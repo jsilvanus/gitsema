@@ -1,0 +1,21 @@
+{
+  "name": "gitsema",
+  "version": "1.0.0",
+  "description": "A content-addressed semantic index synchronized with Git’s object model.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jsilvanus/gitsema.git"
+  },
+  "keywords": ["semantic", "git", "index", "content-addressed"],
+  "author": "jsilvanus",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jsilvanus/gitsema/issues"
+  },
+  "homepage": "https://github.com/jsilvanus/gitsema#readme"
+}
