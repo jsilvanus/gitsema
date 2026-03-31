@@ -631,3 +631,128 @@ entire codebase history — not just within a single file.
 | Model change invalidates index | `model` column on embeddings, re-index detection |
 | SQLite write contention | Single writer pattern, WAL mode |
 | Slow cosine search at scale | KNN index with `sqlite-vss` or `pgvector` migration |
+
+---
+
+### Phase 12 — CLI consolidation & robust per-file indexing
+
+**Goal:** Reduce top-level commands and make single-file indexing first-class and resilient.
+
+Summary of recent changes:
+
+- Consolidated `index-file` into `index --file` which accepts multiple paths.
+- `gitsema index --file a b` runs per-file indexing in parallel, respecting `--concurrency`.
+- `index --file` now uses the same multi-level fallback strategy as the main indexer:
+  - Try whole-file embedding
+  - On context-length errors: fallback to `function` chunker
+  - If function chunks still exceed context: try fixed windows (1500 → 800) per chunk
+- Removed the top-level `index-file` command to reduce first-level keywords.
+- `status <file>` remains positional for quick checks.
+
+Why this helps:
+
+- Simplifies the CLI surface area while preserving expressiveness.
+- Makes targeted indexing (single files) reliable for large files without manual retry.
+- Keeps behavioral parity between bulk indexing and ad-hoc per-file indexing.
+
+Next possible improvements:
+
+- Expose fallback parameters (`fixed` window sizes, overlap) via CLI flags.
+- Add `--file` to `mcp` / programmatic API surface for scripted workflows.
+
+---
+
+### Recent progress (snapshot: 2026-04-01)
+
+- **Commit hash in outputs:** Short commit hashes are shown next to first-seen dates and in `status`/ranking outputs.
+- **`--origin` for evolution:** `gitsema evolution` accepts an `--origin`/origin blob ref to anchor distance calculations.
+- **Robust indexer fallbacks & counters:** Indexer now tracks `embedFailed` / `otherFailed` and applies a multi-stage fallback: whole-file → `function` chunker → fixed windows (1500, then 800, overlap 200).
+- **Per-file indexing:** `index --file <paths...>` is implemented (parallel, respects `--concurrency`); `index-file` command removed.
+- **Status improvements:** `status <file>` resolves repo-relative paths when run from subdirectories and prints a compact, aligned key/value summary.
+- **Persistent logging & `--verbose`:** `logger` writes to `.gitsema/gitsema.log` with single-file rotation to `.gitsema/gitsema.log.1`. `--verbose` or `GITSEMA_VERBOSE=1` enables debug output to console and log.
+- **Chunk listing (verbose):** `status --verbose` lists chunk ranges; to avoid leaking large content it now prints a compact snippet (first 15 chars of the first line and last 15 chars of the last line) per chunk.
+- **Chunk dedupe & safety:** `storeChunk()` was hardened to avoid creating duplicate chunk rows; a dedupe script was run and found no exact duplicates.
+- **Version reporting:** CLI reads `package.json` for the program version so `gitsema -V`/status show the actual package version.
+
+These items reflect recent development iterations focused on reliability and observability for indexing large files and making per-file workflows predictable.
+
+---
+
+### Phase 13 — Standalone model server for embeddings
+
+**Goal:** Provide a lightweight, local HTTP model-server that can download embedding models from Hugging Face, host them locally, and expose a stable HTTP embedding API for `gitsema` (or other tools) to consume. This decouples model hosting from the CLI, reduces cross-language integration friction, and makes it easier to run models on dedicated machines with GPUs.
+
+Design decisions:
+
+- Use Python + FastAPI for broad ecosystem support and easy deployment with `uvicorn`.
+- Support two runtime paths: `sentence-transformers` models when available (simple API), and transformer-based models using `transformers` + `torch` with mean-pooling as a fallback.
+- Use `huggingface_hub` to download and cache models locally; the server exposes a `/download` endpoint to fetch a model and a `/embed` endpoint to compute embeddings.
+- Provide a minimal model registry in-memory that maps model names → loaded model objects; models can be preloaded at startup or downloaded on-demand.
+- Return JSON embeddings (float32 list) and accept batch inputs. Include metadata (model, dims, device).
+
+API (examples):
+
+- `POST /download` { "model": "sentence-transformers/all-MiniLM-L6-v2" }
+- `POST /embed` { "model": "all-MiniLM-L6-v2", "texts": ["hello world", "foo"] }
+
+Security & production notes:
+
+- Authentication is intentionally omitted in the first iteration; add API keys or mTLS for production.
+- Provide an environment variable to restrict allowed HF models or to point at a private HF token via `HUGGINGFACE_TOKEN`.
+- Expose metrics and health endpoints for orchestration.
+
+Deliverables:
+
+- `modelserver/server.py` — FastAPI app implementing `/download`, `/embed`, `/models`, `/health` endpoints.
+- `modelserver/requirements.txt` — Pin of runtime deps: `fastapi`, `uvicorn`, `sentence-transformers`, `transformers`, `torch`, `huggingface-hub`.
+- `modelserver/README.md` — Quick start and run commands.
+
+This phase makes it easy to run a local embedding service that `gitsema` can point at via `GITSEMA_PROVIDER=http://localhost:8000` (or an HTTP provider shim). It also enables running heavier GPU-backed models on separate hardware without changing the CLI code.
+
+---
+
+#### Implementation snapshot (actions taken)
+
+- **Environment:** started preparing a local modelserver scaffold (FastAPI) under `modelserver/`.
+- **Git ignore:** added `modelserver/models/`, `.cache/huggingface/`, and `.cache/torch/` to `.gitignore` to avoid committing downloaded model artifacts.
+- **CUDA preference:** intend to run the modelserver with `USE_CUDA=1` to prefer GPU when available.
+- **Model targeted:** plan to download `nomic-ai/CodeRankEmbed` as a first test model; the server exposes `/download` to fetch models on-demand and `/embed` to compute embeddings.
+
+---
+
+Runbook (how to start and download `nomic-ai/CodeRankEmbed`):
+
+1. Create a Python venv and install deps:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate     # Windows
+pip install -r modelserver/requirements.txt
+```
+
+2. Start the server preferring CUDA:
+
+```bash
+set USE_CUDA=1            # Windows CMD
+# or PowerShell: $env:USE_CUDA = '1'
+uvicorn modelserver.server:app --host 0.0.0.0 --port 8000
+```
+
+3. Download the model and verify embedding:
+
+```bash
+curl -X POST http://localhost:8000/download -H "Content-Type: application/json" \
+  -d '{"model":"nomic-ai/CodeRankEmbed"}'
+
+curl -X POST http://localhost:8000/embed -H "Content-Type: application/json" \
+  -d '{"model":"nomic-ai/CodeRankEmbed","texts":["int main() { return 0; }"]}'
+```
+
+Notes:
+
+- Model downloads can be large; set `HUGGINGFACE_TOKEN` if the model requires auth.
+- If `sentence-transformers` loading fails, the server falls back to a `transformers` mean-pooling loader.
+
+Run attempt note:
+
+- A local attempt to install `modelserver` dependencies in a Windows dev environment failed while building native wheels (the `tokenizers` package requires a Rust toolchain). To run the server locally you may need to install Rust/Cargo or use a prebuilt environment (Docker/Conda) that provides the binary wheels.

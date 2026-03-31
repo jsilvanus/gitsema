@@ -1,4 +1,5 @@
 import { Command } from 'commander'
+import { readFileSync } from 'node:fs'
 import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
@@ -10,14 +11,31 @@ import { startMcpServer } from '../mcp/server.js'
 
 const program = new Command()
 
+// Accept a top-level `--verbose` flag so Commander does not reject it.
+program.option('--verbose', 'Enable verbose debug logging')
+
+// Honor `--verbose` early by setting an env var so other modules (logger)
+// pick it up when they load.
+if (process.argv.includes('--verbose')) process.env.GITSEMA_VERBOSE = '1'
+
+// Read package.json version dynamically so `gitsema -V` matches package.json
+let pkgVersion = '0.0.0'
+try {
+  const pkgPath = new URL('../../package.json', import.meta.url)
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+  if (pkg && typeof pkg.version === 'string') pkgVersion = pkg.version
+} catch {
+  // fall back to default
+}
+
 program
   .name('gitsema')
   .description('A content-addressed semantic index synchronized with Git\'s object model.')
-  .version('0.0.1')
+  .version(pkgVersion)
 
 program
-  .command('status')
-  .description('Show index status and database info')
+  .command('status [file]')
+  .description('Show index status and database info, or status for a specific file')
   .action(statusCommand)
 
 program
@@ -58,6 +76,10 @@ program
   .option(
     '--overlap <n>',
     'overlap in characters between adjacent fixed chunks (default 200)',
+  )
+  .option(
+    '--file <paths...>',
+    'index specific file(s) from HEAD (can supply multiple paths)'
   )
   .action(indexCommand)
 

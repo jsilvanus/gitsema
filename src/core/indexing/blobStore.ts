@@ -1,6 +1,7 @@
 import { db, getRawDb } from '../db/sqlite.js'
 import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
 import type { FileCategory } from '../embedding/fileType.js'
 import type { CommitEntry } from '../git/commitMap.js'
@@ -196,6 +197,33 @@ export interface StoreChunkArgs {
 export function storeChunk(args: StoreChunkArgs): number {
   const { blobHash, startLine, endLine, model, embedding } = args
   const vector = Buffer.from(new Float32Array(embedding).buffer)
+
+  // Avoid creating duplicate chunks for the same blob/start/end by checking
+  // for an existing row first. If a chunk exists but lacks an embedding row,
+  // insert the embedding. Otherwise create both rows in a transaction.
+  // Use raw sqlite to check for an existing chunk row matching the same
+  // blob/start/end triple to avoid duplicate chunk rows.
+  const raw = getRawDb()
+  const existingRow = raw
+    .prepare('SELECT id FROM chunks WHERE blob_hash = ? AND start_line = ? AND end_line = ?')
+    .get(blobHash, startLine, endLine) as { id: number } | undefined
+
+  if (existingRow) {
+    const embRow = db
+      .select({ chunkId: chunkEmbeddings.chunkId })
+      .from(chunkEmbeddings)
+      .where(eq(chunkEmbeddings.chunkId, existingRow.id))
+      .get()
+
+    if (embRow) return existingRow.id
+
+    // Insert missing embedding for existing chunk
+    db.insert(chunkEmbeddings)
+      .values({ chunkId: existingRow.id, model, dimensions: embedding.length, vector })
+      .run()
+
+    return existingRow.id
+  }
 
   const result = db.transaction((tx) => {
     const chunkRow = tx

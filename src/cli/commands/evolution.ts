@@ -8,6 +8,7 @@ export interface EvolutionCommandOptions {
   threshold?: string
   dump?: string | boolean
   includeContent?: boolean
+  origin?: string
 }
 
 /**
@@ -19,6 +20,7 @@ function serializeEvolutionJson(
   entries: EvolutionEntry[],
   threshold: number,
   includeContent: boolean,
+  originBlob?: string,
 ): string {
   const data = {
     path: filePath,
@@ -33,7 +35,7 @@ function serializeEvolutionJson(
         commitHash: e.commitHash,
         distFromPrev: e.distFromPrev,
         distFromOrigin: e.distFromOrigin,
-        isOrigin: i === 0,
+        isOrigin: originBlob ? e.blobHash === originBlob || e.blobHash.startsWith(originBlob) : i === 0,
         isLargeChange: i > 0 && e.distFromPrev >= threshold,
       }
       if (includeContent) {
@@ -61,6 +63,7 @@ function serializeEvolutionJson(
 function renderEvolution(
   entries: EvolutionEntry[],
   threshold: number,
+  originBlob?: string,
 ): string {
   if (entries.length === 0) return '  (no history found — has the file been indexed?)'
 
@@ -73,7 +76,8 @@ function renderEvolution(
     const dPrev = e.distFromPrev.toFixed(4)
     const dOrigin = e.distFromOrigin.toFixed(4)
     let note = ''
-    if (i === 0) note = '  (origin)'
+    if (originBlob && (e.blobHash === originBlob || e.blobHash.startsWith(originBlob))) note = '  (origin)'
+    else if (!originBlob && i === 0) note = '  (origin)'
     else if (e.distFromPrev >= threshold) note = '  ← large change'
     lines.push(
       `${date}  blob:${hash}  commit:${commitShort}  dist_prev=${dPrev}  dist_origin=${dOrigin}${note}`,
@@ -99,11 +103,12 @@ export async function evolutionCommand(
   }
 
   const includeContent = options.includeContent ?? false
-  const entries = computeEvolution(filePath.trim())
+  const origin = options.origin
+  const entries = computeEvolution(filePath.trim(), origin)
 
   // --dump: emit structured JSON to a file or stdout
   if (options.dump !== undefined) {
-    const json = serializeEvolutionJson(filePath.trim(), entries, threshold, includeContent)
+    const json = serializeEvolutionJson(filePath.trim(), entries, threshold, includeContent, origin)
 
     if (typeof options.dump === 'string') {
       // --dump <file> → write JSON to file, then print human-readable to stdout
@@ -125,9 +130,10 @@ export async function evolutionCommand(
 
   // Human-readable output
   console.log(`Evolution of: ${filePath}`)
+  if (options.origin) console.log(`Origin blob: ${options.origin}`)
   console.log(`Versions found: ${entries.length}`)
   if (entries.length > 0) {
     console.log('')
-    console.log(renderEvolution(entries, threshold))
+    console.log(renderEvolution(entries, threshold, origin))
   }
 }

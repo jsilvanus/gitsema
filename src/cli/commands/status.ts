@@ -1,8 +1,16 @@
 import { db, DB_PATH } from '../../core/db/sqlite.js'
-import { blobs, embeddings, paths } from '../../core/db/schema.js'
+import { blobs, embeddings, paths, chunks, chunkEmbeddings } from '../../core/db/schema.js'
+import { eq } from 'drizzle-orm'
+import { logger } from '../../utils/logger.js'
 import { walk } from '../../core/git/walker.js'
+import { execSync } from 'node:child_process'
+import { resolve as pathResolve, relative as pathRelative } from 'node:path'
 import { OllamaProvider } from '../../core/embedding/local.js'
 import { sql } from 'drizzle-orm'
+import { getBlobContent } from '../../core/indexing/blobStore.js'
+import { readFileSync } from 'node:fs'
+import { resolveBlobAtRef } from '../../core/search/evolution.js'
+import { shortHash } from '../../core/search/ranking.js'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -10,7 +18,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export async function statusCommand(): Promise<void> {
+export async function statusCommand(filePath?: string): Promise<void> {
   const [blobCount] = db.select({ count: sql<number>`count(*)` }).from(blobs).all()
   const [embeddingCount] = db.select({ count: sql<number>`count(*)` }).from(embeddings).all()
   const [pathCount] = db.select({ count: sql<number>`count(*)` }).from(paths).all()
@@ -21,32 +29,123 @@ export async function statusCommand(): Promise<void> {
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
   const dualModel = codeModel !== textModel
 
-  console.log(`gitsema v0.0.1`)
-  console.log(`DB:                ${DB_PATH}`)
-  console.log(`Provider:          ${providerType}`)
-  if (dualModel) {
-    console.log(`Text model:        ${textModel}`)
-    console.log(`Code model:        ${codeModel}`)
-  } else {
-    console.log(`Model:             ${textModel}`)
+  // Read package.json version dynamically so status shows accurate version
+  let pkgVersion = '0.0.0'
+  try {
+    const pkgPath = new URL('../../../package.json', import.meta.url)
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+    if (pkg && typeof pkg.version === 'string') pkgVersion = pkg.version
+  } catch {
+    // fall back
   }
-  console.log(`Blobs indexed:     ${blobCount.count}`)
-  console.log(`Embeddings stored: ${embeddingCount.count}`)
-  console.log(`Path entries:      ${pathCount.count}`)
+
+  function printKV(key: string, value: string | number): void {
+    const k = key.padEnd(20)
+    const line = `${k} ${value}`
+    logger.info(line)
+  }
+  printKV(`gitsema v${pkgVersion}`, '')
+  printKV('DB:', DB_PATH)
+  printKV('Provider:', providerType)
+  if (dualModel) {
+    printKV('Text model:', textModel)
+    printKV('Code model:', codeModel)
+  } else {
+    printKV('Model:', textModel)
+  }
+  printKV('Blobs indexed:', blobCount.count)
+  printKV('Embeddings stored:', embeddingCount.count)
+  printKV('Path entries:', pathCount.count)
+
+  if (filePath) {
+    // Resolve blob at HEAD (try as-given first)
+    let blob = await resolveBlobAtRef('HEAD', filePath)
+    let resolvedPath = filePath
+    if (!blob) {
+      try {
+        const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim()
+        // Use git's prefix to compute the repo-relative path when invoked from a subdirectory.
+        const prefix = execSync('git rev-parse --show-prefix', { encoding: 'utf8' }).trim()
+        const rel = (prefix + filePath).replace(/\\/g, '/')
+        if (rel && rel !== filePath) {
+          const alt = await resolveBlobAtRef('HEAD', rel, repoRoot)
+          if (alt) {
+            blob = alt
+            resolvedPath = rel
+          }
+        }
+      } catch {
+        // ignore path resolution errors
+      }
+    }
+    if (!blob) {
+      console.log(`\nFile: ${filePath} — not present at HEAD`)
+      return
+    }
+
+    console.log('')
+    console.log(`File: ${resolvedPath}`)
+    console.log(`  Blob: ${shortHash(blob)} (${blob})`)
+
+    // Check embedding presence
+    const embRow = db.select({ c: sql<number>`count(*)` }).from(embeddings).where(eq(embeddings.blobHash, blob)).all()[0]
+    const embCount = embRow?.c ?? 0
+    console.log(`  Embedding present: ${embCount > 0 ? 'yes' : 'no'}`)
+
+    // Check chunk embeddings for this blob
+    const chunkRows = db.select({ c: sql<number>`count(*)` })
+      .from(chunks)
+      .where(eq(chunks.blobHash, blob))
+      .all()
+    const chunkCount = chunkRows[0]?.c ?? 0
+    const chunkEmbRows = db.select({ c: sql<number>`count(*)` })
+      .from(chunkEmbeddings)
+      .all()
+    console.log(`  Chunk entries: ${chunkCount}`)
+
+    // If verbose, list each chunk's line range and a short snippet.
+    if (process.env.GITSEMA_VERBOSE === '1') {
+      const rows = db.select({ start: chunks.startLine, end: chunks.endLine })
+        .from(chunks)
+        .where(eq(chunks.blobHash, blob))
+        .orderBy(chunks.startLine)
+        .all()
+
+      const content = getBlobContent(blob)
+      const lines = content ? content.split(/\r?\n/) : null
+
+      console.log('  Chunk list:')
+      for (const r of rows) {
+        const start = r.start as number
+        const end = r.end as number
+        let snippet = ''
+        if (lines) {
+          const firstLineRaw = lines[start - 1] ?? ''
+          const lastLineRaw = lines[end - 1] ?? ''
+          const firstPart = firstLineRaw.slice(0, 15).replace(/\s+/g, ' ')
+          const lastPart = lastLineRaw.length > 15 ? lastLineRaw.slice(-15) : lastLineRaw
+          snippet = start === end ? `${firstPart}` : `${firstPart} ... ${lastPart}`
+          snippet = snippet.replace(/\n/g, '\\n')
+        }
+        console.log(`    - ${start}-${end}${snippet ? `: ${snippet}` : ''}`)
+      }
+    }
+    return
+  }
 
   // Check if provider is reachable
   if (providerType === 'ollama') {
     const provider = new OllamaProvider({ model: textModel })
     try {
       await provider.embed('ping')
-      console.log(`Provider status:   reachable (dimensions: ${provider.dimensions})`)
+      logger.info(`Provider status:   reachable (dimensions: ${provider.dimensions})`)
     } catch {
-      console.log(`Provider status:   unreachable (is Ollama running?)`)
+      logger.warn(`Provider status:   unreachable (is Ollama running?)`)
     }
   }
 
   console.log('')
-  console.log('Scanning repo blobs...')
+  logger.info('Scanning repo blobs...')
 
   const stats = await walk({ repoPath: '.' })
 

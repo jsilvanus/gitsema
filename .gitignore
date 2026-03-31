@@ -2,3 +2,8 @@ node_modules/
 dist/
 .gitsema/
 .claude/
+modelserver/models/
+# Hugging Face cache
+.cache/huggingface/
+# Torch cache
+.cache/torch/
