@@ -438,6 +438,23 @@ distance between successive versions. Large jumps indicate rewrites; gradual
 drift indicates organic growth. Output is a timeline of (commit, date, distance
 from previous, distance from origin).
 
+`--dump [file]` outputs a structured JSON representation of the full timeline
+to stdout (if no file given) or to a file while still printing the human-readable
+summary to stdout. The JSON shape is:
+
+```json
+{
+  "path": "src/auth/oauth.ts",
+  "versions": 4,
+  "threshold": 0.3,
+  "timeline": [
+    { "index": 0, "date": "2021-03-15", "blobHash": "...", "commitHash": "...",
+      "distFromPrev": 0, "distFromOrigin": 0, "isOrigin": true, "isLargeChange": false }
+  ],
+  "summary": { "largeChanges": 1, "maxDistFromPrev": 0.412, "totalDrift": 0.401 }
+}
+```
+
 **Semantic diff**
 
 `gitsema diff HEAD~1 HEAD -- src/auth/oauth.ts`
@@ -466,6 +483,7 @@ semantic_search(query: string, options?: SearchOptions): SearchResult[]
 search_history(query: string, options?: TimeOptions): SearchResult[]
 first_seen(query: string): FirstSeenResult[]
 evolution(path: string): EvolutionResult[]
+index(options?: IndexOptions): IndexStats
 ```
 
 The MCP server is a thin adapter over the existing CLI logic — it shares the
@@ -474,6 +492,121 @@ same core modules and SQLite database. It does not duplicate logic.
 **Deliverable:** `gitsema` is a complete semantic intelligence layer for Git
 repositories, accessible both as a CLI tool for developers and as an MCP
 server for AI-assisted workflows.
+
+---
+
+### Phase 11b — Content access and semantic concept tracking
+
+**Goal:** Make the index richer for agent consumption; add concept-level evolution across history.
+
+**`--include-content` on `evolution --dump`**
+
+Extend the JSON dump produced by `gitsema evolution <path> --dump` with an optional
+`--include-content` flag. When set, each timeline entry gains a `content` field
+holding the full stored text of that blob version as it was recorded in the FTS5
+index. This gives agents the raw file at each historical snapshot without any
+extra tooling:
+
+```json
+{
+  "index": 1,
+  "date": "2022-06-10",
+  "blobHash": "b19e4a1...",
+  "content": "// full file text here...",
+  "distFromPrev": 0.145,
+  ...
+}
+```
+
+`content` is `null` when the blob was indexed before the FTS5 table was introduced
+(i.e. before Phase 11).
+
+**`getBlobContent(blobHash)`**
+
+New export from `src/core/indexing/blobStore.ts`. Retrieves the stored text for a
+given blob hash from the FTS5 `blob_fts` table. Returns `undefined` when the blob
+has no stored text. Used by both the CLI dump and the MCP tools.
+
+**MCP `evolution` tool — `include_content` parameter**
+
+The `evolution` MCP tool gains an `include_content: boolean` parameter (only
+meaningful when `structured: true`). When enabled, each timeline entry in the
+returned JSON includes the full stored file text, identical to the CLI flag above.
+
+**`gitsema concept-evolution <query>`**
+
+Semantic concept evolution: rather than tracking a single file, trace how a
+*concept* (e.g. `"authentication"`) evolved across the entire codebase history.
+
+Algorithm:
+
+1. Embed the query string.
+2. Score all indexed blobs by cosine similarity and select the top-k (default 50).
+3. For each selected blob, resolve its earliest commit timestamp and file paths.
+4. Sort the result set chronologically (oldest-first).
+5. Compute `distFromPrev` between consecutive entries in the timeline.
+
+Output is a timeline showing when each semantically related blob first appeared,
+what file it lived in, how similar it is to the concept query, and how much the
+code changed between successive related blobs:
+
+```
+2021-03-15  src/auth/session.ts                          [a3f9c2d]  score=0.892  dist_prev=0.000  (origin)
+2021-06-22  src/auth/oauth.ts                            [b19e4a1]  score=0.912  dist_prev=0.145
+2022-09-10  src/auth/jwt.ts                              [c02d8f7]  score=0.872  dist_prev=0.231  ← large change
+```
+
+Flags:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `-k, --top <n>` | `50` | How many top-matching blobs to include |
+| `--threshold <n>` | `0.3` | Distance threshold for flagging large changes |
+| `--dump [file]` | — | Emit structured JSON to stdout or a file |
+| `--include-content` | `false` | Add stored file text to each JSON entry (with `--dump`) |
+
+The `--dump` JSON shape:
+
+```json
+{
+  "query": "authentication",
+  "entries": 12,
+  "threshold": 0.3,
+  "timeline": [
+    { "index": 0, "date": "2021-03-15", "blobHash": "...", "commitHash": "...",
+      "paths": ["src/auth/session.ts"], "score": 0.892,
+      "distFromPrev": 0, "isOrigin": true, "isLargeChange": false }
+  ],
+  "summary": { "largeChanges": 2, "maxDistFromPrev": 0.231, "avgScore": 0.891 }
+}
+```
+
+**MCP `concept_evolution` tool**
+
+New MCP tool that exposes the same capability to agents:
+
+```ts
+concept_evolution(
+  query: string,            // concept to trace, e.g. "authentication"
+  top_k?: number,           // default 50
+  threshold?: number,       // default 0.3
+  structured?: boolean,     // return JSON instead of human-readable text
+  include_content?: boolean // add stored file text per entry (with structured=true)
+): string
+```
+
+**New module additions**
+
+| Module | Addition |
+|---|---|
+| `src/core/indexing/blobStore.ts` | `getBlobContent(blobHash)` export |
+| `src/core/search/evolution.ts` | `ConceptEvolutionEntry` interface, `computeConceptEvolution()` function |
+| `src/cli/commands/conceptEvolution.ts` | CLI command handler |
+| `src/mcp/server.ts` | `concept_evolution` tool registration |
+
+**Deliverable:** Agents using the MCP layer can retrieve the full file content at
+every historical version, and can ask "how did concept X evolve?" across the
+entire codebase history — not just within a single file.
 
 ---
 

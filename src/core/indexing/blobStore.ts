@@ -1,4 +1,4 @@
-import { db } from '../db/sqlite.js'
+import { db, getRawDb } from '../db/sqlite.js'
 import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
@@ -12,15 +12,19 @@ export interface StoreBlobArgs {
   model: string
   embedding: Embedding
   fileType?: FileCategory
+  /** Raw text content for FTS5 hybrid search indexing. */
+  content?: string
 }
 
 /**
  * Writes a blob, its embedding, and its path in a single transaction.
  * Safe to call multiple times for the same blobHash with different paths
  * (the blob/embedding rows are skipped via INSERT OR IGNORE; a new path row is added).
+ * When `content` is provided it is also upserted into the FTS5 `blob_fts` table
+ * so the blob is searchable via hybrid (BM25 + vector) queries.
  */
 export function storeBlob(args: StoreBlobArgs): void {
-  const { blobHash, size, path, model, embedding, fileType } = args
+  const { blobHash, size, path, model, embedding, fileType, content } = args
 
   // Serialize float32 embedding to a Buffer
   const vector = Buffer.from(new Float32Array(embedding).buffer)
@@ -40,12 +44,19 @@ export function storeBlob(args: StoreBlobArgs): void {
       .values({ blobHash, path })
       .run()
   })
+
+  // Upsert into FTS5 table (outside Drizzle transaction — FTS5 does not participate in them)
+  if (content !== undefined) {
+    storeFtsContent(blobHash, content)
+  }
 }
 
 export interface StoreBlobRecordArgs {
   blobHash: BlobHash
   size: number
   path: string
+  /** Raw text content for FTS5 hybrid search indexing. */
+  content?: string
 }
 
 /**
@@ -53,9 +64,10 @@ export interface StoreBlobRecordArgs {
  * Used by the chunked indexing path where embeddings are stored per-chunk
  * rather than per-blob.  Safe to call multiple times for the same blobHash;
  * the blob row is silently skipped and only a new path row is added.
+ * When `content` is provided it is also upserted into the FTS5 `blob_fts` table.
  */
 export function storeBlobRecord(args: StoreBlobRecordArgs): void {
-  const { blobHash, size, path } = args
+  const { blobHash, size, path, content } = args
   db.transaction((tx) => {
     tx.insert(blobs)
       .values({ blobHash, size, indexedAt: Date.now() })
@@ -66,6 +78,33 @@ export function storeBlobRecord(args: StoreBlobRecordArgs): void {
       .values({ blobHash, path })
       .run()
   })
+
+  if (content !== undefined) {
+    storeFtsContent(blobHash, content)
+  }
+}
+
+/**
+ * Retrieves the stored text content for a blob from the FTS5 table.
+ * Returns undefined if the blob has no content stored (e.g. it was indexed
+ * before Phase 11 without the FTS5 table, or content was omitted).
+ */
+export function getBlobContent(blobHash: string): string | undefined {
+  const raw = getRawDb()
+  const row = raw.prepare(`SELECT content FROM blob_fts WHERE blob_hash = ?`).get(blobHash) as
+    | { content: string }
+    | undefined
+  return row?.content
+}
+
+/**
+ * Upserts blob content into the FTS5 `blob_fts` table.
+ * Uses a DELETE + INSERT pattern because FTS5 does not support ON CONFLICT.
+ */
+export function storeFtsContent(blobHash: string, content: string): void {
+  const raw = getRawDb()
+  raw.prepare(`DELETE FROM blob_fts WHERE blob_hash = ?`).run(blobHash)
+  raw.prepare(`INSERT INTO blob_fts (blob_hash, content) VALUES (?, ?)`).run(blobHash, content)
 }
 
 /**

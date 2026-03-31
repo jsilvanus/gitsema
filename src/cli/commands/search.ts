@@ -2,6 +2,7 @@ import { OllamaProvider } from '../../core/embedding/local.js'
 import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
+import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, type GroupMode } from '../../core/search/ranking.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 
@@ -16,6 +17,8 @@ export interface SearchCommandOptions {
   weightPath?: string
   group?: string
   chunks?: boolean
+  hybrid?: boolean
+  bm25Weight?: string
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -115,6 +118,16 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     groupMode = options.group as GroupMode
   }
 
+  // Parse BM25 weight for hybrid search
+  let bm25Weight: number | undefined
+  if (options.bm25Weight !== undefined) {
+    bm25Weight = parseFloat(options.bm25Weight)
+    if (isNaN(bm25Weight) || bm25Weight < 0 || bm25Weight > 1) {
+      console.error('Error: --bm25-weight must be a number between 0 and 1')
+      process.exit(1)
+    }
+  }
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
@@ -140,7 +153,10 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   let results
-  if (dualModel && codeProvider) {
+  if (options.hybrid) {
+    // Hybrid search: BM25 (FTS5) + vector similarity
+    results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
+  } else if (dualModel && codeProvider) {
     // Dual-model search: embed with both models and merge results
     const codeEmbedding = await embedQuery(codeProvider, codeModel, query)
     const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel })

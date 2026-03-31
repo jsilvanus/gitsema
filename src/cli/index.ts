@@ -3,6 +3,10 @@ import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
 import { firstSeenCommand } from './commands/firstSeen.js'
+import { evolutionCommand } from './commands/evolution.js'
+import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
+import { diffCommand } from './commands/diff.js'
+import { startMcpServer } from '../mcp/server.js'
 
 const program = new Command()
 
@@ -70,6 +74,8 @@ program
   .option('--weight-path <n>', 'weight for path relevance in three-signal ranking (default 0.1)')
   .option('--group <mode>', 'group results by: file, module, or commit')
   .option('--chunks', 'include chunk-level embeddings in search results')
+  .option('--hybrid', 'combine vector similarity with BM25 keyword matching (FTS5)')
+  .option('--bm25-weight <n>', 'weight for the BM25 signal in hybrid search (0–1, default 0.3)')
   .action(searchCommand)
 
 program
@@ -77,6 +83,57 @@ program
   .description('Find when a concept first appeared in the codebase, sorted by date')
   .option('-k, --top <n>', 'number of results to return', '10')
   .action(firstSeenCommand)
+
+program
+  .command('evolution <path>')
+  .description('Track semantic drift of a file over its Git history')
+  .option(
+    '--threshold <n>',
+    'cosine distance threshold above which a version change is flagged as a large change (default 0.3)',
+  )
+  .option(
+    '--dump [file]',
+    'output structured JSON of all evolution entries; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--include-content',
+    'include the stored file content for each version in the JSON dump (only used with --dump)',
+  )
+  .action(evolutionCommand)
+
+program
+  .command('concept-evolution <query>')
+  .description('Show how a semantic concept (e.g. "authentication") evolved across the commit history')
+  .option('-k, --top <n>', 'number of top-matching blobs to include in the timeline (default 50)')
+  .option(
+    '--threshold <n>',
+    'cosine distance threshold above which a timeline step is flagged as a large change (default 0.3)',
+  )
+  .option(
+    '--dump [file]',
+    'output structured JSON of all entries; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--include-content',
+    'include the stored file content for each entry in the JSON dump (only used with --dump)',
+  )
+  .action(conceptEvolutionCommand)
+
+program
+  .command('diff <ref1> <ref2> <path>')
+  .description('Compute semantic diff between two versions of a file')
+  .option(
+    '--neighbors <n>',
+    'number of nearest-neighbour blobs to show for each version (default 0)',
+  )
+  .action(diffCommand)
+
+program
+  .command('mcp')
+  .description('Start the gitsema MCP server (stdio transport)')
+  .action(async () => {
+    await startMcpServer()
+  })
 
 program.parse()
 
