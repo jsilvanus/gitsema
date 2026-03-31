@@ -415,10 +415,10 @@ export async function startMcpServer(): Promise<void> {
       }
 
       const extFilter = ext
-        ? ext.split(',').map((e) => (e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`))
+        ? ext.split(',').map((e: string) => (e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`))
         : undefined
       const excludeFilter = exclude
-        ? exclude.split(',').map((e) => e.trim()).filter(Boolean)
+        ? exclude.split(',').map((e: string) => e.trim()).filter(Boolean)
         : undefined
 
       try {
