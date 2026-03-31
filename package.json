@@ -29,6 +29,7 @@
   },
   "homepage": "https://github.com/jsilvanus/gitsema#readme",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.8.0",
     "commander": "^12.1.0",
     "drizzle-orm": "^0.31.4",

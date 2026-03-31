@@ -221,7 +221,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
           // Persist the blob record and path row exactly once before embedding chunks.
           try {
-            storeBlobRecord({ blobHash, size: content.length, path })
+            storeBlobRecord({ blobHash, size: content.length, path, content: text })
           } catch {
             stats.failed++
             onProgress?.({ ...stats, elapsed: Date.now() - start })
@@ -262,7 +262,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
           // Persist blob + embedding + path in one transaction
           try {
-            storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType })
+            storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType, content: text })
             stats.indexed++
           } catch {
             stats.failed++

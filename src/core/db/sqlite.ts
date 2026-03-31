@@ -8,9 +8,17 @@ import * as schema from './schema.js'
 const DB_DIR = '.gitsema'
 const DB_PATH = join(DB_DIR, 'index.db')
 
+/** Raw better-sqlite3 handle, used by modules that need direct SQL access (e.g. FTS5). */
+let rawSqlite: InstanceType<typeof Database>
+
+export function getRawDb(): InstanceType<typeof Database> {
+  return rawSqlite
+}
+
 function openDatabase(): ReturnType<typeof drizzle> {
   mkdirSync(DB_DIR, { recursive: true })
   const sqlite = new Database(DB_PATH)
+  rawSqlite = sqlite
   sqlite.pragma('journal_mode = WAL')
 
   const db = drizzle(sqlite, { schema })
@@ -66,6 +74,13 @@ function openDatabase(): ReturnType<typeof drizzle> {
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL
+    );
+
+    -- FTS5 virtual table for hybrid (BM25 + vector) search (Phase 11)
+    CREATE VIRTUAL TABLE IF NOT EXISTS blob_fts USING fts5(
+      blob_hash UNINDEXED,
+      content,
+      tokenize='porter ascii'
     );
   `)
 
