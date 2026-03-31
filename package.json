@@ -1,9 +1,15 @@
 {
   "name": "gitsema",
-  "version": "1.0.0",
-  "description": "A content-addressed semantic index synchronized with Git’s object model.",
-  "main": "index.js",
+  "version": "0.0.1",
+  "description": "A content-addressed semantic index synchronized with Git's object model.",
+  "type": "module",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "gitsema": "dist/cli/index.js"
+  },
   "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -13,9 +19,23 @@
   "keywords": ["semantic", "git", "index", "content-addressed"],
   "author": "jsilvanus",
   "license": "ISC",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/jsilvanus/gitsema/issues"
   },
-  "homepage": "https://github.com/jsilvanus/gitsema#readme"
+  "homepage": "https://github.com/jsilvanus/gitsema#readme",
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "commander": "^12.1.0",
+    "drizzle-orm": "^0.31.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.14.0",
+    "drizzle-kit": "^0.22.7",
+    "tsx": "^4.15.7",
+    "typescript": "^5.4.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+  }
 }
