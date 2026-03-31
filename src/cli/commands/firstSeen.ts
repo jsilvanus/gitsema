@@ -2,18 +2,13 @@ import { OllamaProvider } from '../../core/embedding/local.js'
 import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
-import { renderResults } from '../../core/search/ranking.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { renderFirstSeenResults } from '../../core/search/ranking.js'
 
-export interface SearchCommandOptions {
+export interface FirstSeenCommandOptions {
   top?: string
-  recent?: boolean
-  alpha?: string
-  before?: string
-  after?: string
 }
 
-export async function searchCommand(query: string, options: SearchCommandOptions): Promise<void> {
+export async function firstSeenCommand(query: string, options: FirstSeenCommandOptions): Promise<void> {
   if (!query || query.trim() === '') {
     console.error('Error: query string is required')
     process.exit(1)
@@ -23,32 +18,6 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   if (isNaN(topK) || topK < 1) {
     console.error('Error: --top must be a positive integer')
     process.exit(1)
-  }
-
-  const alpha = options.alpha !== undefined ? parseFloat(options.alpha) : 0.8
-  if (isNaN(alpha) || alpha < 0 || alpha > 1) {
-    console.error('Error: --alpha must be a number between 0 and 1')
-    process.exit(1)
-  }
-
-  let before: number | undefined
-  let after: number | undefined
-
-  if (options.before) {
-    try {
-      before = parseDateArg(options.before)
-    } catch (err) {
-      console.error(`Error: --before ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
-    }
-  }
-  if (options.after) {
-    try {
-      after = parseDateArg(options.after)
-    } catch (err) {
-      console.error(`Error: --after ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
-    }
   }
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
@@ -75,13 +44,9 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     process.exit(1)
   }
 
-  const results = vectorSearch(queryEmbedding, {
-    topK,
-    recent: options.recent ?? false,
-    alpha,
-    before,
-    after,
-  })
-  console.log(renderResults(results))
+  // Get top-k results by semantic similarity; vectorSearch populates firstSeen/firstCommit.
+  // renderFirstSeenResults re-sorts by earliest date so the output shows when each
+  // concept first appeared in the codebase.
+  const results = vectorSearch(queryEmbedding, { topK })
+  console.log(renderFirstSeenResults(results))
 }
-
