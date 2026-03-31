@@ -1,5 +1,5 @@
 import { db } from '../db/sqlite.js'
-import { blobs, embeddings, paths, commits, blobCommits, indexedCommits } from '../db/schema.js'
+import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
 import type { FileCategory } from '../embedding/fileType.js'
@@ -33,6 +33,32 @@ export function storeBlob(args: StoreBlobArgs): void {
 
     tx.insert(embeddings)
       .values({ blobHash, model, dimensions: embedding.length, vector, fileType: fileType ?? null })
+      .onConflictDoNothing()
+      .run()
+
+    tx.insert(paths)
+      .values({ blobHash, path })
+      .run()
+  })
+}
+
+export interface StoreBlobRecordArgs {
+  blobHash: BlobHash
+  size: number
+  path: string
+}
+
+/**
+ * Writes a blob record and its path without any embedding.
+ * Used by the chunked indexing path where embeddings are stored per-chunk
+ * rather than per-blob.  Safe to call multiple times for the same blobHash;
+ * the blob row is silently skipped and only a new path row is added.
+ */
+export function storeBlobRecord(args: StoreBlobRecordArgs): void {
+  const { blobHash, size, path } = args
+  db.transaction((tx) => {
+    tx.insert(blobs)
+      .values({ blobHash, size, indexedAt: Date.now() })
       .onConflictDoNothing()
       .run()
 
@@ -114,4 +140,37 @@ export function getLastIndexedCommit(): string | undefined {
     .limit(1)
     .get()
   return row?.commitHash
+}
+
+export interface StoreChunkArgs {
+  blobHash: BlobHash
+  startLine: number
+  endLine: number
+  model: string
+  embedding: Embedding
+}
+
+/**
+ * Writes a single chunk and its embedding to the database in one transaction.
+ * Returns the newly created chunk id.
+ */
+export function storeChunk(args: StoreChunkArgs): number {
+  const { blobHash, startLine, endLine, model, embedding } = args
+  const vector = Buffer.from(new Float32Array(embedding).buffer)
+
+  const result = db.transaction((tx) => {
+    const chunkRow = tx
+      .insert(chunks)
+      .values({ blobHash, startLine, endLine })
+      .returning({ id: chunks.id })
+      .get()
+
+    tx.insert(chunkEmbeddings)
+      .values({ chunkId: chunkRow.id, model, dimensions: embedding.length, vector })
+      .run()
+
+    return chunkRow.id
+  })
+
+  return result
 }

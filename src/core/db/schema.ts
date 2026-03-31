@@ -1,5 +1,27 @@
 import { sqliteTable, text, integer, blob, primaryKey } from 'drizzle-orm/sqlite-core'
 
+/**
+ * Sub-file fragments produced by a chunker (function / fixed strategy).
+ * One row per chunk; the blob_hash FK links back to the source blob.
+ * Line numbers are 1-indexed and inclusive.
+ */
+export const chunks = sqliteTable('chunks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
+  startLine: integer('start_line').notNull(),
+  endLine: integer('end_line').notNull(),
+})
+
+/**
+ * Vector embedding for a chunk.  Keyed by chunk_id; one embedding per chunk.
+ */
+export const chunkEmbeddings = sqliteTable('chunk_embeddings', {
+  chunkId: integer('chunk_id').primaryKey().references(() => chunks.id),
+  model: text('model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+})
+
 export const blobs = sqliteTable('blobs', {
   blobHash: text('blob_hash').primaryKey(),
   size: integer('size').notNull(),

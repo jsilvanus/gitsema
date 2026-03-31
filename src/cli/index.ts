@@ -43,6 +43,18 @@ program
     '--exclude <patterns>',
     'skip blobs whose path contains any of these comma-separated patterns, e.g. "node_modules,dist,vendor"',
   )
+  .option(
+    '--chunker <strategy>',
+    'chunking strategy: file (default, whole-file), function (function/class boundaries), fixed (fixed-size windows)',
+  )
+  .option(
+    '--window-size <n>',
+    'target chunk size in characters for the fixed chunker (default 1500)',
+  )
+  .option(
+    '--overlap <n>',
+    'overlap in characters between adjacent fixed chunks (default 200)',
+  )
   .action(indexCommand)
 
 program
@@ -53,6 +65,11 @@ program
   .option('--alpha <n>', 'weight for cosine similarity in blended score (0–1, default 0.8)')
   .option('--before <date>', 'only include blobs first seen before this date (YYYY-MM-DD)')
   .option('--after <date>', 'only include blobs first seen after this date (YYYY-MM-DD)')
+  .option('--weight-vector <n>', 'weight for vector similarity in three-signal ranking (default 0.7)')
+  .option('--weight-recency <n>', 'weight for recency in three-signal ranking (default 0.2)')
+  .option('--weight-path <n>', 'weight for path relevance in three-signal ranking (default 0.1)')
+  .option('--group <mode>', 'group results by: file, module, or commit')
+  .option('--chunks', 'include chunk-level embeddings in search results')
   .action(searchCommand)
 
 program

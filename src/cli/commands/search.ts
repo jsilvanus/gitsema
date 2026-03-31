@@ -2,7 +2,7 @@ import { OllamaProvider } from '../../core/embedding/local.js'
 import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
-import { renderResults } from '../../core/search/ranking.js'
+import { renderResults, groupResults, type GroupMode } from '../../core/search/ranking.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 
 export interface SearchCommandOptions {
@@ -11,6 +11,11 @@ export interface SearchCommandOptions {
   alpha?: string
   before?: string
   after?: string
+  weightVector?: string
+  weightRecency?: string
+  weightPath?: string
+  group?: string
+  chunks?: boolean
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -73,6 +78,43 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
   }
 
+  // Parse three-signal ranking weights
+  let weightVector: number | undefined
+  let weightRecency: number | undefined
+  let weightPath: number | undefined
+
+  if (options.weightVector !== undefined) {
+    weightVector = parseFloat(options.weightVector)
+    if (isNaN(weightVector) || weightVector < 0) {
+      console.error('Error: --weight-vector must be a non-negative number')
+      process.exit(1)
+    }
+  }
+  if (options.weightRecency !== undefined) {
+    weightRecency = parseFloat(options.weightRecency)
+    if (isNaN(weightRecency) || weightRecency < 0) {
+      console.error('Error: --weight-recency must be a non-negative number')
+      process.exit(1)
+    }
+  }
+  if (options.weightPath !== undefined) {
+    weightPath = parseFloat(options.weightPath)
+    if (isNaN(weightPath) || weightPath < 0) {
+      console.error('Error: --weight-path must be a non-negative number')
+      process.exit(1)
+    }
+  }
+
+  // Parse group mode
+  let groupMode: GroupMode | undefined
+  if (options.group !== undefined) {
+    if (options.group !== 'file' && options.group !== 'module' && options.group !== 'commit') {
+      console.error('Error: --group must be one of: file, module, commit')
+      process.exit(1)
+    }
+    groupMode = options.group as GroupMode
+  }
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
@@ -84,24 +126,35 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   // Embed the query with the text model (natural-language prose)
   const textEmbedding = await embedQuery(textProvider, textModel, query)
 
+  const searchOpts = {
+    topK,
+    recent: options.recent ?? false,
+    alpha,
+    before,
+    after,
+    weightVector,
+    weightRecency,
+    weightPath,
+    query,
+    searchChunks: options.chunks ?? false,
+  }
+
+  let results
   if (dualModel && codeProvider) {
     // Dual-model search: embed with both models and merge results
     const codeEmbedding = await embedQuery(codeProvider, codeModel, query)
-    const searchOpts = { topK, recent: options.recent ?? false, alpha, before, after }
     const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel })
     const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel })
-    const results = mergeSearchResults(textResults, codeResults, topK)
-    console.log(renderResults(results))
+    results = mergeSearchResults(textResults, codeResults, topK)
   } else {
     // Single-model search (backward-compatible)
-    const results = vectorSearch(textEmbedding, {
-      topK,
-      recent: options.recent ?? false,
-      alpha,
-      before,
-      after,
-    })
-    console.log(renderResults(results))
+    results = vectorSearch(textEmbedding, searchOpts)
   }
+
+  if (groupMode) {
+    results = groupResults(results, groupMode, topK)
+  }
+
+  console.log(renderResults(results))
 }
 

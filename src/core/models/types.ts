@@ -14,4 +14,10 @@ export interface SearchResult {
   score: number
   firstCommit?: CommitHash
   firstSeen?: number
+  /** Database ID of the chunk this result corresponds to (only present for chunk-level results). */
+  chunkId?: number
+  /** 1-indexed start line of the chunk within its source file. */
+  startLine?: number
+  /** 1-indexed end line of the chunk within its source file. */
+  endLine?: number
 }
