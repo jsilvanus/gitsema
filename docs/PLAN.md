@@ -756,3 +756,58 @@ Notes:
 Run attempt note:
 
 - A local attempt to install `modelserver` dependencies in a Windows dev environment failed while building native wheels (the `tokenizers` package requires a Rust toolchain). To run the server locally you may need to install Rust/Cargo or use a prebuilt environment (Docker/Conda) that provides the binary wheels.
+
+---
+
+### Phase 14 — Infrastructure, tooling, and maintenance
+
+**Goal:** Close the operational gaps that exist now that the feature set is complete. No new search or indexing capabilities — this phase is about making the project reliable, testable, and easy to onboard.
+
+**Items (priority order):**
+
+**1. Test suite**
+
+The single largest gap. Add a test framework (Vitest is the natural choice — ESM-native, TypeScript-first, no extra config).
+
+- Integration tests for the indexer: create a small fixture Git repo in-process, run `runIndex`, assert blob/embedding/commit counts.
+- Unit tests for chunking: cover `fileChunker`, `functionChunker`, `fixedChunker` with edge cases (empty file, single-function file, file that exceeds one window).
+- Unit tests for search ranking: `cosineSimilarity`, `pathRelevanceScore`, `groupResults`.
+- Integration test for hybrid search: index fixture repo with FTS5, assert BM25 path degrades gracefully to vector-only when query has no FTS5 hits.
+
+Target: `pnpm test` runs green. Add to CI.
+
+**2. CI/CD (GitHub Actions)**
+
+Two workflows:
+
+- `ci.yml` — triggered on every push and PR: `pnpm install`, `pnpm build` (type-check), `pnpm test`.
+- `release.yml` — triggered on version tags (`v*`): build + publish to npm (or just GitHub Releases).
+
+**3. `.env.example`**
+
+Add a `.env.example` at repo root documenting all `GITSEMA_*` variables with inline comments. Referenced in README and CLAUDE.md.
+
+**4. `gitsema backfill-fts` command**
+
+Blobs indexed before Phase 11 have no FTS5 content. Add a maintenance command that iterates all blobs in the DB that have no `blob_fts` entry and re-fetches their content from the Git object store to populate the FTS5 table. Useful after upgrading from an older index.
+
+**5. Schema migration**
+
+Define a `gitsema migrate` command (or a startup check) that applies additive schema changes when the DB version is behind the current schema. Store a `schema_version` in a `meta` table. This prevents breakage when users upgrade gitsema against an existing `.gitsema/index.db`.
+
+**6. Docker image for Phase 13 model server**
+
+The Python model server is blocked on Windows because `tokenizers` requires a Rust toolchain at install time. Provide a `modelserver/Dockerfile` that uses a prebuilt Python image with the wheels already installed. This lets any platform run the model server without Rust or Conda.
+
+```dockerfile
+# modelserver/Dockerfile (sketch)
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY server.py .
+EXPOSE 8000
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+**Deliverable:** `pnpm test` is green, CI passes on PRs, new contributors can onboard from `.env.example` alone, and existing users with pre-Phase-11 indexes can recover full hybrid search via `backfill-fts`.
