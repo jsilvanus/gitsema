@@ -16,7 +16,12 @@
     "type": "git",
     "url": "git+https://github.com/jsilvanus/gitsema.git"
   },
-  "keywords": ["semantic", "git", "index", "content-addressed"],
+  "keywords": [
+    "semantic",
+    "git",
+    "index",
+    "content-addressed"
+  ],
   "author": "jsilvanus",
   "license": "ISC",
   "bugs": {
@@ -26,7 +31,8 @@
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "commander": "^12.1.0",
-    "drizzle-orm": "^0.31.4"
+    "drizzle-orm": "^0.31.4",
+    "p-limit": "^7.3.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -36,6 +42,9 @@
     "typescript": "^5.4.5"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }

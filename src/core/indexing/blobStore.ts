@@ -1,6 +1,6 @@
 import { db } from '../db/sqlite.js'
-import { blobs, embeddings, paths, commits, blobCommits } from '../db/schema.js'
-import { inArray } from 'drizzle-orm'
+import { blobs, embeddings, paths, commits, blobCommits, indexedCommits } from '../db/schema.js'
+import { inArray, desc } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
 import type { FileCategory } from '../embedding/fileType.js'
 import type { CommitEntry } from '../git/commitMap.js'
@@ -88,4 +88,30 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
   })
 
   return indexedHashes.length
+}
+
+/**
+ * Records a commit hash in the `indexed_commits` table, marking it as fully
+ * processed by the indexer. Used by incremental indexing to determine the
+ * default `--since` value on subsequent runs.
+ */
+export function markCommitIndexed(commitHash: string): void {
+  db.insert(indexedCommits)
+    .values({ commitHash, indexedAt: Date.now() })
+    .onConflictDoNothing()
+    .run()
+}
+
+/**
+ * Returns the most recently indexed commit hash, or undefined if the index
+ * has never been built. Used to default `--since` to the last indexed point.
+ */
+export function getLastIndexedCommit(): string | undefined {
+  const row = db
+    .select({ commitHash: indexedCommits.commitHash })
+    .from(indexedCommits)
+    .orderBy(desc(indexedCommits.indexedAt))
+    .limit(1)
+    .get()
+  return row?.commitHash
 }

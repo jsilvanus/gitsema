@@ -33,3 +33,12 @@ export const blobCommits = sqliteTable('blob_commits', {
 }, (table) => ({
   pk: primaryKey({ columns: [table.blobHash, table.commitHash] }),
 }))
+
+/**
+ * Tracks which commits have been fully processed by the indexer.
+ * Used by incremental indexing to default --since to the last indexed point.
+ */
+export const indexedCommits = sqliteTable('indexed_commits', {
+  commitHash: text('commit_hash').primaryKey(),
+  indexedAt: integer('indexed_at').notNull(),
+})
