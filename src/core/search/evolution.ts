@@ -100,7 +100,7 @@ export function getFileHistory(
  * Blobs without a stored embedding are silently skipped.
  * Returns entries sorted oldest-first.
  */
-export function computeEvolution(filePath: string): EvolutionEntry[] {
+export function computeEvolution(filePath: string, originBlob?: string): EvolutionEntry[] {
   const history = getFileHistory(filePath)
   if (history.length === 0) return []
 
@@ -132,6 +132,19 @@ export function computeEvolution(filePath: string): EvolutionEntry[] {
     const emb = embMap.get(entry.blobHash)
     if (!emb) continue   // no embedding — skip this version
 
+    // If an origin blob is specified, prefer its embedding as the origin.
+    if (originBlob && originEmbedding === null) {
+      // Exact match first
+      if (embMap.has(originBlob)) {
+        originEmbedding = embMap.get(originBlob)!
+      } else {
+        // Try prefix match for short hashes
+        const match = Array.from(embMap.keys()).find((k) => k.startsWith(originBlob))
+        if (match) originEmbedding = embMap.get(match)!
+      }
+    }
+
+    // Fallback: if no origin chosen yet, use the first available embedding
     if (originEmbedding === null) {
       originEmbedding = emb
     }

@@ -78,6 +78,10 @@ export interface IndexStats {
   oversized: number // over size limit
   filtered: number  // excluded by path filter
   failed: number
+  /** Number of failures originating from embedding provider errors */
+  embedFailed: number
+  /** Number of failures from other causes (I/O, DB storage, etc.) */
+  otherFailed: number
   /**
    * Total blobs queued for embedding (set after the collection phase).
    * Zero until collection is complete. Used by the CLI to render a progress bar.
@@ -143,6 +147,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   const stats: IndexStats = {
     seen: 0, indexed: 0, skipped: 0, oversized: 0, filtered: 0, failed: 0,
+    embedFailed: 0, otherFailed: 0,
     queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0,
   }
   const start = Date.now()
@@ -191,15 +196,17 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       limit(async () => {
         const { blobHash, path } = entry
 
-        // Read content (returns null if over size cap)
-        let content: Buffer | null
-        try {
-          content = await showBlob(blobHash, repoPath, maxBlobSize)
-        } catch {
-          stats.failed++
-          onProgress?.({ ...stats, elapsed: Date.now() - start })
-          return
-        }
+            // Read content (returns null if over size cap)
+            let content: Buffer | null
+            try {
+              content = await showBlob(blobHash, repoPath, maxBlobSize)
+            } catch (err) {
+              console.error(`Error reading blob ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
+              stats.failed++
+              stats.otherFailed++
+              onProgress?.({ ...stats, elapsed: Date.now() - start })
+              return
+            }
 
         if (content === null) {
           stats.oversized++
@@ -222,8 +229,10 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           // Persist the blob record and path row exactly once before embedding chunks.
           try {
             storeBlobRecord({ blobHash, size: content.length, path, content: text })
-          } catch {
+          } catch (err) {
+            console.error(`Failed to store blob record ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
             stats.failed++
+            stats.otherFailed++
             onProgress?.({ ...stats, elapsed: Date.now() - start })
             return
           }
@@ -232,9 +241,11 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
             let chunkEmbedding: number[]
             try {
               chunkEmbedding = await activeProvider.embed(chunk.content)
-            } catch {
+            } catch (err) {
+              console.error(`Embedding failed for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err instanceof Error ? err.message : String(err)}`)
               allOk = false
               stats.failed++
+              stats.embedFailed++
               onProgress?.({ ...stats, elapsed: Date.now() - start })
               continue
             }
@@ -242,9 +253,11 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
             try {
               storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
               stats.chunks++
-            } catch {
+            } catch (err) {
+              console.error(`Failed to store chunk for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err instanceof Error ? err.message : String(err)}`)
               allOk = false
               stats.failed++
+              stats.otherFailed++
             }
           }
 
@@ -254,8 +267,120 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           let embedding: number[]
           try {
             embedding = await activeProvider.embed(text)
-          } catch {
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.error(`Embedding failed for blob ${blobHash}: ${msg}`)
+
+            // If the failure looks like a context-length / input-too-large error,
+            // attempt a fallback using the `function` chunker so we embed smaller
+            // logical units and store per-chunk embeddings.
+            if (typeof msg === 'string' && /context|input length|exceeds the context/i.test(msg)) {
+              console.error(`Attempting function-chunker fallback for blob ${blobHash}`)
+
+              // Create a function chunker and split the file into chunks
+              const fallbackChunker = createChunker('function', {})
+              const blobChunks = fallbackChunker.chunk(text, path)
+              let allOk = true
+
+              try {
+                storeBlobRecord({ blobHash, size: content.length, path, content: text })
+              } catch (err2) {
+                console.error(`Failed to store blob record (fallback) ${blobHash}: ${err2 instanceof Error ? err2.message : String(err2)}`)
+                stats.failed++
+                stats.otherFailed++
+                onProgress?.({ ...stats, elapsed: Date.now() - start })
+                return
+              }
+
+              for (const chunk of blobChunks) {
+                let chunkEmbedding: number[]
+                try {
+                  chunkEmbedding = await activeProvider.embed(chunk.content)
+                } catch (err3) {
+                  const msg3 = err3 instanceof Error ? err3.message : String(err3)
+                  console.error(`Embedding failed for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${msg3}`)
+
+                  // If chunk still exceeds context, try fixed-size windows progressively
+                  if (typeof msg3 === 'string' && /context|input length|exceeds the context/i.test(msg3)) {
+                    const fixedSizes = [1500, 800]
+                    let fixedSucceeded = false
+
+                    for (const size of fixedSizes) {
+                      console.error(`Attempting fixed-chunker (window=${size}) fallback for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}`)
+                      const fixedChunker = createChunker('fixed', { windowSize: size, overlap: 200 })
+                      const subChunks = fixedChunker.chunk(chunk.content, path)
+                      let subAllOk = true
+
+                      for (const sub of subChunks) {
+                        let subEmb: number[] | null = null
+                        try {
+                          subEmb = await activeProvider.embed(sub.content)
+                        } catch (err5) {
+                          const msg5 = err5 instanceof Error ? err5.message : String(err5)
+                          console.error(`Embedding failed for blob ${blobHash} subchunk ${chunk.startLine + sub.startLine - 1}-${chunk.startLine + sub.endLine - 1}: ${msg5}`)
+                          subAllOk = false
+                          stats.failed++
+                          stats.embedFailed++
+                          onProgress?.({ ...stats, elapsed: Date.now() - start })
+                          // continue attempting other subchunks to collect failures
+                          continue
+                        }
+
+                        try {
+                          const absStart = chunk.startLine + sub.startLine - 1
+                          const absEnd = chunk.startLine + sub.endLine - 1
+                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb })
+                          stats.chunks++
+                        } catch (err6) {
+                          console.error(`Failed to store subchunk for blob ${blobHash} subchunk ${chunk.startLine + sub.startLine - 1}-${chunk.startLine + sub.endLine - 1}: ${err6 instanceof Error ? err6.message : String(err6)}`)
+                          subAllOk = false
+                          stats.failed++
+                          stats.otherFailed++
+                        }
+                      }
+
+                      if (subAllOk) {
+                        fixedSucceeded = true
+                        break
+                      }
+                      // otherwise try next smaller window
+                    }
+
+                    if (fixedSucceeded) {
+                      // this chunk recovered via fixed-chunker
+                      continue
+                    }
+                  }
+
+                  // If we reach here, fallback failed or error wasn't context-related
+                  allOk = false
+                  stats.failed++
+                  stats.embedFailed++
+                  onProgress?.({ ...stats, elapsed: Date.now() - start })
+                  continue
+                }
+
+                try {
+                  storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
+                  stats.chunks++
+                } catch (err4) {
+                  console.error(`Failed to store chunk (fallback) for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err4 instanceof Error ? err4.message : String(err4)}`)
+                  allOk = false
+                  stats.failed++
+                  stats.otherFailed++
+                }
+              }
+
+              if (allOk) stats.indexed++
+              else stats.failed++
+
+              onProgress?.({ ...stats, elapsed: Date.now() - start })
+              return
+            }
+
+            // Non-recoverable embedding failure
             stats.failed++
+            stats.embedFailed++
             onProgress?.({ ...stats, elapsed: Date.now() - start })
             return
           }
@@ -264,8 +389,10 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           try {
             storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType, content: text })
             stats.indexed++
-          } catch {
+          } catch (err) {
+            console.error(`Failed to store blob ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
             stats.failed++
+            stats.otherFailed++
           }
         }
 

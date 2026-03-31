@@ -87,7 +87,9 @@ export function renderResults(results: SearchResult[]): string {
   for (const result of results) {
     const score = formatScore(result.score)
     const hash = shortHash(result.blobHash)
-    const dateSuffix = result.firstSeen !== undefined ? `  first: ${formatDate(result.firstSeen)}` : ''
+    const dateSuffix = result.firstSeen !== undefined
+      ? `  first: ${formatDate(result.firstSeen)}${result.firstCommit ? ` [${shortHash(result.firstCommit)}]` : ''}`
+      : ''
     const lineSuffix = result.startLine !== undefined && result.endLine !== undefined
       ? `:${result.startLine}-${result.endLine}`
       : ''
@@ -128,10 +130,13 @@ export function renderFirstSeenResults(results: SearchResult[]): string {
     const hash = shortHash(result.blobHash)
     const score = formatScore(result.score)
     const date = result.firstSeen !== undefined ? formatDate(result.firstSeen) : '(unknown)'
+    const dateWithCommit = result.firstSeen !== undefined && result.firstCommit
+      ? `${date}  [${shortHash(result.firstCommit)}]`
+      : date
     if (result.paths.length === 0) {
-      lines.push(`${date}  (unknown path)  [${hash}]  (score: ${score})`)
+      lines.push(`${dateWithCommit}  (unknown path)  [${hash}]  (score: ${score})`)
     } else {
-      lines.push(`${date}  ${result.paths[0].padEnd(50)}  [${hash}]  (score: ${score})`)
+      lines.push(`${dateWithCommit}  ${result.paths[0].padEnd(50)}  [${hash}]  (score: ${score})`)
       for (let i = 1; i < result.paths.length; i++) {
         lines.push(`          ${result.paths[i].padEnd(50)}`)
       }

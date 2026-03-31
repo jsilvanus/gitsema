@@ -115,6 +115,7 @@ Options:
   --chunker <strategy>    Chunking strategy: file (default), function, or fixed
   --window-size <n>       Chunk size in characters for the fixed chunker (default: 1500)
   --overlap <n>           Overlap between adjacent fixed chunks (default: 200)
+  --file <paths...>       Index specific file(s) from HEAD (can supply multiple paths)
 ```
 
 Examples:
@@ -128,6 +129,12 @@ gitsema index --since v1.2.0 --ext ".ts,.tsx"
 
 # Use function-level chunking with higher concurrency
 gitsema index --chunker function --concurrency 8
+```
+
+Example: index specific files from HEAD
+
+```bash
+gitsema index --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
 ```
 
 ---
@@ -236,6 +243,8 @@ Start the gitsema MCP server over stdio. Allows AI assistants to query the seman
 ```bash
 gitsema mcp
 ```
+
+In VS Code, you can simply pull the repo, build it, and them Developer Commands: MCP: Add Server - Command - `node <path-to-repo>/dist/index.js mcp`.
 
 ## Data storage
 
