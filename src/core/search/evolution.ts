@@ -3,6 +3,7 @@ import { db } from '../db/sqlite.js'
 import { embeddings, paths, blobCommits, commits } from '../db/schema.js'
 import { eq, inArray } from 'drizzle-orm'
 import { cosineSimilarity } from './vectorSearch.js'
+import { getFirstSeenMap } from './timeSearch.js'
 
 export interface EvolutionEntry {
   blobHash: string
@@ -284,3 +285,116 @@ async function findNeighbors(
     distance: s.distance,
   }))
 }
+
+// ---------------------------------------------------------------------------
+// Concept evolution
+// ---------------------------------------------------------------------------
+
+export interface ConceptEvolutionEntry {
+  blobHash: string
+  commitHash: string
+  timestamp: number
+  paths: string[]
+  /** Cosine similarity between this blob and the query (higher = more relevant). */
+  score: number
+  /** Cosine distance from the previous entry in the timeline (0 for the first). */
+  distFromPrev: number
+}
+
+/**
+ * Semantic concept evolution: searches for all blobs that match a query
+ * embedding, sorts them by their earliest commit timestamp, and computes
+ * the cosine distance between consecutive entries so you can see how
+ * code related to a given concept evolved over the repository's history.
+ *
+ * @param queryEmbedding - Embedding vector for the concept query
+ * @param topK           - How many top-matching blobs to include (default 50)
+ * @returns Array of entries sorted oldest-first
+ */
+export function computeConceptEvolution(
+  queryEmbedding: number[],
+  topK = 50,
+): ConceptEvolutionEntry[] {
+  // 1. Load all stored embeddings and score against the query
+  const allRows = db
+    .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
+    .from(embeddings)
+    .all()
+
+  if (allRows.length === 0) return []
+
+  const scored = allRows
+    .map((r) => {
+      const emb = bufferToEmbedding(r.vector as Buffer)
+      return {
+        blobHash: r.blobHash,
+        emb,
+        score: cosineSimilarity(queryEmbedding, emb),
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+
+  if (scored.length === 0) return []
+
+  const topHashes = scored.map((s) => s.blobHash)
+  const embByHash = new Map(scored.map((s) => [s.blobHash, { emb: s.emb, score: s.score }]))
+
+  // 2. Resolve earliest commit for each blob
+  const firstSeenMap = getFirstSeenMap(topHashes)
+
+  // 3. Resolve file paths for each blob
+  const BATCH = 500
+  const pathsByBlob = new Map<string, string[]>()
+  for (let i = 0; i < topHashes.length; i += BATCH) {
+    const batch = topHashes.slice(i, i + BATCH)
+    const pathRows = db
+      .select({ blobHash: paths.blobHash, path: paths.path })
+      .from(paths)
+      .where(inArray(paths.blobHash, batch))
+      .all()
+    for (const row of pathRows) {
+      const list = pathsByBlob.get(row.blobHash) ?? []
+      list.push(row.path)
+      pathsByBlob.set(row.blobHash, list)
+    }
+  }
+
+  // 4. Build timeline sorted by earliest commit timestamp
+  const timeline = topHashes
+    .map((blobHash) => {
+      const info = firstSeenMap.get(blobHash)
+      if (!info) return null
+      const embInfo = embByHash.get(blobHash)!
+      return {
+        blobHash,
+        commitHash: info.commitHash,
+        timestamp: info.timestamp,
+        paths: pathsByBlob.get(blobHash) ?? [],
+        score: embInfo.score,
+        emb: embInfo.emb,
+      }
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => a.timestamp - b.timestamp)
+
+  // 5. Compute distFromPrev between consecutive timeline entries
+  const result: ConceptEvolutionEntry[] = []
+  let prevEmb: number[] | null = null
+
+  for (const entry of timeline) {
+    const distFromPrev = prevEmb !== null ? cosineDistance(prevEmb, entry.emb) : 0
+    result.push({
+      blobHash: entry.blobHash,
+      commitHash: entry.commitHash,
+      timestamp: entry.timestamp,
+      paths: entry.paths,
+      score: entry.score,
+      distFromPrev,
+    })
+    prevEmb = entry.emb
+  }
+
+  return result
+}
+

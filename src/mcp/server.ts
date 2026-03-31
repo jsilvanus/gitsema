@@ -18,7 +18,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { vectorSearch } from '../core/search/vectorSearch.js'
-import { computeEvolution } from '../core/search/evolution.js'
+import { computeEvolution, computeConceptEvolution } from '../core/search/evolution.js'
 import { runIndex } from '../core/indexing/indexer.js'
 import { getBlobContent } from '../core/indexing/blobStore.js'
 import { OllamaProvider } from '../core/embedding/local.js'
@@ -289,6 +289,96 @@ export async function startMcpServer(): Promise<void> {
 
       return {
         content: [{ type: 'text', text: `Evolution of ${path}:\n\n${lines.join('\n')}` }],
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: concept_evolution
+  // -------------------------------------------------------------------------
+  server.tool(
+    'concept_evolution',
+    'Show how a semantic concept (e.g. "authentication") has evolved across the commit history. Embeds the query, finds the top-matching blobs, sorts them chronologically, and computes the cosine distance between consecutive timeline entries to reveal how the related code changed over time.',
+    {
+      query: z.string().describe('Natural-language concept to trace, e.g. "authentication" or "error handling"'),
+      top_k: z.number().int().positive().optional().default(50).describe('Number of top-matching blobs to include in the timeline'),
+      threshold: z.number().min(0).max(2).optional().default(0.3).describe('Cosine distance threshold above which a step is flagged as a large change'),
+      structured: z.boolean().optional().default(false).describe('Return structured JSON instead of human-readable text (useful for agent processing)'),
+      include_content: z.boolean().optional().default(false).describe('Include stored file content for each entry in the structured output (only used when structured=true)'),
+    },
+    async ({ query, top_k, threshold, structured, include_content }) => {
+      const provider = getTextProvider()
+      let queryEmbedding: number[]
+      try {
+        queryEmbedding = await provider.embed(query)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
+      }
+
+      const entries = computeConceptEvolution(queryEmbedding, top_k)
+
+      if (entries.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No matching blobs found for: "${query}"\nHas the index been built? Run the index tool or \`gitsema index\` first.`,
+            },
+          ],
+        }
+      }
+
+      if (structured) {
+        const data = {
+          query,
+          entries: entries.length,
+          threshold,
+          timeline: entries.map((e, i) => {
+            const item: Record<string, unknown> = {
+              index: i,
+              date: formatDate(e.timestamp),
+              timestamp: e.timestamp,
+              blobHash: e.blobHash,
+              commitHash: e.commitHash,
+              paths: e.paths,
+              score: e.score,
+              distFromPrev: e.distFromPrev,
+              isOrigin: i === 0,
+              isLargeChange: i > 0 && e.distFromPrev >= threshold,
+            }
+            if (include_content) {
+              item.content = getBlobContent(e.blobHash) ?? null
+            }
+            return item
+          }),
+          summary: {
+            largeChanges: entries.filter((e, i) => i > 0 && e.distFromPrev >= threshold).length,
+            maxDistFromPrev: Math.max(...entries.map((e) => e.distFromPrev), 0),
+            avgScore: entries.reduce((sum, e) => sum + e.score, 0) / entries.length,
+          },
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+      }
+
+      // Human-readable output
+      const lines = entries.map((e, i) => {
+        const date = formatDate(e.timestamp)
+        const path = (e.paths[0] ?? '(unknown path)').padEnd(50)
+        const blob = e.blobHash.slice(0, 7)
+        const score = e.score.toFixed(3)
+        const dPrev = e.distFromPrev.toFixed(4)
+        const note = i === 0 ? '  (origin)' : e.distFromPrev >= threshold ? '  ← large change' : ''
+        return `${date}  ${path}  [${blob}]  score=${score}  dist_prev=${dPrev}${note}`
+      })
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Concept evolution: "${query}"\nEntries found: ${entries.length}\n\n${lines.join('\n')}`,
+          },
+        ],
       }
     },
   )
