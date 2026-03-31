@@ -1,0 +1,8 @@
+fastapi==0.101.1
+uvicorn[standard]==0.23.0
+sentence-transformers==2.2.2
+transformers==4.35.0
+# use a torch version available on this environment
+torch==2.11.0
+huggingface-hub==0.18.0
+numpy==1.26.4
