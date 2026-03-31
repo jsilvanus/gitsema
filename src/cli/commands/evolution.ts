@@ -1,8 +1,44 @@
+import { writeFileSync } from 'node:fs'
 import { computeEvolution } from '../../core/search/evolution.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
+import type { EvolutionEntry } from '../../core/search/evolution.js'
 
 export interface EvolutionCommandOptions {
   threshold?: string
+  dump?: string | boolean
+}
+
+/**
+ * Serializes evolution entries as a structured JSON object suitable for
+ * agent consumption or further processing.
+ */
+function serializeEvolutionJson(
+  filePath: string,
+  entries: EvolutionEntry[],
+  threshold: number,
+): string {
+  const data = {
+    path: filePath,
+    versions: entries.length,
+    threshold,
+    timeline: entries.map((e, i) => ({
+      index: i,
+      date: formatDate(e.timestamp),
+      timestamp: e.timestamp,
+      blobHash: e.blobHash,
+      commitHash: e.commitHash,
+      distFromPrev: e.distFromPrev,
+      distFromOrigin: e.distFromOrigin,
+      isOrigin: i === 0,
+      isLargeChange: i > 0 && e.distFromPrev >= threshold,
+    })),
+    summary: {
+      largeChanges: entries.filter((e, i) => i > 0 && e.distFromPrev >= threshold).length,
+      maxDistFromPrev: entries.length > 0 ? Math.max(...entries.map((e) => e.distFromPrev), 0) : 0,
+      totalDrift: entries.length > 0 ? entries[entries.length - 1].distFromOrigin : 0,
+    },
+  }
+  return JSON.stringify(data, null, 2)
 }
 
 /**
@@ -14,7 +50,7 @@ export interface EvolutionCommandOptions {
  *   2023-01-05  c02d8f7  dist_prev=0.412  dist_origin=0.389  ← large change
  */
 function renderEvolution(
-  entries: ReturnType<typeof computeEvolution>,
+  entries: EvolutionEntry[],
   threshold: number,
 ): string {
   if (entries.length === 0) return '  (no history found — has the file been indexed?)'
@@ -54,6 +90,30 @@ export async function evolutionCommand(
   }
 
   const entries = computeEvolution(filePath.trim())
+
+  // --dump: emit structured JSON to a file or stdout
+  if (options.dump !== undefined) {
+    const json = serializeEvolutionJson(filePath.trim(), entries, threshold)
+
+    if (typeof options.dump === 'string') {
+      // --dump <file> → write JSON to file, then print human-readable to stdout
+      try {
+        writeFileSync(options.dump, json, 'utf8')
+        console.log(`Evolution JSON written to: ${options.dump}`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`Error writing dump file: ${msg}`)
+        process.exit(1)
+      }
+      // Fall through to also print human-readable summary below
+    } else {
+      // --dump without a file path → print JSON to stdout and exit
+      process.stdout.write(json + '\n')
+      return
+    }
+  }
+
+  // Human-readable output
   console.log(`Evolution of: ${filePath}`)
   console.log(`Versions found: ${entries.length}`)
   if (entries.length > 0) {

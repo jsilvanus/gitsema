@@ -90,6 +90,10 @@ program
     '--threshold <n>',
     'cosine distance threshold above which a version change is flagged as a large change (default 0.3)',
   )
+  .option(
+    '--dump [file]',
+    'output structured JSON of all evolution entries; writes to <file> if given, otherwise prints JSON to stdout',
+  )
   .action(evolutionCommand)
 
 program
