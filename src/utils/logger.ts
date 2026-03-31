@@ -58,7 +58,7 @@ function isVerbose(): boolean {
 export const logger = {
   info: (msg: string) => { console.log(msg); writeLog('info', msg) },
   warn: (msg: string) => { console.warn(msg); writeLog('warn', msg) },
-  error: (msg: string) => { console.error(msg); writeLog('error', msg) },
+  error: (msg: string) => { writeLog('error', msg) },
   debug: (msg: string) => { if (isVerbose()) { console.debug(msg); writeLog('debug', msg) } },
 }
 

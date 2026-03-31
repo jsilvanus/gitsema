@@ -123,10 +123,14 @@ export async function indexFileCommand(filePath: string, options: { chunker?: st
     return
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`Embedding failed for blob ${blob}: ${msg}`)
+    logger.debug?.(`Embedding failed for blob ${blob}: ${msg}`)
 
     if (typeof msg === 'string' && /context|input length|exceeds the context/i.test(msg)) {
-      console.error(`Attempting function-chunker fallback for blob ${blob}`)
+      // record a function fallback attempt; verbose shows details
+      let fbFunction = 0
+      let fbFixed = 0
+      fbFunction++
+      logger.debug?.(`Attempting function-chunker fallback for blob ${blob}`)
 
       const fallbackChunker = createChunker('function', {})
       const blobChunks = fallbackChunker.chunk(text, filePath)
@@ -150,8 +154,9 @@ export async function indexFileCommand(filePath: string, options: { chunker?: st
           if (typeof msg3 === 'string' && /context|input length|exceeds the context/i.test(msg3)) {
             const fixedSizes = [1500, 800]
             let fixedSucceeded = false
-            for (const size of fixedSizes) {
-              console.error(`Attempting fixed-chunker (window=${size}) fallback for blob ${blob} chunk ${chunk.startLine}-${chunk.endLine}`)
+              for (const size of fixedSizes) {
+              fbFixed++
+              logger.debug?.(`Attempting fixed-chunker (window=${size}) fallback for blob ${blob} chunk ${chunk.startLine}-${chunk.endLine}`)
               const fixedChunker = createChunker('fixed', { windowSize: size, overlap: 200 })
               const subChunks = fixedChunker.chunk(chunk.content, filePath)
               let subAllOk = true
@@ -185,11 +190,12 @@ export async function indexFileCommand(filePath: string, options: { chunker?: st
         console.log(`Indexed blob ${blob} (chunked fallback) for file ${filePath}`)
         return
       }
-      console.error('Fallback attempts failed for some chunks')
+      logger.debug('Fallback attempts failed for some chunks')
+      console.error(`Fallback attempts failed for some chunks (fail=1 fb=${fbFunction}/${fbFixed})`)
       process.exit(1)
     }
 
-    console.error('Embedding failed and is not recoverable')
+    console.error(`Embedding failed and is not recoverable (fail=1)`)
     process.exit(1)
   }
 }
@@ -202,7 +208,7 @@ function renderProgress(stats: IndexStats): string {
     // Use commits > 0 to distinguish Phase B (commit mapping) from Phase A (collecting).
     if (stats.commits > 0) {
       return `\r  Mapping commits... commits=${stats.commits} links=${stats.blobCommits}  `
-    }
+                logger.debug?.(`Embedding failed for blob ${blob}: ${msg}`)
     return (
       `\r  Collecting... seen=${stats.seen} skip=${stats.skipped} filt=${stats.filtered}  `
     )
@@ -228,7 +234,7 @@ function renderProgress(stats: IndexStats): string {
       : '?'
   return (
     `\r  [${bar}] ${pctStr}%` +
-    ` new=${stats.indexed} skip=${stats.skipped} filt=${stats.filtered} over=${stats.oversized} fail=${stats.failed}` +
+                        logger.debug?.(`Embedding failed for blob ${blob} chunk ${chunk.startLine}-${chunk.endLine}: ${msg3}`)
     ` ${rate}/s eta=${eta}  `
   )
 }
@@ -246,7 +252,7 @@ function buildProvider(providerType: string, model: string): EmbeddingProvider {
 }
 
 /**
- * Parses a human-friendly size string (e.g. `"200kb"`, `"1mb"`, `"512"`) into bytes.
+                              logger.debug?.(`Embedding failed for subchunk: ${err5 instanceof Error ? err5.message : String(err5)}`)
  * Returns undefined when the input is undefined.
  * Throws on unrecognisable formats.
  */
@@ -370,9 +376,9 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     await Promise.all(
       options.file.map((p) => limiter(() => indexFileCommand(p, { chunker: chunkerStrategy === 'file' ? undefined : chunkerStrategy })))
     )
-    return
+    return (
   }
-
+      ` new=${stats.indexed} skip=${stats.skipped} filt=${stats.filtered} over=${stats.oversized} fail=${stats.failed} fb=${stats.fbFunction}/${stats.fbFixed}` +
   let lastLine = ''
   const stats = await runIndex({
     repoPath: '.',
@@ -400,7 +406,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   console.log(`  Already in DB:       ${stats.skipped}`)
   console.log(`  Oversized:           ${stats.oversized}`)
   console.log(`  Filtered out:        ${stats.filtered}`)
-  console.log(`  Failed:              ${stats.failed}`)
+  console.log(`  Failed:              ${stats.failed}  fb=${stats.fbFunction}/${stats.fbFixed}`)
   console.log(`    Embed errors:      ${stats.embedFailed}`)
   console.log(`    Other errors:      ${stats.otherFailed}`)
   if (chunkerStrategy !== 'file') {
