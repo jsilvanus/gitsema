@@ -17,6 +17,11 @@ export interface RevListOptions {
    *  - Commit hash / symbolic ref (e.g. `"HEAD~100"`, `"abc1234"`) → same range form
    */
   since?: string
+  /**
+   * Stop after this many commits have been traversed.
+   * Useful for splitting a large history into multiple indexing sessions.
+   */
+  maxCommits?: number
 }
 
 /** Returns true when the string looks like an ISO date rather than a git ref. */
@@ -33,7 +38,7 @@ function isDateString(s: string): boolean {
  * in a single streaming pass without extra per-object subprocess calls.
  */
 export function revList(repoPath: string = '.', options: RevListOptions = {}): Readable {
-  const { since } = options
+  const { since, maxCommits } = options
 
   let revListArgs: string[]
   if (!since) {
@@ -43,6 +48,10 @@ export function revList(repoPath: string = '.', options: RevListOptions = {}): R
   } else {
     // Tag, branch, or commit hash: use a range to get only new objects
     revListArgs = ['rev-list', '--objects', `${since}..HEAD`]
+  }
+
+  if (maxCommits && maxCommits > 0) {
+    revListArgs.push(`--max-count=${maxCommits}`)
   }
 
   const revListProc = spawn('git', revListArgs, {

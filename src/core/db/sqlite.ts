@@ -48,6 +48,11 @@ function openDatabase(): ReturnType<typeof drizzle> {
       commit_hash TEXT NOT NULL REFERENCES commits(commit_hash),
       PRIMARY KEY (blob_hash, commit_hash)
     );
+
+    CREATE TABLE IF NOT EXISTS indexed_commits (
+      commit_hash TEXT PRIMARY KEY,
+      indexed_at INTEGER NOT NULL
+    );
   `)
 
   // Migrate existing databases: add file_type column if it doesn't exist yet

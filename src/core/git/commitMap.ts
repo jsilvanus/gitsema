@@ -26,15 +26,25 @@ export type CommitMapEvent =
  * Uses `git log --all --raw` to capture all commits across all branches and
  * their associated blob changes in a single streaming pass.
  */
-export function streamCommitMap(repoPath: string = '.'): Readable {
-  const proc = spawn(
-    'git',
-    ['log', '--all', '--raw', '--no-abbrev', '--format=COMMIT %H %ct %s'],
-    {
-      cwd: repoPath,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  )
+export interface CommitMapOptions {
+  /**
+   * Stop after this many commits have been traversed.
+   * Should match the same limit passed to `revList` so Phase A and Phase B
+   * cover the same set of commits.
+   */
+  maxCommits?: number
+}
+
+export function streamCommitMap(repoPath: string = '.', options: CommitMapOptions = {}): Readable {
+  const { maxCommits } = options
+  const args = ['log', '--all', '--raw', '--no-abbrev', '--format=COMMIT %H %ct %s']
+  if (maxCommits && maxCommits > 0) {
+    args.push(`--max-count=${maxCommits}`)
+  }
+  const proc = spawn('git', args, {
+    cwd: repoPath,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
 
   const out = new Readable({ objectMode: true, read() {} })
 

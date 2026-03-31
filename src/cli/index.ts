@@ -21,7 +21,27 @@ program
   .description('Index all blobs in the current Git repo')
   .option(
     '--since <ref>',
-    'only index commits after this point; accepts a date (2024-01-01), tag (v1.0), or commit hash',
+    'only index commits after this point; accepts a date (2024-01-01), tag (v1.0), or commit hash; use "all" to force a full re-index',
+  )
+  .option(
+    '--max-commits <n>',
+    'stop after indexing this many commits; pair with incremental indexing to split large histories into multiple sessions',
+  )
+  .option(
+    '--concurrency <n>',
+    'number of blobs to embed concurrently (default 4)',
+  )
+  .option(
+    '--ext <extensions>',
+    'only index files with these comma-separated extensions, e.g. ".ts,.js,.py"',
+  )
+  .option(
+    '--max-size <size>',
+    'skip blobs larger than this size, e.g. "200kb", "1mb" (default 200kb)',
+  )
+  .option(
+    '--exclude <patterns>',
+    'skip blobs whose path contains any of these comma-separated patterns, e.g. "node_modules,dist,vendor"',
   )
   .action(indexCommand)
 
