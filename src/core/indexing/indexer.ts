@@ -2,10 +2,11 @@ import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
 import { isIndexed } from './deduper.js'
-import { storeBlob, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit } from './blobStore.js'
+import { storeBlob, storeBlobRecord, storeChunk, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
+import { createChunker, type ChunkStrategy, type ChunkOptions } from '../chunking/chunker.js'
 import { createLimiter } from '../../utils/concurrency.js'
 import { extname } from 'node:path'
 
@@ -58,6 +59,15 @@ export interface IndexerOptions {
   maxCommits?: number
   /** Path-based filter applied before any blob content is read. */
   filter?: FilterOptions
+  /**
+   * Chunking strategy to use when indexing blobs.
+   * - `'file'` (default) — whole-file indexing, one embedding per blob (backward-compatible)
+   * - `'function'` — split on function/class boundaries
+   * - `'fixed'` — fixed-size windows with overlap
+   */
+  chunker?: ChunkStrategy
+  /** Options passed to the chunker (e.g. window size and overlap for `fixed`). */
+  chunkerOptions?: ChunkOptions
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -76,6 +86,7 @@ export interface IndexStats {
   elapsed: number   // ms
   commits: number       // Phase 6: commits stored
   blobCommits: number   // Phase 6: blob-commit links stored
+  chunks: number        // Phase 10: chunk embeddings stored
 }
 
 /**
@@ -103,6 +114,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     concurrency = 4,
     maxCommits,
     filter = {},
+    chunker: chunkerStrategy = 'file',
+    chunkerOptions = {},
     onProgress,
   } = options
 
@@ -121,12 +134,16 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   // Build a routing provider when a separate code model is configured.
   const router = codeProvider ? new RoutingProvider(provider, codeProvider) : null
 
+  // Build the chunker for this run
+  const chunker = createChunker(chunkerStrategy, chunkerOptions)
+  const useChunking = chunkerStrategy !== 'file'
+
   // Concurrency limiter for embedding calls
   const limit = createLimiter(concurrency)
 
   const stats: IndexStats = {
     seen: 0, indexed: 0, skipped: 0, oversized: 0, filtered: 0, failed: 0,
-    queued: 0, elapsed: 0, commits: 0, blobCommits: 0,
+    queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0,
   }
   const start = Date.now()
   const seenHashes = new Set<string>()
@@ -193,23 +210,63 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         // Determine file category and select the right provider
         const fileType = getFileCategory(path)
         const activeProvider = router ? router.providerForFile(path) : provider
+        const text = content.toString('utf8')
 
-        // Generate embedding
-        let embedding: number[]
-        try {
-          embedding = await activeProvider.embed(content.toString('utf8'))
-        } catch {
-          stats.failed++
-          onProgress?.({ ...stats, elapsed: Date.now() - start })
-          return
-        }
+        if (useChunking) {
+          // Chunked indexing: split into chunks and embed each separately.
+          // Write the blob record and path once (no whole-file embedding),
+          // then store per-chunk embeddings in the chunk_embeddings table.
+          const blobChunks = chunker.chunk(text, path)
+          let allOk = true
 
-        // Persist blob + embedding + path in one transaction
-        try {
-          storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType })
-          stats.indexed++
-        } catch {
-          stats.failed++
+          // Persist the blob record and path row exactly once before embedding chunks.
+          try {
+            storeBlobRecord({ blobHash, size: content.length, path })
+          } catch {
+            stats.failed++
+            onProgress?.({ ...stats, elapsed: Date.now() - start })
+            return
+          }
+
+          for (const chunk of blobChunks) {
+            let chunkEmbedding: number[]
+            try {
+              chunkEmbedding = await activeProvider.embed(chunk.content)
+            } catch {
+              allOk = false
+              stats.failed++
+              onProgress?.({ ...stats, elapsed: Date.now() - start })
+              continue
+            }
+
+            try {
+              storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
+              stats.chunks++
+            } catch {
+              allOk = false
+              stats.failed++
+            }
+          }
+
+          if (allOk) stats.indexed++
+        } else {
+          // Whole-file indexing (default, backward-compatible)
+          let embedding: number[]
+          try {
+            embedding = await activeProvider.embed(text)
+          } catch {
+            stats.failed++
+            onProgress?.({ ...stats, elapsed: Date.now() - start })
+            return
+          }
+
+          // Persist blob + embedding + path in one transaction
+          try {
+            storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType })
+            stats.indexed++
+          } catch {
+            stats.failed++
+          }
         }
 
         onProgress?.({ ...stats, elapsed: Date.now() - start })

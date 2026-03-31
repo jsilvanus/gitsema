@@ -22,11 +22,62 @@ export function formatDate(timestamp: number): string {
 }
 
 /**
+ * Grouping modes for `groupResults()`.
+ * - `file`   — collapse results that share the same file path (top chunk wins)
+ * - `module` — collapse results in the same directory
+ * - `commit` — collapse results that share the same earliest commit
+ */
+export type GroupMode = 'file' | 'module' | 'commit'
+
+/**
+ * Groups a ranked list of SearchResults using the given mode.
+ * Within each group the highest-scoring result is kept as the representative.
+ * The output list is sorted by the representative's score (descending) and
+ * truncated to topK.
+ */
+export function groupResults(results: SearchResult[], mode: GroupMode, topK: number): SearchResult[] {
+  const grouped = new Map<string, SearchResult>()
+
+  for (const result of results) {
+    let key: string
+
+    switch (mode) {
+      case 'file': {
+        // Group by first known path (or blobHash if no path)
+        key = result.paths[0] ?? result.blobHash
+        break
+      }
+      case 'module': {
+        // Group by directory of the first known path
+        const p = result.paths[0] ?? result.blobHash
+        const slash = p.lastIndexOf('/')
+        key = slash >= 0 ? p.slice(0, slash) : '.'
+        break
+      }
+      case 'commit': {
+        key = result.firstCommit ?? result.blobHash
+        break
+      }
+    }
+
+    const existing = grouped.get(key)
+    if (!existing || result.score > existing.score) {
+      grouped.set(key, result)
+    }
+  }
+
+  return Array.from(grouped.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+}
+
+/**
  * Renders a list of SearchResults as human-readable CLI output.
  * Shows the firstSeen date alongside each result when available.
+ * When a result is a chunk, the line range is shown in the path column.
  *
  * Example:
- *   0.921  src/auth/oauth.ts                          [a3f9c2d]  first: 2022-03-15
+ *   0.921  src/auth/oauth.ts:10-45                    [a3f9c2d]  first: 2022-03-15
  *   0.887  src/auth/session.ts                        [b19e4a1]
  */
 export function renderResults(results: SearchResult[]): string {
@@ -37,12 +88,16 @@ export function renderResults(results: SearchResult[]): string {
     const score = formatScore(result.score)
     const hash = shortHash(result.blobHash)
     const dateSuffix = result.firstSeen !== undefined ? `  first: ${formatDate(result.firstSeen)}` : ''
+    const lineSuffix = result.startLine !== undefined && result.endLine !== undefined
+      ? `:${result.startLine}-${result.endLine}`
+      : ''
     if (result.paths.length === 0) {
       lines.push(`${score}  (unknown path)  [${hash}]${dateSuffix}`)
     } else {
-      lines.push(`${score}  ${result.paths[0].padEnd(40)}  [${hash}]${dateSuffix}`)
+      const pathStr = result.paths[0] + lineSuffix
+      lines.push(`${score}  ${pathStr.padEnd(50)}  [${hash}]${dateSuffix}`)
       for (let i = 1; i < result.paths.length; i++) {
-        lines.push(`       ${result.paths[i].padEnd(40)}`)
+        lines.push(`       ${result.paths[i].padEnd(50)}`)
       }
     }
   }
@@ -76,9 +131,9 @@ export function renderFirstSeenResults(results: SearchResult[]): string {
     if (result.paths.length === 0) {
       lines.push(`${date}  (unknown path)  [${hash}]  (score: ${score})`)
     } else {
-      lines.push(`${date}  ${result.paths[0].padEnd(40)}  [${hash}]  (score: ${score})`)
+      lines.push(`${date}  ${result.paths[0].padEnd(50)}  [${hash}]  (score: ${score})`)
       for (let i = 1; i < result.paths.length; i++) {
-        lines.push(`          ${result.paths[i].padEnd(40)}`)
+        lines.push(`          ${result.paths[i].padEnd(50)}`)
       }
     }
   }

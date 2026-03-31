@@ -1,5 +1,5 @@
 import { db } from '../db/sqlite.js'
-import { embeddings, paths } from '../db/schema.js'
+import { embeddings, paths, chunks, chunkEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
@@ -29,6 +29,18 @@ function bufferToEmbedding(buf: Buffer): Embedding {
   return Array.from(f32)
 }
 
+/**
+ * Computes a path relevance score in [0, 1] by counting how many
+ * lowercase query tokens appear as substrings in the file path.
+ */
+export function pathRelevanceScore(query: string, filePath: string): number {
+  const tokens = query.toLowerCase().split(/\W+/).filter(Boolean)
+  if (tokens.length === 0) return 0
+  const lower = filePath.toLowerCase()
+  const matches = tokens.filter((t) => lower.includes(t)).length
+  return matches / tokens.length
+}
+
 export interface VectorSearchOptions {
   topK?: number
   /** When set, only embeddings produced by this model are considered. */
@@ -41,16 +53,40 @@ export interface VectorSearchOptions {
   before?: number
   /** Only include blobs whose earliest commit is strictly after this Unix timestamp (seconds). */
   after?: number
+  /**
+   * Three-signal ranking weights (Phase 10).
+   * When any of these is provided, the three-signal formula is used instead of
+   * the simple cosine (or cosine+recency) formula.
+   * Weights need not sum to 1; they are normalised internally.
+   */
+  weightVector?: number
+  weightRecency?: number
+  weightPath?: number
+  /** The original query string, used to compute path relevance scores. */
+  query?: string
+  /** When true, search chunk embeddings in addition to whole-file embeddings. */
+  searchChunks?: boolean
 }
 
 /**
  * Searches the database by embedding all stored vectors against the query
  * vector, then returns the top-k results sorted by cosine similarity (or
  * blended score when `recent` is true). Supports temporal filtering via
- * `before` / `after` Unix timestamps.
+ * `before` / `after` Unix timestamps and three-signal ranking.
  */
 export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOptions = {}): SearchResult[] {
-  const { topK = 10, model, recent = false, alpha = 0.8, before, after } = options
+  const {
+    topK = 10, model, recent = false, alpha = 0.8, before, after,
+    weightVector, weightRecency, weightPath, query = '',
+    searchChunks = false,
+  } = options
+
+  // Determine if three-signal ranking is active
+  const useThreeSignal = weightVector !== undefined || weightRecency !== undefined || weightPath !== undefined
+  const wv = weightVector ?? 0.7
+  const wr = weightRecency ?? 0.2
+  const wp = weightPath ?? 0.1
+  const wTotal = wv + wr + wp || 1
 
   // Load stored embeddings, optionally filtered to a specific model
   const baseQuery = db.select({
@@ -61,73 +97,141 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const filteredQuery = model ? baseQuery.where(eq(embeddings.model, model)) : baseQuery
   const allRows = filteredQuery.all()
 
+  // Optionally include chunk embeddings
+  type CandidateRow = { blobHash: string; vector: Buffer; chunkId?: number; startLine?: number; endLine?: number }
+  let candidatePool: CandidateRow[] = allRows.map((r) => ({
+    blobHash: r.blobHash,
+    vector: r.vector as Buffer,
+  }))
+
+  if (searchChunks) {
+    const chunkQuery = db.select({
+      chunkId: chunks.id,
+      blobHash: chunks.blobHash,
+      startLine: chunks.startLine,
+      endLine: chunks.endLine,
+      vector: chunkEmbeddings.vector,
+    })
+      .from(chunkEmbeddings)
+      .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
+
+    const chunkRows = (model
+      ? chunkQuery.where(eq(chunkEmbeddings.model, model))
+      : chunkQuery).all()
+
+    for (const row of chunkRows) {
+      candidatePool.push({
+        blobHash: row.blobHash,
+        vector: row.vector as Buffer,
+        chunkId: row.chunkId,
+        startLine: row.startLine,
+        endLine: row.endLine,
+      })
+    }
+  }
+
   // Apply time-range filter on the candidate set before scoring
-  const allHashes = allRows.map((r) => r.blobHash)
+  const allHashes = [...new Set(candidatePool.map((r) => r.blobHash))]
   const filteredHashes = (before !== undefined || after !== undefined)
     ? new Set(filterByTimeRange(allHashes, before, after))
     : null   // null means no filter — include all
 
-  const candidateRows = filteredHashes
-    ? allRows.filter((r) => filteredHashes.has(r.blobHash))
-    : allRows
+  const filteredPool = filteredHashes
+    ? candidatePool.filter((r) => filteredHashes.has(r.blobHash))
+    : candidatePool
 
-  if (candidateRows.length === 0) return []
+  if (filteredPool.length === 0) return []
 
-  // Compute cosine similarity for each candidate blob
-  type ScoredBlob = { blobHash: string; cosine: number }
-  const scored: ScoredBlob[] = candidateRows.map((row) => ({
-    blobHash: row.blobHash,
-    cosine: cosineSimilarity(queryEmbedding, bufferToEmbedding(row.vector as Buffer)),
+  // Compute cosine similarity for each candidate
+  type ScoredEntry = CandidateRow & { cosine: number }
+  const scored: ScoredEntry[] = filteredPool.map((row) => ({
+    ...row,
+    cosine: cosineSimilarity(queryEmbedding, bufferToEmbedding(row.vector)),
   }))
 
-  // Optionally blend with recency score
-  type FinalBlob = { blobHash: string; score: number }
-  let finalScored: FinalBlob[]
-
-  if (recent) {
-    const candidateHashes = scored.map((s) => s.blobHash)
+  // Compute recency scores when needed
+  const needRecency = recent || useThreeSignal
+  let recencyScores: Map<string, number> | null = null
+  if (needRecency) {
+    const candidateHashes = [...new Set(scored.map((s) => s.blobHash))]
     const firstSeenMap = getFirstSeenMap(candidateHashes)
-    const recencyScores = computeRecencyScores(firstSeenMap)
-
-    finalScored = scored.map((s) => {
-      const recency = recencyScores.get(s.blobHash) ?? 0
-      return { blobHash: s.blobHash, score: alpha * s.cosine + (1 - alpha) * recency }
-    })
-  } else {
-    finalScored = scored.map((s) => ({ blobHash: s.blobHash, score: s.cosine }))
+    recencyScores = computeRecencyScores(firstSeenMap)
   }
+
+  // Resolve paths for path-relevance scoring (only when using three-signal ranking)
+  let pathsByBlob: Map<string, string[]> | null = null
+  if (useThreeSignal) {
+    const hashes = [...new Set(scored.map((s) => s.blobHash))]
+    const pathRows = db.select({ blobHash: paths.blobHash, path: paths.path })
+      .from(paths)
+      .where(inArray(paths.blobHash, hashes))
+      .all()
+    pathsByBlob = new Map()
+    for (const row of pathRows) {
+      const list = pathsByBlob.get(row.blobHash) ?? []
+      list.push(row.path)
+      pathsByBlob.set(row.blobHash, list)
+    }
+  }
+
+  // Apply ranking formula
+  type FinalEntry = ScoredEntry & { score: number }
+  const finalScored: FinalEntry[] = scored.map((s) => {
+    let score: number
+
+    if (useThreeSignal) {
+      const recency = recencyScores?.get(s.blobHash) ?? 0
+      const blobPaths = pathsByBlob?.get(s.blobHash) ?? []
+      const pathScore = blobPaths.length > 0
+        ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p)))
+        : 0
+      score = (wv * s.cosine + wr * recency + wp * pathScore) / wTotal
+    } else if (recent) {
+      const recency = recencyScores?.get(s.blobHash) ?? 0
+      score = alpha * s.cosine + (1 - alpha) * recency
+    } else {
+      score = s.cosine
+    }
+
+    return { ...s, score }
+  })
 
   // Sort descending by score, take top-k
   finalScored.sort((a, b) => b.score - a.score)
-  const topBlobs = finalScored.slice(0, topK)
+  const topEntries = finalScored.slice(0, topK)
 
-  if (topBlobs.length === 0) return []
+  if (topEntries.length === 0) return []
 
-  // Resolve file paths
-  const blobHashes = topBlobs.map((b) => b.blobHash)
-  const pathRows = db.select({
-    blobHash: paths.blobHash,
-    path: paths.path,
-  }).from(paths).where(inArray(paths.blobHash, blobHashes)).all()
+  // Resolve file paths for the result set (reuse if already loaded)
+  const blobHashes = [...new Set(topEntries.map((b) => b.blobHash))]
+  if (!pathsByBlob) {
+    const pathRows = db.select({
+      blobHash: paths.blobHash,
+      path: paths.path,
+    }).from(paths).where(inArray(paths.blobHash, blobHashes)).all()
 
-  const pathsByBlob = new Map<string, string[]>()
-  for (const row of pathRows) {
-    const list = pathsByBlob.get(row.blobHash) ?? []
-    list.push(row.path)
-    pathsByBlob.set(row.blobHash, list)
+    pathsByBlob = new Map()
+    for (const row of pathRows) {
+      const list = pathsByBlob.get(row.blobHash) ?? []
+      list.push(row.path)
+      pathsByBlob.set(row.blobHash, list)
+    }
   }
 
   // Resolve firstCommit / firstSeen for the result set
   const firstSeenMap = getFirstSeenMap(blobHashes)
 
-  return topBlobs.map((b) => {
+  return topEntries.map((b) => {
     const firstSeen = firstSeenMap.get(b.blobHash)
     return {
       blobHash: b.blobHash,
-      paths: pathsByBlob.get(b.blobHash) ?? [],
+      paths: pathsByBlob!.get(b.blobHash) ?? [],
       score: b.score,
       firstCommit: firstSeen?.commitHash,
       firstSeen: firstSeen?.timestamp,
+      chunkId: b.chunkId,
+      startLine: b.startLine,
+      endLine: b.endLine,
     }
   })
 }

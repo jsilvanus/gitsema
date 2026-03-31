@@ -3,6 +3,7 @@ import { OllamaProvider } from '../../core/embedding/local.js'
 import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { DEFAULT_MAX_SIZE } from '../../core/git/showBlob.js'
+import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 
 function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -81,6 +82,9 @@ export interface IndexCommandOptions {
   ext?: string
   maxSize?: string
   exclude?: string
+  chunker?: string
+  windowSize?: string
+  overlap?: string
 }
 
 export async function indexCommand(options: IndexCommandOptions): Promise<void> {
@@ -133,10 +137,41 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     ? options.exclude.split(',').map((e) => e.trim()).filter(Boolean)
     : undefined
 
+  // Parse chunker strategy
+  let chunkerStrategy: ChunkStrategy = 'file'
+  if (options.chunker !== undefined) {
+    if (options.chunker !== 'file' && options.chunker !== 'function' && options.chunker !== 'fixed') {
+      console.error('Error: --chunker must be one of: file, function, fixed')
+      process.exit(1)
+    }
+    chunkerStrategy = options.chunker as ChunkStrategy
+  }
+
+  // Parse chunker options (only relevant for `fixed` strategy)
+  let windowSize: number | undefined
+  if (options.windowSize !== undefined) {
+    windowSize = parseInt(options.windowSize, 10)
+    if (isNaN(windowSize) || windowSize < 1) {
+      console.error('Error: --window-size must be a positive integer')
+      process.exit(1)
+    }
+  }
+  let overlap: number | undefined
+  if (options.overlap !== undefined) {
+    overlap = parseInt(options.overlap, 10)
+    if (isNaN(overlap) || overlap < 0) {
+      console.error('Error: --overlap must be a non-negative integer')
+      process.exit(1)
+    }
+  }
+
   if (codeProvider) {
     console.log(`Indexing with ${providerType} — text: ${textModel}, code: ${codeModel}`)
   } else {
     console.log(`Indexing with ${providerType}/${textModel}...`)
+  }
+  if (chunkerStrategy !== 'file') {
+    console.log(`  Chunker: ${chunkerStrategy}${windowSize !== undefined ? ` (window=${windowSize})` : ''}${overlap !== undefined ? ` (overlap=${overlap})` : ''}`)
   }
   if (options.since) {
     console.log(`  Limiting to commits after: ${options.since}`)
@@ -164,6 +199,8 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     maxCommits,
     maxBlobSize,
     filter: { ext, exclude },
+    chunker: chunkerStrategy,
+    chunkerOptions: { windowSize, overlap },
     onProgress: (s) => {
       lastLine = renderProgress(s)
       process.stdout.write(lastLine)
@@ -180,6 +217,9 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   console.log(`  Oversized:           ${stats.oversized}`)
   console.log(`  Filtered out:        ${stats.filtered}`)
   console.log(`  Failed:              ${stats.failed}`)
+  if (chunkerStrategy !== 'file') {
+    console.log(`  Chunk embeddings:    ${stats.chunks}`)
+  }
   console.log(`  Commits mapped:      ${stats.commits}`)
   console.log(`  Blob-commit links:   ${stats.blobCommits}`)
 }
