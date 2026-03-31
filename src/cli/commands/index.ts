@@ -23,28 +23,49 @@ function renderProgress(stats: IndexStats): string {
   )
 }
 
-export async function indexCommand(): Promise<void> {
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-
-  let provider: EmbeddingProvider
+function buildProvider(providerType: string, model: string): EmbeddingProvider {
   if (providerType === 'http') {
     const baseUrl = process.env.GITSEMA_HTTP_URL
     if (!baseUrl) {
       console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
       process.exit(1)
     }
-    provider = new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
-  } else {
-    provider = new OllamaProvider({ model })
+    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
   }
+  return new OllamaProvider({ model })
+}
 
-  console.log(`Indexing with ${providerType}/${model}...`)
+export interface IndexCommandOptions {
+  since?: string
+}
+
+export async function indexCommand(options: IndexCommandOptions): Promise<void> {
+  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
+
+  // Text model (default, also used for unrecognised file types)
+  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  // Code model — defaults to the text model when not set, keeping single-model behaviour
+  const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
+
+  const textProvider = buildProvider(providerType, textModel)
+  // Only build a separate code provider when the models differ
+  const codeProvider = codeModel !== textModel ? buildProvider(providerType, codeModel) : undefined
+
+  if (codeProvider) {
+    console.log(`Indexing with ${providerType} — text: ${textModel}, code: ${codeModel}`)
+  } else {
+    console.log(`Indexing with ${providerType}/${textModel}...`)
+  }
+  if (options.since) {
+    console.log(`  Limiting to commits after: ${options.since}`)
+  }
 
   let lastLine = ''
   const stats = await runIndex({
     repoPath: '.',
-    provider,
+    provider: textProvider,
+    codeProvider,
+    since: options.since,
     onProgress: (s) => {
       lastLine = renderProgress(s)
       process.stdout.write(lastLine)

@@ -4,11 +4,26 @@ import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/c
 import { isIndexed } from './deduper.js'
 import { storeBlob, storeCommitWithBlobs } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
+import { RoutingProvider } from '../embedding/router.js'
+import { getFileCategory } from '../embedding/fileType.js'
 
 export interface IndexerOptions {
   repoPath?: string
   maxBlobSize?: number
   provider: EmbeddingProvider
+  /**
+   * When provided, source code files are embedded with this model while
+   * prose / documentation files use `provider`. If omitted, all files
+   * use `provider` regardless of type (backward-compatible behaviour).
+   */
+  codeProvider?: EmbeddingProvider
+  /**
+   * Restrict indexing to commits after this point. Accepts:
+   *  - ISO date string (e.g. `"2024-01-01"`)
+   *  - Tag name (e.g. `"v1.2.0"`)
+   *  - Commit hash or symbolic ref (e.g. `"HEAD~100"`, `"abc1234"`)
+   */
+  since?: string
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -24,14 +39,16 @@ export interface IndexStats {
 }
 
 export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
-  const { repoPath = '.', maxBlobSize = DEFAULT_MAX_SIZE, provider, onProgress } = options
+  const { repoPath = '.', maxBlobSize = DEFAULT_MAX_SIZE, provider, codeProvider, since, onProgress } = options
+
+  // Build a routing provider when a separate code model is configured.
+  const router = codeProvider ? new RoutingProvider(provider, codeProvider) : null
 
   const stats: IndexStats = { seen: 0, indexed: 0, skipped: 0, oversized: 0, failed: 0, elapsed: 0, commits: 0, blobCommits: 0 }
   const start = Date.now()
   const seenHashes = new Set<string>()
 
-  // Phase A: Walk blobs, generate embeddings, persist to blobs/embeddings/paths
-  const stream = revList(repoPath)
+  const stream = revList(repoPath, { since })
 
   for await (const entry of stream as AsyncIterable<BlobEntry>) {
     const { blobHash, path } = entry
@@ -64,10 +81,14 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       continue
     }
 
+    // Determine file category and select the right provider
+    const fileType = getFileCategory(path)
+    const activeProvider = router ? router.providerForFile(path) : provider
+
     // Generate embedding
     let embedding: number[]
     try {
-      embedding = await provider.embed(content.toString('utf8'))
+      embedding = await activeProvider.embed(content.toString('utf8'))
     } catch {
       stats.failed++
       onProgress?.({ ...stats, elapsed: Date.now() - start })
@@ -76,7 +97,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
     // Persist blob + embedding + path in one transaction
     try {
-      storeBlob({ blobHash, size: content.length, path, model: provider.model, embedding })
+      storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType })
       stats.indexed++
     } catch {
       stats.failed++
