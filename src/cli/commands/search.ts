@@ -1,11 +1,33 @@
 import { OllamaProvider } from '../../core/embedding/local.js'
 import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
+import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { renderResults } from '../../core/search/ranking.js'
 
 export interface SearchCommandOptions {
   top?: string
+}
+
+function buildProvider(providerType: string, model: string): EmbeddingProvider {
+  if (providerType === 'http') {
+    const baseUrl = process.env.GITSEMA_HTTP_URL
+    if (!baseUrl) {
+      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
+      process.exit(1)
+    }
+    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+  }
+  return new OllamaProvider({ model })
+}
+
+async function embedQuery(provider: EmbeddingProvider, model: string, query: string): Promise<number[]> {
+  try {
+    return await provider.embed(query)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`Error: could not embed query with ${model} — ${msg}`)
+    process.exit(1)
+  }
 }
 
 export async function searchCommand(query: string, options: SearchCommandOptions): Promise<void> {
@@ -21,29 +43,26 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
+  const dualModel = codeModel !== textModel
 
-  let provider: EmbeddingProvider
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    provider = new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+  const textProvider = buildProvider(providerType, textModel)
+  const codeProvider = dualModel ? buildProvider(providerType, codeModel) : null
+
+  // Embed the query with the text model (natural-language prose)
+  const textEmbedding = await embedQuery(textProvider, textModel, query)
+
+  if (dualModel && codeProvider) {
+    // Dual-model search: embed with both models and merge results
+    const codeEmbedding = await embedQuery(codeProvider, codeModel, query)
+    const textResults = vectorSearch(textEmbedding, { topK, model: textModel })
+    const codeResults = vectorSearch(codeEmbedding, { topK, model: codeModel })
+    const results = mergeSearchResults(textResults, codeResults, topK)
+    console.log(renderResults(results))
   } else {
-    provider = new OllamaProvider({ model })
+    // Single-model search (backward-compatible)
+    const results = vectorSearch(textEmbedding, { topK })
+    console.log(renderResults(results))
   }
-
-  let queryEmbedding: number[]
-  try {
-    queryEmbedding = await provider.embed(query)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`Error: could not embed query — ${msg}`)
-    process.exit(1)
-  }
-
-  const results = vectorSearch(queryEmbedding, { topK })
-  console.log(renderResults(results))
 }

@@ -16,6 +16,13 @@ export interface IndexerOptions {
    * use `provider` regardless of type (backward-compatible behaviour).
    */
   codeProvider?: EmbeddingProvider
+  /**
+   * Restrict indexing to commits after this point. Accepts:
+   *  - ISO date string (e.g. `"2024-01-01"`)
+   *  - Tag name (e.g. `"v1.2.0"`)
+   *  - Commit hash or symbolic ref (e.g. `"HEAD~100"`, `"abc1234"`)
+   */
+  since?: string
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -29,7 +36,7 @@ export interface IndexStats {
 }
 
 export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
-  const { repoPath = '.', maxBlobSize = DEFAULT_MAX_SIZE, provider, codeProvider, onProgress } = options
+  const { repoPath = '.', maxBlobSize = DEFAULT_MAX_SIZE, provider, codeProvider, since, onProgress } = options
 
   // Build a routing provider when a separate code model is configured.
   const router = codeProvider ? new RoutingProvider(provider, codeProvider) : null
@@ -38,7 +45,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   const start = Date.now()
   const seenHashes = new Set<string>()
 
-  const stream = revList(repoPath)
+  const stream = revList(repoPath, { since })
 
   for await (const entry of stream as AsyncIterable<BlobEntry>) {
     const { blobHash, path } = entry

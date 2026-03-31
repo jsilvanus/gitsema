@@ -18,6 +18,10 @@ program
 program
   .command('index')
   .description('Index all blobs in the current Git repo')
+  .option(
+    '--since <ref>',
+    'only index commits after this point; accepts a date (2024-01-01), tag (v1.0), or commit hash',
+  )
   .action(indexCommand)
 
 program

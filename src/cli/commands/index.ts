@@ -35,7 +35,11 @@ function buildProvider(providerType: string, model: string): EmbeddingProvider {
   return new OllamaProvider({ model })
 }
 
-export async function indexCommand(): Promise<void> {
+export interface IndexCommandOptions {
+  since?: string
+}
+
+export async function indexCommand(options: IndexCommandOptions): Promise<void> {
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
 
   // Text model (default, also used for unrecognised file types)
@@ -52,12 +56,16 @@ export async function indexCommand(): Promise<void> {
   } else {
     console.log(`Indexing with ${providerType}/${textModel}...`)
   }
+  if (options.since) {
+    console.log(`  Limiting to commits after: ${options.since}`)
+  }
 
   let lastLine = ''
   const stats = await runIndex({
     repoPath: '.',
     provider: textProvider,
     codeProvider,
+    since: options.since,
     onProgress: (s) => {
       lastLine = renderProgress(s)
       process.stdout.write(lastLine)

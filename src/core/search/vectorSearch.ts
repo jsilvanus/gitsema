@@ -1,6 +1,6 @@
 import { db } from '../db/sqlite.js'
 import { embeddings, paths } from '../db/schema.js'
-import { inArray } from 'drizzle-orm'
+import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 
 /**
@@ -30,6 +30,8 @@ function bufferToEmbedding(buf: Buffer): Embedding {
 
 export interface VectorSearchOptions {
   topK?: number
+  /** When set, only embeddings produced by this model are considered. */
+  model?: string
 }
 
 /**
@@ -37,13 +39,16 @@ export interface VectorSearchOptions {
  * vector, then returns the top-k results sorted by cosine similarity.
  */
 export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOptions = {}): SearchResult[] {
-  const { topK = 10 } = options
+  const { topK = 10, model } = options
 
-  // Load all stored embeddings
-  const rows = db.select({
+  // Load stored embeddings, optionally filtered to a specific model
+  const baseQuery = db.select({
     blobHash: embeddings.blobHash,
     vector: embeddings.vector,
-  }).from(embeddings).all()
+  }).from(embeddings)
+
+  const filteredQuery = model ? baseQuery.where(eq(embeddings.model, model)) : baseQuery
+  const rows = filteredQuery.all()
 
   // Score each blob
   type ScoredBlob = { blobHash: string; score: number }
@@ -77,4 +82,26 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     paths: pathsByBlob.get(b.blobHash) ?? [],
     score: b.score,
   }))
+}
+
+/**
+ * Merges two ranked result lists (from different models) into a single list.
+ * When a blob appears in both, the higher score is kept. The final list is
+ * re-sorted by score descending and truncated to topK.
+ */
+export function mergeSearchResults(
+  a: SearchResult[],
+  b: SearchResult[],
+  topK: number,
+): SearchResult[] {
+  const best = new Map<string, SearchResult>()
+  for (const r of [...a, ...b]) {
+    const existing = best.get(r.blobHash)
+    if (!existing || r.score > existing.score) {
+      best.set(r.blobHash, r)
+    }
+  }
+  return Array.from(best.values())
+    .sort((x, y) => y.score - x.score)
+    .slice(0, topK)
 }
