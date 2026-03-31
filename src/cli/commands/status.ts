@@ -17,19 +17,26 @@ export async function statusCommand(): Promise<void> {
 
   // Resolve provider config from env or defaults
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
+  const dualModel = codeModel !== textModel
 
   console.log(`gitsema v0.0.1`)
   console.log(`DB:                ${DB_PATH}`)
   console.log(`Provider:          ${providerType}`)
-  console.log(`Model:             ${model}`)
+  if (dualModel) {
+    console.log(`Text model:        ${textModel}`)
+    console.log(`Code model:        ${codeModel}`)
+  } else {
+    console.log(`Model:             ${textModel}`)
+  }
   console.log(`Blobs indexed:     ${blobCount.count}`)
   console.log(`Embeddings stored: ${embeddingCount.count}`)
   console.log(`Path entries:      ${pathCount.count}`)
 
   // Check if provider is reachable
   if (providerType === 'ollama') {
-    const provider = new OllamaProvider({ model })
+    const provider = new OllamaProvider({ model: textModel })
     try {
       await provider.embed('ping')
       console.log(`Provider status:   reachable (dimensions: ${provider.dimensions})`)

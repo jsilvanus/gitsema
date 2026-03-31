@@ -11,6 +11,8 @@ export const embeddings = sqliteTable('embeddings', {
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
+  /** File category used when selecting the embedding model: 'code' | 'text' | 'other'. */
+  fileType: text('file_type'),
 })
 
 export const paths = sqliteTable('paths', {

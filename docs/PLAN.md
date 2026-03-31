@@ -32,7 +32,7 @@ git repo
 [ SQLite + vectors ]    Drizzle ORM, blob-addressed schema
    ↓
 [ CLI ]                 index · search · first-seen · evolution
-   ↓ (phase 10)
+   ↓ (phase 11)
 [ MCP layer ]           semantic_search · search_history · first_seen
 ```
 
@@ -228,7 +228,7 @@ The search pipeline:
 6. Print results: score · path · blob hash (short).
 
 Cosine similarity in pure JS is fast enough for tens of thousands of blobs.
-If the database grows beyond ~500k blobs, revisit with a vector index (Phase 8
+If the database grows beyond ~500k blobs, revisit with a vector index (Phase 9
 or beyond). Do not prematurely optimize.
 
 Example output:
@@ -311,7 +311,43 @@ questions with a temporal dimension, which is the core differentiator of
 
 ---
 
-### Phase 8 — Performance
+### Phase 8 — File-type-aware embedding models
+
+**Goal:** Use the optimal embedding model per content type — a code-aware model for source files and a text model for documentation and prose.
+
+Different content types benefit from different embedding models. Source code has a highly structured, syntax-rich vocabulary that is captured more faithfully by code-aware models (e.g. `nomic-embed-code`). Prose documentation benefits from general-purpose text models (e.g. `nomic-embed-text`). Routing each blob to its best-fit model improves search precision for both use cases without requiring any additional infrastructure.
+
+**New environment variables**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GITSEMA_TEXT_MODEL` | `nomic-embed-text` | Model used for prose, documentation, and unknown file types |
+| `GITSEMA_CODE_MODEL` | (same as text model) | Model used for source code files |
+
+When `GITSEMA_CODE_MODEL` equals `GITSEMA_TEXT_MODEL` (the default), a single provider is used — the behaviour is identical to Phase 3 and fully backward-compatible.
+
+**New modules**
+
+- `src/core/embedding/fileType.ts` — classifies a file path as `'code'`, `'text'`, or `'other'` based on extension. Defines `CODE_EXTENSIONS` and `TEXT_EXTENSIONS` sets.
+- `src/core/embedding/router.ts` — `RoutingProvider` that wraps a text provider and a code provider. `providerForFile(path)` returns the correct provider; `embed(text)` routes to the text provider (search queries are prose).
+
+**Schema change**
+
+Add a nullable `file_type` column to the `embeddings` table. Records the category (`code` / `text` / `other`) that was active when the embedding was produced. This makes it possible to detect mismatches if a blob is re-indexed with a different routing policy.
+
+**Indexer change**
+
+`IndexerOptions` gains an optional `codeProvider` field. When present, the indexer uses `RoutingProvider` to select the active model per blob before calling `embed()`. The `model` column in `embeddings` correctly reflects which model was actually used for each blob.
+
+**Search query handling**
+
+Search queries have no file path. `RoutingProvider.embed()` always delegates to the text provider. This ensures that natural-language queries are embedded with the same model used for prose files, which is the correct semantic space for matching against documentation.
+
+**Deliverable:** `GITSEMA_CODE_MODEL=nomic-embed-code gitsema index` indexes code files with the code model and documentation with the text model. `gitsema status` reports both configured models when they differ. The `scripts/embed.ts` script accepts an optional file path argument and shows which model was selected for that file type.
+
+---
+
+### Phase 9 — Performance
 
 **Goal:** Practical daily use on large repositories.
 
@@ -347,7 +383,7 @@ in under 5 minutes on commodity hardware with a local Ollama instance.
 
 ---
 
-### Phase 9 — Smarter semantics
+### Phase 10 — Smarter semantics
 
 **Goal:** Better results without changing the core architecture.
 
@@ -390,7 +426,7 @@ indexing.
 
 ---
 
-### Phase 10 — Advanced features + MCP
+### Phase 11 — Advanced features + MCP
 
 **Goal:** The full platform.
 
@@ -457,8 +493,8 @@ server for AI-assisted workflows.
 
 | Risk | Mitigation |
 |---|---|
-| Repo explosion (millions of blobs) | Filters (Phase 8), vector index (post-Phase 10) |
-| Embedding cost / latency | Blob dedup (Phase 4), batching (Phase 8) |
+| Repo explosion (millions of blobs) | Filters (Phase 9), vector index (post-Phase 11) |
+| Embedding cost / latency | Blob dedup (Phase 4), batching (Phase 9) |
 | Model change invalidates index | `model` column on embeddings, re-index detection |
 | SQLite write contention | Single writer pattern, WAL mode |
 | Slow cosine search at scale | KNN index with `sqlite-vss` or `pgvector` migration |

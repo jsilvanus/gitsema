@@ -1,6 +1,7 @@
 import { db } from '../db/sqlite.js'
 import { blobs, embeddings, paths } from '../db/schema.js'
 import type { BlobHash, Embedding } from '../models/types.js'
+import type { FileCategory } from '../embedding/fileType.js'
 
 export interface StoreBlobArgs {
   blobHash: BlobHash
@@ -8,6 +9,7 @@ export interface StoreBlobArgs {
   path: string
   model: string
   embedding: Embedding
+  fileType?: FileCategory
 }
 
 /**
@@ -16,7 +18,7 @@ export interface StoreBlobArgs {
  * (the blob/embedding rows are skipped via INSERT OR IGNORE; a new path row is added).
  */
 export function storeBlob(args: StoreBlobArgs): void {
-  const { blobHash, size, path, model, embedding } = args
+  const { blobHash, size, path, model, embedding, fileType } = args
 
   // Serialize float32 embedding to a Buffer
   const vector = Buffer.from(new Float32Array(embedding).buffer)
@@ -28,7 +30,7 @@ export function storeBlob(args: StoreBlobArgs): void {
       .run()
 
     tx.insert(embeddings)
-      .values({ blobHash, model, dimensions: embedding.length, vector })
+      .values({ blobHash, model, dimensions: embedding.length, vector, fileType: fileType ?? null })
       .onConflictDoNothing()
       .run()
 

@@ -3,11 +3,19 @@ import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { isIndexed } from './deduper.js'
 import { storeBlob } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
+import { RoutingProvider } from '../embedding/router.js'
+import { getFileCategory } from '../embedding/fileType.js'
 
 export interface IndexerOptions {
   repoPath?: string
   maxBlobSize?: number
   provider: EmbeddingProvider
+  /**
+   * When provided, source code files are embedded with this model while
+   * prose / documentation files use `provider`. If omitted, all files
+   * use `provider` regardless of type (backward-compatible behaviour).
+   */
+  codeProvider?: EmbeddingProvider
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -21,7 +29,10 @@ export interface IndexStats {
 }
 
 export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
-  const { repoPath = '.', maxBlobSize = DEFAULT_MAX_SIZE, provider, onProgress } = options
+  const { repoPath = '.', maxBlobSize = DEFAULT_MAX_SIZE, provider, codeProvider, onProgress } = options
+
+  // Build a routing provider when a separate code model is configured.
+  const router = codeProvider ? new RoutingProvider(provider, codeProvider) : null
 
   const stats: IndexStats = { seen: 0, indexed: 0, skipped: 0, oversized: 0, failed: 0, elapsed: 0 }
   const start = Date.now()
@@ -60,10 +71,14 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       continue
     }
 
+    // Determine file category and select the right provider
+    const fileType = getFileCategory(path)
+    const activeProvider = router ? router.providerForFile(path) : provider
+
     // Generate embedding
     let embedding: number[]
     try {
-      embedding = await provider.embed(content.toString('utf8'))
+      embedding = await activeProvider.embed(content.toString('utf8'))
     } catch {
       stats.failed++
       onProgress?.({ ...stats, elapsed: Date.now() - start })
@@ -72,7 +87,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
     // Persist blob + embedding + path in one transaction
     try {
-      storeBlob({ blobHash, size: content.length, path, model: provider.model, embedding })
+      storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType })
       stats.indexed++
     } catch {
       stats.failed++
