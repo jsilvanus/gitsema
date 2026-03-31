@@ -94,6 +94,10 @@ program
     '--dump [file]',
     'output structured JSON of all evolution entries; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--include-content',
+    'include the stored file content for each version in the JSON dump (only used with --dump)',
+  )
   .action(evolutionCommand)
 
 program

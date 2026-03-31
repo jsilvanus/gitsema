@@ -20,6 +20,7 @@ import { z } from 'zod'
 import { vectorSearch } from '../core/search/vectorSearch.js'
 import { computeEvolution } from '../core/search/evolution.js'
 import { runIndex } from '../core/indexing/indexer.js'
+import { getBlobContent } from '../core/indexing/blobStore.js'
 import { OllamaProvider } from '../core/embedding/local.js'
 import { HttpProvider } from '../core/embedding/http.js'
 import type { EmbeddingProvider } from '../core/embedding/provider.js'
@@ -227,8 +228,9 @@ export async function startMcpServer(): Promise<void> {
       path: z.string().describe('File path relative to the repo root, e.g. "src/auth/oauth.ts"'),
       threshold: z.number().min(0).max(2).optional().default(0.3).describe('Cosine distance threshold above which a version is flagged as a large change'),
       structured: z.boolean().optional().default(false).describe('Return structured JSON with full timeline data instead of human-readable text (useful for agent processing)'),
+      include_content: z.boolean().optional().default(false).describe('Include the stored file content for each version in the structured output (only used when structured=true)'),
     },
-    async ({ path, threshold, structured }) => {
+    async ({ path, threshold, structured, include_content }) => {
       const entries = computeEvolution(path)
 
       if (entries.length === 0) {
@@ -248,17 +250,23 @@ export async function startMcpServer(): Promise<void> {
           path,
           versions: entries.length,
           threshold,
-          timeline: entries.map((e, i) => ({
-            index: i,
-            date: formatDate(e.timestamp),
-            timestamp: e.timestamp,
-            blobHash: e.blobHash,
-            commitHash: e.commitHash,
-            distFromPrev: e.distFromPrev,
-            distFromOrigin: e.distFromOrigin,
-            isOrigin: i === 0,
-            isLargeChange: i > 0 && e.distFromPrev >= threshold,
-          })),
+          timeline: entries.map((e, i) => {
+            const entry: Record<string, unknown> = {
+              index: i,
+              date: formatDate(e.timestamp),
+              timestamp: e.timestamp,
+              blobHash: e.blobHash,
+              commitHash: e.commitHash,
+              distFromPrev: e.distFromPrev,
+              distFromOrigin: e.distFromOrigin,
+              isOrigin: i === 0,
+              isLargeChange: i > 0 && e.distFromPrev >= threshold,
+            }
+            if (include_content) {
+              entry.content = getBlobContent(e.blobHash) ?? null
+            }
+            return entry
+          }),
           summary: {
             largeChanges: entries.filter((e, i) => i > 0 && e.distFromPrev >= threshold).length,
             maxDistFromPrev: Math.max(...entries.map((e) => e.distFromPrev), 0),

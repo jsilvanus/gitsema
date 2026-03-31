@@ -1,11 +1,13 @@
 import { writeFileSync } from 'node:fs'
 import { computeEvolution } from '../../core/search/evolution.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
+import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
 
 export interface EvolutionCommandOptions {
   threshold?: string
   dump?: string | boolean
+  includeContent?: boolean
 }
 
 /**
@@ -16,22 +18,29 @@ function serializeEvolutionJson(
   filePath: string,
   entries: EvolutionEntry[],
   threshold: number,
+  includeContent: boolean,
 ): string {
   const data = {
     path: filePath,
     versions: entries.length,
     threshold,
-    timeline: entries.map((e, i) => ({
-      index: i,
-      date: formatDate(e.timestamp),
-      timestamp: e.timestamp,
-      blobHash: e.blobHash,
-      commitHash: e.commitHash,
-      distFromPrev: e.distFromPrev,
-      distFromOrigin: e.distFromOrigin,
-      isOrigin: i === 0,
-      isLargeChange: i > 0 && e.distFromPrev >= threshold,
-    })),
+    timeline: entries.map((e, i) => {
+      const entry: Record<string, unknown> = {
+        index: i,
+        date: formatDate(e.timestamp),
+        timestamp: e.timestamp,
+        blobHash: e.blobHash,
+        commitHash: e.commitHash,
+        distFromPrev: e.distFromPrev,
+        distFromOrigin: e.distFromOrigin,
+        isOrigin: i === 0,
+        isLargeChange: i > 0 && e.distFromPrev >= threshold,
+      }
+      if (includeContent) {
+        entry.content = getBlobContent(e.blobHash) ?? null
+      }
+      return entry
+    }),
     summary: {
       largeChanges: entries.filter((e, i) => i > 0 && e.distFromPrev >= threshold).length,
       maxDistFromPrev: entries.length > 0 ? Math.max(...entries.map((e) => e.distFromPrev), 0) : 0,
@@ -89,11 +98,12 @@ export async function evolutionCommand(
     process.exit(1)
   }
 
+  const includeContent = options.includeContent ?? false
   const entries = computeEvolution(filePath.trim())
 
   // --dump: emit structured JSON to a file or stdout
   if (options.dump !== undefined) {
-    const json = serializeEvolutionJson(filePath.trim(), entries, threshold)
+    const json = serializeEvolutionJson(filePath.trim(), entries, threshold, includeContent)
 
     if (typeof options.dump === 'string') {
       // --dump <file> → write JSON to file, then print human-readable to stdout

@@ -85,6 +85,19 @@ export function storeBlobRecord(args: StoreBlobRecordArgs): void {
 }
 
 /**
+ * Retrieves the stored text content for a blob from the FTS5 table.
+ * Returns undefined if the blob has no content stored (e.g. it was indexed
+ * before Phase 11 without the FTS5 table, or content was omitted).
+ */
+export function getBlobContent(blobHash: string): string | undefined {
+  const raw = getRawDb()
+  const row = raw.prepare(`SELECT content FROM blob_fts WHERE blob_hash = ?`).get(blobHash) as
+    | { content: string }
+    | undefined
+  return row?.content
+}
+
+/**
  * Upserts blob content into the FTS5 `blob_fts` table.
  * Uses a DELETE + INSERT pattern because FTS5 does not support ON CONFLICT.
  */
