@@ -10,16 +10,40 @@ function formatMs(ms: number): string {
 }
 
 function renderProgress(stats: IndexStats): string {
-  const total = stats.seen
-  const done = stats.indexed + stats.skipped + stats.oversized + stats.filtered + stats.failed
+  const processed = stats.indexed + stats.oversized + stats.failed
+
+  if (stats.queued === 0) {
+    // Either still in the collection phase, or collection finished with nothing new to embed.
+    // Use commits > 0 to distinguish Phase B (commit mapping) from Phase A (collecting).
+    if (stats.commits > 0) {
+      return `\r  Mapping commits... commits=${stats.commits} links=${stats.blobCommits}  `
+    }
+    return (
+      `\r  Collecting... seen=${stats.seen} skip=${stats.skipped} filt=${stats.filtered}  `
+    )
+  }
+
+  // queued > 0 here, so division is safe.
+  if (processed >= stats.queued) {
+    // Phase B: commit metadata mapping
+    return `\r  Mapping commits... commits=${stats.commits} links=${stats.blobCommits}  `
+  }
+
+  // Embedding phase: render a progress bar.
+  const pct = processed / stats.queued
+  const barWidth = 20
+  const filled = Math.round(pct * barWidth)
+  const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled)
+  const pctStr = (pct * 100).toFixed(0).padStart(3)
   const rate = stats.elapsed > 0 ? ((stats.indexed / stats.elapsed) * 1000).toFixed(1) : '0'
+  const remaining = stats.queued - processed
   const eta =
     stats.indexed > 0 && stats.elapsed > 0
-      ? formatMs(((stats.elapsed / stats.indexed) * (total - done)))
+      ? formatMs((stats.elapsed / stats.indexed) * remaining)
       : '?'
   return (
-    `\r  seen=${total} new=${stats.indexed} skip=${stats.skipped}` +
-    ` over=${stats.oversized} filt=${stats.filtered} fail=${stats.failed}` +
+    `\r  [${bar}] ${pctStr}%` +
+    ` new=${stats.indexed} skip=${stats.skipped} filt=${stats.filtered} over=${stats.oversized} fail=${stats.failed}` +
     ` ${rate}/s eta=${eta}  `
   )
 }
@@ -53,6 +77,7 @@ function parseSize(value: string): number {
 export interface IndexCommandOptions {
   since?: string
   concurrency?: string
+  maxCommits?: string
   ext?: string
   maxSize?: string
   exclude?: string
@@ -75,6 +100,16 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (isNaN(concurrency) || concurrency < 1) {
     console.error('Error: --concurrency must be a positive integer')
     process.exit(1)
+  }
+
+  // Parse max-commits
+  let maxCommits: number | undefined
+  if (options.maxCommits !== undefined) {
+    maxCommits = parseInt(options.maxCommits, 10)
+    if (isNaN(maxCommits) || maxCommits < 1) {
+      console.error('Error: --max-commits must be a positive integer')
+      process.exit(1)
+    }
   }
 
   // Parse max-size
@@ -106,6 +141,9 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (options.since) {
     console.log(`  Limiting to commits after: ${options.since}`)
   }
+  if (maxCommits !== undefined) {
+    console.log(`  Max commits per session: ${maxCommits}`)
+  }
   if (concurrency !== 4) {
     console.log(`  Concurrency: ${concurrency}`)
   }
@@ -123,6 +161,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     codeProvider,
     since: options.since,
     concurrency,
+    maxCommits,
     maxBlobSize,
     filter: { ext, exclude },
     onProgress: (s) => {

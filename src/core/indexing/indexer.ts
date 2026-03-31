@@ -49,6 +49,13 @@ export interface IndexerOptions {
    * Maximum number of blobs to embed concurrently (default 4).
    */
   concurrency?: number
+  /**
+   * Stop after traversing this many commits.
+   * Useful for splitting a large history into multiple indexing sessions —
+   * run with `--max-commits 500` repeatedly and incremental indexing will
+   * resume from where the previous session left off.
+   */
+  maxCommits?: number
   /** Path-based filter applied before any blob content is read. */
   filter?: FilterOptions
   onProgress?: (stats: IndexStats) => void
@@ -61,6 +68,11 @@ export interface IndexStats {
   oversized: number // over size limit
   filtered: number  // excluded by path filter
   failed: number
+  /**
+   * Total blobs queued for embedding (set after the collection phase).
+   * Zero until collection is complete. Used by the CLI to render a progress bar.
+   */
+  queued: number
   elapsed: number   // ms
   commits: number       // Phase 6: commits stored
   blobCommits: number   // Phase 6: blob-commit links stored
@@ -89,6 +101,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     provider,
     codeProvider,
     concurrency = 4,
+    maxCommits,
     filter = {},
     onProgress,
   } = options
@@ -113,12 +126,12 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   const stats: IndexStats = {
     seen: 0, indexed: 0, skipped: 0, oversized: 0, filtered: 0, failed: 0,
-    elapsed: 0, commits: 0, blobCommits: 0,
+    queued: 0, elapsed: 0, commits: 0, blobCommits: 0,
   }
   const start = Date.now()
   const seenHashes = new Set<string>()
 
-  const stream = revList(repoPath, { since })
+  const stream = revList(repoPath, { since, maxCommits })
 
   // Collect blobs first so we can fan-out embedding calls concurrently
   const blobsToProcess: BlobEntry[] = []
@@ -147,6 +160,10 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
     blobsToProcess.push(entry)
   }
+
+  // Expose the total work queue so callers can render a progress bar.
+  stats.queued = blobsToProcess.length
+  onProgress?.({ ...stats, elapsed: Date.now() - start })
 
   // Process blobs concurrently up to the configured limit.
   // Note: stats mutations (stats.failed++, etc.) are safe here because Node.js
@@ -201,7 +218,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   )
 
   // Phase B: Walk commit history, persist to commits/blobCommits
-  const commitStream = streamCommitMap(repoPath) as AsyncIterable<CommitMapEvent>
+  const commitStream = streamCommitMap(repoPath, { maxCommits }) as AsyncIterable<CommitMapEvent>
 
   let pendingCommit: CommitEntry | null = null
   let pendingBlobHashes: string[] = []
