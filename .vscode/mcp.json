@@ -1,0 +1,13 @@
+{
+	"servers": {
+		"Gitsema MCP": {
+			"type": "stdio",
+			"command": "node",
+			"args": [
+				"c:\\Users\\jsilv\\Code\\gitsema\\dist\\cli\\index.js",
+				"mcp"
+			]
+		}
+	},
+	"inputs": []
+}

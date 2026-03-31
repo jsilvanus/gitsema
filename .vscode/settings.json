@@ -1,0 +1,11 @@
+{
+    "chat.mcp.serverSampling": {
+        "gitsema/.vscode/mcp.json: Gitsema MCP": {
+            "allowedModels": [
+                "copilot/auto",
+                "copilotcli/claude-sonnet-4.6",
+                "copilotcli/gpt-5-mini"
+            ]
+        }
+    }
+}

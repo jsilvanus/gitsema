@@ -19,7 +19,10 @@ git clone https://github.com/jsilvanus/gitsema.git
 cd gitsema
 pnpm install
 pnpm build           # compiles TypeScript → dist/
-pnpm link --global   # puts `gitsema` on your PATH (optional)
+
+# Optional: put `gitsema` on your PATH
+pnpm setup           # one-time setup; then open a new terminal
+pnpm link --global
 ```
 
 To use without linking, prefix commands with `node dist/cli/index.js` instead of `gitsema`.
