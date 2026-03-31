@@ -27,7 +27,8 @@ function openDatabase(): ReturnType<typeof drizzle> {
       blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
-      vector BLOB NOT NULL
+      vector BLOB NOT NULL,
+      file_type TEXT
     );
 
     CREATE TABLE IF NOT EXISTS paths (
@@ -36,6 +37,12 @@ function openDatabase(): ReturnType<typeof drizzle> {
       path TEXT NOT NULL
     );
   `)
+
+  // Migrate existing databases: add file_type column if it doesn't exist yet
+  const embeddingsColumns = sqlite.prepare(`PRAGMA table_info(embeddings)`).all() as Array<{ name: string }>
+  if (!embeddingsColumns.some((c) => c.name === 'file_type')) {
+    sqlite.exec(`ALTER TABLE embeddings ADD COLUMN file_type TEXT`)
+  }
 
   return db
 }
