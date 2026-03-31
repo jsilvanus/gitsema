@@ -3,9 +3,14 @@ import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { renderResults } from '../../core/search/ranking.js'
+import { parseDateArg } from '../../core/search/timeSearch.js'
 
 export interface SearchCommandOptions {
   top?: string
+  recent?: boolean
+  alpha?: string
+  before?: string
+  after?: string
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -42,6 +47,32 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     process.exit(1)
   }
 
+  const alpha = options.alpha !== undefined ? parseFloat(options.alpha) : 0.8
+  if (isNaN(alpha) || alpha < 0 || alpha > 1) {
+    console.error('Error: --alpha must be a number between 0 and 1')
+    process.exit(1)
+  }
+
+  let before: number | undefined
+  let after: number | undefined
+
+  if (options.before) {
+    try {
+      before = parseDateArg(options.before)
+    } catch (err) {
+      console.error(`Error: --before ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+  }
+  if (options.after) {
+    try {
+      after = parseDateArg(options.after)
+    } catch (err) {
+      console.error(`Error: --after ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+  }
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
@@ -56,13 +87,21 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   if (dualModel && codeProvider) {
     // Dual-model search: embed with both models and merge results
     const codeEmbedding = await embedQuery(codeProvider, codeModel, query)
-    const textResults = vectorSearch(textEmbedding, { topK, model: textModel })
-    const codeResults = vectorSearch(codeEmbedding, { topK, model: codeModel })
+    const searchOpts = { topK, recent: options.recent ?? false, alpha, before, after }
+    const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel })
+    const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel })
     const results = mergeSearchResults(textResults, codeResults, topK)
     console.log(renderResults(results))
   } else {
     // Single-model search (backward-compatible)
-    const results = vectorSearch(textEmbedding, { topK })
+    const results = vectorSearch(textEmbedding, {
+      topK,
+      recent: options.recent ?? false,
+      alpha,
+      before,
+      after,
+    })
     console.log(renderResults(results))
   }
 }
+

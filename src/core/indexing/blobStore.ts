@@ -1,7 +1,9 @@
 import { db } from '../db/sqlite.js'
-import { blobs, embeddings, paths } from '../db/schema.js'
+import { blobs, embeddings, paths, commits, blobCommits } from '../db/schema.js'
+import { inArray } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
 import type { FileCategory } from '../embedding/fileType.js'
+import type { CommitEntry } from '../git/commitMap.js'
 
 export interface StoreBlobArgs {
   blobHash: BlobHash
@@ -38,4 +40,52 @@ export function storeBlob(args: StoreBlobArgs): void {
       .values({ blobHash, path })
       .run()
   })
+}
+
+/**
+ * Stores a commit and its associated blob-commit links in a single transaction.
+ * Only creates blobCommit rows for blobs that are already indexed in the blobs table.
+ * Returns the number of blobCommit rows stored.
+ */
+export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]): number {
+  if (blobHashes.length === 0) {
+    db.insert(commits)
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message })
+      .onConflictDoNothing()
+      .run()
+    return 0
+  }
+
+  // Deduplicate input hashes
+  const uniqueHashes = [...new Set(blobHashes)]
+
+  // Pre-filter: find which hashes are already indexed using a single IN query
+  const BATCH = 500
+  const indexedSet = new Set<string>()
+  for (let i = 0; i < uniqueHashes.length; i += BATCH) {
+    const batch = uniqueHashes.slice(i, i + BATCH)
+    const rows = db.select({ blobHash: blobs.blobHash })
+      .from(blobs)
+      .where(inArray(blobs.blobHash, batch))
+      .all()
+    for (const row of rows) indexedSet.add(row.blobHash)
+  }
+
+  const indexedHashes = uniqueHashes.filter((h) => indexedSet.has(h))
+
+  db.transaction((tx) => {
+    tx.insert(commits)
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message })
+      .onConflictDoNothing()
+      .run()
+
+    for (const blobHash of indexedHashes) {
+      tx.insert(blobCommits)
+        .values({ blobHash, commitHash: commit.commitHash })
+        .onConflictDoNothing()
+        .run()
+    }
+  })
+
+  return indexedHashes.length
 }

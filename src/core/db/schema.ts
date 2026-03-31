@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, blob } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, blob, primaryKey } from 'drizzle-orm/sqlite-core'
 
 export const blobs = sqliteTable('blobs', {
   blobHash: text('blob_hash').primaryKey(),
@@ -20,3 +20,16 @@ export const paths = sqliteTable('paths', {
   blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
   path: text('path').notNull(),
 })
+
+export const commits = sqliteTable('commits', {
+  commitHash: text('commit_hash').primaryKey(),
+  timestamp: integer('timestamp').notNull(),
+  message: text('message').notNull(),
+})
+
+export const blobCommits = sqliteTable('blob_commits', {
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
+  commitHash: text('commit_hash').notNull().references(() => commits.commitHash),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.blobHash, table.commitHash] }),
+}))

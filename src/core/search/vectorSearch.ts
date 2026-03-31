@@ -2,6 +2,7 @@ import { db } from '../db/sqlite.js'
 import { embeddings, paths } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
+import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
 
 /**
  * Computes the cosine similarity between two vectors.
@@ -32,14 +33,24 @@ export interface VectorSearchOptions {
   topK?: number
   /** When set, only embeddings produced by this model are considered. */
   model?: string
+  /** When true, blends cosine similarity with a recency score. */
+  recent?: boolean
+  /** Weight for cosine similarity in the blended score (default 0.8). Only used with `recent`. */
+  alpha?: number
+  /** Only include blobs whose earliest commit is strictly before this Unix timestamp (seconds). */
+  before?: number
+  /** Only include blobs whose earliest commit is strictly after this Unix timestamp (seconds). */
+  after?: number
 }
 
 /**
  * Searches the database by embedding all stored vectors against the query
- * vector, then returns the top-k results sorted by cosine similarity.
+ * vector, then returns the top-k results sorted by cosine similarity (or
+ * blended score when `recent` is true). Supports temporal filtering via
+ * `before` / `after` Unix timestamps.
  */
 export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOptions = {}): SearchResult[] {
-  const { topK = 10, model } = options
+  const { topK = 10, model, recent = false, alpha = 0.8, before, after } = options
 
   // Load stored embeddings, optionally filtered to a specific model
   const baseQuery = db.select({
@@ -48,22 +59,51 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   }).from(embeddings)
 
   const filteredQuery = model ? baseQuery.where(eq(embeddings.model, model)) : baseQuery
-  const rows = filteredQuery.all()
+  const allRows = filteredQuery.all()
 
-  // Score each blob
-  type ScoredBlob = { blobHash: string; score: number }
-  const scored: ScoredBlob[] = rows.map((row) => ({
+  // Apply time-range filter on the candidate set before scoring
+  const allHashes = allRows.map((r) => r.blobHash)
+  const filteredHashes = (before !== undefined || after !== undefined)
+    ? new Set(filterByTimeRange(allHashes, before, after))
+    : null   // null means no filter — include all
+
+  const candidateRows = filteredHashes
+    ? allRows.filter((r) => filteredHashes.has(r.blobHash))
+    : allRows
+
+  if (candidateRows.length === 0) return []
+
+  // Compute cosine similarity for each candidate blob
+  type ScoredBlob = { blobHash: string; cosine: number }
+  const scored: ScoredBlob[] = candidateRows.map((row) => ({
     blobHash: row.blobHash,
-    score: cosineSimilarity(queryEmbedding, bufferToEmbedding(row.vector as Buffer)),
+    cosine: cosineSimilarity(queryEmbedding, bufferToEmbedding(row.vector as Buffer)),
   }))
 
+  // Optionally blend with recency score
+  type FinalBlob = { blobHash: string; score: number }
+  let finalScored: FinalBlob[]
+
+  if (recent) {
+    const candidateHashes = scored.map((s) => s.blobHash)
+    const firstSeenMap = getFirstSeenMap(candidateHashes)
+    const recencyScores = computeRecencyScores(firstSeenMap)
+
+    finalScored = scored.map((s) => {
+      const recency = recencyScores.get(s.blobHash) ?? 0
+      return { blobHash: s.blobHash, score: alpha * s.cosine + (1 - alpha) * recency }
+    })
+  } else {
+    finalScored = scored.map((s) => ({ blobHash: s.blobHash, score: s.cosine }))
+  }
+
   // Sort descending by score, take top-k
-  scored.sort((a, b) => b.score - a.score)
-  const topBlobs = scored.slice(0, topK)
+  finalScored.sort((a, b) => b.score - a.score)
+  const topBlobs = finalScored.slice(0, topK)
 
   if (topBlobs.length === 0) return []
 
-  // Resolve file paths for each blob using an SQL filter
+  // Resolve file paths
   const blobHashes = topBlobs.map((b) => b.blobHash)
   const pathRows = db.select({
     blobHash: paths.blobHash,
@@ -77,11 +117,19 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     pathsByBlob.set(row.blobHash, list)
   }
 
-  return topBlobs.map((b) => ({
-    blobHash: b.blobHash,
-    paths: pathsByBlob.get(b.blobHash) ?? [],
-    score: b.score,
-  }))
+  // Resolve firstCommit / firstSeen for the result set
+  const firstSeenMap = getFirstSeenMap(blobHashes)
+
+  return topBlobs.map((b) => {
+    const firstSeen = firstSeenMap.get(b.blobHash)
+    return {
+      blobHash: b.blobHash,
+      paths: pathsByBlob.get(b.blobHash) ?? [],
+      score: b.score,
+      firstCommit: firstSeen?.commitHash,
+      firstSeen: firstSeen?.timestamp,
+    }
+  })
 }
 
 /**

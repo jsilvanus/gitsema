@@ -76,9 +76,11 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (lastLine) process.stdout.write('\r' + ' '.repeat(lastLine.length) + '\r')
 
   console.log(`Done in ${formatMs(stats.elapsed)}`)
-  console.log(`  Blobs seen:     ${stats.seen}`)
-  console.log(`  Newly indexed:  ${stats.indexed}`)
-  console.log(`  Already in DB:  ${stats.skipped}`)
-  console.log(`  Oversized:      ${stats.oversized}`)
-  console.log(`  Failed:         ${stats.failed}`)
+  console.log(`  Blobs seen:          ${stats.seen}`)
+  console.log(`  Newly indexed:       ${stats.indexed}`)
+  console.log(`  Already in DB:       ${stats.skipped}`)
+  console.log(`  Oversized:           ${stats.oversized}`)
+  console.log(`  Failed:              ${stats.failed}`)
+  console.log(`  Commits mapped:      ${stats.commits}`)
+  console.log(`  Blob-commit links:   ${stats.blobCommits}`)
 }
