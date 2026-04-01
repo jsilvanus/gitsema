@@ -1,4 +1,4 @@
-import { db } from '../db/sqlite.js'
+import { getActiveSession } from '../db/sqlite.js'
 import { blobs } from '../db/schema.js'
 import { inArray } from 'drizzle-orm'
 import type { BlobHash } from '../models/types.js'
@@ -10,6 +10,7 @@ import type { BlobHash } from '../models/types.js'
 export async function filterNewBlobs(hashes: BlobHash[]): Promise<Set<BlobHash>> {
   if (hashes.length === 0) return new Set()
 
+  const { db } = getActiveSession()
   const BATCH = 500
   const known = new Set<BlobHash>()
 
@@ -26,6 +27,7 @@ export async function filterNewBlobs(hashes: BlobHash[]): Promise<Set<BlobHash>>
  * Returns true if the blob is already indexed.
  */
 export function isIndexed(blobHash: BlobHash): boolean {
+  const { db } = getActiveSession()
   const row = db.select({ blobHash: blobs.blobHash }).from(blobs).where(inArray(blobs.blobHash, [blobHash])).get()
   return row !== undefined
 }

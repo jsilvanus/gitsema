@@ -1,19 +1,26 @@
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { sql } from 'drizzle-orm'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import * as schema from './schema.js'
 
 const DB_DIR = '.gitsema'
 const DB_PATH = join(DB_DIR, 'index.db')
 
-/** Raw better-sqlite3 handle, used by modules that need direct SQL access (e.g. FTS5). */
-let rawSqlite: InstanceType<typeof Database>
+// ---------------------------------------------------------------------------
+// DbSession — wraps a drizzle handle + raw sqlite handle for a single DB file
+// ---------------------------------------------------------------------------
 
-export function getRawDb(): InstanceType<typeof Database> {
-  return rawSqlite
+export interface DbSession {
+  db: ReturnType<typeof drizzle<typeof schema>>
+  rawDb: InstanceType<typeof Database>
+  dbPath: string
 }
+
+// ---------------------------------------------------------------------------
+// Schema initialisation and migrations (shared by all DB opens)
+// ---------------------------------------------------------------------------
 
 /**
  * Current schema version. Increment this whenever a new migration is added.
@@ -71,15 +78,8 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
   // if (version < 3) { sqlite.exec(`...`); version = 3; sqlite.prepare(...).run('3') }
 }
 
-function openDatabase(): ReturnType<typeof drizzle> {
-  mkdirSync(DB_DIR, { recursive: true })
-  const sqlite = new Database(DB_PATH)
-  rawSqlite = sqlite
-  sqlite.pragma('journal_mode = WAL')
-
-  const db = drizzle(sqlite, { schema })
-
-  // Create tables if they don't exist
+/** The full CREATE TABLE block used for every new database file. */
+function initTables(sqlite: InstanceType<typeof Database>): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS blobs (
       blob_hash TEXT PRIMARY KEY,
@@ -146,11 +146,97 @@ function openDatabase(): ReturnType<typeof drizzle> {
       PRIMARY KEY (blob_hash, branch_name)
     );
   `)
+}
 
+// ---------------------------------------------------------------------------
+// Default database (module-level singleton — backward compatible)
+// ---------------------------------------------------------------------------
+
+/** Raw better-sqlite3 handle for the default DB. Used by legacy callers via getRawDb(). */
+let rawSqlite: InstanceType<typeof Database>
+
+/** @deprecated Prefer getActiveSession().rawDb in new code. */
+export function getRawDb(): InstanceType<typeof Database> {
+  return rawSqlite
+}
+
+let _defaultSession: DbSession
+
+function openDatabase(): ReturnType<typeof drizzle<typeof schema>> {
+  mkdirSync(DB_DIR, { recursive: true })
+  const sqlite = new Database(DB_PATH)
+  rawSqlite = sqlite
+  sqlite.pragma('journal_mode = WAL')
+
+  initTables(sqlite)
   applyMigrations(sqlite)
 
-  return db
+  const drizzleDb = drizzle(sqlite, { schema })
+  _defaultSession = { db: drizzleDb, rawDb: sqlite, dbPath: DB_PATH }
+  return drizzleDb
 }
 
 export const db = openDatabase()
 export { DB_PATH }
+
+// ---------------------------------------------------------------------------
+// AsyncLocalStorage session context (Phase 17)
+// ---------------------------------------------------------------------------
+
+/**
+ * Holds the active DbSession for the current async call chain.
+ * When not set, getActiveSession() returns the default session.
+ */
+const _sessionStorage = new AsyncLocalStorage<DbSession>()
+
+/**
+ * Returns the active DbSession for the current async context.
+ * Falls back to the default (module-level) session when no override is active.
+ */
+export function getActiveSession(): DbSession {
+  return _sessionStorage.getStore() ?? _defaultSession
+}
+
+/**
+ * Runs `fn` with `session` as the active DbSession for all async descendants.
+ * Safe for concurrent jobs — each call chain gets its own isolated context.
+ */
+export function withDbSession<T>(session: DbSession, fn: () => Promise<T>): Promise<T> {
+  return _sessionStorage.run(session, fn)
+}
+
+// ---------------------------------------------------------------------------
+// Per-label database factory (Phase 17 — per-repo DB sessions)
+// ---------------------------------------------------------------------------
+
+/** Cache of open labeled DB sessions. Keys are validated label strings. */
+const _labeledDbs = new Map<string, DbSession>()
+
+/**
+ * Opens (or creates) a database at the given absolute path.
+ * Applies the same schema and migrations as the default database.
+ */
+export function openDatabaseAt(dbPath: string): DbSession {
+  mkdirSync(dirname(dbPath), { recursive: true })
+  const sqlite = new Database(dbPath)
+  sqlite.pragma('journal_mode = WAL')
+  initTables(sqlite)
+  applyMigrations(sqlite)
+  const drizzleDb = drizzle(sqlite, { schema })
+  return { db: drizzleDb, rawDb: sqlite, dbPath }
+}
+
+/**
+ * Returns a labeled DbSession, creating it on first use.
+ * The DB file is stored at `.gitsema/<label>.db` relative to cwd.
+ *
+ * @param label - alphanumeric label (validated by the caller before passing here)
+ */
+export function getOrOpenLabeledDb(label: string): DbSession {
+  const existing = _labeledDbs.get(label)
+  if (existing) return existing
+  const dbPath = join(DB_DIR, `${label}.db`)
+  const session = openDatabaseAt(dbPath)
+  _labeledDbs.set(label, session)
+  return session
+}

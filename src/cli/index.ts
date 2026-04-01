@@ -181,9 +181,10 @@ program
 
 program
   .command('remote-index <repoUrl>')
-  .description('Ask a remote gitsema server to clone and index a Git repository (Phase 16)')
+  .description('Ask a remote gitsema server to clone and index a Git repository (Phase 16 + 17)')
   .option('--remote <url>', 'remote gitsema server URL (overrides GITSEMA_REMOTE)')
-  .option('--token <token>', 'Git credential token embedded in the clone URL')
+  .option('--token <token>', 'HTTPS Git credential token (uses GIT_ASKPASS, never in process list)')
+  .option('--ssh-key <path>', 'path to a PEM-encoded SSH private key file for SSH repository URLs')
   .option('--depth <n>', 'shallow clone depth (omit for full clone)')
   .option(
     '--since <ref>',
@@ -197,6 +198,10 @@ program
   .option('--chunker <strategy>', 'chunking strategy: file (default), function, fixed')
   .option('--window-size <n>', 'chunk size in characters for the fixed chunker (default 1500)')
   .option('--overlap <n>', 'character overlap between adjacent fixed chunks (default 200)')
+  .option(
+    '--db-label <label>',
+    'route indexing to .gitsema/<label>.db on the server (1–64 alphanumeric chars or hyphens)',
+  )
   .action(remoteIndexCommand)
 
 program
