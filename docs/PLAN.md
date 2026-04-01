@@ -811,3 +811,105 @@ CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 **Deliverable:** `pnpm test` is green, CI passes on PRs, new contributors can onboard from `.env.example` alone, and existing users with pre-Phase-11 indexes can recover full hybrid search via `backfill-fts`.
+
+---
+
+### Phase 14b — Search result deduplication
+
+**Goal:** Each unique blob appears at most once in search results, even when chunk embeddings are included.
+
+**Problem:** When `--chunks` is used (or chunks were indexed), `vectorSearch` adds one candidate entry per chunk for a given blob hash. After scoring, the top-K slice can return multiple entries for the same blob (e.g. chunks 3, 7, and 11 of the same file all land in the top 10). The caller sees the same file path listed three times with slightly different scores — confusing and wasteful.
+
+**Fix — deduplicate by `blobHash` before slicing:**
+
+In `vectorSearch` ([src/core/search/vectorSearch.ts](src/core/search/vectorSearch.ts)), after computing `finalScored` and sorting descending, group by `blobHash` and keep only the highest-scoring entry per blob before slicing to `topK`. The winning entry retains its `chunkId`/`startLine`/`endLine` so callers still know which chunk matched best.
+
+```ts
+// After sort, before slice:
+const bestByBlob = new Map<string, FinalEntry>()
+for (const entry of finalScored) {
+  const existing = bestByBlob.get(entry.blobHash)
+  if (!existing || entry.score > existing.score) {
+    bestByBlob.set(entry.blobHash, entry)
+  }
+}
+const topEntries = Array.from(bestByBlob.values())
+  .sort((a, b) => b.score - a.score)
+  .slice(0, topK)
+```
+
+This is strictly an improvement: the same blob hash appearing twice was never useful, and dedup-then-slice gives topK *distinct blobs* rather than topK *candidate vectors*.
+
+**Scope:** Change is confined to `vectorSearch` in [src/core/search/vectorSearch.ts](src/core/search/vectorSearch.ts). No schema changes, no CLI flag changes. The existing `--group file` option (which deduplicates by path across different blob hashes) is orthogonal and unchanged.
+
+**Deliverable:** `gitsema search "..." --chunks` returns at most one entry per unique file version. No regressions on non-chunk search paths.
+
+---
+
+### Phase 15 — Branch awareness
+
+**Goal:** Correct `--since <ref>` indexing across all branches and add branch metadata to enable branch-scoped search.
+
+**Two problems:**
+
+1. **Bug** — `revList` ([src/core/git/revList.ts:50](src/core/git/revList.ts#L50)) uses `${since}..HEAD` for the ref/tag form of `--since`. This walks only commits reachable from HEAD, silently skipping blobs that exist exclusively on other branches. The date form (`--after`) correctly uses `--all`.
+
+2. **No branch metadata** — The schema has no concept of which branches reference a blob. Users cannot ask "show me results only from `main`" or "what branches introduced this code?".
+
+**Changes:**
+
+**1. Fix `--since <ref>` in revList.ts**
+
+Change the ref-range form from `${since}..HEAD` to `--all --not ${since}`. This gives all objects reachable from any ref that are not reachable from `<since>` — the correct multi-branch equivalent.
+
+```ts
+// Before:
+revListArgs = ['rev-list', '--objects', `${since}..HEAD`]
+// After:
+revListArgs = ['rev-list', '--objects', '--all', '--not', since]
+```
+
+**File:** [src/core/git/revList.ts](src/core/git/revList.ts)
+
+**2. Add `blob_branches` join table**
+
+```ts
+// schema.ts addition
+blobBranches: {
+  blobHash:   TEXT  FK → blobs.hash
+  branchName: TEXT  -- short ref name (e.g. "main", "feature/auth")
+  PRIMARY KEY (blobHash, branchName)
+}
+```
+
+**Files:** [src/core/db/schema.ts](src/core/db/schema.ts), [src/core/db/sqlite.ts](src/core/db/sqlite.ts)
+
+**3. Capture branch associations during indexing**
+
+Before the streaming pass, build a `Map<commitHash, branchName[]>` by running `git log --all --format="%H %D"` and parsing the ref decorations (`%D`). During `streamCommitMap`, emit a `branches` field per commit event. The indexer writes `blob_branches` rows for each blob introduced by a commit.
+
+**Files:** [src/core/git/commitMap.ts](src/core/git/commitMap.ts), [src/core/indexing/indexer.ts](src/core/indexing/indexer.ts), [src/core/indexing/blobStore.ts](src/core/indexing/blobStore.ts)
+
+**4. `--branch <name>` flag on `gitsema index`**
+
+Restricts indexing to a single branch (useful for large repos where only one branch matters):
+
+```
+gitsema index --branch feature/auth
+```
+
+Passes `refs/heads/<name>` instead of `--all` to both `revList` and `streamCommitMap`.
+
+**File:** [src/cli/commands/index.ts](src/cli/commands/index.ts) (or equivalent — verify path), [src/cli/index.ts](src/cli/index.ts)
+
+**5. `--branch <name>` filter on `gitsema search`**
+
+Adds a JOIN on `blob_branches` to restrict results to blobs seen on the specified branch:
+
+```
+gitsema search "auth middleware" --branch main
+```
+
+**Files:** [src/core/search/vectorSearch.ts](src/core/search/vectorSearch.ts), [src/cli/commands/search.ts](src/cli/commands/search.ts)
+
+**Deliverable:** `--since <tag>` correctly picks up blobs from all branches. `gitsema search "..." --branch main` scopes results to the main branch. `gitsema status` reports branch count in the index.
