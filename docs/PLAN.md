@@ -913,3 +913,214 @@ gitsema search "auth middleware" --branch main
 **Files:** [src/core/search/vectorSearch.ts](src/core/search/vectorSearch.ts), [src/cli/commands/search.ts](src/cli/commands/search.ts)
 
 **Deliverable:** `--since <tag>` correctly picks up blobs from all branches. `gitsema search "..." --branch main` scopes results to the main branch. `gitsema status` reports branch count in the index.
+
+---
+
+### Phase 16 — Remote-repository indexing (server-managed clone, optional in-memory index)
+
+**Goal:** Add a third operational mode in which neither the Git repository nor the index database need to exist on the user's machine. The gitsema server accepts a remote Git URL and optional credentials, clones the repository into a temporary directory, runs the full indexing pipeline, and optionally holds the resulting index in an in-memory SQLite database so nothing is written to disk.
+
+---
+
+**Three-way positioning**
+
+| Mode | Repo location | Index (SQLite) | Who clones |
+|---|---|---|---|
+| 1 — local | user's disk | `.gitsema/index.db` on user's disk | user (pre-existing repo) |
+| 2 — client-server | user's disk | server's disk | user (pre-existing repo) |
+| **3 — fully remote** | **remote Git host (GitHub, GitLab, etc.)** | **server memory or server disk** | **server, on demand** |
+
+In Mode 3 the user only needs to know the remote URL and (optionally) a token. They never run `git clone` themselves and never store the repo or the index locally.
+
+---
+
+**Is cloning necessary?**
+
+Yes, for general Git repos — Git's object protocol makes it the only portable way to walk full history across arbitrary hosts. However:
+
+- A **shallow clone** (`--depth N` or `--shallow-since <date>`) is sufficient when only recent history is needed. This is much faster and uses far less disk space in the temp directory.
+- A **full clone** is required for `evolution`, `first-seen`, and `concept-evolution` commands that need multi-commit history.
+- GitHub/GitLab REST APIs could enumerate blobs without cloning, but that path is platform-specific, paginates at tree-level only, and cannot provide commit timestamps cheaply — not worth the complexity in Phase 16.
+
+The clone lives in a temporary directory on the server and is deleted after indexing (or kept according to a configurable cleanup strategy — see below).
+
+---
+
+**Changes**
+
+**1. Configurable DB path — in-memory SQLite support**
+
+`src/core/db/sqlite.ts` currently hard-codes `.gitsema/index.db`. Add a `GITSEMA_DB_PATH` environment variable that overrides this path. When set to the special value `:memory:`, `better-sqlite3` opens an in-memory database. The index is then session-scoped: it exists for the lifetime of the server process and is lost on restart.
+
+```ts
+// sqlite.ts — resolve DB path from env
+const DB_PATH = process.env.GITSEMA_DB_PATH ?? join(DB_DIR, 'index.db')
+// When DB_PATH is ':memory:', mkdirSync is skipped (no directory needed)
+```
+
+For the fully-remote mode the recommended setup is:
+```bash
+GITSEMA_DB_PATH=:memory: node dist/cli/index.js serve
+```
+
+This means the server never writes any index data to disk. If durability is desired, set `GITSEMA_DB_PATH` to a real file path instead.
+
+**Files:** `src/core/db/sqlite.ts`
+
+---
+
+**2. New server route: `POST /api/v1/remote/index`**
+
+Triggers a server-side clone-and-index operation. No blob content is sent by the client — the server fetches everything itself.
+
+*Request body (Zod-validated):*
+```json
+{
+  "repoUrl": "https://github.com/owner/repo.git",
+  "credentials": {
+    "type": "token",
+    "token": "ghp_..."
+  },
+  "cloneDepth": null,
+  "indexOptions": {
+    "since": null,
+    "maxCommits": null,
+    "concurrency": 4,
+    "ext": [],
+    "maxSize": "200kb",
+    "exclude": [],
+    "chunker": "file"
+  }
+}
+```
+
+`credentials` is optional (for public repos). `type` can be `"token"` (GitHub personal-access-token / GitLab token) or `"basic"` (username + password). SSH URLs are rejected in Phase 16 (deferred to Phase 17 — see notes below).
+
+*Server-side flow:*
+
+1. Validate request with Zod. Reject any `repoUrl` that is not an `https://` URL (security guard — prevents SSRF to internal services and path-injection).
+2. Embed credentials directly in the clone URL so nothing is written to a credential file on disk:
+   - Token: `https://<token>@github.com/owner/repo.git`
+   - Basic: `https://<user>:<pass>@github.com/owner/repo.git`
+3. Create a unique temp directory with `mkdtemp(join(os.tmpdir(), 'gitsema-'))`.
+4. Run `git clone [--depth N] <url-with-credentials> <tmpDir>` via `spawn` (never via shell, so the credential-embedded URL does not leak to a shell history). **Note:** argv is still visible in `/proc/<pid>/cmdline` on Linux regardless of how the process is spawned, so credentials embedded in the URL *will* appear in `ps` output; Phase 17 replaces this with a `GIT_ASKPASS` helper script.
+5. Call `runIndex({ repoPath: tmpDir, ...indexOptions })`.
+6. In a `finally` block, clean up the temp directory according to `GITSEMA_CLONE_KEEP` (see item 4 below).
+7. Return `IndexStats` as JSON.
+
+*New files:*
+- `src/server/routes/remote.ts` — route handler
+- `src/server/routes/remote.test.ts` — integration test (Phase 14 test suite)
+
+Register the router in `src/server/app.ts`:
+```ts
+import { remoteRouter } from './routes/remote.js'
+// …
+app.use(`${base}/remote`, remoteRouter({ textProvider, codeProvider, chunkerStrategy, concurrency }))
+```
+
+---
+
+**3. Clone cleanup strategies — `GITSEMA_CLONE_KEEP`**
+
+| Value | Behaviour |
+|---|---|
+| `always` | Delete temp clone immediately after indexing, whether it succeeded or failed. **(default)** |
+| `on-success` | Delete only if indexing succeeds; keep on failure for manual inspection. |
+| `keep` | Keep the clone indefinitely. On a subsequent call to `POST /remote/index` with the same URL, the server detects the existing clone and runs `git fetch --all` instead of a fresh clone. This is faster for incremental re-indexing. |
+
+Implemented in a small helper `src/core/git/cloneRepo.ts`:
+```ts
+export interface CloneResult {
+  tmpDir: string
+  cleanup: () => Promise<void>
+}
+
+export async function cloneRepo(
+  repoUrl: string,
+  credentialsUrl: string, // URL with credentials embedded
+  depth?: number,
+): Promise<CloneResult>
+```
+
+The helper manages the temp-dir lifecycle and exposes a `cleanup()` callback that the route handler calls in its `finally` block.
+
+**File:** `src/core/git/cloneRepo.ts`
+
+---
+
+**4. Incremental re-indexing of remote repos**
+
+When `GITSEMA_CLONE_KEEP=keep` and the temp dir is preserved, a second call to `POST /remote/index` for the same URL should skip the full clone and instead run `git fetch --all` to update the existing clone. This requires the server to maintain a registry:
+
+```ts
+// In-memory map: normalised repo URL → existing clone path
+const cloneRegistry = new Map<string, string>()
+```
+
+On each request:
+1. Look up `cloneRegistry.get(normalisedUrl)`.
+2. If found and the directory still exists: run `git fetch --all` in it.
+3. If not found or directory missing: run `git clone` into a new temp dir and register it.
+
+This registry is in-memory only (no file). It is lost on server restart.
+
+**File:** `src/server/routes/remote.ts` (or a small `src/core/git/cloneRegistry.ts`)
+
+---
+
+**5. New CLI command: `gitsema remote-index <repoUrl>`**
+
+A thin wrapper that calls `POST /api/v1/remote/index` on the configured `GITSEMA_REMOTE` server. Lets users trigger server-side indexing without curl.
+
+```
+gitsema remote-index https://github.com/owner/repo.git \
+  --token ghp_... \
+  --depth 500 \
+  --concurrency 8
+```
+
+Flags mirror the `indexOptions` fields of the request body plus `--token`, `--username`, `--password` for credentials. After the call returns, the user can run `gitsema search` (which proxies through `GITSEMA_REMOTE`) to query the freshly built index.
+
+**Files:** `src/cli/commands/remoteIndex.ts`, `src/cli/index.ts`
+
+---
+
+**6. New environment variables**
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITSEMA_DB_PATH` | `.gitsema/index.db` | Path to the SQLite database. Set to `:memory:` for a fully in-memory, session-scoped index. |
+| `GITSEMA_CLONE_DIR` | `os.tmpdir()` | Parent directory for temporary Git clones. |
+| `GITSEMA_CLONE_KEEP` | `always` | Clone cleanup strategy: `always` / `on-success` / `keep`. |
+
+---
+
+**Security considerations**
+
+| Risk | Mitigation |
+|---|---|
+| SSRF / internal-host access via `repoUrl` | Enforce `https://` scheme. Resolve the hostname to IP *before* cloning and reject any address in a private or reserved range: `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (link-local), `::1`, `fc00::/7` (IPv6 unique-local, covers `fc*` and `fd*`), `fe80::/10` (IPv6 link-local). Resolving before cloning also prevents DNS-rebinding attacks where an attacker's hostname initially resolves to a public IP but flips to a private IP after the check. |
+| Path traversal in temp dir | Use `mkdtemp` under `os.tmpdir()` — the OS guarantees a safe unique path. |
+| Credential leakage in process list | Credentials embedded in the clone URL appear in `/proc/<pid>/cmdline` and `ps` output on Linux. Phase 17 improvement: pass credentials via a `GIT_ASKPASS` script written to a temp file with `chmod 600`, deleted immediately after clone. |
+| Credential leakage in logs and error responses | Strip `user:pass@` from the URL before passing it to `logger` or returning it in any API error response. Apply the same sanitisation to exception messages thrown by `git clone` (e.g. git may echo the URL back on auth failure). |
+| Large / malicious repos | Enforce a `GITSEMA_CLONE_MAX_BYTES` limit (default `2 GB`) by monitoring the temp dir size during clone; abort and clean up if exceeded. |
+| DoS via parallel clone requests | Gate `POST /remote/index` behind a server-wide semaphore (default: 2 concurrent clones). |
+
+---
+
+**What is NOT in scope for Phase 16**
+
+- **SSH repository URLs** — require temp SSH key files + `ssh-agent` configuration. Deferred to Phase 17.
+- **Multi-repo in-memory sessions** — a single in-memory DB is shared across all repos in the same server process. A per-repo DB registry is a Phase 17 concern.
+- **Streaming progress** — `POST /remote/index` is a synchronous long-poll. Server-Sent Events for live progress are a Phase 17 nice-to-have.
+- **Authentication to the gitsema server itself** — the existing `GITSEMA_SERVER_KEY` / `authMiddleware` already covers this. No new server auth is needed.
+
+---
+
+**Deliverables**
+
+- `GITSEMA_DB_PATH=:memory:` makes the server run with a fully in-memory index — no disk writes.
+- `POST /api/v1/remote/index` on the gitsema server accepts a HTTPS Git URL plus optional token/basic credentials, clones the repo in a server-side temp dir, indexes it, cleans up the clone, and returns `IndexStats`.
+- `gitsema remote-index <url>` CLI command is a one-liner that triggers remote indexing without curl.
+- SSRF and credential-leakage guards are in place from day one.
