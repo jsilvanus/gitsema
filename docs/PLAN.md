@@ -2,6 +2,43 @@
 
 > A Git-aware semantic search engine that treats code history as a time-indexed semantic dataset.
 
+---
+
+## Table of Contents
+
+| Section | Line |
+|---|---|
+| [Vision](#vision) | 42 |
+| [Guiding principles](#guiding-principles) | 48 |
+| [Architecture overview](#architecture-overview) | 58 |
+| [Project structure](#project-structure) | 78 |
+| [Phases](#phases) | 130 |
+| [Phase 1 — Foundation](#phase-1--foundation) | 132 |
+| [Phase 2 — Git walking](#phase-2--git-walking) | 172 |
+| [Phase 3 — Embedding system](#phase-3--embedding-system) | 194 |
+| [Phase 4 — Indexing](#phase-4--indexing) | 230 |
+| [Phase 5 — Search · MVP deliverable](#phase-5--search--mvp-deliverable) | 254 |
+| [Phase 6 — Commit mapping](#phase-6--commit-mapping) | 285 |
+| [Phase 7 — Time-aware queries](#phase-7--time-aware-queries) | 320 |
+| [Phase 8 — File-type-aware embedding models](#phase-8--file-type-aware-embedding-models) | 351 |
+| [Phase 9 — Performance](#phase-9--performance) | 387 |
+| [Phase 10 — Smarter semantics](#phase-10--smarter-semantics) | 423 |
+| [Phase 11 — Advanced features + MCP](#phase-11--advanced-features--mcp) | 466 |
+| [Phase 11b — Content access and semantic concept tracking](#phase-11b--content-access-and-semantic-concept-tracking) | 535 |
+| [Key technical decisions](#key-technical-decisions) | 650 |
+| [Risk register](#risk-register) | 662 |
+| [Phase 12 — CLI consolidation & robust per-file indexing](#phase-12--cli-consolidation--robust-per-file-indexing) | 674 |
+| [Phase 13 — Standalone model server for embeddings](#phase-13--standalone-model-server-for-embeddings) | 718 |
+| [Phase 14 — Infrastructure, tooling, and maintenance](#phase-14--infrastructure-tooling-and-maintenance) | 799 |
+| [Phase 14b — Search result deduplication](#phase-14b--search-result-deduplication) | 854 |
+| [Phase 15 — Branch awareness](#phase-15--branch-awareness) | 886 |
+| [Phase 16 — Remote-repository indexing](#phase-16--remote-repository-indexing) | 956 |
+| [Phase 17 — Remote-indexing hardening and SSH support](#phase-17--remote-indexing-hardening-and-ssh-support) | 1212 |
+| [What's weak or underexplored](#whats-weak-or-underexplored) | 1281 |
+| [What you could do with these embeddings](#what-you-could-do-with-these-embeddings) | 1305 |
+
+---
+
 ## Vision
 
 `gitsema` is not just semantic search over Git. It is a content-addressed semantic index synchronized with Git's object model. Blob hashes are the unit of identity. Embeddings are immutable artifacts. The CLI is the primary interface.
@@ -1238,3 +1275,69 @@ Currently all repos indexed by the server share a single SQLite DB. Add an optio
 Update the CLI command (`src/cli/commands/remoteIndex.ts`) to use the async job API: post the request, then poll (or use SSE) the progress endpoint and render a live progress bar (reusing the existing CLI progress bar from `gitsema index`).
 
 **Deliverable:** Credentials never appear in process lists. SSH repos work. Large-repo indexing jobs are non-blocking and observable. Multiple repos can share a single server with isolated indexes.
+
+---
+
+## What's weak or underexplored
+
+### 1. Function chunker is a regex heuristic
+
+It matches `function`, `class`, `def`, `fn`, `pub fn`, etc. across all languages with one pattern. It works for mainstream cases but will misbehave on templated C++, Rust macros, Python decorators, or anything unusual. This matters because chunk quality directly determines retrieval quality.
+
+### 2. Path relevance scoring is toy-grade
+
+It does lowercase substring matching of query tokens against file paths. `"auth"` matches `"unauthorized.ts"` — which is wrong. This is the weakest link in the three-signal ranker.
+
+### 3. The evolution/drift features have no UX story
+
+`gitsema evolution src/auth.ts` dumps a timeline of cosine distances between file versions. That's raw data. There's no narrative, no summary of what changed semantically, no way to answer "why did this file drift?" This is where the real value could be and it stops just before the useful part.
+
+### 4. No test suite
+
+The CLAUDE.md admits this. It's described as "highest priority technical debt." For a tool that runs migrations and writes to a database, this is a real gap.
+
+### 5. Remote job registry leaks memory
+
+Completed job entries are never evicted from the in-memory map.
+
+---
+
+## What you could do with these embeddings
+
+The data model gives you: every unique blob, its vector, when it first appeared, which commits it appeared in, which branches it lives on, and its full text. That's a rich graph.
+
+### High value, tractable
+
+#### Code review assistant
+
+Given a PR diff, find semantically similar historical blobs. "Here's how this was done before, here are the commits where similar logic evolved." This is concrete utility.
+
+#### Dead concept detection
+
+Find embeddings with high historical similarity to current code that no longer appear in HEAD. These are deleted concepts — maybe they were removed intentionally, maybe accidentally.
+
+#### Semantic blame
+
+Instead of `git blame` (line-level authorship), answer "who introduced this concept into the codebase and when?" Trace semantic lineage rather than textual lineage.
+
+#### Refactor impact analysis
+
+Before renaming/restructuring a module, show which other blobs are semantically coupled to it (high cosine similarity). Flags non-obvious dependencies.
+
+#### Onboarding maps
+
+Cluster embeddings by semantic similarity and produce a concept graph of the codebase. "Here are the 8 semantic regions of this repo and the files that define each."
+
+### Higher effort but differentiated
+
+#### Semantic regression detection
+
+Index CI runs. If a blob's vector moves substantially between two tagged versions, flag it as a semantic change even if the diff looks small (comments, variable renames that change meaning).
+
+#### Cross-repo concept similarity
+
+If you index multiple repos into different databases, a query against both could find when concept X was invented in repo A vs. repo B — useful for tracking where patterns originated.
+
+#### LLM-powered evolution narration
+
+The evolution command gives you the data (timestamps + cosine distances). Feeding those diffs to a language model to produce "between v1.2 and v2.0, the authentication module shifted from session-based to token-based" is a natural next step.
