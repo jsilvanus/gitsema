@@ -1,5 +1,5 @@
 /**
- * gitsema HTTP server (Phase 15)
+ * gitsema HTTP server (Phase 16)
  *
  * Express application factory.  Registers all routes and auth middleware.
  * All embedding and storage happens here; the CLI client only sends raw blobs.
@@ -14,6 +14,7 @@
  *   POST /search/first-seen
  *   POST /evolution/file
  *   POST /evolution/concept
+ *   POST /remote/index        (Phase 16 — server-managed clone + index)
  */
 
 import express from 'express'
@@ -26,6 +27,7 @@ import { blobsRouter } from './routes/blobs.js'
 import { commitsRouter } from './routes/commits.js'
 import { searchRouter } from './routes/search.js'
 import { evolutionRouter } from './routes/evolution.js'
+import { remoteRouter } from './routes/remote.js'
 
 export interface AppOptions {
   textProvider: EmbeddingProvider
@@ -62,6 +64,11 @@ export function createApp(options: AppOptions): Express {
   app.use(`${base}/search`, searchRouter({ textProvider, codeProvider }))
 
   app.use(`${base}/evolution`, evolutionRouter({ textProvider }))
+
+  app.use(
+    `${base}/remote`,
+    remoteRouter({ textProvider, codeProvider, chunkerStrategy, concurrency }),
+  )
 
   return app
 }
