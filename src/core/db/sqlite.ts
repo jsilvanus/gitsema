@@ -15,6 +15,48 @@ export function getRawDb(): InstanceType<typeof Database> {
   return rawSqlite
 }
 
+/**
+ * Current schema version. Increment this whenever a new migration is added.
+ * Migrations are applied in order; each one is idempotent.
+ *
+ * Version history:
+ *   1 — Added file_type column to embeddings (Phase 8)
+ */
+const CURRENT_SCHEMA_VERSION = 1
+
+/**
+ * Applies pending schema migrations and records the resulting version in the
+ * `meta` table. Safe to call on both fresh and existing databases.
+ */
+function applyMigrations(sqlite: InstanceType<typeof Database>): void {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)`)
+
+  const row = sqlite.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as
+    | { value: string }
+    | undefined
+
+  let version: number
+  if (row === undefined) {
+    // meta table just created — determine starting version by inspecting the
+    // live schema so we don't re-apply migrations that already ran.
+    const cols = sqlite.prepare(`PRAGMA table_info(embeddings)`).all() as Array<{ name: string }>
+    version = cols.some((c) => c.name === 'file_type') ? 1 : 0
+    sqlite.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(version))
+  } else {
+    version = parseInt(row.value, 10)
+  }
+
+  // v0 → v1: add file_type column to embeddings
+  if (version < 1) {
+    sqlite.exec(`ALTER TABLE embeddings ADD COLUMN file_type TEXT`)
+    version = 1
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('1')
+  }
+
+  // Future migrations go here:
+  // if (version < 2) { sqlite.exec(`...`); version = 2; sqlite.prepare(...).run('2') }
+}
+
 function openDatabase(): ReturnType<typeof drizzle> {
   mkdirSync(DB_DIR, { recursive: true })
   const sqlite = new Database(DB_PATH)
@@ -84,11 +126,7 @@ function openDatabase(): ReturnType<typeof drizzle> {
     );
   `)
 
-  // Migrate existing databases: add file_type column if it doesn't exist yet
-  const embeddingsColumns = sqlite.prepare(`PRAGMA table_info(embeddings)`).all() as Array<{ name: string }>
-  if (!embeddingsColumns.some((c) => c.name === 'file_type')) {
-    sqlite.exec(`ALTER TABLE embeddings ADD COLUMN file_type TEXT`)
-  }
+  applyMigrations(sqlite)
 
   return db
 }

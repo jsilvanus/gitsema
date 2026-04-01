@@ -8,6 +8,7 @@ import { evolutionCommand } from './commands/evolution.js'
 import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
 import { diffCommand } from './commands/diff.js'
 import { startMcpServer } from '../mcp/server.js'
+import { backfillFtsCommand } from './commands/backfillFts.js'
 
 const program = new Command()
 
@@ -149,6 +150,13 @@ program
     'number of nearest-neighbour blobs to show for each version (default 0)',
   )
   .action(diffCommand)
+
+program
+  .command('backfill-fts')
+  .description('Populate FTS5 content for blobs indexed before Phase 11 (enables hybrid search and --include-content)')
+  .action(async () => {
+    await backfillFtsCommand()
+  })
 
 program
   .command('mcp')

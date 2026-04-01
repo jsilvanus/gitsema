@@ -208,7 +208,7 @@ function renderProgress(stats: IndexStats): string {
     // Use commits > 0 to distinguish Phase B (commit mapping) from Phase A (collecting).
     if (stats.commits > 0) {
       return `\r  Mapping commits... commits=${stats.commits} links=${stats.blobCommits}  `
-                logger.debug?.(`Embedding failed for blob ${blob}: ${msg}`)
+    }
     return (
       `\r  Collecting... seen=${stats.seen} skip=${stats.skipped} filt=${stats.filtered}  `
     )
@@ -234,7 +234,6 @@ function renderProgress(stats: IndexStats): string {
       : '?'
   return (
     `\r  [${bar}] ${pctStr}%` +
-                        logger.debug?.(`Embedding failed for blob ${blob} chunk ${chunk.startLine}-${chunk.endLine}: ${msg3}`)
     ` ${rate}/s eta=${eta}  `
   )
 }
@@ -252,7 +251,6 @@ function buildProvider(providerType: string, model: string): EmbeddingProvider {
 }
 
 /**
-                              logger.debug?.(`Embedding failed for subchunk: ${err5 instanceof Error ? err5.message : String(err5)}`)
  * Returns undefined when the input is undefined.
  * Throws on unrecognisable formats.
  */
@@ -376,9 +374,8 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     await Promise.all(
       options.file.map((p) => limiter(() => indexFileCommand(p, { chunker: chunkerStrategy === 'file' ? undefined : chunkerStrategy })))
     )
-    return (
+    return
   }
-      ` new=${stats.indexed} skip=${stats.skipped} filt=${stats.filtered} over=${stats.oversized} fail=${stats.failed} fb=${stats.fbFunction}/${stats.fbFixed}` +
   let lastLine = ''
   const stats = await runIndex({
     repoPath: '.',
