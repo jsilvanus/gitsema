@@ -1,5 +1,5 @@
 import { remoteStatus } from '../../client/remoteClient.js'
-import { db, DB_PATH } from '../../core/db/sqlite.js'
+import { db, DB_PATH, getRawDb } from '../../core/db/sqlite.js'
 import { blobs, embeddings, paths, chunks, chunkEmbeddings } from '../../core/db/schema.js'
 import { eq } from 'drizzle-orm'
 import { logger } from '../../utils/logger.js'
@@ -78,9 +78,14 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   } else {
     printKV('Model:', textModel)
   }
+  const branchCount = (getRawDb()
+    .prepare('SELECT COUNT(DISTINCT branch_name) AS c FROM blob_branches')
+    .get() as { c: number } | undefined)?.c ?? 0
+
   printKV('Blobs indexed:', blobCount.count)
   printKV('Embeddings stored:', embeddingCount.count)
   printKV('Path entries:', pathCount.count)
+  printKV('Branches tracked:', branchCount)
 
   if (filePath) {
     // Resolve blob at HEAD (try as-given first)

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { Readable } from 'node:stream'
 
@@ -6,6 +6,8 @@ export interface CommitEntry {
   commitHash: string
   timestamp: number
   message: string
+  /** Branch names (short local names) that reference this commit or have it in their history. */
+  branches: string[]
 }
 
 export interface BlobCommitEntry {
@@ -33,11 +35,65 @@ export interface CommitMapOptions {
    * cover the same set of commits.
    */
   maxCommits?: number
+  /**
+   * When set, restrict commit traversal to this branch only.
+   * Pass a short branch name (e.g. `"main"`); the function passes
+   * `refs/heads/<name>` to git instead of `--all`.
+   */
+  branch?: string
+}
+
+/**
+ * Builds a map from commit hash → array of branch names by parsing
+ * `git log --all --format="%H %D"` ref decorations.
+ * Only local branch names (`refs/heads/...`) are captured.
+ */
+function buildCommitBranchMap(repoPath: string): Map<string, string[]> {
+  const map = new Map<string, string[]>()
+  let output: string
+  try {
+    output = execFileSync('git', ['log', '--all', '--format=%H %D'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+  } catch {
+    return map // git may fail on empty repos; return empty map gracefully
+  }
+  for (const line of output.split('\n')) {
+    const spaceIdx = line.indexOf(' ')
+    if (spaceIdx === -1) continue
+    const commitHash = line.slice(0, spaceIdx).trim()
+    if (!commitHash || !/^[0-9a-f]{40,64}$/.test(commitHash)) continue
+    const decoration = line.slice(spaceIdx + 1).trim()
+    if (!decoration) continue
+    const branches: string[] = []
+    for (const ref of decoration.split(',')) {
+      const r = ref.trim()
+      // e.g. "HEAD -> main", "refs/heads/main", "main"
+      const headArrow = r.match(/^HEAD -> (.+)$/)
+      if (headArrow) {
+        branches.push(headArrow[1].trim())
+        continue
+      }
+      const refsHeads = r.match(/^refs\/heads\/(.+)$/)
+      if (refsHeads) {
+        branches.push(refsHeads[1].trim())
+      }
+    }
+    if (branches.length > 0) {
+      map.set(commitHash, branches)
+    }
+  }
+  return map
 }
 
 export function streamCommitMap(repoPath: string = '.', options: CommitMapOptions = {}): Readable {
-  const { maxCommits } = options
-  const args = ['log', '--all', '--raw', '--no-abbrev', '--format=COMMIT %H %ct %s']
+  const { maxCommits, branch } = options
+  const commitBranchMap = buildCommitBranchMap(repoPath)
+  // Use refs/heads/<branch> when a branch filter is set, otherwise walk all refs
+  const refScope = branch ? [`refs/heads/${branch}`] : ['--all']
+  const args = ['log', ...refScope, '--raw', '--no-abbrev', '--format=COMMIT %H %ct %s']
   if (maxCommits && maxCommits > 0) {
     args.push(`--max-count=${maxCommits}`)
   }
@@ -65,7 +121,8 @@ export function streamCommitMap(repoPath: string = '.', options: CommitMapOption
       if (isNaN(timestamp)) return
       const message = parts.slice(2).join(' ')
       currentCommitHash = commitHash
-      out.push({ type: 'commit', data: { commitHash, timestamp, message } } satisfies CommitMapEvent)
+      const branches = commitBranchMap.get(commitHash) ?? []
+      out.push({ type: 'commit', data: { commitHash, timestamp, message, branches } } satisfies CommitMapEvent)
     } else if (line.startsWith(':') && currentCommitHash) {
       // Raw diff line: ":old_mode new_mode old_hash new_hash status\tpath"
       const tabIdx = line.indexOf('\t')

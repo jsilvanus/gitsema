@@ -29,7 +29,7 @@ export function commitsRouter(): Router {
     let stored = 0
     for (const commit of parsed.data) {
       storeCommitWithBlobs(
-        { commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message },
+        { commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, branches: [] },
         commit.blobHashes,
       )
       stored++

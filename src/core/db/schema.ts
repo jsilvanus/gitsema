@@ -64,3 +64,14 @@ export const indexedCommits = sqliteTable('indexed_commits', {
   commitHash: text('commit_hash').primaryKey(),
   indexedAt: integer('indexed_at').notNull(),
 })
+
+/**
+ * Maps blob hashes to the branch(es) they appear on.
+ * Populated during commit-mapping phase; supports --branch filter on search.
+ */
+export const blobBranches = sqliteTable('blob_branches', {
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
+  branchName: text('branch_name').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.blobHash, table.branchName] }),
+}))

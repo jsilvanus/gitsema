@@ -1,5 +1,5 @@
 import { db, getRawDb } from '../db/sqlite.js'
-import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings } from '../db/schema.js'
+import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
@@ -240,4 +240,20 @@ export function storeChunk(args: StoreChunkArgs): number {
   })
 
   return result
+}
+
+/**
+ * Records that the given blob was seen on each of the provided branches.
+ * Uses INSERT OR IGNORE so duplicate (blobHash, branchName) pairs are silently skipped.
+ * No-ops when `branches` is empty or the blob is not yet in the `blobs` table.
+ */
+export function storeBlobBranches(blobHash: string, branches: string[]): void {
+  if (branches.length === 0) return
+  const raw = getRawDb()
+  const stmt = raw.prepare(
+    'INSERT OR IGNORE INTO blob_branches (blob_hash, branch_name) VALUES (?, ?)',
+  )
+  for (const branchName of branches) {
+    stmt.run(blobHash, branchName)
+  }
 }

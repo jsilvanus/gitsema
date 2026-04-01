@@ -1,4 +1,4 @@
-import { db } from '../db/sqlite.js'
+import { db, getRawDb } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
@@ -66,6 +66,8 @@ export interface VectorSearchOptions {
   query?: string
   /** When true, search chunk embeddings in addition to whole-file embeddings. */
   searchChunks?: boolean
+  /** When set, restrict results to blobs that appear on this branch (short name, e.g. "main"). */
+  branch?: string
 }
 
 /**
@@ -78,7 +80,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const {
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',
-    searchChunks = false,
+    searchChunks = false, branch,
   } = options
 
   // Determine if three-signal ranking is active
@@ -128,6 +130,16 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
         endLine: row.endLine,
       })
     }
+  }
+
+  // Apply branch filter when requested
+  if (branch) {
+    const raw = getRawDb()
+    const branchRows = raw
+      .prepare('SELECT DISTINCT blob_hash FROM blob_branches WHERE branch_name = ?')
+      .all(branch) as Array<{ blob_hash: string }>
+    const branchHashSet = new Set(branchRows.map((r) => r.blob_hash))
+    candidatePool = candidatePool.filter((r) => branchHashSet.has(r.blobHash))
   }
 
   // Apply time-range filter on the candidate set before scoring

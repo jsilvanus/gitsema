@@ -2,7 +2,7 @@ import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
 import { isIndexed } from './deduper.js'
-import { storeBlob, storeBlobRecord, storeChunk, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit } from './blobStore.js'
+import { storeBlob, storeBlobRecord, storeChunk, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
@@ -69,6 +69,12 @@ export interface IndexerOptions {
   chunker?: ChunkStrategy
   /** Options passed to the chunker (e.g. window size and overlap for `fixed`). */
   chunkerOptions?: ChunkOptions
+  /**
+   * When set, restrict indexing to commits reachable from this branch only.
+   * Pass a short branch name (e.g. `"main"`, `"feature/auth"`); the indexer
+   * will pass `refs/heads/<name>` to `revList` and `streamCommitMap`.
+   */
+  branchFilter?: string
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -125,6 +131,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     filter = {},
     chunker: chunkerStrategy = 'file',
     chunkerOptions = {},
+    branchFilter,
     onProgress,
   } = options
 
@@ -159,7 +166,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   const start = Date.now()
   const seenHashes = new Set<string>()
 
-  const stream = revList(repoPath, { since, maxCommits })
+  const stream = revList(repoPath, { since, maxCommits, branch: branchFilter })
 
   // Collect blobs first so we can fan-out embedding calls concurrently
   const blobsToProcess: BlobEntry[] = []
@@ -412,7 +419,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   )
 
   // Phase B: Walk commit history, persist to commits/blobCommits
-  const commitStream = streamCommitMap(repoPath, { maxCommits }) as AsyncIterable<CommitMapEvent>
+  const commitStream = streamCommitMap(repoPath, { maxCommits, branch: branchFilter }) as AsyncIterable<CommitMapEvent>
 
   let pendingCommit: CommitEntry | null = null
   let pendingBlobHashes: string[] = []
@@ -422,6 +429,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     const stored = storeCommitWithBlobs(pendingCommit, pendingBlobHashes)
     stats.commits++
     stats.blobCommits += stored
+
+    // Write branch associations for every blob introduced by this commit
+    if (pendingCommit.branches.length > 0) {
+      for (const blobHash of pendingBlobHashes) {
+        storeBlobBranches(blobHash, pendingCommit.branches)
+      }
+    }
 
     // Record commit as fully indexed for future incremental runs
     markCommitIndexed(pendingCommit.commitHash)

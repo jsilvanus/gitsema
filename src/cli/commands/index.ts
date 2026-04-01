@@ -276,6 +276,7 @@ export interface IndexCommandOptions {
   overlap?: string
   file?: string[]
   remote?: string
+  branch?: string
 }
 
 export async function indexCommand(options: IndexCommandOptions): Promise<void> {
@@ -423,6 +424,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     console.log(`  Chunker: ${chunkerStrategy}${windowSize !== undefined ? ` (window=${windowSize})` : ''}${overlap !== undefined ? ` (overlap=${overlap})` : ''}`)
   }
   if (options.since) logger.info(`  Limiting to commits after: ${options.since}`)
+  if (options.branch) logger.info(`  Branch filter: ${options.branch}`)
   if (maxCommits !== undefined) logger.info(`  Max commits per session: ${maxCommits}`)
   if (concurrency !== 4) logger.info(`  Concurrency: ${concurrency}`)
   if (ext && ext.length > 0) logger.info(`  Extensions: ${ext.join(', ')}`)
@@ -448,6 +450,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     filter: { ext, exclude },
     chunker: chunkerStrategy,
     chunkerOptions: { windowSize, overlap },
+    branchFilter: options.branch,
     onProgress: (s) => {
       lastLine = renderProgress(s)
       process.stdout.write(lastLine)

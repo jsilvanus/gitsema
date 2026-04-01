@@ -21,6 +21,7 @@ export interface SearchCommandOptions {
   hybrid?: boolean
   bm25Weight?: string
   remote?: string
+  branch?: string
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -179,6 +180,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     weightPath,
     query,
     searchChunks: options.chunks ?? false,
+    branch: options.branch,
   }
 
   let results

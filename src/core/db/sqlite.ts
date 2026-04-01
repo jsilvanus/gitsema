@@ -21,8 +21,9 @@ export function getRawDb(): InstanceType<typeof Database> {
  *
  * Version history:
  *   1 — Added file_type column to embeddings (Phase 8)
+ *   2 — Added blob_branches table (Phase 15)
  */
-const CURRENT_SCHEMA_VERSION = 1
+const CURRENT_SCHEMA_VERSION = 2
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -53,8 +54,21 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('1')
   }
 
+  // v1 → v2: add blob_branches table
+  if (version < 2) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS blob_branches (
+        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+        branch_name TEXT NOT NULL,
+        PRIMARY KEY (blob_hash, branch_name)
+      )
+    `)
+    version = 2
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('2')
+  }
+
   // Future migrations go here:
-  // if (version < 2) { sqlite.exec(`...`); version = 2; sqlite.prepare(...).run('2') }
+  // if (version < 3) { sqlite.exec(`...`); version = 3; sqlite.prepare(...).run('3') }
 }
 
 function openDatabase(): ReturnType<typeof drizzle> {
@@ -123,6 +137,13 @@ function openDatabase(): ReturnType<typeof drizzle> {
       blob_hash UNINDEXED,
       content,
       tokenize='porter ascii'
+    );
+
+    -- Branch → blob associations, populated during commit-mapping (Phase 15)
+    CREATE TABLE IF NOT EXISTS blob_branches (
+      blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+      branch_name TEXT NOT NULL,
+      PRIMARY KEY (blob_hash, branch_name)
     );
   `)
 

@@ -88,6 +88,10 @@ program
     '--remote <url>',
     'send blobs to a remote gitsema server for embedding (overrides GITSEMA_REMOTE)',
   )
+  .option(
+    '--branch <name>',
+    'restrict indexing to commits reachable from this branch (short name, e.g. "main")',
+  )
   .action(indexCommand)
 
 program
@@ -106,6 +110,7 @@ program
   .option('--hybrid', 'combine vector similarity with BM25 keyword matching (FTS5)')
   .option('--bm25-weight <n>', 'weight for the BM25 signal in hybrid search (0–1, default 0.3)')
   .option('--remote <url>', 'proxy search to a remote gitsema server (overrides GITSEMA_REMOTE)')
+  .option('--branch <name>', 'only return blobs seen on this branch (short name, e.g. "main")')
   .action(searchCommand)
 
 program
