@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "gen:toc": "node scripts/generate_toc.mjs"
   },
   "repository": {
     "type": "git",

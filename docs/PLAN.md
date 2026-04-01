@@ -7,35 +7,48 @@
 ## Table of Contents
 
 | Section | Line |
-|---|---|
-| [Vision](#vision) | 42 |
-| [Guiding principles](#guiding-principles) | 48 |
-| [Architecture overview](#architecture-overview) | 58 |
-| [Project structure](#project-structure) | 78 |
-| [Phases](#phases) | 130 |
-| [Phase 1 — Foundation](#phase-1--foundation) | 132 |
-| [Phase 2 — Git walking](#phase-2--git-walking) | 172 |
-| [Phase 3 — Embedding system](#phase-3--embedding-system) | 194 |
-| [Phase 4 — Indexing](#phase-4--indexing) | 230 |
-| [Phase 5 — Search · MVP deliverable](#phase-5--search--mvp-deliverable) | 254 |
-| [Phase 6 — Commit mapping](#phase-6--commit-mapping) | 285 |
-| [Phase 7 — Time-aware queries](#phase-7--time-aware-queries) | 320 |
-| [Phase 8 — File-type-aware embedding models](#phase-8--file-type-aware-embedding-models) | 351 |
-| [Phase 9 — Performance](#phase-9--performance) | 387 |
-| [Phase 10 — Smarter semantics](#phase-10--smarter-semantics) | 423 |
-| [Phase 11 — Advanced features + MCP](#phase-11--advanced-features--mcp) | 466 |
-| [Phase 11b — Content access and semantic concept tracking](#phase-11b--content-access-and-semantic-concept-tracking) | 535 |
-| [Key technical decisions](#key-technical-decisions) | 650 |
-| [Risk register](#risk-register) | 662 |
-| [Phase 12 — CLI consolidation & robust per-file indexing](#phase-12--cli-consolidation--robust-per-file-indexing) | 674 |
-| [Phase 13 — Standalone model server for embeddings](#phase-13--standalone-model-server-for-embeddings) | 718 |
-| [Phase 14 — Infrastructure, tooling, and maintenance](#phase-14--infrastructure-tooling-and-maintenance) | 799 |
-| [Phase 14b — Search result deduplication](#phase-14b--search-result-deduplication) | 854 |
-| [Phase 15 — Branch awareness](#phase-15--branch-awareness) | 886 |
-| [Phase 16 — Remote-repository indexing](#phase-16--remote-repository-indexing) | 956 |
-| [Phase 17 — Remote-indexing hardening and SSH support](#phase-17--remote-indexing-hardening-and-ssh-support) | 1212 |
-| [What's weak or underexplored](#whats-weak-or-underexplored) | 1281 |
-| [What you could do with these embeddings](#what-you-could-do-with-these-embeddings) | 1305 |
+|---|---:|
+| [Table of Contents](#table-of-contents) | 7 |
+| [Vision](#vision) | 51 |
+| [Guiding principles](#guiding-principles) | 57 |
+| [Architecture overview](#architecture-overview) | 67 |
+| [Project structure](#project-structure) | 87 |
+| [Section I - Phases](#section-i-phases) | 139 |
+|   [Phase 1 — Foundation](#phase-1-—-foundation) | 141 |
+|   [Phase 2 — Git walking](#phase-2-—-git-walking) | 181 |
+|   [Phase 3 — Embedding system](#phase-3-—-embedding-system) | 203 |
+|   [Phase 4 — Indexing](#phase-4-—-indexing) | 239 |
+|   [Phase 5 — Search  ·  *MVP deliverable*](#phase-5-—-search-·-mvp-deliverable) | 263 |
+|   [Phase 6 — Commit mapping](#phase-6-—-commit-mapping) | 294 |
+|   [Phase 7 — Time-aware queries  ·  *Phase 2 deliverable*](#phase-7-—-time-aware-queries-·-phase-2-deliverable) | 329 |
+|   [Phase 8 — File-type-aware embedding models](#phase-8-—-file-type-aware-embedding-models) | 360 |
+|   [Phase 9 — Performance](#phase-9-—-performance) | 396 |
+|   [Phase 10 — Smarter semantics](#phase-10-—-smarter-semantics) | 432 |
+|   [Phase 11 — Advanced features + MCP](#phase-11-—-advanced-features-mcp) | 475 |
+|   [Phase 11b — Content access and semantic concept tracking](#phase-11b-—-content-access-and-semantic-concept-tracking) | 544 |
+| [Key technical decisions](#key-technical-decisions) | 659 |
+| [Risk register](#risk-register) | 671 |
+|   [Phase 12 — CLI consolidation & robust per-file indexing](#phase-12-—-cli-consolidation-robust-per-file-indexing) | 683 |
+|   [Recent progress (snapshot: 2026-04-01)](#recent-progress-snapshot-2026-04-01) | 711 |
+|   [Phase 13 — Standalone model server for embeddings](#phase-13-—-standalone-model-server-for-embeddings) | 727 |
+|   [Phase 14 — Infrastructure, tooling, and maintenance](#phase-14-—-infrastructure-tooling-and-maintenance) | 808 |
+|   [Phase 14b — Search result deduplication](#phase-14b-—-search-result-deduplication) | 863 |
+|   [Phase 15 — Branch awareness](#phase-15-—-branch-awareness) | 895 |
+|   [Phase 16 — Remote-repository indexing (server-managed clone, RAM-backed working tree, persistent DB)](#phase-16-—-remote-repository-indexing-server-managed-clone-ram-backed-working-tree-persistent-db) | 965 |
+|   [Phase 17 — Remote-indexing hardening and SSH support](#phase-17-—-remote-indexing-hardening-and-ssh-support) | 1221 |
+|   [Phase 18 — Reliability, tests, and query caching](#phase-18-—-reliability-tests-and-query-caching) | 1290 |
+|   [Phase 19 — Smarter chunking & semantic blame](#phase-19-—-smarter-chunking-semantic-blame) | 1302 |
+|   [Phase 20 — Dead-concept detection & refactor impact analysis](#phase-20-—-dead-concept-detection-refactor-impact-analysis) | 1313 |
+|   [Phase 21 — Semantic clustering & concept graph](#phase-21-—-semantic-clustering-concept-graph) | 1324 |
+| [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
+|   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
+|   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
+|   [3. The evolution/drift features have no UX story](#3-the-evolutiondrift-features-have-no-ux-story) | 1345 |
+|   [4. No test suite](#4-no-test-suite) | 1349 |
+|   [5. Remote job registry leaks memory](#5-remote-job-registry-leaks-memory) | 1353 |
+| [Section III - What you could do with these embeddings](#section-iii-what-you-could-do-with-these-embeddings) | 1359 |
+|   [High value, tractable](#high-value-tractable) | 1363 |
+|   [Higher effort but differentiated](#higher-effort-but-differentiated) | 1385 |
 
 ---
 
@@ -127,7 +140,7 @@ gitsema/
 
 ---
 
-## Phases
+## Section I - Phases
 
 ### Phase 1 — Foundation
 
@@ -1278,7 +1291,52 @@ Update the CLI command (`src/cli/commands/remoteIndex.ts`) to use the async job 
 
 ---
 
-## What's weak or underexplored
+### Phase 18 — Reliability, tests, and query caching
+
+**Goals:** Fix the remote job registry memory leak, add a comprehensive test suite, and introduce a query embedding cache in the DB to accelerate repeated queries.
+
+- **Remote job registry stability:** Implement eviction and durable housekeeping for the in-memory job registry. Add a TTL, size cap, LRU eviction, and an option to persist recent job metadata to disk so completed jobs can be resurrected after a restart for debugging. Add monitoring metrics (job count, retained entries, eviction rate).
+- **Test suite (see II.4):** Expand the Vitest plan: unit tests for chunkers, ranking, and DB helpers; integration tests that create tiny fixture Git repos, run `index` and `search`, and assert end-to-end behavior (embeddings written, FTS5 populated, `first-seen` results correct). Aim for `pnpm test` passing locally and in CI.
+- **Embedding query cache:** Store query strings + provider model → embedding vector in a new `query_embeddings` table. On search, check the cache before calling the provider; use model name + model-specific config as the cache key. Add TTL and a size cap; expose `--no-cache` for deterministic runs.
+
+**Deliverables:** Memory-safe job registry with metrics; test suite covering core paths and CI integration; `query_embeddings` table and cache-aware search path.
+
+---
+
+### Phase 19 — Smarter chunking & semantic blame
+
+**Goals:** Improve chunk quality and implement a repo-wide semantic blame (nearest-neighbor blame) tool.
+
+- **Chunker research + implementation:** Use a web research/synthesizer step to gather best practices for semantic chunking (AST-based splitters, language-aware tokenization, docstring-aware splits). Implement an improved `function` chunker (prefer AST parsing where available) and an optional learned chunker that uses heuristics + model feedback to refine chunk boundaries.
+- **Semantic blame / NN-blame:** Implement `semantic-blame <file>`: for each line or logical block, find nearest-neighbor blobs historically and attribute concept origin by semantic proximity rather than textual changes. Integrate with `commitMap` to return commit + author + date for semantic origins.
+
+**Deliverables:** New chunker implementations and a `semantic-blame` CLI command that reports nearest-neighbor origins per logical block.
+
+---
+
+### Phase 20 — Dead-concept detection & refactor impact analysis
+
+**Goals:** Surface concepts that have vanished from HEAD but exist historically, and flag likely refactor impact before large structural changes.
+
+- **Dead concept detection:** Add `gitsema dead-concepts [--since] [-k]` which finds embeddings that score highly to a set of current blobs but whose earliest paths/commits are not present in HEAD. Report candidates with score, last-seen commit, and paths where they lived.
+- **Refactor impact analysis:** Implement `gitsema impact <path>` which computes the top-N semantically similar blobs across the codebase and highlights cross-module coupling. Use the chunk-level index to show granular coupling (line ranges/chunks) and surface high-impact targets for review.
+
+**Deliverables:** `dead-concepts` and `impact` commands, sample reports, and guidance for using them during refactors.
+
+---
+
+### Phase 21 — Semantic clustering & concept graph
+
+**Goals:** Cluster embeddings into semantic regions and visualise a lightweight concept graph for onboarding and exploration.
+
+- **Clustering:** Add an offline `cluster` job that vectors all blob embeddings, reduces dimensionality, and clusters (e.g., HDBSCAN or k-means). Store cluster membership in `blob_clusters` with metadata (centroid, size, representative paths).
+- **Concept graph:** Build a `concept_graph` view connecting clusters by nearest-centroid similarity and exposing top keywords (from FTS5) per cluster. Provide a CLI `gitsema clusters --top <n>` and an optional small web UI to render nodes/edges.
+
+**Deliverables:** Persistent cluster assignments, `gitsema clusters` CLI, and a concept graph generator useful for onboarding and architectural insights.
+
+---
+
+## Section II - What's weak or underexplored
 
 ### 1. Function chunker is a regex heuristic
 
@@ -1302,7 +1360,7 @@ Completed job entries are never evicted from the in-memory map.
 
 ---
 
-## What you could do with these embeddings
+## Section III - What you could do with these embeddings
 
 The data model gives you: every unique blob, its vector, when it first appeared, which commits it appeared in, which branches it lives on, and its full text. That's a rich graph.
 
