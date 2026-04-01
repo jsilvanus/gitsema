@@ -196,9 +196,20 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     return { ...s, score }
   })
 
-  // Sort descending by score, take top-k
+  // Sort descending by score, deduplicate by blobHash (keep highest-scoring entry
+  // per blob), then take top-k. This prevents the same file appearing multiple
+  // times when chunk embeddings are included.
   finalScored.sort((a, b) => b.score - a.score)
-  const topEntries = finalScored.slice(0, topK)
+  const bestByBlob = new Map<string, FinalEntry>()
+  for (const entry of finalScored) {
+    const existing = bestByBlob.get(entry.blobHash)
+    if (!existing || entry.score > existing.score) {
+      bestByBlob.set(entry.blobHash, entry)
+    }
+  }
+  const topEntries = Array.from(bestByBlob.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
 
   if (topEntries.length === 0) return []
 
