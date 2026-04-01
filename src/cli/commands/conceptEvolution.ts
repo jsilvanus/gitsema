@@ -6,12 +6,14 @@ import { computeConceptEvolution } from '../../core/search/evolution.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { ConceptEvolutionEntry } from '../../core/search/evolution.js'
+import { remoteConceptEvolution } from '../../client/remoteClient.js'
 
 export interface ConceptEvolutionCommandOptions {
   top?: string
   threshold?: string
   dump?: string | boolean
   includeContent?: boolean
+  remote?: string
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -104,6 +106,46 @@ export async function conceptEvolutionCommand(
   if (!query || query.trim() === '') {
     console.error('Error: query string is required')
     process.exit(1)
+  }
+
+  const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
+  if (remoteUrl) {
+    process.env.GITSEMA_REMOTE = remoteUrl
+    const top = options.top !== undefined ? parseInt(options.top, 10) : 50
+    const threshold = options.threshold !== undefined ? parseFloat(options.threshold) : 0.3
+    try {
+      const result = await remoteConceptEvolution(query.trim(), {
+        top,
+        threshold,
+        includeContent: options.includeContent ?? false,
+      })
+      const json = JSON.stringify(result, null, 2)
+      if (options.dump !== undefined) {
+        if (typeof options.dump === 'string') {
+          writeFileSync(options.dump, json, 'utf8')
+          console.log(`Concept evolution JSON written to: ${options.dump}`)
+        } else {
+          process.stdout.write(json + '\n')
+          return
+        }
+      }
+      // Human-readable summary from structured data
+      const data = result as { query: string; entries: number; timeline: Array<{ date: string; blobHash: string; paths: string[]; score: number; distFromPrev: number; isOrigin: boolean; isLargeChange: boolean }> }
+      console.log(`Concept evolution: "${data.query}"`)
+      console.log(`Entries found: ${data.entries}`)
+      if (data.timeline.length > 0) {
+        console.log('')
+        for (const e of data.timeline) {
+          const path = (e.paths[0] ?? '(unknown path)').padEnd(50)
+          const note = e.isOrigin ? '  (origin)' : e.isLargeChange ? '  ← large change' : ''
+          console.log(`${e.date}  ${path}  [${e.blobHash.slice(0, 7)}]  score=${e.score.toFixed(3)}  dist_prev=${e.distFromPrev.toFixed(4)}${note}`)
+        }
+      }
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+    return
   }
 
   const topK = options.top !== undefined ? parseInt(options.top, 10) : 50

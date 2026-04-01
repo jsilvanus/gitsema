@@ -1,4 +1,5 @@
 import { runIndex, type IndexStats } from '../../core/indexing/indexer.js'
+import { runRemoteIndex } from '../../core/indexing/remoteIndexer.js'
 import { OllamaProvider } from '../../core/embedding/local.js'
 import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
@@ -274,9 +275,68 @@ export interface IndexCommandOptions {
   windowSize?: string
   overlap?: string
   file?: string[]
+  remote?: string
 }
 
 export async function indexCommand(options: IndexCommandOptions): Promise<void> {
+  // Remote mode: ship blobs to a gitsema server instead of embedding locally
+  const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
+  if (remoteUrl) {
+    process.env.GITSEMA_REMOTE = remoteUrl
+
+    // Parse options shared with remote path
+    const concurrency = options.concurrency !== undefined ? parseInt(options.concurrency, 10) : 4
+    let maxCommits: number | undefined
+    if (options.maxCommits !== undefined) {
+      maxCommits = parseInt(options.maxCommits, 10)
+      if (isNaN(maxCommits) || maxCommits < 1) {
+        console.error('Error: --max-commits must be a positive integer')
+        process.exit(1)
+      }
+    }
+    let maxBlobSize: number = DEFAULT_MAX_SIZE
+    if (options.maxSize !== undefined) {
+      try { maxBlobSize = parseSize(options.maxSize) } catch (err) {
+        console.error(`Error: --max-size ${err instanceof Error ? err.message : String(err)}`)
+        process.exit(1)
+      }
+    }
+    const ext = options.ext
+      ? options.ext.split(',').map((e) => (e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`))
+      : undefined
+    const exclude = options.exclude
+      ? options.exclude.split(',').map((e) => e.trim()).filter(Boolean)
+      : undefined
+
+    console.log(`Remote indexing → ${remoteUrl}`)
+    if (options.since) logger.info(`  Since: ${options.since}`)
+
+    let lastLine = ''
+    const stats = await runRemoteIndex({
+      repoPath: '.',
+      since: options.since,
+      concurrency,
+      maxCommits,
+      maxBlobSize,
+      filter: { ext, exclude },
+      onProgress: (s) => {
+        lastLine = renderProgress(s)
+        process.stdout.write(lastLine)
+      },
+    })
+
+    if (lastLine) process.stdout.write('\r' + ' '.repeat(lastLine.length) + '\r')
+    console.log(`Done in ${formatMs(stats.elapsed)}`)
+    console.log(`  Blobs seen:        ${stats.seen}`)
+    console.log(`  Uploaded:          ${stats.indexed}`)
+    console.log(`  Already on server: ${stats.skipped}`)
+    console.log(`  Oversized:         ${stats.oversized}`)
+    console.log(`  Filtered out:      ${stats.filtered}`)
+    console.log(`  Failed:            ${stats.failed}`)
+    console.log(`  Commits mapped:    ${stats.commits}`)
+    return
+  }
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
 
   // Text model (default, also used for unrecognised file types)

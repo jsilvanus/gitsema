@@ -5,6 +5,7 @@ import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, type GroupMode } from '../../core/search/ranking.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
+import { remoteSearch } from '../../client/remoteClient.js'
 
 export interface SearchCommandOptions {
   top?: string
@@ -19,6 +20,7 @@ export interface SearchCommandOptions {
   chunks?: boolean
   hybrid?: boolean
   bm25Weight?: string
+  remote?: string
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -47,6 +49,33 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   if (!query || query.trim() === '') {
     console.error('Error: query string is required')
     process.exit(1)
+  }
+
+  const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
+  if (remoteUrl) {
+    process.env.GITSEMA_REMOTE = remoteUrl
+    const top = options.top !== undefined ? parseInt(options.top, 10) : 10
+    try {
+      const results = await remoteSearch(query, {
+        top,
+        recent: options.recent,
+        alpha: options.alpha !== undefined ? parseFloat(options.alpha) : undefined,
+        before: options.before,
+        after: options.after,
+        weightVector: options.weightVector !== undefined ? parseFloat(options.weightVector) : undefined,
+        weightRecency: options.weightRecency !== undefined ? parseFloat(options.weightRecency) : undefined,
+        weightPath: options.weightPath !== undefined ? parseFloat(options.weightPath) : undefined,
+        group: options.group as 'file' | 'module' | 'commit' | undefined,
+        chunks: options.chunks,
+        hybrid: options.hybrid,
+        bm25Weight: options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : undefined,
+      })
+      console.log(renderResults(results))
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+    return
   }
 
   const topK = options.top !== undefined ? parseInt(options.top, 10) : 10

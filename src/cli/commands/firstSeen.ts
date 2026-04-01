@@ -3,15 +3,31 @@ import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { renderFirstSeenResults } from '../../core/search/ranking.js'
+import { remoteFirstSeen } from '../../client/remoteClient.js'
 
 export interface FirstSeenCommandOptions {
   top?: string
+  remote?: string
 }
 
 export async function firstSeenCommand(query: string, options: FirstSeenCommandOptions): Promise<void> {
   if (!query || query.trim() === '') {
     console.error('Error: query string is required')
     process.exit(1)
+  }
+
+  const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
+  if (remoteUrl) {
+    process.env.GITSEMA_REMOTE = remoteUrl
+    const top = options.top !== undefined ? parseInt(options.top, 10) : 10
+    try {
+      const results = await remoteFirstSeen(query, top)
+      console.log(renderFirstSeenResults(results))
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+    return
   }
 
   const topK = options.top !== undefined ? parseInt(options.top, 10) : 10

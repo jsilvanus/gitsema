@@ -1,3 +1,4 @@
+import { remoteStatus } from '../../client/remoteClient.js'
 import { db, DB_PATH } from '../../core/db/sqlite.js'
 import { blobs, embeddings, paths, chunks, chunkEmbeddings } from '../../core/db/schema.js'
 import { eq } from 'drizzle-orm'
@@ -18,7 +19,31 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export async function statusCommand(filePath?: string): Promise<void> {
+export interface StatusCommandOptions {
+  remote?: string
+}
+
+export async function statusCommand(filePath: string | undefined, options: StatusCommandOptions = {}): Promise<void> {
+  const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
+  if (remoteUrl) {
+    process.env.GITSEMA_REMOTE = remoteUrl
+    try {
+      const status = await remoteStatus()
+      console.log(`Remote: ${remoteUrl}`)
+      console.log(`DB path:           ${status.dbPath}`)
+      console.log(`Model:             ${status.model}`)
+      if (status.codeModel) console.log(`Code model:        ${status.codeModel}`)
+      console.log(`Blobs indexed:     ${status.blobs}`)
+      console.log(`Embeddings stored: ${status.embeddings}`)
+      console.log(`Chunks stored:     ${status.chunks}`)
+      console.log(`Commits mapped:    ${status.commits}`)
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+    return
+  }
+
   const [blobCount] = db.select({ count: sql<number>`count(*)` }).from(blobs).all()
   const [embeddingCount] = db.select({ count: sql<number>`count(*)` }).from(embeddings).all()
   const [pathCount] = db.select({ count: sql<number>`count(*)` }).from(paths).all()

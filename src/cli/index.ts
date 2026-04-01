@@ -9,6 +9,7 @@ import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
 import { diffCommand } from './commands/diff.js'
 import { startMcpServer } from '../mcp/server.js'
 import { backfillFtsCommand } from './commands/backfillFts.js'
+import { serveCommand } from './commands/serve.js'
 
 const program = new Command()
 
@@ -37,6 +38,7 @@ program
 program
   .command('status [file]')
   .description('Show index status and database info, or status for a specific file')
+  .option('--remote <url>', 'remote server URL (overrides GITSEMA_REMOTE)')
   .action(statusCommand)
 
 program
@@ -82,6 +84,10 @@ program
     '--file <paths...>',
     'index specific file(s) from HEAD (can supply multiple paths)'
   )
+  .option(
+    '--remote <url>',
+    'send blobs to a remote gitsema server for embedding (overrides GITSEMA_REMOTE)',
+  )
   .action(indexCommand)
 
 program
@@ -99,12 +105,14 @@ program
   .option('--chunks', 'include chunk-level embeddings in search results')
   .option('--hybrid', 'combine vector similarity with BM25 keyword matching (FTS5)')
   .option('--bm25-weight <n>', 'weight for the BM25 signal in hybrid search (0–1, default 0.3)')
+  .option('--remote <url>', 'proxy search to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(searchCommand)
 
 program
   .command('first-seen <query>')
   .description('Find when a concept first appeared in the codebase, sorted by date')
   .option('-k, --top <n>', 'number of results to return', '10')
+  .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(firstSeenCommand)
 
 program
@@ -122,6 +130,7 @@ program
     '--include-content',
     'include the stored file content for each version in the JSON dump (only used with --dump)',
   )
+  .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(evolutionCommand)
 
 program
@@ -140,6 +149,7 @@ program
     '--include-content',
     'include the stored file content for each entry in the JSON dump (only used with --dump)',
   )
+  .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(conceptEvolutionCommand)
 
 program
@@ -150,6 +160,18 @@ program
     'number of nearest-neighbour blobs to show for each version (default 0)',
   )
   .action(diffCommand)
+
+program
+  .command('serve')
+  .description('Start the gitsema HTTP API server (embedding and storage backend)')
+  .option('--port <n>', 'port to listen on (default 4242, overrides GITSEMA_SERVE_PORT)')
+  .option('--key <token>', 'require this Bearer token for all requests (overrides GITSEMA_SERVE_KEY)')
+  .option(
+    '--chunker <strategy>',
+    'chunking strategy for incoming blobs: file (default), function, fixed',
+  )
+  .option('--concurrency <n>', 'max concurrent embedding calls (default 4)')
+  .action(serveCommand)
 
 program
   .command('backfill-fts')

@@ -3,12 +3,14 @@ import { computeEvolution } from '../../core/search/evolution.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
+import { remoteFileEvolution } from '../../client/remoteClient.js'
 
 export interface EvolutionCommandOptions {
   threshold?: string
   dump?: string | boolean
   includeContent?: boolean
   origin?: string
+  remote?: string
 }
 
 /**
@@ -93,6 +95,43 @@ export async function evolutionCommand(
   if (!filePath || filePath.trim() === '') {
     console.error('Error: file path is required')
     process.exit(1)
+  }
+
+  const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
+  if (remoteUrl) {
+    process.env.GITSEMA_REMOTE = remoteUrl
+    const threshold = options.threshold !== undefined ? parseFloat(options.threshold) : 0.3
+    try {
+      const result = await remoteFileEvolution(filePath.trim(), {
+        threshold,
+        includeContent: options.includeContent ?? false,
+      })
+      const json = JSON.stringify(result, null, 2)
+      if (options.dump !== undefined) {
+        if (typeof options.dump === 'string') {
+          writeFileSync(options.dump, json, 'utf8')
+          console.log(`Evolution JSON written to: ${options.dump}`)
+        } else {
+          process.stdout.write(json + '\n')
+          return
+        }
+      }
+      // Human-readable summary from structured data
+      const data = result as { path: string; versions: number; timeline: Array<{ date: string; blobHash: string; commitHash: string; distFromPrev: number; distFromOrigin: number; isOrigin: boolean; isLargeChange: boolean }> }
+      console.log(`Evolution of: ${data.path}`)
+      console.log(`Versions found: ${data.versions}`)
+      if (data.timeline.length > 0) {
+        console.log('')
+        for (const e of data.timeline) {
+          const note = e.isOrigin ? '  (origin)' : e.isLargeChange ? '  ← large change' : ''
+          console.log(`${e.date}  blob:${e.blobHash.slice(0, 7)}  commit:${e.commitHash.slice(0, 7)}  dist_prev=${e.distFromPrev.toFixed(4)}  dist_origin=${e.distFromOrigin.toFixed(4)}${note}`)
+        }
+      }
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+    return
   }
 
   const threshold =
