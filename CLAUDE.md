@@ -83,6 +83,7 @@ The indexer applies a multi-level fallback chain: whole-file → function chunke
 | `--chunks` | off | Include chunk-level embeddings |
 | `--hybrid` | off | Combine vector + BM25 (FTS5) |
 | `--bm25-weight <n>` | `0.3` | BM25 weight in hybrid score |
+| `--branch <name>` | — | Restrict results to blobs seen on this branch |
 
 ### `gitsema first-seen <query> [-k n]`
 Find when a concept first appeared — same as `search` but sorted chronologically (earliest first).
@@ -95,6 +96,7 @@ Track semantic drift of a single file across its Git history.
 | `--threshold <n>` | `0.3` | Cosine distance above which a version is flagged as a large change |
 | `--dump [file]` | — | Output structured JSON; writes to `<file>` or stdout |
 | `--include-content` | off | Add stored file text per version in JSON (requires `--dump`) |
+| `--branch <name>` | — | Restrict evolution to blobs seen on this branch |
 
 ### `gitsema concept-evolution <query> [options]`
 Trace how a semantic concept evolved across the entire codebase history.
@@ -109,6 +111,17 @@ Trace how a semantic concept evolved across the entire codebase history.
 ### `gitsema diff <ref1> <ref2> <path>`
 Compute cosine distance between two versions of a file. `--neighbors <n>` shows nearest-neighbor blobs for each version.
 
+### `gitsema serve [options]`
+Start an HTTP API server that exposes embedding and storage over the network. Allows remote machines to delegate indexing to a central server.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--port <n>` | `4242` | Port to listen on (also `GITSEMA_SERVE_PORT`) |
+| `--key <token>` | — | Require Bearer token on all requests (also `GITSEMA_SERVE_KEY`) |
+
+### `gitsema backfill-fts`
+Populate FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added). Required to use `--hybrid` search on older index entries.
+
 ### `gitsema mcp`
 Start the MCP server over stdio. Exposes: `semantic_search`, `search_history`, `first_seen`, `evolution`, `concept_evolution`, `index`.
 
@@ -119,23 +132,27 @@ Start the MCP server over stdio. Exposes: `semantic_search`, `search_history`, `
 ```
 git repo
    ↓
-[ src/core/git/ ]          revList.ts  — streams (blobHash, path) via git rev-list --objects
-   │                        showBlob.ts — fetches content via git cat-file blob
+[ src/core/git/ ]          revList.ts   — streams (blobHash, path) via git rev-list --objects
+   │                        showBlob.ts  — fetches content via git cat-file blob
    │                        commitMap.ts — maps commit hashes to timestamps + blobs
+   │                        walker.ts    — Git tree walking helpers
    ↓
-[ src/core/indexing/ ]     deduper.ts  — skips already-indexed blob hashes
-   │                        indexer.ts  — orchestrates the full pipeline (400 LOC)
-   │                        blobStore.ts — transactional SQLite writes
+[ src/core/indexing/ ]     deduper.ts        — skips already-indexed blob hashes
+   │                        indexer.ts        — orchestrates the full pipeline (~400 LOC)
+   │                        blobStore.ts      — transactional SQLite writes
+   │                        remoteIndexer.ts  — delegates embedding to remote HTTP server
+   │                        backfillFts.ts    — backfills FTS5 content for older index entries
    ↓
 [ src/core/chunking/ ]     fileChunker / functionChunker / fixedChunker
    ↓
-[ src/core/embedding/ ]    provider.ts — EmbeddingProvider interface
-   │                        local.ts    — OllamaProvider (localhost:11434)
-   │                        http.ts     — HttpProvider (OpenAI-compatible)
-   │                        router.ts   — RoutingProvider (code vs. text per file type)
+[ src/core/embedding/ ]    provider.ts  — EmbeddingProvider interface
+   │                        local.ts     — OllamaProvider (localhost:11434)
+   │                        http.ts      — HttpProvider (OpenAI-compatible)
+   │                        router.ts    — RoutingProvider (code vs. text per file type)
+   │                        fileType.ts  — categorises files by extension (code vs. prose)
    ↓
 [ src/core/db/ ]           schema.ts   — Drizzle ORM table definitions
-   │                        sqlite.ts   — connection, WAL mode, FTS5 init
+   │                        sqlite.ts   — connection, WAL mode, versioned migrations, FTS5 init
    ↓
 [ src/core/search/ ]       vectorSearch.ts  — cosine similarity, three-signal ranking
    │                        hybridSearch.ts  — vector + BM25 fusion
@@ -145,6 +162,8 @@ git repo
    ↓
 [ src/cli/ ]               index.ts + commands/*.ts  — Commander.js CLI
 [ src/mcp/ ]               server.ts                 — MCP stdio server
+[ src/server/ ]            app.ts + routes/ + middleware/  — HTTP API server (remote backend)
+[ src/client/ ]            remoteClient.ts            — client for remote server mode
 ```
 
 **Key data flow (indexing):**
@@ -179,6 +198,8 @@ All configuration is via environment variables. No config file.
 | `GITSEMA_API_KEY` | *(optional)* | Bearer token for HTTP provider |
 | `GITSEMA_VERBOSE` | off | Set to `1` for debug logging |
 | `GITSEMA_LOG_MAX_BYTES` | `1048576` | Log rotation threshold (1 MB) |
+| `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema serve` HTTP server |
+| `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema serve` |
 
 **Ollama quick start:**
 ```bash
@@ -219,10 +240,15 @@ gitsema index
 | `blob_commits` | Many-to-many blob ↔ commit join |
 | `indexed_commits` | Tracks which commits have been fully processed (incremental resume) |
 | `blob_fts` | FTS5 virtual table for BM25 hybrid search |
+| `blob_branches` | Maps blobs to branch names (added in Phase 15) |
 
-**FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content.
+**FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
-**Schema changes:** No Drizzle migration workflow exists yet. Schema changes require updating `src/core/db/schema.ts` and `src/core/db/sqlite.ts` (which runs `CREATE TABLE IF NOT EXISTS` on startup).
+**Schema migrations:** `sqlite.ts` runs versioned migrations on startup (idempotent):
+- v0 → v1: Added `file_type` column to `embeddings` (Phase 8)
+- v1 → v2: Added `blob_branches` table (Phase 15)
+
+Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 
 ---
 
@@ -274,7 +300,7 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 - **ESM only.** `"type": "module"` in `package.json`. All imports must use `.js` extensions (even for `.ts` source files). No CommonJS.
 - **Strict TypeScript.** `strict: true` in `tsconfig.json`. No `any` casts without explicit reason.
 - **No barrel exports.** Import directly from the file that defines the function/class.
-- **No test suite yet.** The `test` script in `package.json` is a placeholder. Tests are a known gap.
+- **No test suite yet.** Vitest is installed and `vitest.config.ts` exists, but no tests are written. Tests are a known gap.
 - **Logger:** Use `logger.ts` (`log.info`, `log.debug`, etc.) — do not use `console.log` in library code. `console.log` is acceptable in CLI command handlers for user output.
 - **Error handling:** Errors from embedding providers should be caught per-blob and counted in stats (not crash the whole indexer). See `indexer.ts` for the pattern.
 
@@ -284,10 +310,6 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 
 | Gap | Notes |
 |---|---|
-| **No test suite** | Highest priority technical debt. Need integration tests (indexer + search) and unit tests (chunking, ranking). |
-| **No CI/CD** | No GitHub Actions. No automated build or type-check on PRs. |
-| **No `.env.example`** | Config is only documented here and in README. |
-| **Phase 13: Python model server** | `modelserver/` is scaffolded but blocked on Windows — `tokenizers` requires a Rust toolchain. Docker image would solve this. |
-| **No schema migration** | Drizzle ORM is set up but no migration workflow. Schema changes are done manually via `CREATE TABLE IF NOT EXISTS`. |
-| **No FTS5 backfill** | Blobs indexed before Phase 11 have no FTS5 content. A `gitsema backfill-fts` command would fix this. |
+| **No test suite** | Highest priority technical debt. `vitest.config.ts` exists and Vitest is installed, but no tests are written. Need integration tests (indexer + search) and unit tests (chunking, ranking). |
+| **Phase 13: Python model server** | `modelserver/` is scaffolded (FastAPI + sentence-transformers) but blocked on Windows — `tokenizers` requires a Rust toolchain. A Docker image would solve this. |
 | **Cosine at scale** | Pure-JS cosine works to ~500K blobs. `sqlite-vss` or DuckDB migration path is in the risk register but not designed. |
