@@ -173,6 +173,60 @@ export async function remoteConceptEvolution(
 }
 
 // ---------------------------------------------------------------------------
+// Remote repository indexing (Phase 16)
+// ---------------------------------------------------------------------------
+
+export interface RemoteIndexCredentials {
+  type: 'token'
+  token: string
+}
+
+export interface RemoteIndexOptions {
+  since?: string | null
+  maxCommits?: number | null
+  concurrency?: number
+  ext?: string[]
+  maxSize?: string
+  exclude?: string[]
+  chunker?: 'file' | 'function' | 'fixed'
+  windowSize?: number
+  overlap?: number
+}
+
+export interface RemoteIndexRequest {
+  repoUrl: string
+  credentials?: RemoteIndexCredentials
+  cloneDepth?: number | null
+  indexOptions?: RemoteIndexOptions
+}
+
+export interface RemoteIndexStats {
+  seen: number
+  indexed: number
+  skipped: number
+  oversized: number
+  filtered: number
+  failed: number
+  embedFailed: number
+  otherFailed: number
+  fbFunction: number
+  fbFixed: number
+  queued: number
+  elapsed: number
+  commits: number
+  blobCommits: number
+  chunks: number
+}
+
+/**
+ * Asks the remote server to clone and index a Git repository.
+ * Requires GITSEMA_REMOTE to point at a running gitsema server.
+ */
+export async function remoteIndexRepo(req: RemoteIndexRequest): Promise<RemoteIndexStats> {
+  return request<RemoteIndexStats>('/remote/index', req)
+}
+
+// ---------------------------------------------------------------------------
 // Status
 // ---------------------------------------------------------------------------
 

@@ -10,6 +10,7 @@ import { diffCommand } from './commands/diff.js'
 import { startMcpServer } from '../mcp/server.js'
 import { backfillFtsCommand } from './commands/backfillFts.js'
 import { serveCommand } from './commands/serve.js'
+import { remoteIndexCommand } from './commands/remoteIndex.js'
 
 const program = new Command()
 
@@ -177,6 +178,26 @@ program
   )
   .option('--concurrency <n>', 'max concurrent embedding calls (default 4)')
   .action(serveCommand)
+
+program
+  .command('remote-index <repoUrl>')
+  .description('Ask a remote gitsema server to clone and index a Git repository (Phase 16)')
+  .option('--remote <url>', 'remote gitsema server URL (overrides GITSEMA_REMOTE)')
+  .option('--token <token>', 'Git credential token embedded in the clone URL')
+  .option('--depth <n>', 'shallow clone depth (omit for full clone)')
+  .option(
+    '--since <ref>',
+    'only index commits after this point; accepts a date, tag, commit hash, or "all"',
+  )
+  .option('--max-commits <n>', 'stop after indexing this many commits')
+  .option('--concurrency <n>', 'parallel embedding workers on the server (default 4)')
+  .option('--ext <extensions>', 'only index files with these comma-separated extensions')
+  .option('--max-size <size>', 'skip blobs larger than this size, e.g. "200kb"')
+  .option('--exclude <patterns>', 'skip blobs whose path contains these comma-separated patterns')
+  .option('--chunker <strategy>', 'chunking strategy: file (default), function, fixed')
+  .option('--window-size <n>', 'chunk size in characters for the fixed chunker (default 1500)')
+  .option('--overlap <n>', 'character overlap between adjacent fixed chunks (default 200)')
+  .action(remoteIndexCommand)
 
 program
   .command('backfill-fts')
