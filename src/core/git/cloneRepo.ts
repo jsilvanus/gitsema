@@ -1,16 +1,19 @@
 /**
- * Remote repository clone management (Phase 16).
+ * Remote repository clone management (Phase 16 + Phase 17).
  *
- * Handles cloning HTTPS Git repositories into RAM-backed temp directories,
- * enforcing SSRF protections, size/timeout limits, cleanup strategies, and
- * an in-memory registry for `keep` mode incremental re-indexing.
+ * Phase 16: HTTPS cloning with token credentials embedded in the URL.
+ * Phase 17 additions:
+ *   - GIT_ASKPASS credential helper: keeps token out of /proc/<pid>/cmdline
+ *   - SSH repository URLs: ssh:// and SCP-style git@host:path
+ *   - PEM SSH private key support via GIT_SSH_COMMAND
  */
 
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { lookup } from 'node:dns/promises'
+import { randomBytes } from 'node:crypto'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -90,22 +93,51 @@ function isPrivateIPv6(addr: string): boolean {
 }
 
 /**
+ * Extracts the hostname from any supported URL format:
+ *  - Standard URLs: https://host/path, ssh://host/path
+ *  - SCP-style: git@host:owner/repo.git
+ *
+ * Returns null for unrecognised formats.
+ */
+function extractHostname(rawUrl: string): { hostname: string; protocol: string } | null {
+  // SCP-style (no ://): git@github.com:owner/repo.git or host:path
+  if (!rawUrl.includes('://')) {
+    const match = rawUrl.match(/^(?:[^@/]+@)?([^:/]+):/)
+    if (match) {
+      return { hostname: match[1], protocol: 'ssh' }
+    }
+    return null
+  }
+
+  try {
+    const parsed = new URL(rawUrl)
+    return { hostname: parsed.hostname, protocol: parsed.protocol.replace(':', '') }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Validates that a URL is safe to clone from.
  * Throws an error if the URL fails SSRF checks.
+ *
+ * Accepts:
+ *  - https:// URLs
+ *  - ssh:// URLs
+ *  - SCP-style git@host:path URLs
  */
 export async function validateCloneUrl(rawUrl: string): Promise<void> {
-  let parsed: URL
-  try {
-    parsed = new URL(rawUrl)
-  } catch {
-    throw new Error(`Invalid URL: ${rawUrl}`)
+  const extracted = extractHostname(rawUrl)
+  if (!extracted) {
+    throw new Error(`Invalid or unsupported URL format: ${rawUrl}`)
   }
 
-  if (parsed.protocol !== 'https:') {
-    throw new Error(`Only https:// URLs are allowed (got ${parsed.protocol})`)
+  const { hostname, protocol } = extracted
+
+  if (protocol !== 'https' && protocol !== 'ssh') {
+    throw new Error(`Only https:// and ssh:// (including SCP-style) URLs are allowed (got ${protocol}://)`)
   }
 
-  const hostname = parsed.hostname
   if (!hostname) throw new Error('URL has no hostname')
 
   // Resolve hostname to IP and check for private/loopback addresses
@@ -129,29 +161,26 @@ export async function validateCloneUrl(rawUrl: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// URL credential embedding and sanitisation
+// Credential types (Phase 17: union type)
 // ---------------------------------------------------------------------------
 
-export interface CloneCredentials {
-  type: 'token'
-  token: string
-}
+export type CloneCredentials =
+  | { type: 'token'; token: string }
+  | { type: 'sshKey'; key: string }
 
-/**
- * Embeds credentials into a clone URL.
- * Uses user:token@host form — credentials stay in argv array (not shell).
- */
-export function embedCredentials(rawUrl: string, creds: CloneCredentials): string {
-  const parsed = new URL(rawUrl)
-  parsed.username = 'oauth2'
-  parsed.password = creds.token
-  return parsed.toString()
-}
+// ---------------------------------------------------------------------------
+// URL sanitisation
+// ---------------------------------------------------------------------------
 
 /**
  * Returns a URL safe for logging — strips userinfo (credentials).
+ * Handles standard URLs and SCP-style formats.
  */
 export function sanitiseUrl(rawUrl: string): string {
+  // SCP-style: git@host:path — no embedded credentials in the URL itself
+  if (!rawUrl.includes('://')) {
+    return rawUrl
+  }
   try {
     const parsed = new URL(rawUrl)
     parsed.username = ''
@@ -160,6 +189,47 @@ export function sanitiseUrl(rawUrl: string): string {
   } catch {
     return '<invalid-url>'
   }
+}
+
+// ---------------------------------------------------------------------------
+// GIT_ASKPASS credential helper (Phase 17)
+// ---------------------------------------------------------------------------
+
+/**
+ * Writes a GIT_ASKPASS helper script to a temp file (mode 0700).
+ * The script echoes the token regardless of the prompt — git calls it for
+ * username and password separately but both return the token, which works
+ * for most HTTPS token-based providers (GitHub, GitLab, Gitea).
+ *
+ * The file path must be deleted by the caller in a finally block.
+ */
+async function writeAskpassScript(token: string): Promise<string> {
+  const id = randomBytes(8).toString('hex')
+  const scriptPath = join(cloneDir(), `gitsema-askpass-${id}.sh`)
+  // Escape single quotes in the token for safe shell embedding.
+  // The only character that cannot appear in a single-quoted shell string is
+  // a single quote — we handle it with the standard '\'' escape sequence.
+  const safeToken = token.replace(/'/g, `'\\''`)
+  const content = `#!/bin/sh\nprintf '%s' '${safeToken}'\n`
+  await writeFile(scriptPath, content, { mode: 0o700 })
+  return scriptPath
+}
+
+// ---------------------------------------------------------------------------
+// SSH private key helper (Phase 17)
+// ---------------------------------------------------------------------------
+
+/**
+ * Writes a PEM-encoded SSH private key to a temp file (mode 0600).
+ * The file path must be deleted by the caller in a finally block.
+ */
+async function writeSshKey(pemKey: string): Promise<string> {
+  const id = randomBytes(8).toString('hex')
+  const keyPath = join(cloneDir(), `gitsema-sshkey-${id}`)
+  // Ensure the key ends with a newline — some OpenSSH versions require it.
+  const content = pemKey.endsWith('\n') ? pemKey : `${pemKey}\n`
+  await writeFile(keyPath, content, { mode: 0o600 })
+  return keyPath
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +283,10 @@ export function getCloneSemaphore(): Semaphore {
 const cloneRegistry = new Map<string, string>()
 
 function normaliseUrl(rawUrl: string): string {
+  if (!rawUrl.includes('://')) {
+    // SCP-style: normalise to lowercase
+    return rawUrl.toLowerCase()
+  }
   try {
     const parsed = new URL(rawUrl)
     parsed.username = ''
@@ -242,6 +316,35 @@ export interface CloneResult {
 }
 
 /**
+ * Builds the extra environment variables needed for credential delivery.
+ * Returns the vars and paths to temp files that must be deleted in finally.
+ */
+async function buildCredentialEnv(
+  credentials: CloneCredentials | undefined,
+): Promise<{ extraEnv: Record<string, string>; tempFiles: string[] }> {
+  const extraEnv: Record<string, string> = {}
+  const tempFiles: string[] = []
+
+  if (!credentials) return { extraEnv, tempFiles }
+
+  if (credentials.type === 'token') {
+    // Phase 17: GIT_ASKPASS keeps the token out of /proc/<pid>/cmdline
+    const askpassPath = await writeAskpassScript(credentials.token)
+    tempFiles.push(askpassPath)
+    extraEnv['GIT_ASKPASS'] = askpassPath
+    extraEnv['GIT_TERMINAL_PROMPT'] = '0' // fail fast if askpass returns nothing useful
+  } else if (credentials.type === 'sshKey') {
+    // Phase 17: write key to temp file, set GIT_SSH_COMMAND
+    const keyPath = await writeSshKey(credentials.key)
+    tempFiles.push(keyPath)
+    extraEnv['GIT_SSH_COMMAND'] =
+      `ssh -i ${keyPath} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes`
+  }
+
+  return { extraEnv, tempFiles }
+}
+
+/**
  * Creates a unique temp directory under `cloneDir`, runs `git clone`, and
  * returns the path. Size monitoring kills the process if it exceeds the limit.
  */
@@ -249,36 +352,58 @@ async function freshClone(options: CloneOptions): Promise<string> {
   const { repoUrl, credentials, depth } = options
   const base = cloneDir()
   const clonePath = await mkdtemp(join(base, 'gitsema-'))
-
-  const cloneUrl = credentials ? embedCredentials(repoUrl, credentials) : repoUrl
   const safeUrl = sanitiseUrl(repoUrl)
 
   const args: string[] = ['clone', '--quiet']
   if (depth != null && depth > 0) {
     args.push('--depth', String(depth))
   }
-  args.push(cloneUrl, clonePath)
+  args.push(repoUrl, clonePath)
 
   logger.info(`Cloning ${safeUrl} into ${clonePath}`)
 
-  await runGitCommand(args, clonePath, safeUrl)
+  const { extraEnv, tempFiles } = await buildCredentialEnv(credentials)
+  try {
+    await runGitCommand(args, clonePath, safeUrl, extraEnv)
+  } finally {
+    for (const f of tempFiles) {
+      await unlink(f).catch(() => {})
+    }
+  }
+
   return clonePath
 }
 
 /**
  * Runs `git fetch --all` in an existing clone to update it.
  */
-async function updateClone(clonePath: string, repoUrl: string): Promise<void> {
+async function updateClone(clonePath: string, options: CloneOptions): Promise<void> {
+  const { repoUrl, credentials } = options
   const safeUrl = sanitiseUrl(repoUrl)
   logger.info(`Fetching updates for ${safeUrl} in ${clonePath}`)
-  await runGitCommand(['fetch', '--all', '--quiet'], clonePath, safeUrl)
+
+  const { extraEnv, tempFiles } = await buildCredentialEnv(credentials)
+  try {
+    await runGitCommand(['fetch', '--all', '--quiet'], clonePath, safeUrl, extraEnv)
+  } finally {
+    for (const f of tempFiles) {
+      await unlink(f).catch(() => {})
+    }
+  }
 }
 
 /**
  * Spawns a git command, enforcing timeout and size limits.
  * Never uses shell to avoid credential leakage.
+ * Extra environment variables (e.g. GIT_ASKPASS, GIT_SSH_COMMAND) are merged
+ * with the current process environment.
  */
-function runGitCommand(args: string[], cwd: string, safeUrl: string): Promise<void> {
+function runGitCommand(
+  args: string[],
+  cwd: string,
+  safeUrl: string,
+  extraEnv: Record<string, string> = {},
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const maxBytes = cloneMaxBytes()
     const timeoutMs = cloneTimeoutMs()
@@ -287,6 +412,7 @@ function runGitCommand(args: string[], cwd: string, safeUrl: string): Promise<vo
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false, // critical: never use shell (credential leakage risk)
+      env: { ...process.env, ...extraEnv },
     })
 
     let stderr = ''
@@ -359,7 +485,7 @@ export async function obtainClone(options: CloneOptions): Promise<CloneResult> {
     const existing = cloneRegistry.get(key)
     if (existing) {
       try {
-        await updateClone(existing, options.repoUrl)
+        await updateClone(existing, options)
         return { clonePath: existing, fresh: false }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)

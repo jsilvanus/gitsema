@@ -1,4 +1,4 @@
-import { db, getRawDb } from '../db/sqlite.js'
+import { getActiveSession } from '../db/sqlite.js'
 import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
@@ -26,6 +26,7 @@ export interface StoreBlobArgs {
  */
 export function storeBlob(args: StoreBlobArgs): void {
   const { blobHash, size, path, model, embedding, fileType, content } = args
+  const { db, rawDb } = getActiveSession()
 
   // Serialize float32 embedding to a Buffer
   const vector = Buffer.from(new Float32Array(embedding).buffer)
@@ -69,6 +70,8 @@ export interface StoreBlobRecordArgs {
  */
 export function storeBlobRecord(args: StoreBlobRecordArgs): void {
   const { blobHash, size, path, content } = args
+  const { db } = getActiveSession()
+
   db.transaction((tx) => {
     tx.insert(blobs)
       .values({ blobHash, size, indexedAt: Date.now() })
@@ -91,8 +94,8 @@ export function storeBlobRecord(args: StoreBlobRecordArgs): void {
  * before Phase 11 without the FTS5 table, or content was omitted).
  */
 export function getBlobContent(blobHash: string): string | undefined {
-  const raw = getRawDb()
-  const row = raw.prepare(`SELECT content FROM blob_fts WHERE blob_hash = ?`).get(blobHash) as
+  const { rawDb } = getActiveSession()
+  const row = rawDb.prepare(`SELECT content FROM blob_fts WHERE blob_hash = ?`).get(blobHash) as
     | { content: string }
     | undefined
   return row?.content
@@ -103,9 +106,9 @@ export function getBlobContent(blobHash: string): string | undefined {
  * Uses a DELETE + INSERT pattern because FTS5 does not support ON CONFLICT.
  */
 export function storeFtsContent(blobHash: string, content: string): void {
-  const raw = getRawDb()
-  raw.prepare(`DELETE FROM blob_fts WHERE blob_hash = ?`).run(blobHash)
-  raw.prepare(`INSERT INTO blob_fts (blob_hash, content) VALUES (?, ?)`).run(blobHash, content)
+  const { rawDb } = getActiveSession()
+  rawDb.prepare(`DELETE FROM blob_fts WHERE blob_hash = ?`).run(blobHash)
+  rawDb.prepare(`INSERT INTO blob_fts (blob_hash, content) VALUES (?, ?)`).run(blobHash, content)
 }
 
 /**
@@ -114,6 +117,8 @@ export function storeFtsContent(blobHash: string, content: string): void {
  * Returns the number of blobCommit rows stored.
  */
 export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]): number {
+  const { db } = getActiveSession()
+
   if (blobHashes.length === 0) {
     db.insert(commits)
       .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message })
@@ -162,6 +167,7 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
  * default `--since` value on subsequent runs.
  */
 export function markCommitIndexed(commitHash: string): void {
+  const { db } = getActiveSession()
   db.insert(indexedCommits)
     .values({ commitHash, indexedAt: Date.now() })
     .onConflictDoNothing()
@@ -173,6 +179,7 @@ export function markCommitIndexed(commitHash: string): void {
  * has never been built. Used to default `--since` to the last indexed point.
  */
 export function getLastIndexedCommit(): string | undefined {
+  const { db } = getActiveSession()
   const row = db
     .select({ commitHash: indexedCommits.commitHash })
     .from(indexedCommits)
@@ -196,6 +203,7 @@ export interface StoreChunkArgs {
  */
 export function storeChunk(args: StoreChunkArgs): number {
   const { blobHash, startLine, endLine, model, embedding } = args
+  const { db, rawDb } = getActiveSession()
   const vector = Buffer.from(new Float32Array(embedding).buffer)
 
   // Avoid creating duplicate chunks for the same blob/start/end by checking
@@ -203,8 +211,7 @@ export function storeChunk(args: StoreChunkArgs): number {
   // insert the embedding. Otherwise create both rows in a transaction.
   // Use raw sqlite to check for an existing chunk row matching the same
   // blob/start/end triple to avoid duplicate chunk rows.
-  const raw = getRawDb()
-  const existingRow = raw
+  const existingRow = rawDb
     .prepare('SELECT id FROM chunks WHERE blob_hash = ? AND start_line = ? AND end_line = ?')
     .get(blobHash, startLine, endLine) as { id: number } | undefined
 
@@ -249,8 +256,8 @@ export function storeChunk(args: StoreChunkArgs): number {
  */
 export function storeBlobBranches(blobHash: string, branches: string[]): void {
   if (branches.length === 0) return
-  const raw = getRawDb()
-  const stmt = raw.prepare(
+  const { rawDb } = getActiveSession()
+  const stmt = rawDb.prepare(
     'INSERT OR IGNORE INTO blob_branches (blob_hash, branch_name) VALUES (?, ?)',
   )
   for (const branchName of branches) {

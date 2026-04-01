@@ -1,23 +1,27 @@
 /**
- * Remote repository indexing route (Phase 16).
+ * Remote repository indexing route (Phase 16 + Phase 17).
  *
- * POST /api/v1/remote/index
+ * Phase 16:
+ *   POST /api/v1/remote/index — clone + index, synchronous response (IndexStats)
  *
- * Accepts an HTTPS Git URL + optional credentials, clones the repository into
- * a RAM-backed temp directory, runs the full indexing pipeline, and returns
- * IndexStats.  The clone is cleaned up according to GITSEMA_CLONE_KEEP.
+ * Phase 17 additions:
+ *   POST /api/v1/remote/index — returns { jobId } immediately; job runs asynchronously
+ *   GET  /api/v1/remote/jobs/:jobId/progress — SSE stream of IndexStats snapshots
+ *   Request body: adds `dbLabel` (per-repo DB) and `sshKey` credential type
  *
  * Security mitigations enforced:
- *   - SSRF: HTTPS-only, DNS resolution checked against blocked IP ranges
- *   - Credential leakage: spawn argv array (no shell), sanitised error messages
+ *   - SSRF: HTTPS + SSH allowed, DNS resolution checked against blocked IP ranges
+ *   - Credential leakage: GIT_ASKPASS helper (token) / temp key file (SSH), never in argv
  *   - Oversized repos: background du polling + SIGKILL + GITSEMA_CLONE_MAX_BYTES
  *   - Clone timeout: GITSEMA_CLONE_TIMEOUT_MS (default 10 min)
  *   - DoS: server-wide semaphore (GITSEMA_CLONE_CONCURRENCY, default 2)
  *   - Path traversal: mkdtemp under validated GITSEMA_CLONE_DIR
  *   - Input: Zod schema, array limits, string length limits
+ *   - dbLabel: alphanumeric + hyphens only, 1–64 chars
  */
 
 import { Router } from 'express'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
@@ -30,16 +34,28 @@ import {
   getCloneSemaphore,
   sanitiseUrl,
 } from '../../core/git/cloneRepo.js'
+import { getOrOpenLabeledDb, withDbSession } from '../../core/db/sqlite.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
 // Zod schemas
 // ---------------------------------------------------------------------------
 
-const CredentialsSchema = z.object({
+const TokenCredentialsSchema = z.object({
   type: z.literal('token'),
   token: z.string().min(1).max(256),
 })
+
+const SshKeyCredentialsSchema = z.object({
+  type: z.literal('sshKey'),
+  /** PEM-encoded SSH private key. Max 16 KB covers all common key types. */
+  key: z.string().min(1).max(16384),
+})
+
+const CredentialsSchema = z.discriminatedUnion('type', [
+  TokenCredentialsSchema,
+  SshKeyCredentialsSchema,
+])
 
 const IndexOptionsSchema = z.object({
   since: z.string().max(256).nullable().optional(),
@@ -53,11 +69,18 @@ const IndexOptionsSchema = z.object({
   overlap: z.number().int().nonnegative().optional(),
 }).strict()
 
+/** Alphanumeric + hyphens, 1–64 chars. Used as a DB filename component. */
+const DbLabelSchema = z.string().regex(/^[a-zA-Z0-9-]{1,64}$/, {
+  message: 'dbLabel must be 1–64 alphanumeric characters or hyphens',
+})
+
 const RemoteIndexBodySchema = z.object({
   repoUrl: z.string().max(2048),
   credentials: CredentialsSchema.optional(),
   cloneDepth: z.number().int().positive().nullable().optional(),
   indexOptions: IndexOptionsSchema.optional(),
+  /** Optional label — routes indexing to .gitsema/<label>.db instead of the default DB. */
+  dbLabel: DbLabelSchema.optional(),
 }).strict()
 
 // ---------------------------------------------------------------------------
@@ -71,6 +94,151 @@ function parseMaxSize(s: string): number {
   const unit = (match[2] ?? 'b').toLowerCase()
   const multipliers: Record<string, number> = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }
   return Math.floor(n * (multipliers[unit] ?? 1))
+}
+
+// ---------------------------------------------------------------------------
+// Job registry (Phase 17 — async job API)
+// ---------------------------------------------------------------------------
+
+type JobSubscriber = (event: JobEvent) => void
+
+type JobEvent =
+  | { type: 'progress'; stats: IndexStats }
+  | { type: 'done'; stats: IndexStats }
+  | { type: 'error'; error: string }
+
+interface Job {
+  id: string
+  status: 'running' | 'done' | 'failed'
+  stats: IndexStats | null
+  error: string | null
+  subscribers: JobSubscriber[]
+}
+
+const _jobs = new Map<string, Job>()
+
+/** Remove completed jobs after this TTL to prevent unbounded memory growth. */
+const JOB_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+function createJob(): Job {
+  const job: Job = {
+    id: randomUUID(),
+    status: 'running',
+    stats: null,
+    error: null,
+    subscribers: [],
+  }
+  _jobs.set(job.id, job)
+  return job
+}
+
+function notifySubscribers(job: Job, event: JobEvent): void {
+  for (const sub of job.subscribers) {
+    try { sub(event) } catch { /* ignore subscriber errors */ }
+  }
+}
+
+function scheduleJobCleanup(jobId: string): void {
+  setTimeout(() => { _jobs.delete(jobId) }, JOB_TTL_MS).unref()
+}
+
+// ---------------------------------------------------------------------------
+// Core job runner
+// ---------------------------------------------------------------------------
+
+async function runIndexJob(
+  job: Job,
+  options: {
+    repoUrl: string
+    credentials: z.infer<typeof CredentialsSchema> | undefined
+    cloneDepth: number | null | undefined
+    indexOptions: z.infer<typeof IndexOptionsSchema>
+    dbLabel: string | undefined
+    textProvider: EmbeddingProvider
+    codeProvider: EmbeddingProvider | undefined
+    serverChunker: ChunkStrategy
+    serverConcurrency: number
+  },
+): Promise<void> {
+  const {
+    repoUrl, credentials, cloneDepth, indexOptions,
+    dbLabel, textProvider, codeProvider, serverChunker, serverConcurrency,
+  } = options
+
+  const safeUrl = sanitiseUrl(repoUrl)
+  let clonePath: string | null = null
+  let succeeded = false
+
+  try {
+    logger.info(`Starting remote index of ${safeUrl}${dbLabel ? ` (db: ${dbLabel})` : ''}`)
+    const cloneResult = await obtainClone({
+      repoUrl,
+      credentials,
+      depth: cloneDepth ?? null,
+    })
+    clonePath = cloneResult.clonePath
+
+    const maxBlobSize = indexOptions.maxSize ? parseMaxSize(indexOptions.maxSize) : undefined
+
+    const indexerOptions = {
+      repoPath: clonePath,
+      provider: textProvider,
+      codeProvider,
+      concurrency: indexOptions.concurrency ?? serverConcurrency,
+      since: indexOptions.since ?? undefined,
+      maxCommits: indexOptions.maxCommits ?? undefined,
+      maxBlobSize,
+      filter: {
+        ext: indexOptions.ext && indexOptions.ext.length > 0 ? indexOptions.ext : undefined,
+        exclude: indexOptions.exclude && indexOptions.exclude.length > 0
+          ? indexOptions.exclude
+          : undefined,
+      },
+      chunker: (indexOptions.chunker as ChunkStrategy | undefined) ?? serverChunker,
+      chunkerOptions: {
+        windowSize: indexOptions.windowSize,
+        overlap: indexOptions.overlap,
+      },
+      onProgress: (stats: IndexStats) => {
+        job.stats = stats
+        notifySubscribers(job, { type: 'progress', stats })
+      },
+    }
+
+    let stats: IndexStats
+
+    if (dbLabel) {
+      // Per-repo DB session: all indexer writes go to .gitsema/<label>.db
+      const session = getOrOpenLabeledDb(dbLabel)
+      stats = await withDbSession(session, () => runIndex(indexerOptions))
+    } else {
+      stats = await runIndex(indexerOptions)
+    }
+
+    succeeded = true
+    job.status = 'done'
+    job.stats = stats
+    notifySubscribers(job, { type: 'done', stats })
+
+    logger.info(
+      `Remote index of ${safeUrl} complete: ` +
+      `${stats.indexed} indexed, ${stats.skipped} skipped, ${stats.failed} failed`,
+    )
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // Sanitise message to avoid leaking credentials
+    const safeMsg = msg.replace(/https?:\/\/[^@\s]+@/g, 'https://<credentials>@')
+    logger.error(`Remote index of ${safeUrl} failed: ${safeMsg}`)
+    job.status = 'failed'
+    job.error = safeMsg
+    notifySubscribers(job, { type: 'error', error: safeMsg })
+  } finally {
+    getCloneSemaphore().release()
+    scheduleJobCleanup(job.id)
+    if (clonePath) {
+      await cleanupClone(clonePath, succeeded)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -97,8 +265,9 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
   /**
    * POST /api/v1/remote/index
    *
-   * Body: RemoteIndexBody (see schema above)
-   * Response: IndexStats JSON
+   * Validates input, acquires the clone semaphore, and starts an async index
+   * job. Returns 202 Accepted with { jobId } immediately. The caller polls
+   * GET /api/v1/remote/jobs/:jobId/progress for live progress via SSE.
    */
   router.post('/index', async (req, res) => {
     // --- 1. Validate input ---------------------------------------------------
@@ -108,7 +277,7 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       return
     }
 
-    const { repoUrl, credentials, cloneDepth, indexOptions = {} } = parsed.data
+    const { repoUrl, credentials, cloneDepth, indexOptions = {}, dbLabel } = parsed.data
 
     // --- 2. SSRF guard -------------------------------------------------------
     try {
@@ -132,65 +301,82 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
 
     await semaphore.acquire()
 
-    const safeUrl = sanitiseUrl(repoUrl)
-    let clonePath: string | null = null
-    let succeeded = false
+    // --- 4. Create job and return jobId immediately -------------------------
+    const job = createJob()
+    res.status(202).json({ jobId: job.id })
 
-    try {
-      // --- 4. Clone -----------------------------------------------------------
-      logger.info(`Starting remote index of ${safeUrl}`)
-      const cloneResult = await obtainClone({
-        repoUrl,
-        credentials,
-        depth: cloneDepth ?? null,
-      })
-      clonePath = cloneResult.clonePath
+    // --- 5. Run indexing asynchronously (semaphore released inside runner) --
+    void runIndexJob(job, {
+      repoUrl,
+      credentials,
+      cloneDepth,
+      indexOptions,
+      dbLabel,
+      textProvider,
+      codeProvider,
+      serverChunker,
+      serverConcurrency,
+    })
+  })
 
-      // --- 5. Build index options --------------------------------------------
-      const maxBlobSize = indexOptions.maxSize
-        ? parseMaxSize(indexOptions.maxSize)
-        : undefined
+  /**
+   * GET /api/v1/remote/jobs/:jobId/progress
+   *
+   * Server-Sent Events stream. Sends IndexStats snapshots as `progress` events
+   * while the job is running. Sends a final `done` or `error` event on completion.
+   *
+   * Event format:  data: {"type":"progress"|"done"|"error", ...}\n\n
+   */
+  router.get('/jobs/:jobId/progress', (req, res) => {
+    const job = _jobs.get(req.params['jobId'] ?? '')
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' })
+      return
+    }
 
-      const stats: IndexStats = await runIndex({
-        repoPath: clonePath,
-        provider: textProvider,
-        codeProvider,
-        concurrency: indexOptions.concurrency ?? serverConcurrency,
-        since: indexOptions.since ?? undefined,
-        maxCommits: indexOptions.maxCommits ?? undefined,
-        maxBlobSize,
-        filter: {
-          ext: indexOptions.ext && indexOptions.ext.length > 0 ? indexOptions.ext : undefined,
-          exclude: indexOptions.exclude && indexOptions.exclude.length > 0
-            ? indexOptions.exclude
-            : undefined,
-        },
-        chunker: (indexOptions.chunker as ChunkStrategy | undefined) ?? serverChunker,
-        chunkerOptions: {
-          windowSize: indexOptions.windowSize,
-          overlap: indexOptions.overlap,
-        },
-      })
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
 
-      succeeded = true
-      logger.info(
-        `Remote index of ${safeUrl} complete: ` +
-        `${stats.indexed} indexed, ${stats.skipped} skipped, ${stats.failed} failed`,
-      )
+    function send(event: JobEvent): void {
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
 
-      res.status(200).json(stats)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      // Sanitise message to avoid leaking credentials
-      const safeMsg = msg.replace(/https?:\/\/[^@\s]+@/g, 'https://<credentials>@')
-      logger.error(`Remote index of ${safeUrl} failed: ${safeMsg}`)
-      res.status(500).json({ error: safeMsg })
-    } finally {
-      semaphore.release()
-      if (clonePath) {
-        await cleanupClone(clonePath, succeeded)
+    // If the job has already finished, send the final event immediately.
+    if (job.status === 'done' && job.stats) {
+      send({ type: 'done', stats: job.stats })
+      res.end()
+      return
+    }
+    if (job.status === 'failed') {
+      send({ type: 'error', error: job.error ?? 'Unknown error' })
+      res.end()
+      return
+    }
+
+    // Send the latest known stats snapshot so the client isn't blank initially.
+    if (job.stats) {
+      send({ type: 'progress', stats: job.stats })
+    }
+
+    // Subscribe to future updates.
+    const subscriber: JobSubscriber = (event) => {
+      send(event)
+      if (event.type === 'done' || event.type === 'error') {
+        // Remove this subscriber and close the SSE response.
+        const idx = job.subscribers.indexOf(subscriber)
+        if (idx >= 0) job.subscribers.splice(idx, 1)
+        res.end()
       }
     }
+    job.subscribers.push(subscriber)
+
+    // Clean up when the client disconnects mid-stream.
+    req.on('close', () => {
+      const idx = job.subscribers.indexOf(subscriber)
+      if (idx >= 0) job.subscribers.splice(idx, 1)
+    })
   })
 
   return router
