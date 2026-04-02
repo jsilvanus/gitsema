@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches } from '../db/schema.js'
+import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches, symbols, symbolEmbeddings } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
@@ -263,4 +263,65 @@ export function storeBlobBranches(blobHash: string, branches: string[]): void {
   for (const branchName of branches) {
     stmt.run(blobHash, branchName)
   }
+}
+
+export interface StoreSymbolArgs {
+  blobHash: BlobHash
+  startLine: number
+  endLine: number
+  symbolName: string
+  symbolKind: string
+  language: string
+  model: string
+  embedding: Embedding
+}
+
+/**
+ * Writes a symbol record and its enriched embedding in a single transaction.
+ *
+ * The symbol records the named declaration boundary (function, class, method,
+ * impl, etc.) along with its symbol name, kind, and detected language.  The
+ * `embedding` is expected to have been computed from enriched text that
+ * includes the file path, symbol name, and source lines — not just the raw
+ * code content — so that natural-language queries resolve to the right symbol.
+ *
+ * If an identical (blobHash, startLine, endLine, symbolName) row already exists
+ * the call is a no-op; this makes the function safe to call multiple times for
+ * the same symbol (e.g. during a re-index).
+ *
+ * Returns the newly created (or existing) symbol id.
+ */
+export function storeSymbol(args: StoreSymbolArgs): number {
+  const { blobHash, startLine, endLine, symbolName, symbolKind, language, model, embedding } = args
+  const { db, rawDb } = getActiveSession()
+  const vector = Buffer.from(new Float32Array(embedding).buffer)
+
+  const existing = rawDb
+    .prepare(
+      'SELECT id FROM symbols WHERE blob_hash = ? AND start_line = ? AND end_line = ? AND symbol_name = ?',
+    )
+    .get(blobHash, startLine, endLine, symbolName) as { id: number } | undefined
+
+  if (existing) {
+    // Upsert the embedding in case it was missing (e.g. previous partial run)
+    db.insert(symbolEmbeddings)
+      .values({ symbolId: existing.id, model, dimensions: embedding.length, vector })
+      .onConflictDoNothing()
+      .run()
+    return existing.id
+  }
+
+  return db.transaction((tx) => {
+    const symbolRow = tx
+      .insert(symbols)
+      .values({ blobHash, startLine, endLine, symbolName, symbolKind, language })
+      .returning({ id: symbols.id })
+      .get()
+
+    tx.insert(symbolEmbeddings)
+      .values({ symbolId: symbolRow.id, model, dimensions: embedding.length, vector })
+      .run()
+
+    return symbolRow.id
+  })
 }

@@ -13,6 +13,18 @@ export interface Chunk {
   startLine: number
   endLine: number
   content: string
+  /**
+   * Name of the declared symbol this chunk represents (function, class, method,
+   * impl block, etc.), when extracted from the source AST or via regex heuristics.
+   * Present only when using the `function` chunker strategy.
+   */
+  symbolName?: string
+  /**
+   * Kind of the declared symbol: `'function'`, `'class'`, `'method'`, `'impl'`,
+   * `'struct'`, `'enum'`, `'trait'`, or `'other'`.
+   * Present only when using the `function` chunker strategy.
+   */
+  symbolKind?: string
 }
 
 export interface ChunkOptions {

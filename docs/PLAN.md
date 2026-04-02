@@ -1303,14 +1303,66 @@ Update the CLI command (`src/cli/commands/remoteIndex.ts`) to use the async job 
 
 ---
 
-### Phase 19 — Smarter chunking & semantic blame
+### Phase 19 — Smarter chunking, semantic blame & symbol-level embeddings
 
-**Goals:** Improve chunk quality and implement a repo-wide semantic blame (nearest-neighbor blame) tool.
+**Goals:** Improve chunk quality via AST-based splitting, implement a repo-wide semantic blame (nearest-neighbor blame) tool, and introduce symbol-level embeddings as a new indexing tier that captures function identity and enriched metadata.
 
-- **Chunker research + implementation:** Use a web research/synthesizer step to gather best practices for semantic chunking (AST-based splitters, language-aware tokenization, docstring-aware splits). Implement an improved `function` chunker (prefer AST parsing where available) and an optional learned chunker that uses heuristics + model feedback to refine chunk boundaries.
-- **Semantic blame / NN-blame:** Implement `semantic-blame <file>`: for each line or logical block, find nearest-neighbor blobs historically and attribute concept origin by semantic proximity rather than textual changes. Integrate with `commitMap` to return commit + author + date for semantic origins.
+#### Chunker improvements
 
-**Deliverables:** New chunker implementations and a `semantic-blame` CLI command that reports nearest-neighbor origins per logical block.
+Replaced the single catch-all regex with **tree-sitter AST parsing** as the primary splitting strategy for the `function` chunker, with language-specific regex patterns as a graceful fallback when tree-sitter is unavailable (e.g. no C++ toolchain, CI without native build support).
+
+Tree-sitter grammars are added as `optionalDependencies` — installation failures are non-blocking and the chunker silently degrades.
+
+Per-language top-level declaration types:
+
+| Language | Extension(s) | AST node types |
+|---|---|---|
+| Python | `.py`, `.pyi` | `decorated_definition` (decorator + function grouped), `function_definition`, `class_definition` |
+| Go | `.go` | `function_declaration`, `method_declaration` |
+| Rust | `.rs` | `function_item`, `impl_item`, `struct_item`, `enum_item`, `trait_item` |
+| TypeScript/TSX | `.ts`, `.tsx` | `export_statement`, `function_declaration`, `class_declaration`, `lexical_declaration` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | same as TypeScript |
+| Java/C# | `.java`, `.cs`, `.kt`, `.scala` | regex-only fallback |
+
+#### Semantic blame
+
+Implemented `gitsema semantic-blame <file>`: for each logical block in the file (using the function chunker), finds the nearest-neighbor blobs historically and attributes concept origin by semantic proximity rather than textual changes. Returns commit + author + date for each semantic origin. Supports `--top <n>` and `--dump [file]` for JSON output.
+
+#### Symbol-level embeddings (new indexing tier)
+
+Added a new level of embedding — **symbol-level** — that sits alongside blob-level embeddings without replacing them. Symbol embeddings capture named declarations (functions, classes, methods, impl blocks, etc.) and embed them with **enriched context** that includes the file path, symbol name, and kind:
+
+```
+// file: src/auth/jwt.ts  (jwt.ts)  lines 10-25
+// function: validateToken
+export async function validateToken(token: string): Promise<boolean> { ... }
+```
+
+This enriched text lets the embedding model resolve natural-language queries ("authentication middleware") to the right symbol — not just the right file.
+
+**New database tables (schema v4):**
+
+| Table | Purpose |
+|---|---|
+| `symbols` | One row per named declaration: `blob_hash`, `start_line`, `end_line`, `symbol_name`, `symbol_kind`, `language` |
+| `symbol_embeddings` | Vector embedding of the enriched text, keyed by `symbol_id` |
+
+**What is stored in each column:**
+- `symbol_name` — extracted identifier (e.g. `validateToken`, `Auth`, `Repository`)
+- `symbol_kind` — `function` \| `class` \| `method` \| `impl` \| `struct` \| `enum` \| `trait` \| `other`
+- `language` — detected language (`typescript`, `python`, `go`, `rust`, etc.)
+- `symbol_embeddings.vector` — Float32 embedding of the enriched preamble + code text
+
+**When symbols are indexed:** Symbol extraction runs automatically when `--chunker function` is used. Each chunk that carries a `symbolName` (from tree-sitter or the regex fallback) triggers an additional embedding of the enriched text, stored separately in the `symbols`/`symbol_embeddings` tables. Failures are non-fatal — chunk embeddings succeed independently.
+
+**Symbol-level search:** `vectorSearch` accepts `searchSymbols: true` to include symbol-level candidates alongside blob-level ones. Results include `symbolId`, `symbolName`, `symbolKind`, and `language` fields.
+
+**Deliverables:**
+- Tree-sitter-based `FunctionChunker` with regex fallback
+- `gitsema semantic-blame` CLI command
+- `symbols` + `symbol_embeddings` DB tables (schema v4 migration)
+- `storeSymbol()` write path and `searchSymbols` read path
+- Test suite: 97 tests covering chunker symbol extraction, DB storage, search, and deduplication
 
 ---
 

@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { embeddings, paths, chunks, chunkEmbeddings } from '../db/schema.js'
+import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
@@ -66,6 +66,8 @@ export interface VectorSearchOptions {
   query?: string
   /** When true, search chunk embeddings in addition to whole-file embeddings. */
   searchChunks?: boolean
+  /** When true, search symbol-level embeddings (named function/class declarations). */
+  searchSymbols?: boolean
   /** When set, restrict results to blobs that appear on this branch (short name, e.g. "main"). */
   branch?: string
 }
@@ -80,7 +82,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const {
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',
-    searchChunks = false, branch,
+    searchChunks = false, searchSymbols = false, branch,
   } = options
 
   // Determine if three-signal ranking is active
@@ -102,7 +104,11 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const allRows = filteredQuery.all()
 
   // Optionally include chunk embeddings
-  type CandidateRow = { blobHash: string; vector: Buffer; chunkId?: number; startLine?: number; endLine?: number }
+  type CandidateRow = {
+    blobHash: string; vector: Buffer
+    chunkId?: number; startLine?: number; endLine?: number
+    symbolId?: number; symbolName?: string; symbolKind?: string; language?: string
+  }
   let candidatePool: CandidateRow[] = allRows.map((r) => ({
     blobHash: r.blobHash,
     vector: r.vector as Buffer,
@@ -130,6 +136,38 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
         chunkId: row.chunkId,
         startLine: row.startLine,
         endLine: row.endLine,
+      })
+    }
+  }
+
+  if (searchSymbols) {
+    const symQuery = db.select({
+      symbolId: symbols.id,
+      blobHash: symbols.blobHash,
+      startLine: symbols.startLine,
+      endLine: symbols.endLine,
+      symbolName: symbols.symbolName,
+      symbolKind: symbols.symbolKind,
+      language: symbols.language,
+      vector: symbolEmbeddings.vector,
+    })
+      .from(symbolEmbeddings)
+      .innerJoin(symbols, eq(symbolEmbeddings.symbolId, symbols.id))
+
+    const symRows = (model
+      ? symQuery.where(eq(symbolEmbeddings.model, model))
+      : symQuery).all()
+
+    for (const row of symRows) {
+      candidatePool.push({
+        blobHash: row.blobHash,
+        vector: row.vector as Buffer,
+        startLine: row.startLine,
+        endLine: row.endLine,
+        symbolId: row.symbolId,
+        symbolName: row.symbolName,
+        symbolKind: row.symbolKind,
+        language: row.language,
       })
     }
   }
@@ -256,6 +294,10 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       chunkId: b.chunkId,
       startLine: b.startLine,
       endLine: b.endLine,
+      symbolId: b.symbolId,
+      symbolName: b.symbolName,
+      symbolKind: b.symbolKind,
+      language: b.language,
     }
   })
 }

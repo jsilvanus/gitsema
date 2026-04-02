@@ -15,6 +15,8 @@ interface TSNode {
   type: string
   startPosition: { row: number; column: number }
   namedChildren: TSNode[]
+  text: string
+  childForFieldName(name: string): TSNode | null | undefined
 }
 
 // Dynamically loaded once on first use; stays null if native bindings are
@@ -122,6 +124,138 @@ function getGrammar(lang: Language): TreeSitterGrammar | null {
 }
 
 // ---------------------------------------------------------------------------
+// Symbol kind mapping
+// ---------------------------------------------------------------------------
+
+/** Maps a tree-sitter node type to a human-readable symbol kind. */
+function symbolKindFromNodeType(nodeType: string): string {
+  switch (nodeType) {
+    case 'function_declaration':
+    case 'function_definition':
+    case 'function_item':
+    case 'function_signature_item':
+      return 'function'
+
+    case 'method_declaration':
+      return 'method'
+
+    case 'class_declaration':
+    case 'class_definition':
+      return 'class'
+
+    case 'impl_item':
+      return 'impl'
+
+    case 'struct_item':
+      return 'struct'
+
+    case 'enum_item':
+      return 'enum'
+
+    case 'trait_item':
+      return 'trait'
+
+    case 'decorated_definition':
+      return 'function'  // Python decorated function/class; resolved below
+
+    case 'export_statement':
+      return 'export'  // resolved to inner decl kind below
+
+    case 'lexical_declaration':
+    case 'variable_declarator':
+      return 'function'  // e.g. const foo = () => {}
+
+    default:
+      return 'other'
+  }
+}
+
+/**
+ * Extracts the symbol name and kind from a tree-sitter declaration node.
+ * Returns null when the node type is not a recognized top-level declaration.
+ */
+function extractSymbolInfo(node: TSNode, lang: Language): { name: string; kind: string } | null {
+  switch (lang) {
+    case 'python': {
+      if (node.type === 'decorated_definition') {
+        // The actual declaration is the last named child (skipping decorator nodes)
+        const inner = node.namedChildren.find(
+          (c) => c.type === 'function_definition' || c.type === 'class_definition',
+        )
+        if (inner) {
+          const name = inner.childForFieldName('name')?.text ?? ''
+          return { name, kind: inner.type === 'class_definition' ? 'class' : 'function' }
+        }
+        return null
+      }
+      if (node.type === 'function_definition') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'function' }
+      }
+      if (node.type === 'class_definition') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'class' }
+      }
+      return null
+    }
+
+    case 'go': {
+      if (node.type === 'function_declaration') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'function' }
+      }
+      if (node.type === 'method_declaration') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'method' }
+      }
+      return null
+    }
+
+    case 'rust': {
+      if (node.type === 'function_item') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'function' }
+      }
+      if (node.type === 'impl_item') {
+        return { name: node.childForFieldName('type')?.text ?? '', kind: 'impl' }
+      }
+      if (node.type === 'struct_item') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'struct' }
+      }
+      if (node.type === 'enum_item') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'enum' }
+      }
+      if (node.type === 'trait_item') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'trait' }
+      }
+      return null
+    }
+
+    case 'typescript':
+    case 'tsx':
+    case 'javascript': {
+      if (node.type === 'export_statement') {
+        // Recurse into the export body to find the inner declaration
+        const body = node.namedChildren[0]
+        if (body) return extractSymbolInfo(body, lang)
+        return null
+      }
+      if (node.type === 'function_declaration') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'function' }
+      }
+      if (node.type === 'class_declaration') {
+        return { name: node.childForFieldName('name')?.text ?? '', kind: 'class' }
+      }
+      if (node.type === 'lexical_declaration') {
+        // e.g. const foo = () => {} or const foo = function() {}
+        const declarator = node.namedChildren.find((c) => c.type === 'variable_declarator')
+        const name = declarator?.childForFieldName('name')?.text ?? ''
+        return { name, kind: 'function' }
+      }
+      return null
+    }
+
+    default:
+      return null
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Node types that represent top-level declarations per language
 // ---------------------------------------------------------------------------
 
@@ -159,15 +293,30 @@ function isTopLevelDecl(nodeType: string, lang: Language): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Tree-sitter-based split-line extraction
+// Declaration info (line + symbol metadata)
+// ---------------------------------------------------------------------------
+
+/** Parsed information about a top-level declaration boundary. */
+export interface DeclarationInfo {
+  /** 1-indexed start line of the declaration. */
+  startLine: number
+  /** Extracted symbol name, if available. */
+  symbolName?: string
+  /** Symbol kind: 'function' | 'class' | 'method' | 'impl' | 'struct' | 'enum' | 'trait' | 'other'. */
+  symbolKind?: string
+}
+
+// ---------------------------------------------------------------------------
+// Tree-sitter-based declaration extraction
 // ---------------------------------------------------------------------------
 
 /**
  * Uses tree-sitter to extract the 1-indexed start lines of top-level
- * declarations in `content`.  Returns null when tree-sitter is unavailable
- * or parsing fails, signalling the caller to fall back to regex.
+ * declarations in `content`, together with each declaration's symbol name and
+ * kind.  Returns null when tree-sitter is unavailable or parsing fails,
+ * signalling the caller to fall back to regex.
  */
-function extractSplitLinesWithTreeSitter(content: string, lang: Language): number[] | null {
+function extractDeclarationsWithTreeSitter(content: string, lang: Language): DeclarationInfo[] | null {
   const grammar = getGrammar(lang)
   if (!grammar) return null
 
@@ -178,14 +327,19 @@ function extractSplitLinesWithTreeSitter(content: string, lang: Language): numbe
     return null
   }
 
-  const splitLines: number[] = []
+  const declarations: DeclarationInfo[] = []
   for (const child of tree.rootNode.namedChildren) {
     if (isTopLevelDecl(child.type, lang)) {
-      splitLines.push(child.startPosition.row + 1)  // 1-indexed
+      const symbolInfo = extractSymbolInfo(child, lang)
+      declarations.push({
+        startLine: child.startPosition.row + 1,  // 1-indexed
+        symbolName: symbolInfo?.name || undefined,
+        symbolKind: symbolInfo?.kind || undefined,
+      })
     }
   }
 
-  return splitLines
+  return declarations
 }
 
 // ---------------------------------------------------------------------------
@@ -218,35 +372,107 @@ function getSplitPattern(lang: Language): RegExp {
 }
 
 /**
- * Regex-based fallback that returns 1-indexed split lines.
+ * Regex-based fallback that returns declaration info (1-indexed start line +
+ * symbol name/kind extracted by simple heuristics).
  * For Python, decorators immediately preceding a def/class are pulled back
  * so they appear in the same chunk as the function they annotate.
  */
-function extractSplitLinesWithRegex(lines: string[], lang: Language): number[] {
+function extractDeclarationsWithRegex(lines: string[], lang: Language): DeclarationInfo[] {
   const splitRe = getSplitPattern(lang)
-  let splitLines: number[] = []
+  let declarations: DeclarationInfo[] = []
 
   for (let i = 0; i < lines.length; i++) {
     if (splitRe.test(lines[i])) {
-      splitLines.push(i + 1)  // 1-indexed
+      const symbolInfo = extractSymbolNameFromLine(lines[i], lang)
+      declarations.push({
+        startLine: i + 1,  // 1-indexed
+        symbolName: symbolInfo?.name,
+        symbolKind: symbolInfo?.kind,
+      })
     }
   }
 
-  if (lang === 'python' && splitLines.length > 0) {
-    const adjusted: number[] = []
-    for (const splitLine of splitLines) {
-      let start = splitLine
+  if (lang === 'python' && declarations.length > 0) {
+    const adjusted: DeclarationInfo[] = []
+    for (const decl of declarations) {
+      let start = decl.startLine
       let prevIdx = start - 2  // 0-indexed
       while (prevIdx >= 0 && /^\s*@/.test(lines[prevIdx])) {
         start--
         prevIdx--
       }
-      adjusted.push(start)
+      adjusted.push({ ...decl, startLine: start })
     }
-    splitLines = [...new Set(adjusted)].sort((a, b) => a - b)
+    // Deduplicate and sort (two functions with adjacent decorators collapsing)
+    const seen = new Set<number>()
+    declarations = adjusted.filter((d) => {
+      if (seen.has(d.startLine)) return false
+      seen.add(d.startLine)
+      return true
+    }).sort((a, b) => a.startLine - b.startLine)
   }
 
-  return splitLines
+  return declarations
+}
+
+// ---------------------------------------------------------------------------
+// Regex-based symbol name extraction heuristics
+// ---------------------------------------------------------------------------
+
+interface SymbolInfo { name: string; kind: string }
+
+/** Extracts a symbol name and kind from a single declaration line via regex. */
+function extractSymbolNameFromLine(line: string, lang: Language): SymbolInfo | null {
+  const trimmed = line.trim()
+
+  if (lang === 'python') {
+    let m = trimmed.match(/^(?:async\s+)?def\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'function' }
+    m = trimmed.match(/^class\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'class' }
+    return null
+  }
+
+  if (lang === 'go') {
+    // func (recv *Type) MethodName(...) or func FunctionName(...)
+    let m = trimmed.match(/^func\s+\([^)]+\)\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'method' }
+    m = trimmed.match(/^func\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'function' }
+    return null
+  }
+
+  if (lang === 'rust') {
+    let m = trimmed.match(/^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)?fn\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'function' }
+    m = trimmed.match(/^(?:pub\s+)?impl(?:<[^>]+>)?\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'impl' }
+    m = trimmed.match(/^(?:pub\s+)?struct\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'struct' }
+    m = trimmed.match(/^(?:pub\s+)?enum\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'enum' }
+    m = trimmed.match(/^(?:pub\s+)?trait\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'trait' }
+    return null
+  }
+
+  if (lang === 'typescript' || lang === 'tsx' || lang === 'javascript') {
+    let m = trimmed.match(/^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'function' }
+    m = trimmed.match(/^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(\w+)/)
+    if (m) return { name: m[1], kind: 'class' }
+    m = trimmed.match(/^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\()/)
+    if (m) return { name: m[1], kind: 'function' }
+    return null
+  }
+
+  if (lang === 'java') {
+    const m = trimmed.match(/(?:public|private|protected|static|final|abstract|override|virtual)(?:\s+\w+)*\s+(\w+)\s*\(/)
+    if (m) return { name: m[1], kind: 'function' }
+    return null
+  }
+
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -293,51 +519,61 @@ export class FunctionChunker implements Chunker {
     const lang = detectLanguage(path)
 
     // Try tree-sitter first; fall back to regex when unavailable or when
-    // tree-sitter returns no split points (e.g. grammar mismatch).
-    let splitLines = extractSplitLinesWithTreeSitter(content, lang)
+    // tree-sitter returns no declarations (e.g. grammar mismatch).
+    let declarations = extractDeclarationsWithTreeSitter(content, lang)
 
-    // Use regex if tree-sitter is unavailable or returned no split points.
+    // Use regex if tree-sitter is unavailable or returned no declarations.
     // A null result means tree-sitter couldn't load or parse; an empty array
     // from tree-sitter on a multi-line file means no recognised declarations were
     // found — the regex fallback may still find boundaries (e.g. for unknown
     // language extensions where the grammar is not installed).
-    if (splitLines === null || splitLines.length === 0) {
-      splitLines = extractSplitLinesWithRegex(lines, lang)
+    if (declarations === null || declarations.length === 0) {
+      declarations = extractDeclarationsWithRegex(lines, lang)
     }
 
     // If no boundaries found, return the whole file as one chunk
-    if (splitLines.length === 0) {
+    if (declarations.length === 0) {
       return [{ startLine: 1, endLine: lines.length, content }]
     }
 
-    // Build chunk boundaries: from each split line to the line before the next
-    const boundaries: Array<{ start: number; end: number }> = []
+    // Build chunk boundaries: from each declaration start to the line before the next
+    const boundaries: Array<{ start: number; end: number; symbolName?: string; symbolKind?: string }> = []
 
-    // Content before first declaration (if any)
-    if (splitLines[0] > 1) {
-      boundaries.push({ start: 1, end: splitLines[0] - 1 })
+    // Content before first declaration (if any) — no symbol metadata
+    if (declarations[0].startLine > 1) {
+      boundaries.push({ start: 1, end: declarations[0].startLine - 1 })
     }
 
-    for (let i = 0; i < splitLines.length; i++) {
-      const start = splitLines[i]
-      const end = i + 1 < splitLines.length ? splitLines[i + 1] - 1 : lines.length
-      boundaries.push({ start, end })
+    for (let i = 0; i < declarations.length; i++) {
+      const { startLine, symbolName, symbolKind } = declarations[i]
+      const end = i + 1 < declarations.length ? declarations[i + 1].startLine - 1 : lines.length
+      boundaries.push({ start: startLine, end, symbolName, symbolKind })
     }
 
     // Merge chunks that are too small into their predecessor
-    const merged: Array<{ start: number; end: number }> = []
+    const merged: Array<{ start: number; end: number; symbolName?: string; symbolKind?: string }> = []
     for (const b of boundaries) {
       if (merged.length > 0 && (b.end - b.start + 1) < MIN_CHUNK_LINES) {
-        merged[merged.length - 1].end = b.end
+        const prev = merged[merged.length - 1]
+        prev.end = b.end
+        // If the predecessor is a preamble (no symbol) and the small chunk being
+        // merged carries a symbol, propagate the symbol to the merged chunk so
+        // that symbol-level search can still find the named declaration.
+        if (!prev.symbolName && b.symbolName) {
+          prev.symbolName = b.symbolName
+          prev.symbolKind = b.symbolKind
+        }
       } else {
         merged.push({ ...b })
       }
     }
 
-    return merged.map(({ start, end }) => ({
+    return merged.map(({ start, end, symbolName, symbolKind }) => ({
       startLine: start,
       endLine: end,
       content: lines.slice(start - 1, end).join('\n'),
+      symbolName,
+      symbolKind,
     }))
   }
 }
