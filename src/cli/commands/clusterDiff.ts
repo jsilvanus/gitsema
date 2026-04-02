@@ -7,6 +7,7 @@ import {
   type TemporalClusterReport,
   type ClusterChange,
 } from '../../core/search/clustering.js'
+import { renderClusterDiffHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface ClusterDiffCommandOptions {
   k?: string
@@ -14,6 +15,7 @@ export interface ClusterDiffCommandOptions {
   iterations?: string
   edgeThreshold?: string
   dump?: string | boolean
+  html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
 }
@@ -87,6 +89,19 @@ export async function clusterDiffCommand(
         console.log(`Wrote cluster-diff JSON to ${options.dump}`)
       } else {
         console.log(json)
+      }
+      return
+    }
+
+    if (options.html !== undefined) {
+      const html = renderClusterDiffHtml(report)
+      const outFile = typeof options.html === 'string' ? options.html : 'cluster-diff.html'
+      try {
+        writeFileSync(outFile, html, 'utf8')
+        console.log(`Wrote cluster-diff HTML to ${outFile}`)
+      } catch (err) {
+        console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
+        process.exit(1)
       }
       return
     }
