@@ -1,4 +1,4 @@
-import { db } from '../db/sqlite.js'
+import { getActiveSession } from '../db/sqlite.js'
 import { blobCommits, commits } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 
@@ -16,6 +16,7 @@ export function getFirstSeenMap(blobHashes: string[]): Map<string, FirstSeenInfo
 
   const BATCH = 500
   const result = new Map<string, FirstSeenInfo>()
+  const { db } = getActiveSession()
 
   for (let i = 0; i < blobHashes.length; i += BATCH) {
     const batch = blobHashes.slice(i, i + BATCH)

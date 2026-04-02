@@ -1,5 +1,4 @@
-import { getRawDb } from '../db/sqlite.js'
-import { db } from '../db/sqlite.js'
+import { getActiveSession } from '../db/sqlite.js'
 import { paths } from '../db/schema.js'
 import { inArray } from 'drizzle-orm'
 import { vectorSearch, type VectorSearchOptions } from './vectorSearch.js'
@@ -47,7 +46,7 @@ export function hybridSearch(
   if (vectorResults.length === 0) return []
 
   // --- Stage 2: BM25 search via FTS5 ---
-  const raw = getRawDb()
+  const { db, rawDb: raw } = getActiveSession()
 
   // FTS5 bm25() returns negative values (more negative = better match).
   // We fetch up to vectorK rows to have a comparable candidate pool.

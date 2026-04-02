@@ -112,6 +112,7 @@ program
   .option('--bm25-weight <n>', 'weight for the BM25 signal in hybrid search (0–1, default 0.3)')
   .option('--remote <url>', 'proxy search to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--branch <name>', 'only return blobs seen on this branch (short name, e.g. "main")')
+  .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
   .action(searchCommand)
 
 program

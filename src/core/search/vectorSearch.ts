@@ -1,4 +1,4 @@
-import { db, getRawDb } from '../db/sqlite.js'
+import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
@@ -90,6 +90,8 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const wp = weightPath ?? 0.1
   const wTotal = wv + wr + wp || 1
 
+  const { db, rawDb } = getActiveSession()
+
   // Load stored embeddings, optionally filtered to a specific model
   const baseQuery = db.select({
     blobHash: embeddings.blobHash,
@@ -134,8 +136,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   // Apply branch filter when requested
   if (branch) {
-    const raw = getRawDb()
-    const branchRows = raw
+    const branchRows = rawDb
       .prepare('SELECT DISTINCT blob_hash FROM blob_branches WHERE branch_name = ?')
       .all(branch) as Array<{ blob_hash: string }>
     const branchHashSet = new Set(branchRows.map((r) => r.blob_hash))

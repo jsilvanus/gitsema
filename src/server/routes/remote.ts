@@ -22,6 +22,7 @@
 
 import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
@@ -97,7 +98,7 @@ function parseMaxSize(s: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Job registry (Phase 17 — async job API)
+// Job registry (Phase 17 — async job API; Phase 18 — stability improvements)
 // ---------------------------------------------------------------------------
 
 type JobSubscriber = (event: JobEvent) => void
@@ -113,6 +114,20 @@ interface Job {
   stats: IndexStats | null
   error: string | null
   subscribers: JobSubscriber[]
+  /** Unix timestamp (ms) when the job was created. */
+  createdAt: number
+  /** Unix timestamp (ms) when the job completed (done or failed). Null if still running. */
+  completedAt: number | null
+}
+
+/** Serializable summary of a completed job for disk persistence. */
+interface JobSummary {
+  id: string
+  status: 'done' | 'failed'
+  stats: IndexStats | null
+  error: string | null
+  createdAt: number
+  completedAt: number
 }
 
 const _jobs = new Map<string, Job>()
@@ -120,13 +135,141 @@ const _jobs = new Map<string, Job>()
 /** Remove completed jobs after this TTL to prevent unbounded memory growth. */
 const JOB_TTL_MS = 60 * 60 * 1000 // 1 hour
 
+/**
+ * Maximum number of jobs retained in memory at any time.
+ * When exceeded, completed/failed jobs are evicted LRU-first.
+ * Configurable via GITSEMA_JOB_REGISTRY_MAX (default 500).
+ */
+const MAX_JOB_REGISTRY_SIZE = Math.max(
+  1,
+  parseInt(process.env['GITSEMA_JOB_REGISTRY_MAX'] ?? '500', 10) || 500,
+)
+
+/**
+ * Optional path to a JSON-lines file where completed job summaries are appended.
+ * When set, completed jobs are persisted and reloaded on startup for debugging.
+ * Configurable via GITSEMA_JOB_PERSIST_PATH.
+ */
+const JOB_PERSIST_PATH = process.env['GITSEMA_JOB_PERSIST_PATH'] ?? ''
+
+/** Cumulative count of jobs evicted from the registry due to the size cap. */
+let _evictionCount = 0
+
+/**
+ * Returns a snapshot of job registry metrics for monitoring.
+ */
+export function getJobMetrics(): {
+  total: number
+  running: number
+  done: number
+  failed: number
+  evictions: number
+} {
+  let running = 0
+  let done = 0
+  let failed = 0
+  for (const job of _jobs.values()) {
+    if (job.status === 'running') running++
+    else if (job.status === 'done') done++
+    else failed++
+  }
+  return { total: _jobs.size, running, done, failed, evictions: _evictionCount }
+}
+
+/**
+ * Evicts jobs from the registry when at capacity.
+ * Eviction order: oldest completed/failed first, then oldest running.
+ * At least one slot is freed per call.
+ */
+function evictIfNeeded(): void {
+  if (_jobs.size < MAX_JOB_REGISTRY_SIZE) return
+
+  // Collect completed/failed jobs sorted by completedAt ascending (oldest first)
+  const completed = Array.from(_jobs.values())
+    .filter((j) => j.completedAt !== null)
+    .sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0))
+
+  if (completed.length > 0) {
+    _jobs.delete(completed[0].id)
+    _evictionCount++
+    return
+  }
+
+  // Fallback: evict oldest running job by createdAt
+  const running = Array.from(_jobs.values()).sort((a, b) => a.createdAt - b.createdAt)
+  if (running.length > 0) {
+    _jobs.delete(running[0].id)
+    _evictionCount++
+  }
+}
+
+/**
+ * Appends a completed job summary to the persistence file (if configured).
+ */
+function persistJob(job: Job): void {
+  if (!JOB_PERSIST_PATH) return
+  const summary: JobSummary = {
+    id: job.id,
+    status: job.status as 'done' | 'failed',
+    stats: job.stats,
+    error: job.error,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt ?? Date.now(),
+  }
+  try {
+    appendFileSync(JOB_PERSIST_PATH, JSON.stringify(summary) + '\n', 'utf8')
+  } catch (err) {
+    logger.debug(`Failed to persist job ${job.id}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
+ * Loads persisted job summaries from disk on startup.
+ * Only the most recent MAX_JOB_REGISTRY_SIZE / 2 entries are loaded to
+ * avoid filling memory with stale history.
+ */
+function loadPersistedJobs(): void {
+  if (!JOB_PERSIST_PATH || !existsSync(JOB_PERSIST_PATH)) return
+  try {
+    const lines = readFileSync(JOB_PERSIST_PATH, 'utf8').split('\n').filter(Boolean)
+    const recent = lines.slice(-Math.floor(MAX_JOB_REGISTRY_SIZE / 2))
+    for (const line of recent) {
+      try {
+        const summary = JSON.parse(line) as JobSummary
+        if (!summary.id || !summary.status) continue
+        const job: Job = {
+          id: summary.id,
+          status: summary.status,
+          stats: summary.stats,
+          error: summary.error,
+          subscribers: [],
+          createdAt: summary.createdAt,
+          completedAt: summary.completedAt,
+        }
+        _jobs.set(job.id, job)
+      } catch {
+        // skip malformed lines
+      }
+    }
+    logger.debug(`Loaded ${_jobs.size} persisted job(s) from ${JOB_PERSIST_PATH}`)
+  } catch (err) {
+    logger.debug(`Failed to load persisted jobs: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+// Load persisted jobs at module initialisation
+loadPersistedJobs()
+
 function createJob(): Job {
+  evictIfNeeded()
   const job: Job = {
     id: randomUUID(),
     status: 'running',
     stats: null,
     error: null,
     subscribers: [],
+    createdAt: Date.now(),
+    completedAt: null,
   }
   _jobs.set(job.id, job)
   return job
@@ -218,6 +361,8 @@ async function runIndexJob(
     succeeded = true
     job.status = 'done'
     job.stats = stats
+    job.completedAt = Date.now()
+    persistJob(job)
     notifySubscribers(job, { type: 'done', stats })
 
     logger.info(
@@ -231,6 +376,8 @@ async function runIndexJob(
     logger.error(`Remote index of ${safeUrl} failed: ${safeMsg}`)
     job.status = 'failed'
     job.error = safeMsg
+    job.completedAt = Date.now()
+    persistJob(job)
     notifySubscribers(job, { type: 'error', error: safeMsg })
   } finally {
     getCloneSemaphore().release()
@@ -317,6 +464,15 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       serverChunker,
       serverConcurrency,
     })
+  })
+
+  /**
+   * GET /api/v1/remote/jobs/metrics
+   *
+   * Returns current job registry metrics: counts by status and total evictions.
+   */
+  router.get('/jobs/metrics', (_req, res) => {
+    res.json(getJobMetrics())
   })
 
   /**
