@@ -31,8 +31,10 @@ export interface DbSession {
  *   2 — Added blob_branches table (Phase 15)
  *   3 — Added query_embeddings cache table (Phase 18)
  *   4 — Added symbols + symbol_embeddings tables (Phase 19)
+ *   5 — Added blob_clusters + cluster_assignments tables (Phase 21)
+ *   6 — Added idx_commits_timestamp index for temporal cluster queries (Phase 22)
  */
-const CURRENT_SCHEMA_VERSION = 5
+const CURRENT_SCHEMA_VERSION = 6
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -136,6 +138,13 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     `)
     version = 5
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('5')
+  }
+
+  // v5 → v6: add index on commits.timestamp for fast temporal cluster queries (Phase 22)
+  if (version < 6) {
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_commits_timestamp ON commits (timestamp)`)
+    version = 6
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('6')
   }
 }
 
@@ -251,6 +260,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
       cluster_id INTEGER NOT NULL REFERENCES blob_clusters(id)
     );
+
+    -- Index on commits.timestamp for fast temporal cluster filtering (Phase 22)
+    CREATE INDEX IF NOT EXISTS idx_commits_timestamp ON commits (timestamp);
   `)
 }
 
