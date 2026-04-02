@@ -32,7 +32,7 @@ export interface DbSession {
  *   3 — Added query_embeddings cache table (Phase 18)
  *   4 — Added symbols + symbol_embeddings tables (Phase 19)
  */
-const CURRENT_SCHEMA_VERSION = 4
+const CURRENT_SCHEMA_VERSION = 5
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -117,8 +117,26 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('4')
   }
 
-  // Future migrations go here:
-  // if (version < 5) { sqlite.exec(`...`); version = 5; sqlite.prepare(...).run('5') }
+  // v4 → v5: add blob_clusters + cluster_assignments tables (Phase 21)
+  if (version < 5) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS blob_clusters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label TEXT NOT NULL,
+        centroid BLOB NOT NULL,
+        size INTEGER NOT NULL,
+        representative_paths TEXT NOT NULL,
+        top_keywords TEXT NOT NULL,
+        clustered_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS cluster_assignments (
+        blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
+        cluster_id INTEGER NOT NULL REFERENCES blob_clusters(id)
+      );
+    `)
+    version = 5
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('5')
+  }
 }
 
 /** The full CREATE TABLE block used for every new database file. */
@@ -217,6 +235,21 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS blob_clusters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      centroid BLOB NOT NULL,
+      size INTEGER NOT NULL,
+      representative_paths TEXT NOT NULL,
+      top_keywords TEXT NOT NULL,
+      clustered_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS cluster_assignments (
+      blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
+      cluster_id INTEGER NOT NULL REFERENCES blob_clusters(id)
     );
   `)
 }
