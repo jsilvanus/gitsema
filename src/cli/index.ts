@@ -14,6 +14,7 @@ import { remoteIndexCommand } from './commands/remoteIndex.js'
 import { semanticBlameCommand } from './commands/semanticBlame.js'
 import { deadConceptsCommand } from './commands/deadConcepts.js'
 import { impactCommand } from './commands/impact.js'
+import { clustersCommand } from './commands/clusters.js'
 
 const program = new Command()
 
@@ -242,6 +243,19 @@ program
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .action(impactCommand)
+
+program
+  .command('clusters')
+  .description('Cluster all blob embeddings into semantic regions and display a concept graph')
+  .option('--k <n>', 'number of clusters to compute (default 8)', '8')
+  .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
+  .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
+  .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(clustersCommand)
 
 program
   .command('backfill-fts')

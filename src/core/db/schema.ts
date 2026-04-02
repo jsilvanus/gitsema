@@ -143,3 +143,33 @@ export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
 })
+
+/**
+ * One row per clustering run's cluster (Phase 21).
+ * Each cluster has a generated label, its centroid vector, representative paths,
+ * and top keywords extracted from FTS5 content.
+ */
+export const blobClusters = sqliteTable('blob_clusters', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** Auto-generated label derived from the most representative file path */
+  label: text('label').notNull(),
+  /** Serialised Float32 centroid vector (same format as embeddings.vector) */
+  centroid: blob('centroid', { mode: 'buffer' }).notNull(),
+  /** Number of blobs assigned to this cluster */
+  size: integer('size').notNull(),
+  /** JSON-encoded array of the top representative file paths for this cluster */
+  representativePaths: text('representative_paths').notNull(),
+  /** JSON-encoded array of the top keyword strings extracted from FTS5 content */
+  topKeywords: text('top_keywords').notNull(),
+  /** Unix timestamp (seconds) of when this clustering run completed */
+  clusteredAt: integer('clustered_at').notNull(),
+})
+
+/**
+ * Many-to-one assignment of blobs to clusters (Phase 21).
+ * One row per blob; replaced atomically on each clustering run.
+ */
+export const clusterAssignments = sqliteTable('cluster_assignments', {
+  blobHash: text('blob_hash').primaryKey().references(() => blobs.blobHash),
+  clusterId: integer('cluster_id').notNull().references(() => blobClusters.id),
+})
