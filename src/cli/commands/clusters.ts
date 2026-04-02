@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { computeClusters, type ClusterReport } from '../../core/search/clustering.js'
+import { renderClustersHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface ClustersCommandOptions {
   k?: string
@@ -7,6 +8,7 @@ export interface ClustersCommandOptions {
   iterations?: string
   edgeThreshold?: string
   dump?: string | boolean
+  html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
 }
@@ -43,6 +45,14 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
       } else {
         console.log(json)
       }
+      return
+    }
+
+    if (options.html !== undefined) {
+      const html = renderClustersHtml(report)
+      const outFile = typeof options.html === 'string' ? options.html : 'clusters.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Wrote clusters HTML to ${outFile}`)
       return
     }
 

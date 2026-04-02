@@ -163,6 +163,10 @@ program
     'output structured JSON of all entries; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise concept-evolution.html',
+  )
+  .option(
     '--include-content',
     'include the stored file content for each entry in the JSON dump (only used with --dump)',
   )
@@ -261,6 +265,10 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise clusters.html',
+  )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .action(clustersCommand)
@@ -275,6 +283,10 @@ program
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-diff.html',
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
@@ -294,6 +306,10 @@ program
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-timeline.html',
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')

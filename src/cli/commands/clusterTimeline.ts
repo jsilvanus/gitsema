@@ -6,6 +6,7 @@ import {
   type ClusterTimelineStep,
   type ClusterChange,
 } from '../../core/search/clustering.js'
+import { renderClusterTimelineHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface ClusterTimelineCommandOptions {
   k?: string
@@ -17,6 +18,7 @@ export interface ClusterTimelineCommandOptions {
   edgeThreshold?: string
   threshold?: string
   dump?: string | boolean
+  html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
 }
@@ -93,6 +95,14 @@ export async function clusterTimelineCommand(options: ClusterTimelineCommandOpti
       } else {
         console.log(json)
       }
+      return
+    }
+
+    if (options.html !== undefined) {
+      const html = renderClusterTimelineHtml(report, threshold)
+      const outFile = typeof options.html === 'string' ? options.html : 'cluster-timeline.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Wrote cluster-timeline HTML to ${outFile}`)
       return
     }
 

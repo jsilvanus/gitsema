@@ -7,11 +7,13 @@ import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { ConceptEvolutionEntry } from '../../core/search/evolution.js'
 import { remoteConceptEvolution } from '../../client/remoteClient.js'
+import { renderConceptEvolutionHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface ConceptEvolutionCommandOptions {
   top?: string
   threshold?: string
   dump?: string | boolean
+  html?: string | boolean
   includeContent?: boolean
   remote?: string
 }
@@ -198,6 +200,21 @@ export async function conceptEvolutionCommand(
       process.stdout.write(json + '\n')
       return
     }
+  }
+
+  // --html: emit interactive HTML visualization
+  if (options.html !== undefined) {
+    const html = renderConceptEvolutionHtml(query.trim(), entries, threshold)
+    const outFile = typeof options.html === 'string' ? options.html : 'concept-evolution.html'
+    try {
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Concept evolution HTML written to: ${outFile}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error writing HTML file: ${msg}`)
+      process.exit(1)
+    }
+    return
   }
 
   // Human-readable output
