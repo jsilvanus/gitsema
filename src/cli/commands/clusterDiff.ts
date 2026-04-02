@@ -96,8 +96,13 @@ export async function clusterDiffCommand(
     if (options.html !== undefined) {
       const html = renderClusterDiffHtml(report)
       const outFile = typeof options.html === 'string' ? options.html : 'cluster-diff.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Wrote cluster-diff HTML to ${outFile}`)
+      try {
+        writeFileSync(outFile, html, 'utf8')
+        console.log(`Wrote cluster-diff HTML to ${outFile}`)
+      } catch (err) {
+        console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
+        process.exit(1)
+      }
       return
     }
 

@@ -101,8 +101,13 @@ export async function clusterTimelineCommand(options: ClusterTimelineCommandOpti
     if (options.html !== undefined) {
       const html = renderClusterTimelineHtml(report, threshold)
       const outFile = typeof options.html === 'string' ? options.html : 'cluster-timeline.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Wrote cluster-timeline HTML to ${outFile}`)
+      try {
+        writeFileSync(outFile, html, 'utf8')
+        console.log(`Wrote cluster-timeline HTML to ${outFile}`)
+      } catch (err) {
+        console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
+        process.exit(1)
+      }
       return
     }
 

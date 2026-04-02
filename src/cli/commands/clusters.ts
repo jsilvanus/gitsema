@@ -51,8 +51,13 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
     if (options.html !== undefined) {
       const html = renderClustersHtml(report)
       const outFile = typeof options.html === 'string' ? options.html : 'clusters.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Wrote clusters HTML to ${outFile}`)
+      try {
+        writeFileSync(outFile, html, 'utf8')
+        console.log(`Wrote clusters HTML to ${outFile}`)
+      } catch (err) {
+        console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
+        process.exit(1)
+      }
       return
     }
 

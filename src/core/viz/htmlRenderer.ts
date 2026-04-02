@@ -31,8 +31,9 @@ function escHtml(s: unknown): string {
 
 /**
  * Serializes data as JSON safe for embedding inside a <script> block.
- * Replaces `<`, `>`, and `&` with unicode escapes so the browser HTML parser
- * cannot see `</script>` or `<!--` in the source, preventing script injection.
+ * Replaces `<`, `>`, `&`, and the Unicode line/paragraph separators with their
+ * unicode escapes so the browser HTML parser cannot see `</script>` or `<!--`
+ * in the source, preventing script injection.
  * The JSON value is still valid and will be parsed correctly by the JS engine.
  */
 function safeJson(data: unknown): string {
@@ -40,6 +41,8 @@ function safeJson(data: unknown): string {
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 }
 
 // ─── Data sanitizers (strip heavy centroid arrays) ────────────────────────────
