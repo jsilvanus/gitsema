@@ -200,4 +200,169 @@ describe('FunctionChunker', () => {
     expect(chunks).toHaveLength(1)
     expect(chunks[0].content).toBe('')
   })
+
+  // -------------------------------------------------------------------------
+  // Language-specific patterns — Go
+  // -------------------------------------------------------------------------
+
+  it('splits Go functions using the `func` keyword', () => {
+    const lines = [
+      'func Add(a, b int) int {',
+      '    x := a + b',
+      '    y := x * 2',
+      '    return y / 2',
+      '}',
+      '',
+      'func Subtract(a, b int) int {',
+      '    x := a - b',
+      '    y := x * 2',
+      '    return y / 2',
+      '}',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'math.go')
+    // Two Go functions → two chunks
+    expect(chunks.length).toBe(2)
+    // First chunk starts at line 1
+    expect(chunks[0].startLine).toBe(1)
+  })
+
+  it('splits Go methods (func with receiver)', () => {
+    const lines = [
+      'func (r *Rect) Area() float64 {',
+      '    w := r.Width',
+      '    h := r.Height',
+      '    return w * h',
+      '}',
+      '',
+      'func (r *Rect) Perimeter() float64 {',
+      '    return 2 * (r.Width + r.Height)',
+      '    // extra comment to meet min lines',
+      '    // another comment',
+      '}',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'shapes.go')
+    expect(chunks.length).toBeGreaterThanOrEqual(1)
+    // All lines covered
+    const covered = new Set<number>()
+    for (const c of chunks) {
+      for (let l = c.startLine; l <= c.endLine; l++) covered.add(l)
+    }
+    expect(covered.size).toBe(lines.length)
+  })
+
+  // -------------------------------------------------------------------------
+  // Language-specific patterns — Rust
+  // -------------------------------------------------------------------------
+
+  it('splits Rust fn declarations', () => {
+    const lines = [
+      'fn add(a: i32, b: i32) -> i32 {',
+      '    let x = a + b;',
+      '    let y = x * 2;',
+      '    y / 2',
+      '}',
+      '',
+      'pub fn subtract(a: i32, b: i32) -> i32 {',
+      '    let x = a - b;',
+      '    let y = x * 2;',
+      '    y / 2',
+      '}',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'math.rs')
+    expect(chunks.length).toBe(2)
+    expect(chunks[0].startLine).toBe(1)
+  })
+
+  it('splits Rust impl blocks', () => {
+    const lines = [
+      'struct Foo {',
+      '    x: i32,',
+      '    y: i32,',
+      '    z: i32,',
+      '}',
+      '',
+      'impl Foo {',
+      '    pub fn new(x: i32) -> Self {',
+      '        Foo { x, y: 0, z: 0 }',
+      '    }',
+      '    pub fn get_x(&self) -> i32 {',
+      '        self.x',
+      '    }',
+      '}',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'lib.rs')
+    // struct block + impl block → at least 2 chunks (struct may be merged)
+    expect(chunks.length).toBeGreaterThanOrEqual(1)
+    // All lines covered
+    const covered = new Set<number>()
+    for (const c of chunks) {
+      for (let l = c.startLine; l <= c.endLine; l++) covered.add(l)
+    }
+    expect(covered.size).toBe(lines.length)
+    // impl block must start its own chunk or be included in a merged chunk
+    const implChunk = chunks.find((c) => c.content.includes('impl Foo'))
+    expect(implChunk).toBeDefined()
+  })
+
+  // -------------------------------------------------------------------------
+  // Python decorator handling
+  // -------------------------------------------------------------------------
+
+  it('includes decorator lines in the following function chunk', () => {
+    const lines = [
+      '@my_decorator',
+      'def foo():',
+      '    """Docstring."""',
+      '    x = 1',
+      '    return x',
+      '',
+      '@decorator_a',
+      '@decorator_b',
+      'def bar():',
+      '    """Another docstring."""',
+      '    y = 2',
+      '    return y',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'module.py')
+    // Two decorated functions → two chunks
+    expect(chunks.length).toBe(2)
+    // First chunk must start at line 1 (the @my_decorator line)
+    expect(chunks[0].startLine).toBe(1)
+    expect(chunks[0].content).toContain('@my_decorator')
+    expect(chunks[0].content).toContain('def foo')
+    // Second chunk must start at line 7 (the first @decorator_a line)
+    expect(chunks[1].startLine).toBe(7)
+    expect(chunks[1].content).toContain('@decorator_a')
+    expect(chunks[1].content).toContain('@decorator_b')
+    expect(chunks[1].content).toContain('def bar')
+  })
+
+  it('covers all lines when decorators are present', () => {
+    const lines = [
+      '# Module-level comment',
+      '',
+      '@app.route("/hello")',
+      'def hello_view():',
+      '    """Return greeting."""',
+      '    return "Hello"',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'views.py')
+    const covered = new Set<number>()
+    for (const c of chunks) {
+      for (let l = c.startLine; l <= c.endLine; l++) covered.add(l)
+    }
+    expect(covered.size).toBe(lines.length)
+  })
 })

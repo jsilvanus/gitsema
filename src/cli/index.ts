@@ -11,6 +11,7 @@ import { startMcpServer } from '../mcp/server.js'
 import { backfillFtsCommand } from './commands/backfillFts.js'
 import { serveCommand } from './commands/serve.js'
 import { remoteIndexCommand } from './commands/remoteIndex.js'
+import { semanticBlameCommand } from './commands/semanticBlame.js'
 
 const program = new Command()
 
@@ -204,6 +205,16 @@ program
     'route indexing to .gitsema/<label>.db on the server (1–64 alphanumeric chars or hyphens)',
   )
   .action(remoteIndexCommand)
+
+program
+  .command('semantic-blame <file>')
+  .description('Show semantic origin of each logical block in a file — nearest-neighbor blame')
+  .option('-k, --top <n>', 'number of nearest-neighbor blobs to show per block (default 3)', '3')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(semanticBlameCommand)
 
 program
   .command('backfill-fts')

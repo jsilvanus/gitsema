@@ -1,15 +1,79 @@
 import type { Chunk, Chunker } from './chunker.js'
 
+// ---------------------------------------------------------------------------
+// Language detection
+// ---------------------------------------------------------------------------
+
+type Language = 'python' | 'go' | 'rust' | 'typescript' | 'java' | 'other'
+
+function detectLanguage(path: string): Language {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  switch (ext) {
+    case 'py': case 'pyi': return 'python'
+    case 'go': return 'go'
+    case 'rs': return 'rust'
+    case 'ts': case 'tsx': case 'js': case 'jsx': case 'mjs': case 'cjs': return 'typescript'
+    case 'java': case 'cs': case 'kt': case 'scala': return 'java'
+    default: return 'other'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Language-specific split patterns
+// ---------------------------------------------------------------------------
+
 /**
- * Regex patterns that identify the start of a top-level function or class
- * declaration for common programming languages.  This is intentionally a
- * heuristic: it covers the majority of real-world code without requiring a
- * full parser / tree-sitter grammar for each language.
- *
- * Matches at the beginning of a line (possibly after leading whitespace for
- * indented top-level declarations in Python).
+ * Python: `def`, `async def`, and `class` declarations (possibly indented for
+ * nested classes).  Decorator lines (`@...`) are handled in a post-processing
+ * step so they are included in the same chunk as the function they annotate.
  */
-const FUNCTION_START_RE = /^(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+\w|class\s+\w|\w+\s*=\s*(?:async\s+)?(?:function|\([^)]*\)\s*=>|\w+\s*=>)))|(?:^\s*(?:async\s+)?def\s+\w)|(?:^\s*class\s+\w)|(?:^(?:pub\s+)?(?:async\s+)?fn\s+\w)|(?:^(?:public|private|protected|static|final|abstract|synchronized)(?:\s+\w+)*\s+\w+\s*\()/m
+const PYTHON_SPLIT_RE = /^\s*(?:(?:async\s+)?def\s+\w|class\s+\w)/
+
+/**
+ * Go: top-level `func` declarations (both standalone functions and methods
+ * with receiver types, e.g. `func (r *Receiver) Method(...)`).
+ */
+const GO_SPLIT_RE = /^func\s+/
+
+/**
+ * Rust: top-level `fn` declarations with optional visibility/async/const/unsafe
+ * modifiers, and `impl` blocks (including generic ones like `impl<T> Trait for Type`).
+ */
+const RUST_SPLIT_RE = /^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)?(?:fn\s+\w|impl(?:\s|\s*<))/
+
+/**
+ * TypeScript / JavaScript: top-level `function` and `class` declarations,
+ * and arrow-function or function-expression assignments (including `export`,
+ * `default`, and `async` variants).
+ */
+const TS_SPLIT_RE = /^(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+\w|class\s+\w|\w+\s*=\s*(?:async\s+)?(?:function|\([^)]*\)\s*=>|\w+\s*=>)))/
+
+/**
+ * Java / C# / Kotlin: access-modifier-qualified method or constructor
+ * declarations.
+ */
+const JAVA_SPLIT_RE = /^(?:public|private|protected|internal|static|final|abstract|override|virtual|synchronized)(?:\s+\w+)*\s+\w+\s*\(/
+
+/**
+ * Generic fallback that covers the union of all language-specific patterns.
+ * Used for files with an unknown or unrecognised extension.
+ */
+const DEFAULT_SPLIT_RE = /^(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+\w|class\s+\w|\w+\s*=\s*(?:async\s+)?(?:function|\([^)]*\)\s*=>|\w+\s*=>)))|(?:^\s*(?:async\s+)?def\s+\w)|(?:^\s*class\s+\w)|(?:^func\s+)|(?:^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)?(?:fn\s+\w|impl(?:\s|\s*<)))|(?:^(?:pub|private|protected|static|final|abstract|synchronized)(?:\s+\w+)*\s+\w+\s*\()/
+
+function getSplitPattern(lang: Language): RegExp {
+  switch (lang) {
+    case 'python':     return PYTHON_SPLIT_RE
+    case 'go':         return GO_SPLIT_RE
+    case 'rust':       return RUST_SPLIT_RE
+    case 'typescript': return TS_SPLIT_RE
+    case 'java':       return JAVA_SPLIT_RE
+    default:           return DEFAULT_SPLIT_RE
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chunker
+// ---------------------------------------------------------------------------
 
 /**
  * Minimum number of lines a chunk must contain.  Fragments smaller than this
@@ -18,22 +82,58 @@ const FUNCTION_START_RE = /^(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:func
 const MIN_CHUNK_LINES = 5
 
 /**
- * Function/class boundary chunker — splits source files on top-level
- * function and class declaration lines using a language-agnostic regex.
- * Supported languages include TypeScript, JavaScript, Python, Rust, Java, Go,
- * C, and C++.
+ * Language-aware function/class boundary chunker.
+ *
+ * Splits source files on top-level function and class declaration lines using
+ * language-specific regex patterns.  The file extension is used to select the
+ * best-fit pattern set; an unrecognised extension falls back to a broad
+ * combined pattern that covers TypeScript/JavaScript, Python, Rust, Go, Java,
+ * and C#.
+ *
+ * **Python decorator handling:** decorator lines (`@...`) immediately
+ * preceding a `def` or `class` are pulled into the same chunk as the function
+ * they annotate, so the embedding captures the full declaration context.
+ *
+ * Supported languages and their detected extensions:
+ * - TypeScript / JavaScript: `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`
+ * - Python: `.py`, `.pyi`
+ * - Go: `.go`
+ * - Rust: `.rs`
+ * - Java / C# / Kotlin / Scala: `.java`, `.cs`, `.kt`, `.scala`
+ * - Everything else: combined fallback pattern
  */
 export class FunctionChunker implements Chunker {
-  chunk(content: string, _path: string): Chunk[] {
+  chunk(content: string, path: string): Chunk[] {
     const lines = content.split('\n')
     if (lines.length === 0) return []
 
+    const lang = detectLanguage(path)
+    const splitRe = getSplitPattern(lang)
+
     // Find lines that start a new top-level declaration (1-indexed)
-    const splitLines: number[] = []
+    let splitLines: number[] = []
     for (let i = 0; i < lines.length; i++) {
-      if (FUNCTION_START_RE.test(lines[i])) {
+      if (splitRe.test(lines[i])) {
         splitLines.push(i + 1)  // 1-indexed
       }
+    }
+
+    // Python decorator handling: walk backwards from each split line to include
+    // any immediately preceding `@...` decorator lines in the same chunk.
+    if (lang === 'python' && splitLines.length > 0) {
+      const adjusted: number[] = []
+      for (const splitLine of splitLines) {
+        let start = splitLine
+        // lines array is 0-indexed; splitLine is 1-indexed
+        let prevIdx = start - 2  // line before splitLine, 0-indexed
+        while (prevIdx >= 0 && /^\s*@/.test(lines[prevIdx])) {
+          start--
+          prevIdx--
+        }
+        adjusted.push(start)
+      }
+      // Deduplicate and sort in case two adjusted lines collapsed onto the same position
+      splitLines = [...new Set(adjusted)].sort((a, b) => a - b)
     }
 
     // If no boundaries found, return the whole file as one chunk
