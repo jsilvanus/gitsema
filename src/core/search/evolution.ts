@@ -167,6 +167,91 @@ export function computeEvolution(filePath: string, originBlob?: string): Evoluti
 }
 
 /**
+ * Retrieves the author of a commit as a human-readable string.
+ * Returns null if the commit hash is not valid or git is unavailable.
+ */
+export function getCommitAuthor(commitHash: string, repoPath = '.'): Promise<string | null> {
+  return new Promise((resolve) => {
+    const proc = spawn('git', ['log', '-1', '--format=%an <%ae>', commitHash], {
+      cwd: repoPath,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    proc.on('close', (code) => {
+      if (code !== 0) resolve(null)
+      else resolve(stdout.trim() || null)
+    })
+    proc.on('error', () => resolve(null))
+  })
+}
+
+/**
+ * Returns the URL of the `origin` remote, or null if unavailable.
+ */
+export function getRemoteUrl(repoPath = '.'): Promise<string | null> {
+  return new Promise((resolve) => {
+    const proc = spawn('git', ['remote', 'get-url', 'origin'], {
+      cwd: repoPath,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    proc.on('close', (code) => {
+      if (code !== 0) resolve(null)
+      else resolve(stdout.trim() || null)
+    })
+    proc.on('error', () => resolve(null))
+  })
+}
+
+/**
+ * Constructs a web commit URL from a remote URL and a commit hash.
+ *
+ * Supports GitHub, GitLab, and Bitbucket HTTPS and SSH remote formats:
+ *   - `https://github.com/org/repo.git`   → `https://github.com/org/repo/commit/<hash>`
+ *   - `git@github.com:org/repo.git`        → `https://github.com/org/repo/commit/<hash>`
+ *   - `https://gitlab.com/org/repo.git`    → `https://gitlab.com/org/repo/-/commit/<hash>`
+ *   - `https://bitbucket.org/org/repo.git` → `https://bitbucket.org/org/repo/commits/<hash>`
+ *
+ * Returns `undefined` for unrecognised remote formats.
+ */
+export function buildCommitUrl(commitHash: string, remoteUrl: string): string | undefined {
+  // Normalise SSH → HTTPS: git@github.com:org/repo.git → https://github.com/org/repo.git
+  // Using greedy `.+` so multi-segment paths like org/team/repo are captured in full.
+  let url = remoteUrl.trim()
+  const sshMatch = url.match(/^git@([^:]+):(.+)$/)
+  if (sshMatch) {
+    const host = sshMatch[1]
+    const path = sshMatch[2].replace(/\.git$/, '')
+    url = `https://${host}/${path}`
+  } else {
+    url = url.replace(/\.git$/, '')
+  }
+
+  // Parse the normalised URL and match on the *hostname* only, not a substring of
+  // the full URL (which could be trivially spoofed with a path like /github.com/).
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+
+  const { hostname } = parsed
+  if (hostname === 'github.com' || hostname.endsWith('.github.com')) {
+    return `${url}/commit/${commitHash}`
+  }
+  if (hostname === 'gitlab.com' || hostname.endsWith('.gitlab.com')) {
+    return `${url}/-/commit/${commitHash}`
+  }
+  if (hostname === 'bitbucket.org' || hostname.endsWith('.bitbucket.org')) {
+    return `${url}/commits/${commitHash}`
+  }
+  return undefined
+}
+
+/**
  * Uses `git rev-parse <ref>:<path>` to resolve the blob hash for a file at a
  * specific Git ref.  Returns null if the file does not exist at that ref.
  */
