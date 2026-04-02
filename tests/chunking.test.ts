@@ -365,4 +365,93 @@ describe('FunctionChunker', () => {
     }
     expect(covered.size).toBe(lines.length)
   })
+
+  // -------------------------------------------------------------------------
+  // Tree-sitter-specific: verifies AST-based splitting when grammar available
+  // -------------------------------------------------------------------------
+
+  it('(tree-sitter) splits TypeScript export functions correctly', () => {
+    const lines = [
+      'export async function authenticate(token: string): Promise<boolean> {',
+      '  if (!token) return false',
+      '  const parts = token.split(".")',
+      '  if (parts.length !== 3) return false',
+      '  return parts[1].length > 0',
+      '}',
+      '',
+      'export class UserService {',
+      '  constructor(private db: Database) {}',
+      '  async find(id: string) { return this.db.get(id) }',
+      '  async create(data: unknown) { return this.db.insert(data) }',
+      '  async delete(id: string) { return this.db.remove(id) }',
+      '}',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'auth.ts')
+    // Two top-level export statements → two chunks
+    expect(chunks.length).toBe(2)
+    expect(chunks[0].startLine).toBe(1)
+    expect(chunks[0].content).toContain('authenticate')
+    expect(chunks[1].content).toContain('UserService')
+    // All lines covered
+    const covered = new Set<number>()
+    for (const c of chunks) {
+      for (let l = c.startLine; l <= c.endLine; l++) covered.add(l)
+    }
+    expect(covered.size).toBe(lines.length)
+  })
+
+  it('(tree-sitter) Rust impl block starts its own chunk', () => {
+    const lines = [
+      'struct Config {',
+      '    host: String,',
+      '    port: u16,',
+      '    timeout: u32,',
+      '}',
+      '',
+      'impl Config {',
+      '    pub fn new(host: &str, port: u16) -> Self {',
+      '        Config { host: host.to_string(), port, timeout: 30 }',
+      '    }',
+      '}',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'config.rs')
+    // struct + impl → two separate chunks
+    const implChunk = chunks.find((c) => c.content.includes('impl Config'))
+    expect(implChunk).toBeDefined()
+    // All lines covered
+    const covered = new Set<number>()
+    for (const c of chunks) {
+      for (let l = c.startLine; l <= c.endLine; l++) covered.add(l)
+    }
+    expect(covered.size).toBe(lines.length)
+  })
+
+  it('(tree-sitter) Python decorated_definition groups decorator + function', () => {
+    // tree-sitter's Python grammar wraps @decorator + def together as
+    // decorated_definition, so the chunker must start the chunk at the decorator.
+    const lines = [
+      'CONSTANT = 42',
+      '',
+      '@pytest.mark.parametrize("x", [1, 2, 3])',
+      'def test_values(x):',
+      '    assert x > 0',
+      '    assert x < 10',
+      '',
+      'def helper(a, b, c):',
+      '    return a + b + c',
+      '    # extra line to meet min_chunk_lines',
+      '    pass',
+    ]
+    const content = lines.join('\n')
+    const chunker = new FunctionChunker()
+    const chunks = chunker.chunk(content, 'tests.py')
+    // decorated test_values + plain helper → 2 function chunks (CONSTANT may merge)
+    const decoratedChunk = chunks.find((c) => c.content.includes('@pytest.mark'))
+    expect(decoratedChunk).toBeDefined()
+    expect(decoratedChunk!.content).toContain('def test_values')
+  })
 })
