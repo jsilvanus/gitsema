@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { computeEvolution } from '../../core/search/evolution.js'
+import { computeEvolution, getCommitAuthor, getRemoteUrl, buildCommitUrl } from '../../core/search/evolution.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
@@ -11,6 +11,89 @@ export interface EvolutionCommandOptions {
   includeContent?: boolean
   origin?: string
   remote?: string
+  /** Top-N largest-jump alerts. Pass `true` for default 5, or a numeric string for a custom count. */
+  alerts?: string | boolean
+}
+
+/** A single alert entry – one of the top-N largest semantic jumps for a file. */
+export interface EvolutionAlert {
+  rank: number
+  /** 0-based index in the full evolution timeline. */
+  index: number
+  date: string
+  blobHash: string
+  commitHash: string
+  distFromPrev: number
+  distFromOrigin: number
+  /** Git commit author in "Name <email>" format, if resolvable. */
+  author?: string
+  /** Web link to the commit on GitHub / GitLab / Bitbucket, if the remote is recognised. */
+  commitUrl?: string
+}
+
+/**
+ * Extracts the top-N largest semantic jumps (by `distFromPrev`) from an
+ * evolution timeline, sorted descending by delta score.
+ */
+export function buildAlerts(
+  entries: EvolutionEntry[],
+  threshold: number,
+  topN: number,
+): Array<{ entry: EvolutionEntry; index: number }> {
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ index }) => index > 0)
+    .filter(({ entry }) => entry.distFromPrev >= threshold)
+    .sort((a, b) => b.entry.distFromPrev - a.entry.distFromPrev)
+    .slice(0, topN)
+}
+
+/**
+ * Enriches a list of raw alert candidates with author and commit-URL metadata
+ * by running `git log` and inspecting the `origin` remote.
+ */
+async function enrichAlerts(
+  candidates: Array<{ entry: EvolutionEntry; index: number }>,
+  repoPath = '.',
+): Promise<EvolutionAlert[]> {
+  const remoteUrl = await getRemoteUrl(repoPath)
+
+  const results: EvolutionAlert[] = []
+  for (let i = 0; i < candidates.length; i++) {
+    const { entry, index } = candidates[i]
+    const author = await getCommitAuthor(entry.commitHash, repoPath) ?? undefined
+    const commitUrl = remoteUrl ? buildCommitUrl(entry.commitHash, remoteUrl) : undefined
+
+    results.push({
+      rank: i + 1,
+      index,
+      date: formatDate(entry.timestamp),
+      blobHash: entry.blobHash,
+      commitHash: entry.commitHash,
+      distFromPrev: entry.distFromPrev,
+      distFromOrigin: entry.distFromOrigin,
+      author,
+      commitUrl,
+    })
+  }
+  return results
+}
+
+/**
+ * Renders the top-N alert entries as a human-readable CLI section.
+ */
+function renderAlerts(alerts: EvolutionAlert[], filePath: string, threshold: number): string {
+  if (alerts.length === 0) {
+    return `  (no jumps found above threshold ${threshold.toFixed(2)})`
+  }
+
+  const lines: string[] = []
+  for (const a of alerts) {
+    lines.push(`  #${a.rank}  ${a.date}  blob:${shortHash(a.blobHash)}  commit:${shortHash(a.commitHash)}  Δprev=${a.distFromPrev.toFixed(4)}  Δorigin=${a.distFromOrigin.toFixed(4)}`)
+    if (a.author) lines.push(`      Author: ${a.author}`)
+    if (a.commitUrl) lines.push(`      ${a.commitUrl}`)
+  }
+  return `⚠  Top ${alerts.length} largest semantic jump${alerts.length === 1 ? '' : 's'} for ${filePath}:\n\n${lines.join('\n')}`
 }
 
 /**
@@ -23,8 +106,9 @@ function serializeEvolutionJson(
   threshold: number,
   includeContent: boolean,
   originBlob?: string,
+  alerts?: EvolutionAlert[],
 ): string {
-  const data = {
+  const data: Record<string, unknown> = {
     path: filePath,
     versions: entries.length,
     threshold,
@@ -50,6 +134,9 @@ function serializeEvolutionJson(
       maxDistFromPrev: entries.length > 0 ? Math.max(...entries.map((e) => e.distFromPrev), 0) : 0,
       totalDrift: entries.length > 0 ? entries[entries.length - 1].distFromOrigin : 0,
     },
+  }
+  if (alerts !== undefined) {
+    data.alerts = alerts
   }
   return JSON.stringify(data, null, 2)
 }
@@ -141,13 +228,30 @@ export async function evolutionCommand(
     process.exit(1)
   }
 
+  // Parse --alerts option: boolean true → default 5, numeric string → custom count.
+  let alertsTopN: number | undefined
+  if (options.alerts !== undefined) {
+    if (options.alerts === true) {
+      alertsTopN = 5
+    } else {
+      alertsTopN = parseInt(String(options.alerts), 10) || 5
+    }
+  }
+
   const includeContent = options.includeContent ?? false
   const origin = options.origin
   const entries = computeEvolution(filePath.trim(), origin)
 
+  // Build and enrich alerts when --alerts is set.
+  let enrichedAlerts: EvolutionAlert[] | undefined
+  if (alertsTopN !== undefined) {
+    const candidates = buildAlerts(entries, threshold, alertsTopN)
+    enrichedAlerts = await enrichAlerts(candidates)
+  }
+
   // --dump: emit structured JSON to a file or stdout
   if (options.dump !== undefined) {
-    const json = serializeEvolutionJson(filePath.trim(), entries, threshold, includeContent, origin)
+    const json = serializeEvolutionJson(filePath.trim(), entries, threshold, includeContent, origin, enrichedAlerts)
 
     if (typeof options.dump === 'string') {
       // --dump <file> → write JSON to file, then print human-readable to stdout
@@ -171,7 +275,12 @@ export async function evolutionCommand(
   console.log(`Evolution of: ${filePath}`)
   if (options.origin) console.log(`Origin blob: ${options.origin}`)
   console.log(`Versions found: ${entries.length}`)
-  if (entries.length > 0) {
+
+  if (enrichedAlerts !== undefined) {
+    // --alerts mode: show alerts section (optionally in addition to the full timeline)
+    console.log('')
+    console.log(renderAlerts(enrichedAlerts, filePath, threshold))
+  } else if (entries.length > 0) {
     console.log('')
     console.log(renderEvolution(entries, threshold, origin))
   }

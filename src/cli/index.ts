@@ -142,6 +142,10 @@ program
     '--include-content',
     'include the stored file content for each version in the JSON dump (only used with --dump)',
   )
+  .option(
+    '--alerts [n]',
+    'show the top-N largest semantic jumps (default 5) with author and commit link; use with --dump to include in JSON output',
+  )
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(evolutionCommand)
 
