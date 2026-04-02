@@ -12,7 +12,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function makeCluster(id: number, label: string, centroid: number[], size: number): ClusterInfo {
-  return { id, label, centroid, size, representativePaths: [], topKeywords: [] }
+  return { id, label, centroid, size, representativePaths: [], topKeywords: [], enhancedKeywords: [] }
 }
 
 function makeReport(clusters: ClusterInfo[]): ClusterReport {

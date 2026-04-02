@@ -4,6 +4,7 @@ import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths } from '../db/schema.js'
 import { logger } from '../../utils/logger.js'
 import { cosineSimilarity } from './vectorSearch.js'
+import { enhanceClusters, type EnhancedLabelOptions, type ClusterEnhancerInput } from './labelEnhancer.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -16,6 +17,12 @@ export interface ClusterInfo {
   size: number
   representativePaths: string[]
   topKeywords: string[]
+  /**
+   * Enhanced keywords derived from TF-IDF across all clusters (path tokens +
+   * identifier splitting).  Populated when `useEnhancedLabels` is enabled in
+   * the compute options; empty array otherwise.
+   */
+  enhancedKeywords: string[]
 }
 
 export interface ConceptEdge {
@@ -104,6 +111,7 @@ export interface ClusterTimelineStep {
     size: number
     topKeywords: string[]
     representativePaths: string[]
+    enhancedKeywords: string[]
   }>
   /**
    * Structural changes relative to the previous step.
@@ -293,6 +301,10 @@ interface PartialCluster {
   representativePaths: string[]
   topKeywords: string[]
   blobHashes: string[]
+  /** Combined FTS content for all assigned blobs — used by the label enhancer. */
+  rawFtsContent: string
+  /** All paths resolved for assigned blobs — used by the label enhancer. */
+  allPaths: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -358,8 +370,17 @@ function buildClusterPartials(
 
     const topBlobHashes = distances.slice(0, topPaths).map((x) => x.hash)
 
-    // resolve paths for the top blobs
+    // resolve paths for the top blobs (representative) and all blobs (for enhancer)
     let repPaths: string[] = []
+    let allPathsForCluster: string[] = []
+    if (assigned.length > 0) {
+      // All paths for the cluster (used by label enhancer)
+      const allPlaceholders = assigned.map(() => '?').join(',')
+      const allPathRows = (rawDb.prepare(
+        `SELECT path FROM paths WHERE blob_hash IN (${allPlaceholders})`
+      ).all(...assigned) as Array<{ path: string }>)
+      allPathsForCluster = allPathRows.map((r) => r.path)
+    }
     if (topBlobHashes.length > 0) {
       const placeholders = topBlobHashes.map(() => '?').join(',')
       const stmt = rawDb.prepare(`SELECT blob_hash, path FROM paths WHERE blob_hash IN (${placeholders})`)
@@ -378,12 +399,13 @@ function buildClusterPartials(
 
     // extract keywords from FTS5 content
     let keywords: string[] = []
+    let rawFtsContent = ''
     if (assigned.length > 0) {
       const placeholders = assigned.map(() => '?').join(',')
       const stmt = rawDb.prepare(`SELECT content FROM blob_fts WHERE blob_hash IN (${placeholders})`)
       const ftsRows = stmt.all(...assigned) as Array<{ content: string }>
-      const combined = ftsRows.map((r) => r.content).join(' ')
-      keywords = extractKeywords(combined, topKeywordsN)
+      rawFtsContent = ftsRows.map((r) => r.content).join(' ')
+      keywords = extractKeywords(rawFtsContent, topKeywordsN)
     }
 
     // label: semantic keywords combined with the most common directory prefix
@@ -400,7 +422,16 @@ function buildClusterPartials(
       label = `cluster-${ci + 1}`
     }
 
-    partials.push({ label, centroid: centroids[ci], size, representativePaths: repPaths, topKeywords: keywords, blobHashes: assigned })
+    partials.push({
+      label,
+      centroid: centroids[ci],
+      size,
+      representativePaths: repPaths,
+      topKeywords: keywords,
+      blobHashes: assigned,
+      rawFtsContent,
+      allPaths: allPathsForCluster,
+    })
   }
 
   return { partials, assignments }
@@ -430,12 +461,18 @@ export async function computeClusters(opts: {
   edgeThreshold?: number
   topKeywords?: number
   topPaths?: number
+  /** When true, enhance cluster labels with TF-IDF keyword extraction (default: false) */
+  useEnhancedLabels?: boolean
+  /** Number of enhanced keywords to compute per cluster (default: 5) */
+  enhancedKeywordsN?: number
 } = {}): Promise<ClusterReport> {
   const kOpt = opts.k ?? 8
   const maxIterations = opts.maxIterations ?? 20
   const edgeThreshold = opts.edgeThreshold ?? 0.3
   const topKeywordsN = opts.topKeywords ?? 5
   const topPaths = opts.topPaths ?? 5
+  const useEnhancedLabels = opts.useEnhancedLabels ?? false
+  const enhancedKeywordsN = opts.enhancedKeywordsN ?? 5
 
   const { db, rawDb } = getActiveSession()
 
@@ -451,6 +488,15 @@ export async function computeClusters(opts: {
 
   const { partials } = buildClusterPartials(vectors, blobHashes, kOpt, maxIterations, topPaths, topKeywordsN, rawDb)
   const actualK = partials.length
+
+  // Optionally run label enhancer across all clusters
+  const enhancerInputs: ClusterEnhancerInput[] = partials.map((p) => ({
+    paths: p.allPaths,
+    content: p.rawFtsContent,
+    existingKeywords: p.topKeywords,
+  }))
+  const enhancedLabelOpts: EnhancedLabelOptions = { enabled: useEnhancedLabels, topN: enhancedKeywordsN }
+  const enhancedResults = enhanceClusters(enhancerInputs, enhancedLabelOpts)
 
   // Persist atomically
   const insertClusterStmt = rawDb.prepare(`INSERT INTO blob_clusters (label, centroid, size, representative_paths, top_keywords, clustered_at) VALUES (?, ?, ?, ?, ?, ?)`)
@@ -494,6 +540,7 @@ export async function computeClusters(opts: {
       size: partials[i].size,
       representativePaths: partials[i].representativePaths,
       topKeywords: partials[i].topKeywords,
+      enhancedKeywords: enhancedResults[i].keywords,
     })
   }
 
@@ -576,12 +623,18 @@ export async function computeClusterSnapshot(opts: {
   edgeThreshold?: number
   topKeywords?: number
   topPaths?: number
+  /** When true, enhance cluster labels with TF-IDF keyword extraction (default: false) */
+  useEnhancedLabels?: boolean
+  /** Number of enhanced keywords to compute per cluster (default: 5) */
+  enhancedKeywordsN?: number
 } = {}): Promise<ClusterSnapshot> {
   const kOpt = opts.k ?? 8
   const maxIterations = opts.maxIterations ?? 20
   const edgeThreshold = opts.edgeThreshold ?? 0.3
   const topKeywordsN = opts.topKeywords ?? 5
   const topPaths = opts.topPaths ?? 5
+  const useEnhancedLabels = opts.useEnhancedLabels ?? false
+  const enhancedKeywordsN = opts.enhancedKeywordsN ?? 5
 
   const { db, rawDb } = getActiveSession()
 
@@ -622,6 +675,15 @@ export async function computeClusterSnapshot(opts: {
   )
   const actualK = partials.length
 
+  // Optionally run label enhancer across all clusters
+  const enhancerInputs: ClusterEnhancerInput[] = partials.map((p) => ({
+    paths: p.allPaths,
+    content: p.rawFtsContent,
+    existingKeywords: p.topKeywords,
+  }))
+  const enhancedLabelOpts: EnhancedLabelOptions = { enabled: useEnhancedLabels, topN: enhancedKeywordsN }
+  const enhancedResults = enhanceClusters(enhancerInputs, enhancedLabelOpts)
+
   // Build ClusterInfo with sequential IDs (not persisted to DB)
   const clusters: ClusterInfo[] = partials.map((p, i) => ({
     id: i,
@@ -630,6 +692,7 @@ export async function computeClusterSnapshot(opts: {
     size: p.size,
     representativePaths: p.representativePaths,
     topKeywords: p.topKeywords,
+    enhancedKeywords: enhancedResults[i].keywords,
   }))
 
   const edges = buildEdges(clusters, edgeThreshold)
@@ -870,6 +933,10 @@ export async function computeClusterTimeline(opts: {
   edgeThreshold?: number
   topPaths?: number
   topKeywords?: number
+  /** When true, enhance cluster labels with TF-IDF keyword extraction (default: false) */
+  useEnhancedLabels?: boolean
+  /** Number of enhanced keywords to compute per cluster (default: 5) */
+  enhancedKeywordsN?: number
 } = {}): Promise<ClusterTimelineReport> {
   const steps = Math.max(1, opts.steps ?? 5)
   const kOpt = opts.k ?? 8
@@ -879,6 +946,8 @@ export async function computeClusterTimeline(opts: {
     edgeThreshold: opts.edgeThreshold ?? 0.3,
     topPaths: opts.topPaths ?? 5,
     topKeywords: opts.topKeywords ?? 5,
+    useEnhancedLabels: opts.useEnhancedLabels ?? false,
+    enhancedKeywordsN: opts.enhancedKeywordsN ?? 5,
   }
 
   const { rawDb } = getActiveSession()
@@ -961,6 +1030,7 @@ export async function computeClusterTimeline(opts: {
         size: c.size,
         topKeywords: c.topKeywords,
         representativePaths: c.representativePaths,
+        enhancedKeywords: c.enhancedKeywords,
       })),
       changes,
       stats,

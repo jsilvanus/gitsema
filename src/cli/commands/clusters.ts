@@ -7,6 +7,8 @@ export interface ClustersCommandOptions {
   iterations?: string
   edgeThreshold?: string
   dump?: string | boolean
+  enhancedLabels?: boolean
+  enhancedKeywordsN?: string
 }
 
 export async function clustersCommand(options: ClustersCommandOptions): Promise<void> {
@@ -14,6 +16,8 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
   const top = options.top !== undefined ? parseInt(options.top, 10) : 5
   const iterations = options.iterations !== undefined ? parseInt(options.iterations, 10) : 20
   const edgeThreshold = options.edgeThreshold !== undefined ? parseFloat(options.edgeThreshold) : 0.3
+  const useEnhancedLabels = options.enhancedLabels ?? false
+  const enhancedKeywordsN = options.enhancedKeywordsN !== undefined ? parseInt(options.enhancedKeywordsN, 10) : 5
 
   if (isNaN(k) || k < 1) {
     console.error('Error: --k must be a positive integer')
@@ -21,7 +25,15 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
   }
 
   try {
-    const report: ClusterReport = await computeClusters({ k, maxIterations: iterations, edgeThreshold, topPaths: top, topKeywords: 5 })
+    const report: ClusterReport = await computeClusters({
+      k,
+      maxIterations: iterations,
+      edgeThreshold,
+      topPaths: top,
+      topKeywords: 5,
+      useEnhancedLabels,
+      enhancedKeywordsN,
+    })
 
     if (options.dump !== undefined) {
       const json = JSON.stringify(report, null, 2)
@@ -42,6 +54,9 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
       const header = `Cluster ${i + 1} — ${c.label}  (${c.size} blobs)`
       console.log(header)
       console.log(`  Keywords:  ${c.topKeywords.join(', ')}`)
+      if (c.enhancedKeywords.length > 0) {
+        console.log(`  Enhanced:  ${c.enhancedKeywords.join(', ')}`)
+      }
       console.log(`  Top paths: ${c.representativePaths.join(', ')}`)
       const neighbors = report.edges.filter((e) => e.fromId === c.id || e.toId === c.id)
         .map((e) => {
