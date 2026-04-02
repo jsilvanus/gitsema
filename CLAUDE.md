@@ -300,9 +300,10 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 - **ESM only.** `"type": "module"` in `package.json`. All imports must use `.js` extensions (even for `.ts` source files). No CommonJS.
 - **Strict TypeScript.** `strict: true` in `tsconfig.json`. No `any` casts without explicit reason.
 - **No barrel exports.** Import directly from the file that defines the function/class.
-- **No test suite yet.** Vitest is installed and `vitest.config.ts` exists, but no tests are written. Tests are a known gap.
+- **Test suite:** Vitest is used for tests (`pnpm test`). Tests live in `tests/` (unit) and `tests/integration/` (end-to-end). Add tests for any new core logic.
 - **Logger:** Use `logger.ts` (`log.info`, `log.debug`, etc.) — do not use `console.log` in library code. `console.log` is acceptable in CLI command handlers for user output.
 - **Error handling:** Errors from embedding providers should be caught per-blob and counted in stats (not crash the whole indexer). See `indexer.ts` for the pattern.
+- **Version bump at end of each phase:** Run `npm version minor --no-git-tag-version` (or `patch` for hotfixes) at the end of every phase implementation, then commit `package.json` with the bare version string as the commit message (e.g. `0.18.0`). This is a required step — do not skip it.
 
 ---
 
@@ -310,6 +311,6 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 
 | Gap | Notes |
 |---|---|
-| **No test suite** | Highest priority technical debt. `vitest.config.ts` exists and Vitest is installed, but no tests are written. Need integration tests (indexer + search) and unit tests (chunking, ranking). |
+| **Test suite (partial)** | Phase 18 added unit tests (chunking, ranking, vectorSearch, queryCache) and integration tests (index + search end-to-end). Coverage of server routes and MCP layer is still a gap. |
 | **Phase 13: Python model server** | `modelserver/` is scaffolded (FastAPI + sentence-transformers) but blocked on Windows — `tokenizers` requires a Rust toolchain. A Docker image would solve this. |
 | **Cosine at scale** | Pure-JS cosine works to ~500K blobs. `sqlite-vss` or DuckDB migration path is in the risk register but not designed. |
