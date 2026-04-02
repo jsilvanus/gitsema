@@ -14,6 +14,8 @@ export interface ClusterDiffCommandOptions {
   iterations?: string
   edgeThreshold?: string
   dump?: string | boolean
+  enhancedLabels?: boolean
+  enhancedKeywordsN?: string
 }
 
 /**
@@ -32,6 +34,8 @@ export async function clusterDiffCommand(
   const top = options.top !== undefined ? parseInt(options.top, 10) : 5
   const iterations = options.iterations !== undefined ? parseInt(options.iterations, 10) : 20
   const edgeThreshold = options.edgeThreshold !== undefined ? parseFloat(options.edgeThreshold) : 0.3
+  const useEnhancedLabels = options.enhancedLabels ?? false
+  const enhancedKeywordsN = options.enhancedKeywordsN !== undefined ? parseInt(options.enhancedKeywordsN, 10) : 5
 
   if (isNaN(k) || k < 1) {
     console.error('Error: --k must be a positive integer')
@@ -69,7 +73,7 @@ export async function clusterDiffCommand(
     }
 
     // Compute cluster snapshots
-    const clusterOpts = { k, maxIterations: iterations, edgeThreshold, topPaths: top, topKeywords: 5 }
+    const clusterOpts = { k, maxIterations: iterations, edgeThreshold, topPaths: top, topKeywords: 5, useEnhancedLabels, enhancedKeywordsN }
 
     const snapshot1 = await computeClusterSnapshot({ ...clusterOpts, blobHashFilter: hashes1 })
     const snapshot2 = await computeClusterSnapshot({ ...clusterOpts, blobHashFilter: hashes2 })
@@ -143,6 +147,10 @@ function printClusterChange(change: ClusterChange, index: number): void {
   const keywords = (after ?? before)!.topKeywords
   if (keywords.length > 0) {
     console.log(`    Keywords:        ${keywords.join(', ')}`)
+  }
+  const enhanced = (after ?? before)!.enhancedKeywords
+  if (enhanced.length > 0) {
+    console.log(`    Enhanced:        ${enhanced.join(', ')}`)
   }
 
   console.log('')

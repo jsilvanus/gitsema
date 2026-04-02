@@ -17,6 +17,8 @@ export interface ClusterTimelineCommandOptions {
   edgeThreshold?: string
   threshold?: string
   dump?: string | boolean
+  enhancedLabels?: boolean
+  enhancedKeywordsN?: string
 }
 
 /**
@@ -32,6 +34,8 @@ export async function clusterTimelineCommand(options: ClusterTimelineCommandOpti
   const iterations = options.iterations !== undefined ? parseInt(options.iterations, 10) : 20
   const edgeThreshold = options.edgeThreshold !== undefined ? parseFloat(options.edgeThreshold) : 0.3
   const threshold = options.threshold !== undefined ? parseFloat(options.threshold) : 0.15
+  const useEnhancedLabels = options.enhancedLabels ?? false
+  const enhancedKeywordsN = options.enhancedKeywordsN !== undefined ? parseInt(options.enhancedKeywordsN, 10) : 5
 
   if (isNaN(k) || k < 1) {
     console.error('Error: --k must be a positive integer')
@@ -72,6 +76,8 @@ export async function clusterTimelineCommand(options: ClusterTimelineCommandOpti
       edgeThreshold,
       topPaths: top,
       topKeywords: 5,
+      useEnhancedLabels,
+      enhancedKeywordsN,
     })
 
     if (report.steps.length === 0) {
@@ -167,6 +173,9 @@ function printStep(
 
     if (c.topKeywords.length > 0) {
       console.log(`       Keywords:  ${c.topKeywords.join(', ')}`)
+    }
+    if (c.enhancedKeywords.length > 0) {
+      console.log(`       Enhanced:  ${c.enhancedKeywords.join(', ')}`)
     }
     if (c.representativePaths.length > 0) {
       console.log(`       Paths:     ${c.representativePaths.join(', ')}`)

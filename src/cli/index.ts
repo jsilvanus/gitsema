@@ -257,6 +257,8 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
+  .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .action(clustersCommand)
 
 program
@@ -270,6 +272,8 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
+  .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .action(clusterDiffCommand)
 
 program
@@ -287,6 +291,8 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
+  .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .action(clusterTimelineCommand)
 
 program
