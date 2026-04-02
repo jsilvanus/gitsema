@@ -89,3 +89,57 @@ export const queryEmbeddings = sqliteTable('query_embeddings', {
   vector: blob('vector', { mode: 'buffer' }).notNull(),
   cachedAt: integer('cached_at').notNull(),
 })
+
+/**
+ * Symbol-level registry (Phase 19).
+ *
+ * One row per named declaration (function, class, method, impl block, etc.)
+ * extracted by the `function` chunker from a blob.  The `symbol_name` and
+ * `symbol_kind` columns store the extracted identifier and its kind
+ * (e.g. "validateToken" / "function", "Auth" / "class", "Repository" / "impl").
+ *
+ * Unlike `chunks`, which stores only line boundaries, `symbols` records the
+ * rich metadata needed to build enriched embeddings and to enable symbol-level
+ * semantic search.
+ */
+export const symbols = sqliteTable('symbols', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
+  startLine: integer('start_line').notNull(),
+  endLine: integer('end_line').notNull(),
+  /** Extracted identifier, e.g. "validateToken", "Auth", "Repository". */
+  symbolName: text('symbol_name').notNull(),
+  /**
+   * Kind of the symbol: one of 'function' | 'class' | 'method' | 'impl' |
+   * 'struct' | 'enum' | 'trait' | 'other'.
+   */
+  symbolKind: text('symbol_kind').notNull(),
+  /**
+   * Detected language for this symbol (e.g. 'typescript', 'python', 'go', 'rust').
+   * Stored so callers can format symbol-level search results appropriately.
+   */
+  language: text('language').notNull(),
+})
+
+/**
+ * Embedding for a symbol.  Keyed by symbol_id; one embedding per symbol.
+ *
+ * The embedded text is an **enriched** representation that combines:
+ *   - the file path (from the `paths` table)
+ *   - the symbol name and kind
+ *   - the raw source code of the symbol's line range
+ *
+ * Example enriched text:
+ *   // file: src/auth/jwt.ts  lines 10-25
+ *   // function: validateToken
+ *   export async function validateToken(token: string): Promise<boolean> { ... }
+ *
+ * This richer context improves recall for natural-language queries against
+ * symbols compared with embedding the bare code snippet alone.
+ */
+export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
+  symbolId: integer('symbol_id').primaryKey().references(() => symbols.id),
+  model: text('model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+})

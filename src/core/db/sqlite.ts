@@ -30,8 +30,9 @@ export interface DbSession {
  *   1 — Added file_type column to embeddings (Phase 8)
  *   2 — Added blob_branches table (Phase 15)
  *   3 — Added query_embeddings cache table (Phase 18)
+ *   4 — Added symbols + symbol_embeddings tables (Phase 19)
  */
-const CURRENT_SCHEMA_VERSION = 3
+const CURRENT_SCHEMA_VERSION = 4
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -92,8 +93,32 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('3')
   }
 
+  // v3 → v4: add symbols + symbol_embeddings tables (Phase 19)
+  if (version < 4) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS symbols (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+        start_line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        symbol_name TEXT NOT NULL,
+        symbol_kind TEXT NOT NULL,
+        language TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS symbol_embeddings (
+        symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL
+      );
+    `)
+    version = 4
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('4')
+  }
+
   // Future migrations go here:
-  // if (version < 4) { sqlite.exec(`...`); version = 4; sqlite.prepare(...).run('4') }
+  // if (version < 5) { sqlite.exec(`...`); version = 5; sqlite.prepare(...).run('5') }
 }
 
 /** The full CREATE TABLE block used for every new database file. */
@@ -173,6 +198,25 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       vector BLOB NOT NULL,
       cached_at INTEGER NOT NULL,
       UNIQUE (query_text, model)
+    );
+
+    -- Symbol-level registry: named declarations extracted by the function chunker (Phase 19)
+    CREATE TABLE IF NOT EXISTS symbols (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      symbol_name TEXT NOT NULL,
+      symbol_kind TEXT NOT NULL,
+      language TEXT NOT NULL
+    );
+
+    -- Enriched embeddings for symbol-level semantic search (Phase 19)
+    CREATE TABLE IF NOT EXISTS symbol_embeddings (
+      symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id),
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      vector BLOB NOT NULL
     );
   `)
 }

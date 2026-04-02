@@ -2,7 +2,7 @@ import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
 import { isIndexed } from './deduper.js'
-import { storeBlob, storeBlobRecord, storeChunk, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches } from './blobStore.js'
+import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
@@ -102,6 +102,7 @@ export interface IndexStats {
   commits: number       // Phase 6: commits stored
   blobCommits: number   // Phase 6: blob-commit links stored
   chunks: number        // Phase 10: chunk embeddings stored
+  symbols: number       // Phase 19: symbol-level embeddings stored
 }
 
 /**
@@ -118,6 +119,52 @@ function isFiltered(path: string, filter: FilterOptions): boolean {
     }
   }
   return false
+}
+
+/**
+ * Detects the programming language of a file by extension.
+ * Returns a short string used as the `language` column in the `symbols` table.
+ */
+function detectLanguageForPath(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+  switch (ext) {
+    case 'py': case 'pyi': return 'python'
+    case 'go': return 'go'
+    case 'rs': return 'rust'
+    case 'ts': return 'typescript'
+    case 'tsx': return 'tsx'
+    case 'js': case 'jsx': case 'mjs': case 'cjs': return 'javascript'
+    case 'java': return 'java'
+    case 'cs': return 'csharp'
+    case 'kt': return 'kotlin'
+    case 'scala': return 'scala'
+    default: return 'other'
+  }
+}
+
+/**
+ * Builds the enriched text for a symbol embedding.  Including the file path,
+ * symbol kind, and symbol name in the preamble lets the embedding model
+ * capture the symbol's identity context alongside its code content.
+ *
+ * Format:
+ *   // file: src/auth/jwt.ts  lines 10-25
+ *   // function: validateToken
+ *   <source code>
+ */
+function buildEnrichedText(
+  filePath: string,
+  startLine: number,
+  endLine: number,
+  symbolKind: string,
+  symbolName: string,
+  code: string,
+): string {
+  return [
+    `// file: ${filePath}  lines ${startLine}-${endLine}`,
+    `// ${symbolKind}: ${symbolName}`,
+    code,
+  ].join('\n')
 }
 
 export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
@@ -153,6 +200,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   // Build the chunker for this run
   const chunker = createChunker(chunkerStrategy, chunkerOptions)
   const useChunking = chunkerStrategy !== 'file'
+  // Symbol embeddings are only produced when the function chunker is active,
+  // since that is the only strategy that extracts named declarations.
+  const useSymbols = chunkerStrategy === 'function'
 
   // Concurrency limiter for embedding calls
   const limit = createLimiter(concurrency)
@@ -161,7 +211,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     seen: 0, indexed: 0, skipped: 0, oversized: 0, filtered: 0, failed: 0,
     embedFailed: 0, otherFailed: 0,
     fbFunction: 0, fbFixed: 0,
-    queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0,
+    queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0, symbols: 0,
   }
   const start = Date.now()
   const seenHashes = new Set<string>()
@@ -271,6 +321,36 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               allOk = false
               stats.failed++
               stats.otherFailed++
+            }
+
+            // When using the function chunker AND the chunk carries a symbol name,
+            // also embed the enriched text and store in symbols/symbol_embeddings.
+            if (useSymbols && chunk.symbolName) {
+              const lang = detectLanguageForPath(path)
+              const enriched = buildEnrichedText(
+                path, chunk.startLine, chunk.endLine,
+                chunk.symbolKind ?? 'function', chunk.symbolName, chunk.content,
+              )
+              let symbolEmbedding: number[]
+              try {
+                symbolEmbedding = await activeProvider.embed(enriched)
+              } catch (err) {
+                logger.debug?.(`Symbol embedding failed for ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
+                // Symbol embedding failure is non-fatal — the chunk embedding succeeded
+                onProgress?.({ ...stats, elapsed: Date.now() - start })
+                continue
+              }
+              try {
+                storeSymbol({
+                  blobHash, startLine: chunk.startLine, endLine: chunk.endLine,
+                  symbolName: chunk.symbolName, symbolKind: chunk.symbolKind ?? 'function',
+                  language: lang, model: activeProvider.model, embedding: symbolEmbedding,
+                })
+                stats.symbols++
+              } catch (err) {
+                logger.error(`Failed to store symbol ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
+                // Non-fatal: symbol storage failure does not roll back the chunk embedding
+              }
             }
           }
 
