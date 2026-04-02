@@ -86,6 +86,54 @@ export interface TemporalClusterReport {
   stableBlobsTotal: number
 }
 
+/**
+ * A single step in a cluster timeline — clusters at one point in time plus the
+ * changes from the previous step (null for the first step).
+ */
+export interface ClusterTimelineStep {
+  /** Human-readable reference string for this step (formatted date). */
+  ref: string
+  /** Unix timestamp (seconds) used as the cutoff for this step. */
+  timestamp: number
+  /** Number of blobs visible at this step. */
+  blobCount: number
+  /** Cluster summary for this step. */
+  clusters: Array<{
+    id: number
+    label: string
+    size: number
+    topKeywords: string[]
+    representativePaths: string[]
+  }>
+  /**
+   * Structural changes relative to the previous step.
+   * Null for the first step (no prior state to compare to).
+   */
+  changes: ClusterChange[] | null
+  /** Aggregate blob-movement stats relative to the previous step. */
+  stats: {
+    newBlobs: number
+    removedBlobs: number
+    movedBlobs: number
+    stableBlobs: number
+  } | null
+  /** Ref label of the previous step (null for first step). */
+  prevRef: string | null
+}
+
+/**
+ * Full cluster timeline produced by `computeClusterTimeline`.
+ */
+export interface ClusterTimelineReport {
+  /** Ordered chronological steps (oldest first). */
+  steps: ClusterTimelineStep[]
+  k: number
+  /** Unix timestamp of the earliest step. */
+  since: number
+  /** Unix timestamp of the latest step. */
+  until: number
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -215,6 +263,26 @@ export function extractKeywords(text: string, topN: number): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Labeling helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the most common directory prefix (up to 2 levels deep) among the
+ * provided file paths, or an empty string when the input array is empty.
+ */
+function buildPathPrefix(paths: string[]): string {
+  if (paths.length === 0) return ''
+  const prefixes = paths.map((p) => {
+    const parts = p.split('/')
+    return parts.length >= 2 ? parts.slice(0, 2).join('/') : parts[0]
+  })
+  const counts = new Map<string, number>()
+  for (const pr of prefixes) counts.set(pr, (counts.get(pr) ?? 0) + 1)
+  const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])
+  return sorted[0][0]
+}
+
+// ---------------------------------------------------------------------------
 // Shared internal types
 // ---------------------------------------------------------------------------
 
@@ -318,17 +386,16 @@ function buildClusterPartials(
       keywords = extractKeywords(combined, topKeywordsN)
     }
 
-    // label: most common directory prefix among repPaths
+    // label: semantic keywords combined with the most common directory prefix
+    const pathPrefix = buildPathPrefix(repPaths)
+    const topWords = keywords.slice(0, 3).join(' ')
     let label = ''
-    if (repPaths.length > 0) {
-      const prefixes = repPaths.map((p) => {
-        const parts = p.split('/')
-        return parts.slice(0, 2).join('/')
-      })
-      const counts = new Map<string, number>()
-      for (const pr of prefixes) counts.set(pr, (counts.get(pr) ?? 0) + 1)
-      const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])
-      label = sorted[0][0]
+    if (topWords && pathPrefix) {
+      label = `${topWords} (${pathPrefix})`
+    } else if (topWords) {
+      label = topWords
+    } else if (pathPrefix) {
+      label = pathPrefix
     } else {
       label = `cluster-${ci + 1}`
     }
@@ -520,7 +587,13 @@ export async function computeClusterSnapshot(opts: {
 
   // Load embeddings — optionally filtered
   let rows: Array<{ blobHash: string; vector: unknown }>
-  if (opts.blobHashFilter && opts.blobHashFilter.length > 0) {
+  if (opts.blobHashFilter !== undefined) {
+    // An explicit filter was provided.
+    // An empty array means "no blobs in this time window" — return immediately.
+    if (opts.blobHashFilter.length === 0) {
+      const emptyReport: ClusterReport = { clusters: [], edges: [], totalBlobs: 0, k: 0, clusteredAt: Math.floor(Date.now() / 1000) }
+      return { report: emptyReport, assignments: new Map() }
+    }
     // Fetch in one raw SQL call to avoid Drizzle IN() limitations with large arrays
     const placeholders = opts.blobHashFilter.map(() => '?').join(',')
     rows = (rawDb.prepare(
@@ -772,4 +845,128 @@ export function compareClusterSnapshots(
     movedBlobsTotal,
     stableBlobsTotal,
   }
+}
+
+// ---------------------------------------------------------------------------
+// computeClusterTimeline — multi-step temporal cluster view (Phase 23)
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes clusters at `steps` evenly-spaced points in time across the indexed
+ * commit history, then stitches consecutive snapshots together into a timeline
+ * of cluster shifts and relabelings.
+ *
+ * @param opts.steps   - number of time checkpoints to sample (default 5)
+ * @param opts.since   - earliest timestamp to include (unix seconds; defaults to earliest indexed commit)
+ * @param opts.until   - latest timestamp to include (unix seconds; defaults to latest indexed commit)
+ * @param opts.k       - number of clusters per snapshot (default 8)
+ */
+export async function computeClusterTimeline(opts: {
+  steps?: number
+  since?: number
+  until?: number
+  k?: number
+  maxIterations?: number
+  edgeThreshold?: number
+  topPaths?: number
+  topKeywords?: number
+} = {}): Promise<ClusterTimelineReport> {
+  const steps = Math.max(1, opts.steps ?? 5)
+  const kOpt = opts.k ?? 8
+  const snapshotOpts = {
+    k: kOpt,
+    maxIterations: opts.maxIterations ?? 20,
+    edgeThreshold: opts.edgeThreshold ?? 0.3,
+    topPaths: opts.topPaths ?? 5,
+    topKeywords: opts.topKeywords ?? 5,
+  }
+
+  const { rawDb } = getActiveSession()
+
+  // Find the timestamp range from the commits table
+  const rangeRow = rawDb.prepare(`SELECT MIN(timestamp) AS minTs, MAX(timestamp) AS maxTs FROM commits`)
+    .get() as { minTs: number | null; maxTs: number | null }
+
+  if (rangeRow.minTs === null || rangeRow.maxTs === null) {
+    return { steps: [], k: kOpt, since: 0, until: 0 }
+  }
+
+  const since = opts.since !== undefined ? Math.max(opts.since, rangeRow.minTs) : rangeRow.minTs
+  const until = opts.until !== undefined ? Math.min(opts.until, rangeRow.maxTs) : rangeRow.maxTs
+
+  // Generate evenly-spaced timestamps across [since, until]
+  const timestamps: number[] = []
+  if (steps === 1) {
+    timestamps.push(until)
+  } else {
+    const interval = (until - since) / (steps - 1)
+    for (let i = 0; i < steps; i++) {
+      timestamps.push(Math.round(since + interval * i))
+    }
+  }
+
+  // Snap each timestamp to the nearest real commit timestamp (≤ timestamp),
+  // so that steps with no blobs get deduplicated cleanly.
+  const snapTimestamps: number[] = timestamps.map((ts) => {
+    const row = rawDb.prepare(
+      `SELECT MAX(timestamp) AS ts FROM commits WHERE timestamp <= ?`
+    ).get(ts) as { ts: number | null }
+    return row.ts ?? ts
+  })
+
+  // Compute snapshots for each checkpoint
+  const snapshots: ClusterSnapshot[] = []
+  const effectiveTimestamps: number[] = []
+
+  for (const ts of snapTimestamps) {
+    const blobHashes = getBlobHashesUpTo(ts)
+    const snapshot = await computeClusterSnapshot({ ...snapshotOpts, blobHashFilter: blobHashes })
+    snapshots.push(snapshot)
+    effectiveTimestamps.push(ts)
+  }
+
+  // Build timeline steps
+  const timelineSteps: ClusterTimelineStep[] = []
+
+  for (let i = 0; i < snapshots.length; i++) {
+    const snap = snapshots[i]
+    const ts = effectiveTimestamps[i]
+    const ref = new Date(ts * 1000).toISOString().slice(0, 10)
+
+    let changes: ClusterChange[] | null = null
+    let stats: ClusterTimelineStep['stats'] = null
+    let prevRef: string | null = null
+
+    if (i > 0) {
+      const prev = snapshots[i - 1]
+      const prevTs = effectiveTimestamps[i - 1]
+      prevRef = new Date(prevTs * 1000).toISOString().slice(0, 10)
+      const diff = compareClusterSnapshots(prev, snap, prevRef, ref)
+      changes = diff.changes
+      stats = {
+        newBlobs: diff.newBlobsTotal,
+        removedBlobs: diff.removedBlobsTotal,
+        movedBlobs: diff.movedBlobsTotal,
+        stableBlobs: diff.stableBlobsTotal,
+      }
+    }
+
+    timelineSteps.push({
+      ref,
+      timestamp: ts,
+      blobCount: snap.report.totalBlobs,
+      clusters: snap.report.clusters.map((c) => ({
+        id: c.id,
+        label: c.label,
+        size: c.size,
+        topKeywords: c.topKeywords,
+        representativePaths: c.representativePaths,
+      })),
+      changes,
+      stats,
+      prevRef,
+    })
+  }
+
+  return { steps: timelineSteps, k: kOpt, since, until }
 }

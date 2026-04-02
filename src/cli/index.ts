@@ -16,6 +16,7 @@ import { deadConceptsCommand } from './commands/deadConcepts.js'
 import { impactCommand } from './commands/impact.js'
 import { clustersCommand } from './commands/clusters.js'
 import { clusterDiffCommand } from './commands/clusterDiff.js'
+import { clusterTimelineCommand } from './commands/clusterTimeline.js'
 
 const program = new Command()
 
@@ -270,6 +271,23 @@ program
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .action(clusterDiffCommand)
+
+program
+  .command('cluster-timeline')
+  .description('Show how semantic clusters shifted over the commit history (multi-step timeline)')
+  .option('--k <n>', 'number of clusters per step (default 8)', '8')
+  .option('--steps <n>', 'number of evenly-spaced time checkpoints (default 5)', '5')
+  .option('--since <ref>', 'start date or git ref for the timeline (default: earliest indexed commit)')
+  .option('--until <ref>', 'end date or git ref for the timeline (default: latest indexed commit)')
+  .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
+  .option('--iterations <n>', 'max k-means iterations per step (default 20)', '20')
+  .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
+  .option('--threshold <n>', 'centroid-drift threshold above which a cluster is flagged as relabeled (default 0.15)', '0.15')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(clusterTimelineCommand)
 
 program
   .command('backfill-fts')
