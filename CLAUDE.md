@@ -303,7 +303,7 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 - **Test suite:** Vitest is used for tests (`pnpm test`). Tests live in `tests/` (unit) and `tests/integration/` (end-to-end). Add tests for any new core logic.
 - **Logger:** Use `logger.ts` (`log.info`, `log.debug`, etc.) — do not use `console.log` in library code. `console.log` is acceptable in CLI command handlers for user output.
 - **Error handling:** Errors from embedding providers should be caught per-blob and counted in stats (not crash the whole indexer). See `indexer.ts` for the pattern.
-- **Version bump at end of each phase:** Run `npm version minor --no-git-tag-version` (or `patch` for hotfixes) at the end of every phase implementation, then commit `package.json` with the bare version string as the commit message (e.g. `0.18.0`). This is a required step — do not skip it.
+- **Version bump at end of each phase:** Run `npm version minor` (or `patch` for hotfixes) at the end of every phase implementation. This automatically bumps `package.json`, creates a git commit with the bare version string as the message (e.g. `0.18.0`), and creates a git tag (`v0.18.0`). Push both the branch and the tag with `git push && git push --tags`. This is a required step — do not skip it.
 
 ---
 
