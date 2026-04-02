@@ -15,6 +15,7 @@ import { semanticBlameCommand } from './commands/semanticBlame.js'
 import { deadConceptsCommand } from './commands/deadConcepts.js'
 import { impactCommand } from './commands/impact.js'
 import { clustersCommand } from './commands/clusters.js'
+import { clusterDiffCommand } from './commands/clusterDiff.js'
 
 const program = new Command()
 
@@ -256,6 +257,19 @@ program
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .action(clustersCommand)
+
+program
+  .command('cluster-diff <ref1> <ref2>')
+  .description('Compare semantic clusters between two points in history (temporal clustering)')
+  .option('--k <n>', 'number of clusters to compute at each ref (default 8)', '8')
+  .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
+  .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
+  .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(clusterDiffCommand)
 
 program
   .command('backfill-fts')

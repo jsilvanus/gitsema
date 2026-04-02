@@ -6,4 +6,4 @@ modelserver/models/
 # Hugging Face cache
 .cache/huggingface/
 # Torch cache
-.cache/torch/
+.cache/torch/yarn.lock
