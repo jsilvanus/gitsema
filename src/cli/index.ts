@@ -12,6 +12,8 @@ import { backfillFtsCommand } from './commands/backfillFts.js'
 import { serveCommand } from './commands/serve.js'
 import { remoteIndexCommand } from './commands/remoteIndex.js'
 import { semanticBlameCommand } from './commands/semanticBlame.js'
+import { deadConceptsCommand } from './commands/deadConcepts.js'
+import { impactCommand } from './commands/impact.js'
 
 const program = new Command()
 
@@ -215,6 +217,31 @@ program
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .action(semanticBlameCommand)
+
+program
+  .command('dead-concepts')
+  .description('Find historical concepts that no longer exist in HEAD but are semantically similar to current code')
+  .option('-k, --top <n>', 'number of results to return', '10')
+  .option(
+    '--since <date>',
+    'only consider dead blobs whose latest commit is on or after this date (YYYY-MM-DD or ISO 8601)',
+  )
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(deadConceptsCommand)
+
+program
+  .command('impact <path>')
+  .description('Compute semantically similar blobs across the codebase to highlight refactor impact')
+  .option('-k, --top <n>', 'number of similar blobs to return', '10')
+  .option('--chunks', 'include chunk-level embeddings for finer-grained coupling')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(impactCommand)
 
 program
   .command('backfill-fts')
