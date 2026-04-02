@@ -29,8 +29,9 @@ export interface DbSession {
  * Version history:
  *   1 — Added file_type column to embeddings (Phase 8)
  *   2 — Added blob_branches table (Phase 15)
+ *   3 — Added query_embeddings cache table (Phase 18)
  */
-const CURRENT_SCHEMA_VERSION = 2
+const CURRENT_SCHEMA_VERSION = 3
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -74,8 +75,25 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('2')
   }
 
+  // v2 → v3: add query_embeddings cache table (Phase 18)
+  if (version < 3) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS query_embeddings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query_text TEXT NOT NULL,
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        cached_at INTEGER NOT NULL,
+        UNIQUE (query_text, model)
+      )
+    `)
+    version = 3
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('3')
+  }
+
   // Future migrations go here:
-  // if (version < 3) { sqlite.exec(`...`); version = 3; sqlite.prepare(...).run('3') }
+  // if (version < 4) { sqlite.exec(`...`); version = 4; sqlite.prepare(...).run('4') }
 }
 
 /** The full CREATE TABLE block used for every new database file. */
@@ -144,6 +162,17 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
       branch_name TEXT NOT NULL,
       PRIMARY KEY (blob_hash, branch_name)
+    );
+
+    -- Query embedding cache — avoids re-embedding identical queries (Phase 18)
+    CREATE TABLE IF NOT EXISTS query_embeddings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      query_text TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      vector BLOB NOT NULL,
+      cached_at INTEGER NOT NULL,
+      UNIQUE (query_text, model)
     );
   `)
 }

@@ -75,3 +75,17 @@ export const blobBranches = sqliteTable('blob_branches', {
 }, (table) => ({
   pk: primaryKey({ columns: [table.blobHash, table.branchName] }),
 }))
+
+/**
+ * Cache for query string → embedding vector lookups (Phase 18).
+ * Keyed by (query_text, model) so different embedding models have separate entries.
+ * Entries expire after a TTL; size is capped by the prune helper.
+ */
+export const queryEmbeddings = sqliteTable('query_embeddings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  queryText: text('query_text').notNull(),
+  model: text('model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+  cachedAt: integer('cached_at').notNull(),
+})

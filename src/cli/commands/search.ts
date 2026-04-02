@@ -1,6 +1,7 @@
 import { OllamaProvider } from '../../core/embedding/local.js'
 import { HttpProvider } from '../../core/embedding/http.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import { getCachedQueryEmbedding, setCachedQueryEmbedding } from '../../core/embedding/queryCache.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, type GroupMode } from '../../core/search/ranking.js'
@@ -22,6 +23,11 @@ export interface SearchCommandOptions {
   bm25Weight?: string
   remote?: string
   branch?: string
+  /**
+   * Commander sets this to `false` when the user passes `--no-cache`.
+   * Defaults to `true` (use cache). When `false`, skip both cache reads and writes.
+   */
+  cache?: boolean
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -36,14 +42,32 @@ function buildProvider(providerType: string, model: string): EmbeddingProvider {
   return new OllamaProvider({ model })
 }
 
-async function embedQuery(provider: EmbeddingProvider, model: string, query: string): Promise<number[]> {
+async function embedQuery(
+  provider: EmbeddingProvider,
+  model: string,
+  query: string,
+  noCache: boolean,
+): Promise<number[]> {
+  if (!noCache) {
+    const cached = getCachedQueryEmbedding(query, model)
+    if (cached) return cached
+  }
+  let embedding: number[]
   try {
-    return await provider.embed(query)
+    embedding = await provider.embed(query)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: could not embed query with ${model} — ${msg}`)
     process.exit(1)
   }
+  if (!noCache) {
+    try {
+      setCachedQueryEmbedding(query, model, embedding)
+    } catch {
+      // Cache write failures are non-fatal
+    }
+  }
+  return embedding
 }
 
 export async function searchCommand(query: string, options: SearchCommandOptions): Promise<void> {
@@ -162,12 +186,13 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
   const dualModel = codeModel !== textModel
+  const noCache = options.cache === false
 
   const textProvider = buildProvider(providerType, textModel)
   const codeProvider = dualModel ? buildProvider(providerType, codeModel) : null
 
   // Embed the query with the text model (natural-language prose)
-  const textEmbedding = await embedQuery(textProvider, textModel, query)
+  const textEmbedding = await embedQuery(textProvider, textModel, query, noCache)
 
   const searchOpts = {
     topK,
@@ -189,7 +214,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
   } else if (dualModel && codeProvider) {
     // Dual-model search: embed with both models and merge results
-    const codeEmbedding = await embedQuery(codeProvider, codeModel, query)
+    const codeEmbedding = await embedQuery(codeProvider, codeModel, query, noCache)
     const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel })
     const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel })
     results = mergeSearchResults(textResults, codeResults, topK)
