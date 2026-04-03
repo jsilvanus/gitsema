@@ -41,6 +41,10 @@ if (process.argv.includes('--verbose')) process.env.GITSEMA_VERBOSE = '1'
 // Apply file-based config defaults to process.env so all commands that read
 // env vars transparently pick up values from .gitsema/config.json or
 // ~/.config/gitsema/config.json.  Env vars already set take precedence.
+// This mirrors the --verbose pattern above: both run eagerly before any
+// command handler to ensure a consistent environment at parse time.
+// The CLI entry point is never imported as a library — it's always run
+// as the main script — so this side effect is safe here.
 applyConfigToEnv()
 
 // Read package.json version dynamically so `gitsema -V` matches package.json

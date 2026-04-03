@@ -183,20 +183,27 @@ export function getDeep(obj: ConfigData, key: string): unknown {
 /**
  * Sets a value in a nested object using dot-notation (mutates `obj`).
  * Creates intermediate objects as needed.
+ * Guards against prototype pollution by rejecting dangerous key segments.
  */
 export function setDeep(obj: ConfigData, key: string, value: unknown): void {
-  assertSafeKey(key)
   const parts = key.split('.')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let current: any = obj
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i]
+    if (FORBIDDEN_KEYS.has(part)) {
+      throw new Error(`Invalid config key segment: '${part}'`)
+    }
     if (current[part] === null || typeof current[part] !== 'object') {
-      current[part] = {}
+      current[part] = Object.create(null) as Record<string, unknown>
     }
     current = current[part]
   }
-  current[parts[parts.length - 1]] = value
+  const lastPart = parts[parts.length - 1]
+  if (FORBIDDEN_KEYS.has(lastPart)) {
+    throw new Error(`Invalid config key segment: '${lastPart}'`)
+  }
+  current[lastPart] = value
 }
 
 /**

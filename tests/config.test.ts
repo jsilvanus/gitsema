@@ -195,18 +195,24 @@ describe('setConfigValue + getConfigValue', () => {
     expect(source).toBe('local')
   })
 
-  it('sets and gets a global config value', () => {
-    // Use a custom global path by temporarily patching homeDir via env isn't practical;
-    // instead write directly to verify the round-trip with saveConfigFile.
-    const globalPath = join(tmpDir, 'global', 'config.json')
-    saveConfigFile(globalPath, {})
-    // We test the round-trip function independently
-    setDeep(loadConfigFile(globalPath), 'provider', 'http')
-    // Just confirm the local path works end-to-end
-    setConfigValue('provider', 'http', 'local', tmpDir)
-    const { value, source } = getConfigValue('provider', tmpDir)
-    expect(value).toBe('http')
-    expect(source).toBe('local')
+  it('local config file is written and readable via loadConfigFile', () => {
+    setConfigValue('index.concurrency', 8, 'local', tmpDir)
+    const localPath = getLocalConfigPath(tmpDir)
+    const data = loadConfigFile(localPath)
+    expect(getDeep(data, 'index.concurrency')).toBe(8)
+  })
+
+  it('global config file is written and readable via loadConfigFile', () => {
+    // Write directly to the canonical global path and verify round-trip
+    const globalPath = getGlobalConfigPath()
+    const testKey = 'search.bm25Weight'
+    try {
+      setConfigValue(testKey, 0.5, 'global')
+      const data = loadConfigFile(globalPath)
+      expect(getDeep(data, testKey)).toBe(0.5)
+    } finally {
+      unsetConfigValue(testKey, 'global')
+    }
   })
 
   it('env var takes precedence over local config', () => {
