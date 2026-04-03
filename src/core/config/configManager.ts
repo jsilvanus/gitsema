@@ -148,10 +148,28 @@ export function saveConfigFile(filePath: string, data: ConfigData): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Keys that must never be written to guard against prototype pollution.
+ */
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+/**
+ * Validates that no part of a dot-notation key is a forbidden prototype key.
+ * Throws if a dangerous key segment is detected.
+ */
+function assertSafeKey(key: string): void {
+  for (const part of key.split('.')) {
+    if (FORBIDDEN_KEYS.has(part)) {
+      throw new Error(`Invalid config key segment: '${part}'`)
+    }
+  }
+}
+
+/**
  * Gets a value from a nested object using dot-notation.
  * e.g. getDeep({ search: { top: 10 } }, 'search.top') → 10
  */
 export function getDeep(obj: ConfigData, key: string): unknown {
+  assertSafeKey(key)
   const parts = key.split('.')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let current: any = obj
@@ -167,6 +185,7 @@ export function getDeep(obj: ConfigData, key: string): unknown {
  * Creates intermediate objects as needed.
  */
 export function setDeep(obj: ConfigData, key: string, value: unknown): void {
+  assertSafeKey(key)
   const parts = key.split('.')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let current: any = obj
@@ -185,6 +204,7 @@ export function setDeep(obj: ConfigData, key: string, value: unknown): void {
  * Returns true if the key existed.
  */
 export function unsetDeep(obj: ConfigData, key: string): boolean {
+  assertSafeKey(key)
   const parts = key.split('.')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let current: any = obj

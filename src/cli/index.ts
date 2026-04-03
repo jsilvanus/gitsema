@@ -231,19 +231,31 @@ Examples:
     ) => {
       switch (action) {
         case 'set':
-          if (!key) { console.error('Error: key is required for config set'); process.exit(1) }
-          if (value === undefined) { console.error('Error: value is required for config set'); process.exit(1) }
+          if (!key) {
+            console.error('Error: key is required for config set')
+            process.exit(1)
+          }
+          if (value === undefined) {
+            console.error('Error: value is required for config set')
+            process.exit(1)
+          }
           await configSetCommand(key as string, value as string, options)
           break
         case 'get':
-          if (!key) { console.error('Error: key is required for config get'); process.exit(1) }
+          if (!key) {
+            console.error('Error: key is required for config get')
+            process.exit(1)
+          }
           await configGetCommand(key as string)
           break
         case 'list':
           await configListCommand(options)
           break
         case 'unset':
-          if (!key) { console.error('Error: key is required for config unset'); process.exit(1) }
+          if (!key) {
+            console.error('Error: key is required for config unset')
+            process.exit(1)
+          }
           await configUnsetCommand(key as string, options)
           break
         default:

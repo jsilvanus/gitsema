@@ -113,6 +113,14 @@ describe('setDeep', () => {
     setDeep(obj, 'search.top', 25)
     expect((obj.search as Record<string, unknown>).top).toBe(25)
   })
+
+  it('throws for __proto__ key segment (prototype pollution guard)', () => {
+    expect(() => setDeep({}, '__proto__.polluted', true)).toThrow('Invalid config key segment')
+  })
+
+  it('throws for constructor key segment', () => {
+    expect(() => setDeep({}, 'a.constructor', 'x')).toThrow('Invalid config key segment')
+  })
 })
 
 describe('unsetDeep', () => {
