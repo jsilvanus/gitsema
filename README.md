@@ -88,7 +88,23 @@ gitsema index
 
 ## Commands
 
-### `gitsema status`
+Commands are organised into five groups:
+
+| Group | Commands |
+|---|---|
+| **Setup & Infrastructure** | `status`, `index`, `serve`, `remote-index`, `backfill-fts`, `mcp` |
+| **Search & Discovery** | `search`, `first-seen`, `dead-concepts` |
+| **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
+| **Concept History** | `concept-evolution` |
+| **Cluster Analysis** | `clusters`, `cluster-diff`, `cluster-timeline` |
+
+> **Backward-compatible renames (v1 aliases):** `evolution` → `file-evolution`, `diff` → `file-diff`, `semantic-blame` → `blame`. The old names still work and are shown alongside new names in `--help`.
+
+---
+
+### Setup & Infrastructure
+
+#### `gitsema status`
 
 Show index statistics and database path.
 
@@ -98,7 +114,7 @@ gitsema status
 
 ---
 
-### `gitsema index [options]`
+#### `gitsema index [options]`
 
 Walk the Git history and embed all blobs into the index. Already-indexed blobs are skipped automatically (content-addressed deduplication).
 
@@ -129,17 +145,52 @@ gitsema index --since v1.2.0 --ext ".ts,.tsx"
 
 # Use function-level chunking with higher concurrency
 gitsema index --chunker function --concurrency 8
-```
 
-Example: index specific files from HEAD
-
-```bash
+# Index specific files from HEAD
 gitsema index --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
 ```
 
 ---
 
-### `gitsema search <query> [options]`
+#### `gitsema serve [options]`
+
+Start the gitsema HTTP API server so remote machines can delegate embedding and storage to a central host.
+
+```
+Options:
+  --port <n>      Port to listen on (default: 4242)
+  --key <token>   Require this Bearer token on all requests
+  --chunker       Chunking strategy for incoming blobs: file (default), function, fixed
+  --concurrency   Max concurrent embedding calls (default: 4)
+```
+
+---
+
+#### `gitsema remote-index <repoUrl>`
+
+Ask a remote `gitsema serve` instance to clone and index a Git repository.
+
+---
+
+#### `gitsema backfill-fts`
+
+Populate FTS5 content for blobs indexed before Phase 11. Required to use `--hybrid` search on older index entries.
+
+---
+
+#### `gitsema mcp`
+
+Start the gitsema MCP server over stdio. Allows AI assistants (Claude, VS Code Copilot, etc.) to query the semantic index via the Model Context Protocol.
+
+```bash
+gitsema mcp
+```
+
+---
+
+### Search & Discovery
+
+#### `gitsema search <query> [options]`
 
 Semantically search the index.
 
@@ -170,9 +221,11 @@ gitsema search "error handling" --hybrid
 
 ---
 
-### `gitsema first-seen <query> [options]`
+#### `gitsema first-seen <query> [options]`
 
 Find when a concept first appeared in the codebase, sorted chronologically.
+
+*See also: [`search`](#gitsema-search-query-options), [`concept-evolution`](#gitsema-concept-evolution-query-options)*
 
 ```
 Options:
@@ -185,33 +238,110 @@ gitsema first-seen "JWT token validation"
 
 ---
 
-### `gitsema evolution <path> [options]`
+#### `gitsema dead-concepts [options]`
+
+Find historical concepts that no longer exist in HEAD but are semantically similar to current code.
+
+*See also: [`search`](#gitsema-search-query-options), [`concept-evolution`](#gitsema-concept-evolution-query-options)*
+
+```
+Options:
+  -k, --top <n>       Number of results (default: 10)
+  --since <date>      Only consider blobs whose latest commit is on or after this date
+  --dump [file]       Output structured JSON
+```
+
+---
+
+### File History
+
+#### `gitsema file-evolution <path> [options]`
+
+> **Alias:** `gitsema evolution` (backward-compatible)
 
 Track the semantic drift of a file across its Git history.
+
+*See also: [`file-diff`](#gitsema-file-diff-ref1-ref2-path), [`concept-evolution`](#gitsema-concept-evolution-query-options)*
 
 ```
 Options:
   --threshold <n>       Cosine distance above which a version change is flagged (default: 0.3)
   --dump [file]         Output structured JSON; writes to <file> or stdout if omitted
   --include-content     Include stored file content in the JSON dump (requires --dump)
+  --alerts [n]          Show the top-N largest semantic jumps (default: 5)
 ```
 
 ```bash
-gitsema evolution src/core/auth/middleware.ts
-gitsema evolution src/core/auth/middleware.ts --dump evolution.json
+gitsema file-evolution src/core/auth/middleware.ts
+gitsema file-evolution src/core/auth/middleware.ts --dump evolution.json
 ```
 
 ---
 
-### `gitsema concept-evolution <query> [options]`
+#### `gitsema file-diff <ref1> <ref2> <path>`
 
-Show how a semantic concept evolved across the commit history.
+> **Alias:** `gitsema diff` (backward-compatible)
+
+Compute the semantic diff between two versions of a file.
+
+*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`cluster-diff`](#gitsema-cluster-diff-ref1-ref2)*
+
+```
+Options:
+  --neighbors <n>   Number of nearest-neighbour blobs to show for each version (default: 0)
+```
+
+```bash
+gitsema file-diff HEAD~10 HEAD src/api/router.ts
+```
+
+---
+
+#### `gitsema blame <file> [options]`
+
+> **Alias:** `gitsema semantic-blame` (backward-compatible)
+
+Show the semantic origin of each logical block in a file — nearest-neighbour blame.
+
+*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`impact`](#gitsema-impact-path-options)*
+
+```
+Options:
+  -k, --top <n>   Number of nearest-neighbor blobs to show per block (default: 3)
+  --dump [file]   Output structured JSON
+```
+
+---
+
+#### `gitsema impact <path> [options]`
+
+Compute semantically similar blobs across the codebase to highlight refactor impact.
+
+*See also: [`blame`](#gitsema-blame-file-options), [`file-diff`](#gitsema-file-diff-ref1-ref2-path)*
+
+```
+Options:
+  -k, --top <n>   Number of similar blobs to return (default: 10)
+  --chunks        Include chunk-level embeddings for finer-grained coupling
+  --dump [file]   Output structured JSON
+```
+
+---
+
+### Concept History
+
+#### `gitsema concept-evolution <query> [options]`
+
+Show how a semantic concept evolved across the entire commit history.
+
+*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`first-seen`](#gitsema-first-seen-query-options)*
 
 ```
 Options:
   -k, --top <n>         Number of top-matching blobs to include (default: 50)
   --threshold <n>       Cosine distance threshold for flagging large changes (default: 0.3)
   --dump [file]         Output structured JSON
+  --html [file]         Output an interactive HTML visualization
   --include-content     Include stored file content in the JSON dump (requires --dump)
 ```
 
@@ -221,30 +351,54 @@ gitsema concept-evolution "authentication"
 
 ---
 
-### `gitsema diff <ref1> <ref2> <path>`
+### Cluster Analysis
 
-Compute the semantic diff between two versions of a file.
+#### `gitsema clusters [options]`
+
+Cluster all blob embeddings into semantic regions using k-means++ and display a concept graph.
+
+*See also: [`cluster-diff`](#gitsema-cluster-diff-ref1-ref2), [`cluster-timeline`](#gitsema-cluster-timeline)*
 
 ```
 Options:
-  --neighbors <n>   Number of nearest-neighbour blobs to show for each version (default: 0)
-```
-
-```bash
-gitsema diff HEAD~10 HEAD src/api/router.ts
+  --k <n>                 Number of clusters (default: 8)
+  --top <n>               Top representative paths per cluster (default: 5)
+  --iterations <n>        Max k-means iterations (default: 20)
+  --edge-threshold <n>    Cosine similarity threshold for concept graph edges (default: 0.3)
+  --dump [file]           Output structured JSON
+  --html [file]           Output an interactive HTML visualization
+  --enhanced-labels       Enhance cluster labels using TF-IDF path and identifier analysis
 ```
 
 ---
 
-### `gitsema mcp`
+#### `gitsema cluster-diff <ref1> <ref2>`
 
-Start the gitsema MCP server over stdio. Allows AI assistants to query the semantic index via the Model Context Protocol.
+Compare semantic clusters between two points in history (temporal clustering).
+
+*See also: [`clusters`](#gitsema-clusters-options), [`cluster-timeline`](#gitsema-cluster-timeline), [`file-diff`](#gitsema-file-diff-ref1-ref2-path)*
 
 ```bash
-gitsema mcp
+gitsema cluster-diff v1.0.0 HEAD
+gitsema cluster-diff 2024-01-01 2024-06-01
 ```
 
-In VS Code, you can simply pull the repo, build it, and them Developer Commands: MCP: Add Server - Command - `node <path-to-repo>/dist/index.js mcp`.
+---
+
+#### `gitsema cluster-timeline`
+
+Show how semantic clusters shifted over the commit history — multi-step timeline.
+
+*See also: [`clusters`](#gitsema-clusters-options), [`cluster-diff`](#gitsema-cluster-diff-ref1-ref2)*
+
+```
+Options:
+  --k <n>         Number of clusters per step (default: 8)
+  --steps <n>     Number of evenly-spaced time checkpoints (default: 5)
+  --since <ref>   Start date or git ref for the timeline
+  --until <ref>   End date or git ref for the timeline
+  --html [file]   Output an interactive HTML visualization
+```
 
 ## Data storage
 
