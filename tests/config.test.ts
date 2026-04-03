@@ -203,7 +203,7 @@ describe('setConfigValue + getConfigValue', () => {
   })
 
   it('global config file is written and readable via loadConfigFile', () => {
-    // Write directly to the canonical global path and verify round-trip
+    // Use setConfigValue to write to global config and verify the file was updated
     const globalPath = getGlobalConfigPath()
     const testKey = 'search.bm25Weight'
     try {
