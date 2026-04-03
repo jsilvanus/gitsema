@@ -151,6 +151,66 @@ The `cluster-*` prefix convention is already strong and should be retained.
 
 ---
 
+## Alternative approaches under consideration
+
+### A. Rename `cluster*` → `concept*`
+
+**Proposal:** Rename the three clustering commands to use the `concept` prefix:
+
+| Current | Proposed |
+|---|---|
+| `clusters` | `concepts` |
+| `cluster-diff` | `concept-diff` |
+| `cluster-timeline` | `concept-timeline` |
+
+**In favour:** The K-means clusters *are* semantic concept regions — calling them "concepts" would align the vocabulary with `concept-evolution` and `dead-concepts`. A user thinking "I want to understand the concepts in this codebase" would naturally reach for `concepts`.
+
+**Against:**
+- `concept-diff` would sit next to `concept-evolution` and could be confused with "diff of how a concept evolved", which is not what it does. `concept-diff` is a structural snapshot comparison; `concept-evolution` traces a query over time.
+- `concepts` (plural, no argument) is more ambiguous than `clusters` (which implies a clustering operation).
+- Renaming all three commands is a larger breaking change than renaming one.
+
+**Verdict:** Worth pursuing, but only if `concept-diff` / `concept-timeline` are distinguished clearly in descriptions. The naming works best if the three commands are always presented as a family, e.g., via CLI group headers.
+
+---
+
+### B. Unify `evolution` and `concept-evolution` under a single command with sub-arguments
+
+**Proposal:** Replace two top-level commands with one command that routes on input type:
+
+```
+# File mode (current: gitsema evolution <path>)
+gitsema evolution file <path>
+
+# Concept mode (current: gitsema concept-evolution <query>)
+gitsema evolution concept <query>
+
+# Or with a flag:
+gitsema evolution --file <path>
+gitsema evolution --concept <query>
+```
+
+**In favour:**
+- Removes the surface-level ambiguity — there is only one `evolution` entry in `--help`.
+- Groups the two related ideas under a single verb, making it clearer they are variations of the same question ("how did X evolve?").
+- Makes room for future variants (e.g., `evolution symbol`, `evolution module`) without cluttering the top-level command list.
+
+**Against:**
+- The two modes have very different required arguments, flags, and output shapes. Combining them into one command adds dispatch logic and makes `--help` output harder to read (users would see flags that only apply to one mode).
+- Breaking change — all existing scripts using `concept-evolution` or `evolution` directly would need updating.
+- Commander.js sub-commands are possible (`program.command('evolution').command('file')`) but add nesting depth.
+
+**Alternative middle ground:** Keep both top-level commands but add a clear cross-reference in each description:
+
+```
+evolution <path>          Track semantic drift of a file (see also: concept-evolution)
+concept-evolution <query> Trace a concept across the codebase (see also: evolution, first-seen)
+```
+
+**Verdict:** Sub-argument unification is architecturally clean but has a high migration cost. The cross-reference approach achieves most of the discoverability benefit at zero cost. If a v2 major-version break is planned, unifying under `evolution file` / `evolution concept` is recommended.
+
+---
+
 ## Recommended next steps
 
 1. **Add group headers to `gitsema --help`** using Commander.js's `addHelpGroup` API (available in Commander ≥ 12) or by prefixing command descriptions with a group tag (e.g., `[history] Track semantic drift of a file`).
