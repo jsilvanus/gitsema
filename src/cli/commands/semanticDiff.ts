@@ -26,9 +26,10 @@ function buildProvider(providerType: string, model: string): EmbeddingProvider {
 
 function renderGroup(label: string, entries: SemanticDiffEntry[]): string {
   if (entries.length === 0) return `  ${label}: (none)`
+  const maxPathLen = Math.max(30, ...entries.map((e) => (e.paths[0] ?? '').length))
   const lines = [`  ${label}:`]
   for (const e of entries) {
-    const path = (e.paths[0] ?? '(unknown path)').padEnd(50)
+    const path = (e.paths[0] ?? '(unknown path)').padEnd(maxPathLen)
     const blob = shortHash(e.blobHash)
     const score = e.score.toFixed(3)
     const date = formatDate(e.firstSeen)

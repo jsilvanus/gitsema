@@ -158,7 +158,7 @@ export function computeSemanticDiff(
   const stableHashes = [...set1].filter((h) => set2.has(h))
 
   // Load embeddings for the union of all blobs we need to score
-  const allHashes = [...new Set([...gainedHashes, ...lostHashes, ...stableHashes])]
+  const allHashes = [...new Set([...set1, ...set2])]
   const embeddingMap = loadBlobData(allHashes)
 
   return {
