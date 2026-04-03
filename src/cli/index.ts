@@ -7,6 +7,7 @@ import { firstSeenCommand } from './commands/firstSeen.js'
 import { evolutionCommand } from './commands/evolution.js'
 import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
 import { diffCommand } from './commands/diff.js'
+import { semanticDiffCommand } from './commands/semanticDiff.js'
 import { startMcpServer } from '../mcp/server.js'
 import { backfillFtsCommand } from './commands/backfillFts.js'
 import { serveCommand } from './commands/serve.js'
@@ -69,14 +70,14 @@ const COMMAND_GROUPS: Record<string, string> = {
   'dead-concepts':  'Search & Discovery',
   // File History
   'file-evolution': 'File History',
-  evolution:        'File History',   // backward-compat alias
   'file-diff':      'File History',
-  diff:             'File History',   // backward-compat alias
   blame:            'File History',
   'semantic-blame': 'File History',   // backward-compat alias
   impact:           'File History',
   // Concept History
-  'concept-evolution': 'Concept History',
+  evolution:           'Concept History',   // primary name (was concept-evolution)
+  'concept-evolution': 'Concept History',   // backward-compat alias
+  diff:                'Concept History',   // semantic diff across refs
   // Cluster Analysis
   clusters:           'Cluster Analysis',
   'cluster-diff':     'Cluster Analysis',
@@ -257,8 +258,7 @@ program
 
 program
   .command('file-evolution <path>')
-  .alias('evolution')
-  .description('Track semantic drift of a file over its Git history (see also: file-diff, concept-evolution)')
+  .description('Track semantic drift of a file over its Git history (see also: file-diff, evolution)')
   .option(
     '--threshold <n>',
     'cosine distance threshold above which a version change is flagged as a large change (default 0.3)',
@@ -279,7 +279,8 @@ program
   .action(evolutionCommand)
 
 program
-  .command('concept-evolution <query>')
+  .command('evolution <query>')
+  .alias('concept-evolution')
   .description('Show how a semantic concept evolved across the commit history (see also: file-evolution, first-seen)')
   .option('-k, --top <n>', 'number of top-matching blobs to include in the timeline (default 50)')
   .option(
@@ -303,13 +304,23 @@ program
 
 program
   .command('file-diff <ref1> <ref2> <path>')
-  .alias('diff')
-  .description('Compute semantic diff between two versions of a file (see also: file-evolution, cluster-diff)')
+  .description('Compute semantic diff between two versions of a file (see also: file-evolution, cluster-diff, diff)')
   .option(
     '--neighbors <n>',
     'number of nearest-neighbour blobs to show for each version (default 0)',
   )
   .action(diffCommand)
+
+program
+  .command('diff <ref1> <ref2>')
+  .description('Compute a conceptual/semantic diff of a topic across two git refs — shows gained, lost, and stable concepts (see also: file-diff, evolution)')
+  .requiredOption('--topic <query>', 'topic or concept to compare across the two refs')
+  .option('-k, --top <n>', 'max results to show per group (gained/lost/stable)', '10')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(semanticDiffCommand)
 
 program
   .command('serve')

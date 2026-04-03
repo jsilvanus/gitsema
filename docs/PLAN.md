@@ -40,6 +40,11 @@
 |   [Phase 19 — Smarter chunking & semantic blame](#phase-19-—-smarter-chunking-semantic-blame) | 1302 |
 |   [Phase 20 — Dead-concept detection & refactor impact analysis](#phase-20-—-dead-concept-detection-refactor-impact-analysis) | 1313 |
 |   [Phase 21 — Semantic clustering & concept graph](#phase-21-—-semantic-clustering-concept-graph) | 1324 |
+|   [Phase 22 — Temporal cluster diff](#phase-22-—-temporal-cluster-diff) | — |
+|   [Phase 23 — Cluster timeline](#phase-23-—-cluster-timeline) | — |
+|   [Phase 24 — Enhanced cluster labeling](#phase-24-—-enhanced-cluster-labeling) | — |
+|   [Phase 25 — Interactive HTML visualizations](#phase-25-—-interactive-html-visualizations) | — |
+|   [Phase 26 — CLI naming consolidation & conceptual diff](#phase-26-—-cli-naming-consolidation-conceptual-diff) | — |
 | [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
 |   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
 |   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
@@ -1388,7 +1393,92 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 
 ---
 
-## Section II - What's weak or underexplored
+### Phase 22 — Temporal cluster diff
+
+**Goals:** Compare semantic cluster snapshots at two points in history.
+
+- **`gitsema cluster-diff <ref1> <ref2>`:** compute clusters for blobs visible at each ref and compare; reports new, dissolved, drifted, stable, and migrated clusters.
+- New core functions: `ClusterSnapshot`, `compareClusterSnapshots`, `resolveRefToTimestamp`, `getBlobHashesUpTo`.
+
+**Deliverables:** `cluster-diff` command, `ClusterSnapshot` types, schema v6 (timestamp index), tests.
+
+---
+
+### Phase 23 — Cluster timeline
+
+**Goals:** Track how semantic clusters shift across the full commit history via multi-step checkpoints.
+
+- **`gitsema cluster-timeline`:** evenly-spaced snapshots between `--since` and `--until`; reports per-step cluster changes with drift scores.
+- Improved cluster labeling: keywords + path prefix (e.g. "search embed index (src/core)").
+- Bugfix: empty `blobHashFilter` now returns empty snapshot (no division by zero).
+
+**Deliverables:** `cluster-timeline` command, `ClusterTimelineStep`/`ClusterTimelineReport` types, tests.
+
+---
+
+### Phase 24 — Enhanced cluster labeling
+
+**Goals:** Replace simple top-term labels with TF-IDF-weighted labels derived from path tokens and identifier splitting.
+
+- New module: `src/core/search/labelEnhancer.ts` with TF-IDF, identifier splitting, noise filtering, and normalization.
+- `ClusterInfo.enhancedKeywords` field populated when `--enhanced-labels` is supplied.
+- `--enhanced-labels` / `--enhanced-keywords-n` flags on `clusters`, `cluster-diff`, `cluster-timeline`.
+
+**Deliverables:** `labelEnhancer.ts`, enriched `ClusterInfo`, CLI flags, tests.
+
+---
+
+### Phase 25 — Interactive HTML visualizations
+
+**Goals:** Add `--html [file]` output to cluster and concept-evolution commands.
+
+- New module: `src/core/viz/htmlRenderer.ts` with four render functions:
+  `renderClustersHtml`, `renderClusterDiffHtml`, `renderClusterTimelineHtml`, `renderConceptEvolutionHtml`.
+- `safeJson()` helper escapes `<`, `>`, `&`, U+2028, U+2029 in embedded JSON to prevent XSS.
+- `--html [file]` flag added to `clusters`, `cluster-diff`, `cluster-timeline`, `concept-evolution`.
+
+**Deliverables:** `htmlRenderer.ts`, HTML output on all four commands, 19 unit tests.
+
+---
+
+### Phase 26 — CLI naming consolidation & conceptual diff
+
+**Goals:** Promote `evolution` as the primary name for the concept-evolution command, introduce a
+first-class `diff` command for semantic topic diffing across refs, and clean up the alias table.
+
+#### Command naming changes
+
+| Old primary | New primary | Backward-compat alias |
+|---|---|---|
+| `concept-evolution <query>` | `evolution <query>` | `concept-evolution` ✓ still works |
+| `file-evolution <path>` | `file-evolution <path>` | *(no change)* |
+| `file-diff <ref1> <ref2> <path>` | `file-diff <ref1> <ref2> <path>` | *(no change)* |
+
+The former alias `evolution` → `file-evolution` and `diff` → `file-diff` are **removed**.
+`semantic-blame` → `blame` is kept.
+
+#### New `diff` command
+
+`gitsema diff <ref1> <ref2> --topic <query> [--top n] [--dump [file]]`
+
+Computes a **conceptual/semantic diff** of a topic across two git refs using the existing
+embedding index.  For each ref the set of blobs whose earliest-commit timestamp ≤ the ref
+timestamp is determined.  Each group (gained / lost / stable) is then scored by cosine
+similarity to the topic query and the top-k most relevant entries are reported.
+
+New modules:
+- `src/core/search/semanticDiff.ts` — `computeSemanticDiff()`, `SemanticDiffResult`, `SemanticDiffEntry`
+- `src/cli/commands/semanticDiff.ts` — `semanticDiffCommand()`
+
+#### Documentation
+
+- `README.md` command table and alias notes updated.
+- `gitsema --help` now shows `evolution` and `diff` under **Concept History**.
+
+**Deliverables:** `evolution` as primary concept-evolution command, `diff` as new
+conceptual-diff command, backward-compat alias for `concept-evolution`, updated docs, tests.
+
+---
 
 ### 1. Function chunker is a regex heuristic
 
