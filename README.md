@@ -350,25 +350,28 @@ gitsema concept-evolution "authentication"   # backward-compatible alias
 
 ---
 
-#### `gitsema diff <ref1> <ref2> --topic <query> [options]`
+#### `gitsema diff <ref1> <ref2> <query> [options]`
 
 Compute a **conceptual/semantic diff** of a topic across two git refs.  Shows which
 blobs matching the topic were **gained** (new in ref2), **lost** (removed from ref1),
-and **stable** (present in both), each ranked by topic relevance.
+and **stable** (present in both), each ranked by topic relevance — most relevant files
+for the topic appear at the top of each group.
 
 *See also: [`evolution`](#gitsema-evolution-query-options), [`file-diff`](#gitsema-file-diff-ref1-ref2-path), [`cluster-diff`](#gitsema-cluster-diff-ref1-ref2)*
 
 ```
+Arguments:
+  query             Topic or concept to compare across the two refs
+
 Options:
-  --topic <query>   (required) Topic or concept to compare across the two refs
   -k, --top <n>     Max results per group (gained/lost/stable) (default: 10)
   --dump [file]     Output structured JSON
 ```
 
 ```bash
-gitsema diff v1.0.0 HEAD --topic "authentication"
-gitsema diff 2024-01-01 2024-06-01 --topic "error handling" --top 5
-gitsema diff HEAD~20 HEAD --topic "database access" --dump diff.json
+gitsema diff v1.0.0 HEAD "authentication"
+gitsema diff 2024-01-01 2024-06-01 "error handling" --top 5
+gitsema diff HEAD~20 HEAD "database access" --dump diff.json
 ```
 
 ---

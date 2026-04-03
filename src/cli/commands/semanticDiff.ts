@@ -7,7 +7,6 @@ import { formatDate, shortHash } from '../../core/search/ranking.js'
 import type { SemanticDiffEntry, SemanticDiffResult } from '../../core/search/semanticDiff.js'
 
 export interface SemanticDiffCommandOptions {
-  topic: string
   top?: string
   dump?: string | boolean
 }
@@ -81,11 +80,12 @@ function serializeSemanticDiffJson(result: SemanticDiffResult): string {
 export async function semanticDiffCommand(
   ref1: string,
   ref2: string,
+  query: string,
   options: SemanticDiffCommandOptions,
 ): Promise<void> {
-  const topic = options.topic?.trim() ?? ''
+  const topic = query?.trim() ?? ''
   if (!topic) {
-    console.error('Error: --topic <query> is required')
+    console.error('Error: query argument is required')
     process.exit(1)
   }
 

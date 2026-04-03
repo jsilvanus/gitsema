@@ -312,9 +312,8 @@ program
   .action(diffCommand)
 
 program
-  .command('diff <ref1> <ref2>')
+  .command('diff <ref1> <ref2> <query>')
   .description('Compute a conceptual/semantic diff of a topic across two git refs — shows gained, lost, and stable concepts (see also: file-diff, evolution)')
-  .requiredOption('--topic <query>', 'topic or concept to compare across the two refs')
   .option('-k, --top <n>', 'max results to show per group (gained/lost/stable)', '10')
   .option(
     '--dump [file]',

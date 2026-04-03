@@ -1459,7 +1459,7 @@ The former alias `evolution` → `file-evolution` and `diff` → `file-diff` are
 
 #### New `diff` command
 
-`gitsema diff <ref1> <ref2> --topic <query> [--top n] [--dump [file]]`
+`gitsema diff <ref1> <ref2> <query> [--top n] [--dump [file]]`
 
 Computes a **conceptual/semantic diff** of a topic across two git refs using the existing
 embedding index.  For each ref the set of blobs whose earliest-commit timestamp ≤ the ref
