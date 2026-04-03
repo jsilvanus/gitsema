@@ -18,6 +18,9 @@ import { impactCommand } from './commands/impact.js'
 import { clustersCommand } from './commands/clusters.js'
 import { clusterDiffCommand } from './commands/clusterDiff.js'
 import { clusterTimelineCommand } from './commands/clusterTimeline.js'
+import { changePointsCommand } from './commands/changePoints.js'
+import { fileChangePointsCommand } from './commands/fileChangePoints.js'
+import { clusterChangePointsCommand } from './commands/clusterChangePoints.js'
 
 const program = new Command()
 
@@ -54,6 +57,7 @@ const GROUPS = [
   'File History',
   'Concept History',
   'Cluster Analysis',
+  'Change Detection',
 ] as const
 
 const COMMAND_GROUPS: Record<string, string> = {
@@ -82,6 +86,10 @@ const COMMAND_GROUPS: Record<string, string> = {
   clusters:           'Cluster Analysis',
   'cluster-diff':     'Cluster Analysis',
   'cluster-timeline': 'Cluster Analysis',
+  // Change Detection
+  'change-points':         'Change Detection',
+  'file-change-points':    'Change Detection',
+  'cluster-change-points': 'Change Detection',
 }
 
 program.configureHelp({
@@ -454,6 +462,51 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .action(clusterTimelineCommand)
+
+program
+  .command('change-points <query>')
+  .description('Detect conceptual change points for a semantic query across commit history (see also: concept-evolution, cluster-change-points)')
+  .option('-k, --top <n>', 'number of top-matching blobs used to define concept state per commit (default 50)', '50')
+  .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
+  .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
+  .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(changePointsCommand)
+
+program
+  .command('file-change-points <path>')
+  .description('Detect semantic change points in a file\'s Git history (see also: file-evolution, change-points)')
+  .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
+  .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
+  .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(fileChangePointsCommand)
+
+program
+  .command('cluster-change-points')
+  .description('Detect change points in the repo\'s cluster structure across commit history (see also: cluster-timeline, change-points)')
+  .option('--k <n>', 'number of clusters to compute per step (default 8)', '8')
+  .option('--threshold <n>', 'mean centroid shift threshold to flag a change point (default 0.3)', '0.3')
+  .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
+  .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option(
+    '--max-commits <n>',
+    'cap the number of commits evaluated (sampled evenly across the range); omit to evaluate every commit',
+  )
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(clusterChangePointsCommand)
 
 program
   .command('backfill-fts')

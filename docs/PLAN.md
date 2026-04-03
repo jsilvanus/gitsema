@@ -1480,6 +1480,64 @@ conceptual-diff command, backward-compat alias for `concept-evolution`, updated 
 
 ---
 
+### Phase 27 — Semantic change-point detection
+
+**Goals:** Detect sharp semantic shifts across Git history with commit-level granularity — a complement to the evolution and cluster timeline commands that surfaces *where* abrupt conceptual changes happened rather than showing a continuous drift.
+
+Three new commands under the **Change Detection** group:
+
+#### `gitsema change-points <query>`
+
+Conceptual change points for a semantic query across the entire commit history.
+
+- **Algorithm:** For each indexed commit `t` in chronological order:
+  1. Determine the set of blobs visible as of `t` (blob first-seen timestamp ≤ commit timestamp).
+  2. Score all visible blobs against `<query>` via cosine similarity (computed once, cached in memory).
+  3. Take the top-k visible blobs by similarity score.
+  4. Compute a weighted centroid `C_t` (weights = similarity scores) of the top-k embeddings.
+  5. Compute `D_t = cosineDistance(C_{t-1}, C_t)`.
+  6. Emit a change point at commit `t` when `D_t >= threshold`.
+- Rank emitted points by `D_t` descending, return top `--top-points`.
+- **Performance:** Embeddings are loaded once. Visible blobs are tracked with a pointer advancing through a blob list sorted by first-seen. For each commit, top-k selection scans the score-sorted list and stops after k visible hits.
+- **Options:** `--top` (k, default 50), `--threshold` (default 0.3), `--top-points` (default 5), `--since`, `--until`, `--dump [file]`.
+- **JSON output schema:** `type: "concept-change-points"`, `query`, `k`, `threshold`, `range: {since,until}`, `points: [{before,after,distance}]`.
+
+#### `gitsema file-change-points <path>`
+
+File-specific change points (semantic jumps) across a file's Git history.
+
+- **Algorithm:** Reuses `computeEvolution(filePath)` (from Phase 6) to retrieve consecutive-version cosine distances. Emits a change point for each pair `(entry[i-1], entry[i])` where `entry[i].distFromPrev >= threshold`. Filters by `--since`/`--until` on the "after" entry timestamp.
+- Rank by distance descending, return top `--top-points`.
+- **Options:** `--threshold` (default 0.3), `--top-points` (default 5), `--since`, `--until`, `--dump [file]`.
+- **JSON output schema:** `type: "file-change-points"`, `path`, `threshold`, `range`, `points: [{before:{commit,date,blobHash},after,distance}]`.
+
+#### `gitsema cluster-change-points`
+
+Detect change points in the repo's cluster structure.
+
+- **Algorithm:** For each sampled commit `t`:
+  1. Retrieve visible blobs via `getBlobHashesUpTo(timestamp)` (same as `cluster-timeline`).
+  2. Skip if the visible blob set hasn't changed since the previous step (avoids redundant k-means runs).
+  3. Run k-means clustering (`computeClusterSnapshot`) over visible blobs.
+  4. Greedily match clusters to the previous step by centroid cosine similarity.
+  5. Compute per-pair drift = `cosineDistance(matchedBefore.centroid, after.centroid)`.
+  6. Compute mean centroid shift score `S_t = mean(drifts)`.
+  7. Emit a change point when `S_t >= threshold`.
+- Rank by `S_t` descending, return top `--top-points`.
+- **Performance:** Running k-means at every commit can be expensive. Use `--max-commits` to cap the number of timestamps sampled (evenly spaced across the since–until range).
+- **Options:** `--k` (default 8), `--threshold` (default 0.3), `--top-points` (default 5), `--since`, `--until`, `--max-commits`, `--dump [file]`.
+- **JSON output schema:** `type: "cluster-change-points"`, `k`, `threshold`, `range`, `points: [{before,after,shiftScore,topMovingPairs:[{beforeLabel,afterLabel,drift}]}]`.
+
+**Implementation notes:**
+- Core logic lives in `src/core/search/changePoints.ts` (concept + file) and appended to `src/core/search/clustering.ts` (cluster change points).
+- CLI handlers: `src/cli/commands/changePoints.ts`, `fileChangePoints.ts`, `clusterChangePoints.ts`.
+- All three commands are added to the **Change Detection** group in the CLI help formatter.
+- Tests in `tests/changePoints.test.ts` cover: empty-index handling, change-point detection above threshold, sorting, topPoints limit, since/until filtering, metadata correctness.
+
+**Deliverables:** Three new CLI commands, JSON output schemas, tests, and updated README.
+
+---
+
 ### 1. Function chunker is a regex heuristic
 
 It matches `function`, `class`, `def`, `fn`, `pub fn`, etc. across all languages with one pattern. It works for mainstream cases but will misbehave on templated C++, Rust macros, Python decorators, or anything unusual. This matters because chunk quality directly determines retrieval quality.
