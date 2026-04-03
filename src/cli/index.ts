@@ -1,5 +1,12 @@
 import { Command } from 'commander'
 import { readFileSync } from 'node:fs'
+import { applyConfigToEnv } from '../core/config/configManager.js'
+import {
+  configSetCommand,
+  configGetCommand,
+  configListCommand,
+  configUnsetCommand,
+} from './commands/config.js'
 import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
@@ -30,6 +37,11 @@ program.option('--verbose', 'Enable verbose debug logging')
 // Honor `--verbose` early by setting an env var so other modules (logger)
 // pick it up when they load.
 if (process.argv.includes('--verbose')) process.env.GITSEMA_VERBOSE = '1'
+
+// Apply file-based config defaults to process.env so all commands that read
+// env vars transparently pick up values from .gitsema/config.json or
+// ~/.config/gitsema/config.json.  Env vars already set take precedence.
+applyConfigToEnv()
 
 // Read package.json version dynamically so `gitsema -V` matches package.json
 let pkgVersion = '0.0.0'
@@ -62,6 +74,7 @@ const GROUPS = [
 
 const COMMAND_GROUPS: Record<string, string> = {
   // Setup & Infrastructure
+  config:           'Setup & Infrastructure',
   status:           'Setup & Infrastructure',
   index:            'Setup & Infrastructure',
   serve:            'Setup & Infrastructure',
@@ -177,6 +190,68 @@ program.configureHelp({
     return output.join('\n')
   },
 })
+
+program
+  .command('config <action> [key] [value]')
+  .description('Manage persistent configuration (set, get, list, unset)')
+  .option('--global', 'apply to global config (~/.config/gitsema/config.json)')
+  .option('--local', 'apply to local config (.gitsema/config.json, default for set/unset)')
+  .addHelpText(
+    'after',
+    `
+Subcommands:
+  set <key> <value>   Set a config value (--global for user-level, default: repo-level)
+  get <key>           Show the resolved value and its source
+  list                List all active configuration values and their sources
+  unset <key>         Remove a key from config (--global for user-level, default: repo-level)
+
+Supported keys (dot-notation for command defaults):
+  provider, model, textModel, codeModel, httpUrl, apiKey
+  verbose, logMaxBytes, servePort, serveKey, remoteUrl, remoteKey
+  index.concurrency, index.chunker, index.ext, index.maxSize, index.exclude
+  index.maxCommits, index.windowSize, index.overlap
+  search.top, search.hybrid, search.bm25Weight, search.recent
+  search.weightVector, search.weightRecency, search.weightPath
+  evolution.threshold, clusters.k
+
+Examples:
+  gitsema config set search.hybrid true
+  gitsema config set provider http --global
+  gitsema config set model text-embedding-3-small --global
+  gitsema config get search.hybrid
+  gitsema config list
+  gitsema config unset search.hybrid`,
+  )
+  .action(
+    async (
+      action: string,
+      key: string | undefined,
+      value: string | undefined,
+      options: { global?: boolean; local?: boolean },
+    ) => {
+      switch (action) {
+        case 'set':
+          if (!key) { console.error('Error: key is required for config set'); process.exit(1) }
+          if (value === undefined) { console.error('Error: value is required for config set'); process.exit(1) }
+          await configSetCommand(key as string, value as string, options)
+          break
+        case 'get':
+          if (!key) { console.error('Error: key is required for config get'); process.exit(1) }
+          await configGetCommand(key as string)
+          break
+        case 'list':
+          await configListCommand(options)
+          break
+        case 'unset':
+          if (!key) { console.error('Error: key is required for config unset'); process.exit(1) }
+          await configUnsetCommand(key as string, options)
+          break
+        default:
+          console.error(`Error: unknown config action '${action}'. Use: set, get, list, unset`)
+          process.exit(1)
+      }
+    },
+  )
 
 program
   .command('status [file]')
