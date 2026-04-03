@@ -18,6 +18,7 @@ function cosineDistance(a: number[], b: number[]): number {
 /**
  * Computes a weighted centroid of the given embeddings.
  * Weights are cosine similarity scores (higher = more representative).
+ * Returns an empty array when embs is empty (callers must guard before use).
  */
 function weightedCentroid(embs: number[][], weights: number[]): number[] {
   if (embs.length === 0) return []

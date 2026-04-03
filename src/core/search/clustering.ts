@@ -1167,19 +1167,21 @@ export async function computeClusterChangePoints(opts: {
   // Process timestamps and collect change points
   let prevSnapshot: ClusterSnapshot | null = null
   let prevTs: number | null = null
-  let prevBlobSet: string = ''
+  // Track visible blob count to efficiently skip steps where nothing changed.
+  // getBlobHashesUpTo returns a monotonically growing set as timestamps increase,
+  // so equal counts imply equal sets — O(1) check instead of building a sorted string.
+  let prevBlobCount = -1
 
   const allChangePoints: ClusterChangePoint[] = []
 
   for (const ts of timestamps) {
     const blobHashes = getBlobHashesUpTo(ts)
-    // Skip if the visible blob set hasn't changed (saves unnecessary k-means runs)
-    const blobSetKey = blobHashes.slice().sort().join(',')
-    if (blobSetKey === prevBlobSet && prevSnapshot !== null) {
+    // Skip if the visible blob set hasn't grown (saves unnecessary k-means runs)
+    if (blobHashes.length === prevBlobCount && prevSnapshot !== null) {
       prevTs = ts
       continue
     }
-    prevBlobSet = blobSetKey
+    prevBlobCount = blobHashes.length
 
     const snapshot = await computeClusterSnapshot({ ...snapshotOpts, blobHashFilter: blobHashes })
 
