@@ -1040,3 +1040,208 @@ export async function computeClusterTimeline(opts: {
 
   return { steps: timelineSteps, k: kOpt, since, until }
 }
+
+// ---------------------------------------------------------------------------
+// computeClusterChangePoints — detect structural change points (Phase 27)
+// ---------------------------------------------------------------------------
+
+/**
+ * A pair of cluster descriptors matched between two consecutive snapshots,
+ * along with the centroid drift between them.
+ */
+export interface ClusterMovingPair {
+  beforeLabel: string
+  afterLabel: string
+  drift: number
+}
+
+/**
+ * A single cluster-structure change point — one commit step where the
+ * mean centroid drift score across matched clusters exceeded the threshold.
+ */
+export interface ClusterChangePoint {
+  before: {
+    ref: string
+    timestamp: number
+    clusters: Array<{ label: string; size: number; representativePaths: string[] }>
+  }
+  after: {
+    ref: string
+    timestamp: number
+    clusters: Array<{ label: string; size: number; representativePaths: string[] }>
+  }
+  shiftScore: number
+  topMovingPairs: ClusterMovingPair[]
+}
+
+/**
+ * Full report produced by `computeClusterChangePoints`.
+ */
+export interface ClusterChangePointReport {
+  type: 'cluster-change-points'
+  k: number
+  threshold: number
+  range: { since: string; until: string }
+  points: ClusterChangePoint[]
+}
+
+/**
+ * Computes semantic cluster change points across Git history.
+ *
+ * For each sampled commit the function:
+ *  1. Determines which blobs were visible as of that commit.
+ *  2. Runs k-means clustering over those blobs.
+ *  3. Greedily matches clusters between consecutive steps by centroid similarity.
+ *  4. Computes a mean centroid shift score across matched pairs.
+ *  5. Emits a change point when the score >= threshold.
+ *
+ * **Performance note:** Running k-means at every commit can be expensive on
+ * large repositories.  Use `maxCommits` to cap the number of commits sampled
+ * (commits are selected evenly across the since–until range when capped).
+ *
+ * Returns the top `topPoints` change points sorted by shift score descending.
+ */
+export async function computeClusterChangePoints(opts: {
+  k?: number
+  threshold?: number
+  topPoints?: number
+  since?: number
+  until?: number
+  maxCommits?: number
+  maxIterations?: number
+  topPaths?: number
+} = {}): Promise<ClusterChangePointReport> {
+  const kOpt = opts.k ?? 8
+  const threshold = opts.threshold ?? 0.3
+  const topPoints = opts.topPoints ?? 5
+  const maxIterations = opts.maxIterations ?? 20
+  const topPathsN = opts.topPaths ?? 3
+
+  const snapshotOpts = {
+    k: kOpt,
+    maxIterations,
+    edgeThreshold: 0.3,
+    topPaths: topPathsN,
+    topKeywords: 5,
+    useEnhancedLabels: false,
+    enhancedKeywordsN: 5,
+  }
+
+  const { rawDb } = getActiveSession()
+
+  // Find the timestamp range
+  const rangeRow = rawDb.prepare(`SELECT MIN(timestamp) AS minTs, MAX(timestamp) AS maxTs FROM commits`)
+    .get() as { minTs: number | null; maxTs: number | null }
+
+  if (rangeRow.minTs === null || rangeRow.maxTs === null) {
+    return { type: 'cluster-change-points', k: kOpt, threshold, range: { since: '', until: '' }, points: [] }
+  }
+
+  const since = opts.since !== undefined ? Math.max(opts.since, rangeRow.minTs) : rangeRow.minTs
+  const until = opts.until !== undefined ? Math.min(opts.until, rangeRow.maxTs) : rangeRow.maxTs
+
+  const sinceLabel = new Date(since * 1000).toISOString().slice(0, 10)
+  const untilLabel = new Date(until * 1000).toISOString().slice(0, 10)
+
+  // Retrieve all distinct commit timestamps in the range, ordered ascending
+  const allTimestamps = (rawDb.prepare(`
+    SELECT DISTINCT timestamp FROM commits WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC
+  `).all(since, until) as Array<{ timestamp: number }>).map((r) => r.timestamp)
+
+  if (allTimestamps.length < 2) {
+    return { type: 'cluster-change-points', k: kOpt, threshold, range: { since: sinceLabel, until: untilLabel }, points: [] }
+  }
+
+  // If maxCommits is set, sample evenly across the timeline
+  let timestamps = allTimestamps
+  if (opts.maxCommits !== undefined && opts.maxCommits > 0 && allTimestamps.length > opts.maxCommits) {
+    const sampled: number[] = []
+    const step = (allTimestamps.length - 1) / (opts.maxCommits - 1)
+    for (let i = 0; i < opts.maxCommits; i++) {
+      sampled.push(allTimestamps[Math.round(i * step)])
+    }
+    // Ensure uniqueness and order
+    timestamps = [...new Set(sampled)].sort((a, b) => a - b)
+  }
+
+  // Process timestamps and collect change points
+  let prevSnapshot: ClusterSnapshot | null = null
+  let prevTs: number | null = null
+  let prevBlobSet: string = ''
+
+  const allChangePoints: ClusterChangePoint[] = []
+
+  for (const ts of timestamps) {
+    const blobHashes = getBlobHashesUpTo(ts)
+    // Skip if the visible blob set hasn't changed (saves unnecessary k-means runs)
+    const blobSetKey = blobHashes.slice().sort().join(',')
+    if (blobSetKey === prevBlobSet && prevSnapshot !== null) {
+      prevTs = ts
+      continue
+    }
+    prevBlobSet = blobSetKey
+
+    const snapshot = await computeClusterSnapshot({ ...snapshotOpts, blobHashFilter: blobHashes })
+
+    if (prevSnapshot !== null && prevTs !== null && snapshot.report.clusters.length > 0 && prevSnapshot.report.clusters.length > 0) {
+      const prevClusters = prevSnapshot.report.clusters
+      const currClusters = snapshot.report.clusters
+
+      // Greedy centroid matching (current → previous)
+      const usedPrev = new Set<number>()
+      const pairs: Array<{ prev: ClusterInfo; curr: ClusterInfo; drift: number }> = []
+
+      for (const curr of currClusters) {
+        let bestPrev: ClusterInfo | null = null
+        let bestSim = -Infinity
+        for (const prev of prevClusters) {
+          if (usedPrev.has(prev.id)) continue
+          const sim = cosineSimilarity(prev.centroid, curr.centroid)
+          if (sim > bestSim) { bestSim = sim; bestPrev = prev }
+        }
+        if (bestPrev !== null) {
+          usedPrev.add(bestPrev.id)
+          pairs.push({ prev: bestPrev, curr, drift: 1 - bestSim })
+        }
+      }
+
+      if (pairs.length > 0) {
+        const shiftScore = pairs.reduce((s, p) => s + p.drift, 0) / pairs.length
+
+        if (shiftScore >= threshold) {
+          const topMovingPairs = pairs
+            .sort((a, b) => b.drift - a.drift)
+            .slice(0, 5)
+            .map((p) => ({ beforeLabel: p.prev.label, afterLabel: p.curr.label, drift: p.drift }))
+
+          allChangePoints.push({
+            before: {
+              ref: new Date(prevTs * 1000).toISOString().slice(0, 10),
+              timestamp: prevTs,
+              clusters: prevClusters.map((c) => ({ label: c.label, size: c.size, representativePaths: c.representativePaths })),
+            },
+            after: {
+              ref: new Date(ts * 1000).toISOString().slice(0, 10),
+              timestamp: ts,
+              clusters: currClusters.map((c) => ({ label: c.label, size: c.size, representativePaths: c.representativePaths })),
+            },
+            shiftScore,
+            topMovingPairs,
+          })
+        }
+      }
+    }
+
+    prevSnapshot = snapshot
+    prevTs = ts
+  }
+
+  allChangePoints.sort((a, b) => b.shiftScore - a.shiftScore)
+  return {
+    type: 'cluster-change-points',
+    k: kOpt,
+    threshold,
+    range: { since: sinceLabel, until: untilLabel },
+    points: allChangePoints.slice(0, topPoints),
+  }
+}

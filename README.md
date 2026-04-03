@@ -88,7 +88,7 @@ gitsema index
 
 ## Commands
 
-Commands are organised into five groups:
+Commands are organised into six groups:
 
 | Group | Commands |
 |---|---|
@@ -97,6 +97,7 @@ Commands are organised into five groups:
 | **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
 | **Concept History** | `concept-evolution` |
 | **Cluster Analysis** | `clusters`, `cluster-diff`, `cluster-timeline` |
+| **Change Detection** | `change-points`, `file-change-points`, `cluster-change-points` |
 
 > **Backward-compatible renames (v1 aliases):** `evolution` → `file-evolution`, `diff` → `file-diff`, `semantic-blame` → `blame`. The old names still work and are shown alongside new names in `--help`.
 
@@ -398,6 +399,125 @@ Options:
   --since <ref>   Start date or git ref for the timeline
   --until <ref>   End date or git ref for the timeline
   --html [file]   Output an interactive HTML visualization
+```
+
+---
+
+### Change Detection
+
+#### `gitsema change-points <query> [options]`
+
+Detect conceptual change points for a semantic query across the entire commit history.
+For each indexed commit the command builds a weighted centroid from the top-k matching blobs
+visible at that point in time and reports commits where the centroid shifted sharply.
+
+*See also: [`concept-evolution`](#gitsema-concept-evolution-query-options), [`cluster-change-points`](#gitsema-cluster-change-points-options)*
+
+```
+Options:
+  -k, --top <n>       Top-k blobs used to define concept state per commit (default: 50)
+  --threshold <n>     Cosine distance threshold to flag a change point (default: 0.3)
+  --top-points <n>    Show top-N largest jumps (default: 5)
+  --since <ref>       Limit commits from this point; accepts date (YYYY-MM-DD), tag, or hash
+  --until <ref>       Limit commits up to this point; accepts date (YYYY-MM-DD), tag, or hash
+  --dump [file]       Output structured JSON; writes to <file> or stdout if omitted
+```
+
+```bash
+gitsema change-points "authentication middleware"
+gitsema change-points "database connection" --threshold 0.4 --top-points 3
+gitsema change-points "error handling" --since 2024-01-01 --dump changes.json
+```
+
+Example JSON output (`--dump`):
+```json
+{
+  "type": "concept-change-points",
+  "query": "authentication middleware",
+  "k": 50,
+  "threshold": 0.3,
+  "range": { "since": null, "until": null },
+  "points": [
+    {
+      "before": { "commit": "a1b2c3d", "date": "2023-06-15", "timestamp": 1686787200, "topPaths": ["src/auth/session.ts"] },
+      "after":  { "commit": "e4f5a6b", "date": "2023-09-20", "timestamp": 1695168000, "topPaths": ["src/auth/jwt.ts"] },
+      "distance": 0.412
+    }
+  ]
+}
+```
+
+---
+
+#### `gitsema file-change-points <path> [options]`
+
+Detect semantic change points in a single file's Git history.
+Reports commits where the embedding distance between consecutive file versions exceeded the threshold.
+
+*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`change-points`](#gitsema-change-points-query-options)*
+
+```
+Options:
+  --threshold <n>     Cosine distance threshold (default: 0.3)
+  --top-points <n>    Show top-N largest jumps (default: 5)
+  --since <ref>       Limit commits from this point; accepts date (YYYY-MM-DD), tag, or hash
+  --until <ref>       Limit commits up to this point; accepts date (YYYY-MM-DD), tag, or hash
+  --dump [file]       Output structured JSON; writes to <file> or stdout if omitted
+```
+
+```bash
+gitsema file-change-points src/core/auth/middleware.ts
+gitsema file-change-points src/api/router.ts --threshold 0.4 --top-points 3
+gitsema file-change-points src/db/schema.ts --since v1.0 --dump schema-changes.json
+```
+
+Example JSON output (`--dump`):
+```json
+{
+  "type": "file-change-points",
+  "path": "src/core/auth/middleware.ts",
+  "threshold": 0.3,
+  "range": { "since": null, "until": null },
+  "points": [
+    {
+      "before": { "commit": "a1b2c3d", "date": "2023-06-15", "timestamp": 1686787200, "blobHash": "abc1234..." },
+      "after":  { "commit": "e4f5a6b", "date": "2023-09-20", "timestamp": 1695168000, "blobHash": "def5678..." },
+      "distance": 0.524
+    }
+  ]
+}
+```
+
+---
+
+#### `gitsema cluster-change-points [options]`
+
+Detect change points in the repo's cluster structure across commit history.
+For each sampled commit the command runs k-means clustering over visible blobs, matches clusters
+between consecutive steps using greedy centroid similarity, and reports steps where the mean
+centroid shift score exceeded the threshold.
+
+*See also: [`cluster-timeline`](#gitsema-cluster-timeline), [`change-points`](#gitsema-change-points-query-options)*
+
+> **Performance note:** By default every indexed commit is evaluated. On large repositories
+> use `--max-commits` to cap the number of commits sampled (they are selected evenly across
+> the since–until range).
+
+```
+Options:
+  --k <n>             Number of clusters per step (default: 8)
+  --threshold <n>     Mean centroid shift threshold (default: 0.3)
+  --top-points <n>    Show top-N largest shifts (default: 5)
+  --since <ref>       Limit commits from this point; accepts date (YYYY-MM-DD), tag, or hash
+  --until <ref>       Limit commits up to this point; accepts date (YYYY-MM-DD), tag, or hash
+  --max-commits <n>   Cap commits evaluated; sampled evenly (omit to evaluate every commit)
+  --dump [file]       Output structured JSON; writes to <file> or stdout if omitted
+```
+
+```bash
+gitsema cluster-change-points
+gitsema cluster-change-points --k 6 --threshold 0.4 --top-points 3
+gitsema cluster-change-points --max-commits 200 --dump cluster-changes.json
 ```
 
 ## Data storage
