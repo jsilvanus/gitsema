@@ -95,10 +95,10 @@ Commands are organised into five groups:
 | **Setup & Infrastructure** | `status`, `index`, `serve`, `remote-index`, `backfill-fts`, `mcp` |
 | **Search & Discovery** | `search`, `first-seen`, `dead-concepts` |
 | **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
-| **Concept History** | `concept-evolution` |
+| **Concept History** | `evolution`, `diff` |
 | **Cluster Analysis** | `clusters`, `cluster-diff`, `cluster-timeline` |
 
-> **Backward-compatible renames (v1 aliases):** `evolution` → `file-evolution`, `diff` → `file-diff`, `semantic-blame` → `blame`. The old names still work and are shown alongside new names in `--help`.
+> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`. The old names still work. Note: `diff` is now the new **conceptual diff** command (not `file-diff`), and `evolution` is now the **concept evolution** command (not `file-evolution`).
 
 ---
 
@@ -225,7 +225,7 @@ gitsema search "error handling" --hybrid
 
 Find when a concept first appeared in the codebase, sorted chronologically.
 
-*See also: [`search`](#gitsema-search-query-options), [`concept-evolution`](#gitsema-concept-evolution-query-options)*
+*See also: [`search`](#gitsema-search-query-options), [`evolution`](#gitsema-evolution-query-options)*
 
 ```
 Options:
@@ -242,7 +242,7 @@ gitsema first-seen "JWT token validation"
 
 Find historical concepts that no longer exist in HEAD but are semantically similar to current code.
 
-*See also: [`search`](#gitsema-search-query-options), [`concept-evolution`](#gitsema-concept-evolution-query-options)*
+*See also: [`search`](#gitsema-search-query-options), [`evolution`](#gitsema-evolution-query-options)*
 
 ```
 Options:
@@ -257,11 +257,9 @@ Options:
 
 #### `gitsema file-evolution <path> [options]`
 
-> **Alias:** `gitsema evolution` (backward-compatible)
-
 Track the semantic drift of a file across its Git history.
 
-*See also: [`file-diff`](#gitsema-file-diff-ref1-ref2-path), [`concept-evolution`](#gitsema-concept-evolution-query-options)*
+*See also: [`file-diff`](#gitsema-file-diff-ref1-ref2-path), [`evolution`](#gitsema-evolution-query-options)*
 
 ```
 Options:
@@ -280,11 +278,9 @@ gitsema file-evolution src/core/auth/middleware.ts --dump evolution.json
 
 #### `gitsema file-diff <ref1> <ref2> <path>`
 
-> **Alias:** `gitsema diff` (backward-compatible)
-
 Compute the semantic diff between two versions of a file.
 
-*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`cluster-diff`](#gitsema-cluster-diff-ref1-ref2)*
+*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`cluster-diff`](#gitsema-cluster-diff-ref1-ref2), [`diff`](#gitsema-diff-ref1-ref2)*
 
 ```
 Options:
@@ -330,11 +326,13 @@ Options:
 
 ### Concept History
 
-#### `gitsema concept-evolution <query> [options]`
+#### `gitsema evolution <query> [options]`
+
+> **Alias:** `gitsema concept-evolution` (backward-compatible)
 
 Show how a semantic concept evolved across the entire commit history.
 
-*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`first-seen`](#gitsema-first-seen-query-options)*
+*See also: [`file-evolution`](#gitsema-file-evolution-path-options), [`first-seen`](#gitsema-first-seen-query-options), [`diff`](#gitsema-diff-ref1-ref2)*
 
 ```
 Options:
@@ -346,7 +344,34 @@ Options:
 ```
 
 ```bash
-gitsema concept-evolution "authentication"
+gitsema evolution "authentication"
+gitsema concept-evolution "authentication"   # backward-compatible alias
+```
+
+---
+
+#### `gitsema diff <ref1> <ref2> <query> [options]`
+
+Compute a **conceptual/semantic diff** of a topic across two git refs.  Shows which
+blobs matching the topic were **gained** (new in ref2), **lost** (removed from ref1),
+and **stable** (present in both), each ranked by topic relevance — most relevant files
+for the topic appear at the top of each group.
+
+*See also: [`evolution`](#gitsema-evolution-query-options), [`file-diff`](#gitsema-file-diff-ref1-ref2-path), [`cluster-diff`](#gitsema-cluster-diff-ref1-ref2)*
+
+```
+Arguments:
+  query             Topic or concept to compare across the two refs
+
+Options:
+  -k, --top <n>     Max results per group (gained/lost/stable) (default: 10)
+  --dump [file]     Output structured JSON
+```
+
+```bash
+gitsema diff v1.0.0 HEAD "authentication"
+gitsema diff 2024-01-01 2024-06-01 "error handling" --top 5
+gitsema diff HEAD~20 HEAD "database access" --dump diff.json
 ```
 
 ---
