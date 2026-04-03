@@ -33,8 +33,9 @@ export interface DbSession {
  *   4 — Added symbols + symbol_embeddings tables (Phase 19)
  *   5 — Added blob_clusters + cluster_assignments tables (Phase 21)
  *   6 — Added idx_commits_timestamp index for temporal cluster queries (Phase 22)
+ *   7 — Added commit_embeddings table for commit message semantic search (Phase 28)
  */
-const CURRENT_SCHEMA_VERSION = 6
+const CURRENT_SCHEMA_VERSION = 7
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -145,6 +146,20 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_commits_timestamp ON commits (timestamp)`)
     version = 6
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('6')
+  }
+
+  // v6 → v7: add commit_embeddings table for commit message semantic search (Phase 28)
+  if (version < 7) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS commit_embeddings (
+        commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL
+      )
+    `)
+    version = 7
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('7')
   }
 }
 
@@ -259,6 +274,14 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     CREATE TABLE IF NOT EXISTS cluster_assignments (
       blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
       cluster_id INTEGER NOT NULL REFERENCES blob_clusters(id)
+    );
+
+    -- Commit message embeddings for semantic commit search (Phase 28)
+    CREATE TABLE IF NOT EXISTS commit_embeddings (
+      commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      vector BLOB NOT NULL
     );
 
     -- Index on commits.timestamp for fast temporal cluster filtering (Phase 22)

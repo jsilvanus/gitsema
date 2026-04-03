@@ -145,6 +145,20 @@ export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
 })
 
 /**
+ * Semantic embedding of a Git commit message (Phase 28).
+ *
+ * Stores the vector representation of a commit's message text so the index
+ * can answer questions like "find commits related to authentication refactoring".
+ * Keyed by commit_hash (one embedding per commit per model).
+ */
+export const commitEmbeddings = sqliteTable('commit_embeddings', {
+  commitHash: text('commit_hash').primaryKey().references(() => commits.commitHash),
+  model: text('model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+})
+
+/**
  * One row per clustering run's cluster (Phase 21).
  * Each cluster has a generated label, its centroid vector, representative paths,
  * and top keywords extracted from FTS5 content.
