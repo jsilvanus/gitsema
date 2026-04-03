@@ -42,6 +42,133 @@ program
   .description('A content-addressed semantic index synchronized with Git\'s object model.')
   .version(pkgVersion)
 
+// ---------------------------------------------------------------------------
+// --help group headers (Commander 12 does not have addHelpGroup; we override
+// formatHelp to inject group headings into the top-level command listing).
+// ---------------------------------------------------------------------------
+
+const GROUPS = [
+  'Setup & Infrastructure',
+  'Search & Discovery',
+  'File History',
+  'Concept History',
+  'Cluster Analysis',
+] as const
+
+const COMMAND_GROUPS: Record<string, string> = {
+  // Setup & Infrastructure
+  status:           'Setup & Infrastructure',
+  index:            'Setup & Infrastructure',
+  serve:            'Setup & Infrastructure',
+  'remote-index':   'Setup & Infrastructure',
+  'backfill-fts':   'Setup & Infrastructure',
+  mcp:              'Setup & Infrastructure',
+  // Search & Discovery
+  search:           'Search & Discovery',
+  'first-seen':     'Search & Discovery',
+  'dead-concepts':  'Search & Discovery',
+  // File History
+  'file-evolution': 'File History',
+  evolution:        'File History',   // backward-compat alias
+  'file-diff':      'File History',
+  diff:             'File History',   // backward-compat alias
+  blame:            'File History',
+  'semantic-blame': 'File History',   // backward-compat alias
+  impact:           'File History',
+  // Concept History
+  'concept-evolution': 'Concept History',
+  // Cluster Analysis
+  clusters:           'Cluster Analysis',
+  'cluster-diff':     'Cluster Analysis',
+  'cluster-timeline': 'Cluster Analysis',
+}
+
+program.configureHelp({
+  formatHelp(cmd, helper) {
+    const termWidth = helper.padWidth(cmd, helper)
+    const helpWidth = helper.helpWidth ?? 80
+    const itemIndentWidth = 2
+    const itemSeparatorWidth = 2
+
+    function formatItem(term: string, description: string): string {
+      if (description) {
+        const fullText = `${term.padEnd(termWidth + itemSeparatorWidth)}${description}`
+        return helper.wrap(fullText, helpWidth - itemIndentWidth, termWidth + itemSeparatorWidth)
+      }
+      return term
+    }
+    function formatList(textArray: string[]): string {
+      return textArray.join('\n').replace(/^/gm, ' '.repeat(itemIndentWidth))
+    }
+
+    // Usage
+    let output: string[] = [`Usage: ${helper.commandUsage(cmd)}`, '']
+
+    // Description
+    const commandDescription = helper.commandDescription(cmd)
+    if (commandDescription.length > 0) {
+      output = output.concat([helper.wrap(commandDescription, helpWidth, 0), ''])
+    }
+
+    // Arguments
+    const argumentList = helper.visibleArguments(cmd).map((argument) =>
+      formatItem(helper.argumentTerm(argument), helper.argumentDescription(argument)),
+    )
+    if (argumentList.length > 0) {
+      output = output.concat(['Arguments:', formatList(argumentList), ''])
+    }
+
+    // Options
+    const optionList = helper.visibleOptions(cmd).map((option) =>
+      formatItem(helper.optionTerm(option), helper.optionDescription(option)),
+    )
+    if (optionList.length > 0) {
+      output = output.concat(['Options:', formatList(optionList), ''])
+    }
+
+    // Global options (if enabled)
+    if (helper.showGlobalOptions) {
+      const globalOptionList = helper.visibleGlobalOptions(cmd).map((option) =>
+        formatItem(helper.optionTerm(option), helper.optionDescription(option)),
+      )
+      if (globalOptionList.length > 0) {
+        output = output.concat(['Global Options:', formatList(globalOptionList), ''])
+      }
+    }
+
+    // Commands — sorted into groups
+    const allCommands = helper.visibleCommands(cmd)
+    if (allCommands.length > 0) {
+      const grouped = new Map<string, string[]>()
+      const ungrouped: string[] = []
+
+      for (const subcmd of allCommands) {
+        const group = COMMAND_GROUPS[subcmd.name()]
+        const item = formatItem(helper.subcommandTerm(subcmd), helper.subcommandDescription(subcmd))
+        if (group) {
+          if (!grouped.has(group)) grouped.set(group, [])
+          grouped.get(group)!.push(item)
+        } else {
+          ungrouped.push(item)
+        }
+      }
+
+      for (const groupName of GROUPS) {
+        const items = grouped.get(groupName)
+        if (items?.length) {
+          output = output.concat([`${groupName}:`, formatList(items), ''])
+        }
+      }
+
+      if (ungrouped.length > 0) {
+        output = output.concat(['Commands:', formatList(ungrouped), ''])
+      }
+    }
+
+    return output.join('\n')
+  },
+})
+
 program
   .command('status [file]')
   .description('Show index status and database info, or status for a specific file')
@@ -123,14 +250,15 @@ program
 
 program
   .command('first-seen <query>')
-  .description('Find when a concept first appeared in the codebase, sorted by date')
+  .description('Find when a concept first appeared in the codebase, sorted by date (see also: search, concept-evolution)')
   .option('-k, --top <n>', 'number of results to return', '10')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(firstSeenCommand)
 
 program
-  .command('evolution <path>')
-  .description('Track semantic drift of a file over its Git history')
+  .command('file-evolution <path>')
+  .alias('evolution')
+  .description('Track semantic drift of a file over its Git history (see also: file-diff, concept-evolution)')
   .option(
     '--threshold <n>',
     'cosine distance threshold above which a version change is flagged as a large change (default 0.3)',
@@ -152,7 +280,7 @@ program
 
 program
   .command('concept-evolution <query>')
-  .description('Show how a semantic concept (e.g. "authentication") evolved across the commit history')
+  .description('Show how a semantic concept evolved across the commit history (see also: file-evolution, first-seen)')
   .option('-k, --top <n>', 'number of top-matching blobs to include in the timeline (default 50)')
   .option(
     '--threshold <n>',
@@ -174,8 +302,9 @@ program
   .action(conceptEvolutionCommand)
 
 program
-  .command('diff <ref1> <ref2> <path>')
-  .description('Compute semantic diff between two versions of a file')
+  .command('file-diff <ref1> <ref2> <path>')
+  .alias('diff')
+  .description('Compute semantic diff between two versions of a file (see also: file-evolution, cluster-diff)')
   .option(
     '--neighbors <n>',
     'number of nearest-neighbour blobs to show for each version (default 0)',
@@ -220,8 +349,9 @@ program
   .action(remoteIndexCommand)
 
 program
-  .command('semantic-blame <file>')
-  .description('Show semantic origin of each logical block in a file — nearest-neighbor blame')
+  .command('blame <file>')
+  .alias('semantic-blame')
+  .description('Show semantic origin of each logical block in a file — nearest-neighbor blame (see also: file-evolution, impact)')
   .option('-k, --top <n>', 'number of nearest-neighbor blobs to show per block (default 3)', '3')
   .option(
     '--dump [file]',
@@ -231,7 +361,7 @@ program
 
 program
   .command('dead-concepts')
-  .description('Find historical concepts that no longer exist in HEAD but are semantically similar to current code')
+  .description('Find historical concepts no longer in HEAD but semantically similar to current code (see also: search, concept-evolution)')
   .option('-k, --top <n>', 'number of results to return', '10')
   .option(
     '--since <date>',
@@ -245,7 +375,7 @@ program
 
 program
   .command('impact <path>')
-  .description('Compute semantically similar blobs across the codebase to highlight refactor impact')
+  .description('Compute semantically similar blobs across the codebase to highlight refactor impact (see also: blame, file-diff)')
   .option('-k, --top <n>', 'number of similar blobs to return', '10')
   .option('--chunks', 'include chunk-level embeddings for finer-grained coupling')
   .option(
@@ -256,7 +386,7 @@ program
 
 program
   .command('clusters')
-  .description('Cluster all blob embeddings into semantic regions and display a concept graph')
+  .description('Cluster all blob embeddings into semantic regions and display a concept graph (see also: cluster-diff, cluster-timeline)')
   .option('--k <n>', 'number of clusters to compute (default 8)', '8')
   .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
   .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
@@ -275,7 +405,7 @@ program
 
 program
   .command('cluster-diff <ref1> <ref2>')
-  .description('Compare semantic clusters between two points in history (temporal clustering)')
+  .description('Compare semantic clusters between two points in history — temporal clustering (see also: clusters, cluster-timeline, file-diff)')
   .option('--k <n>', 'number of clusters to compute at each ref (default 8)', '8')
   .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
   .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
@@ -294,7 +424,7 @@ program
 
 program
   .command('cluster-timeline')
-  .description('Show how semantic clusters shifted over the commit history (multi-step timeline)')
+  .description('Show how semantic clusters shifted over the commit history — multi-step timeline (see also: clusters, cluster-diff)')
   .option('--k <n>', 'number of clusters per step (default 8)', '8')
   .option('--steps <n>', 'number of evenly-spaced time checkpoints (default 5)', '5')
   .option('--since <ref>', 'start date or git ref for the timeline (default: earliest indexed commit)')

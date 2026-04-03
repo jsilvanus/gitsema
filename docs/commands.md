@@ -137,17 +137,17 @@ Commands that cluster the full blob space by vector similarity.
 
 ---
 
-## Naming recommendations
+## Naming changes implemented
 
-If command renames are acceptable in a future major version, the following would improve clarity:
+The following renames were applied in this PR. Old names are kept as backward-compatible aliases so existing scripts continue to work.
 
-| Current name | Suggested name | Reason |
+| Old name | New canonical name | Alias still works? |
 |---|---|---|
-| `evolution` | `file-evolution` | Mirrors `concept-evolution`; makes clear the input is a file path |
-| `diff` | `file-diff` or `semantic-diff` | Disambiguates from `cluster-diff`; `diff` alone is too generic |
-| `semantic-blame` | `blame` | Shorter, follows git conventions, the "semantic" qualifier is already implied by the tool |
+| `evolution` | `file-evolution` | ✅ yes |
+| `diff` | `file-diff` | ✅ yes |
+| `semantic-blame` | `blame` | ✅ yes |
 
-The `cluster-*` prefix convention is already strong and should be retained.
+The `cluster-*` prefix convention is retained. `--help` now shows both names for each renamed command (e.g. `file-evolution|evolution`).
 
 ---
 
