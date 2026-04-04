@@ -180,8 +180,8 @@ export async function computeBranchSummary(
       const lastEntry = evolution[evolution.length - 1]
       driftedPaths.push({ path: p, semanticDrift: lastEntry.distFromPrev })
     } else if (evolution.length === 1) {
-      // Single-version file — new file added on the branch, drift from origin = 0
-      driftedPaths.push({ path: p, semanticDrift: evolution[0].distFromOrigin })
+      // Single-version file (new file added on the branch) — no prior version, drift = 0
+      driftedPaths.push({ path: p, semanticDrift: 0 })
     }
   }
   driftedPaths.sort((a, b) => b.semanticDrift - a.semanticDrift)
