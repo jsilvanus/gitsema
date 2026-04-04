@@ -1,6 +1,6 @@
 import { remoteStatus } from '../../client/remoteClient.js'
 import { db, DB_PATH, getRawDb } from '../../core/db/sqlite.js'
-import { blobs, embeddings, paths, chunks, chunkEmbeddings } from '../../core/db/schema.js'
+import { blobs, embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, commitEmbeddings, moduleEmbeddings } from '../../core/db/schema.js'
 import { eq } from 'drizzle-orm'
 import { logger } from '../../utils/logger.js'
 import { walk } from '../../core/git/walker.js'
@@ -48,6 +48,23 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   const [embeddingCount] = db.select({ count: sql<number>`count(*)` }).from(embeddings).all()
   const [pathCount] = db.select({ count: sql<number>`count(*)` }).from(paths).all()
 
+  // Extended indexing level counts
+  const rawDb = getRawDb()
+  const chunkCount = (rawDb.prepare('SELECT COUNT(*) AS c FROM chunks').get() as { c: number })?.c ?? 0
+  const chunkEmbCount = (rawDb.prepare('SELECT COUNT(*) AS c FROM chunk_embeddings').get() as { c: number })?.c ?? 0
+  const symbolCount = (rawDb.prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name='symbols'").get() as { c: number })?.c
+    ? (rawDb.prepare('SELECT COUNT(*) AS c FROM symbols').get() as { c: number })?.c ?? 0
+    : 0
+  const symbolEmbCount = (rawDb.prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name='symbol_embeddings'").get() as { c: number })?.c
+    ? (rawDb.prepare('SELECT COUNT(*) AS c FROM symbol_embeddings').get() as { c: number })?.c ?? 0
+    : 0
+  const commitEmbCount = (rawDb.prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name='commit_embeddings'").get() as { c: number })?.c
+    ? (rawDb.prepare('SELECT COUNT(*) AS c FROM commit_embeddings').get() as { c: number })?.c ?? 0
+    : 0
+  const moduleEmbCount = (rawDb.prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name='module_embeddings'").get() as { c: number })?.c
+    ? (rawDb.prepare('SELECT COUNT(*) AS c FROM module_embeddings').get() as { c: number })?.c ?? 0
+    : 0
+
   // Resolve provider config from env or defaults
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
@@ -86,6 +103,12 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   printKV('Embeddings stored:', embeddingCount.count)
   printKV('Path entries:', pathCount.count)
   printKV('Branches tracked:', branchCount)
+  if (chunkCount > 0) printKV('Chunks stored:', chunkCount)
+  if (chunkEmbCount > 0) printKV('Chunk embeddings:', chunkEmbCount)
+  if (symbolCount > 0) printKV('Symbols indexed:', symbolCount)
+  if (symbolEmbCount > 0) printKV('Symbol embeddings:', symbolEmbCount)
+  if (commitEmbCount > 0) printKV('Commit embeddings:', commitEmbCount)
+  if (moduleEmbCount > 0) printKV('Module embeddings:', moduleEmbCount)
 
   if (filePath) {
     // Resolve blob at HEAD (try as-given first)

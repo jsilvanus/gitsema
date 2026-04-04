@@ -1,7 +1,6 @@
 import { runIndex, type IndexStats } from '../../core/indexing/indexer.js'
 import { runRemoteIndex } from '../../core/indexing/remoteIndexer.js'
-import { OllamaProvider } from '../../core/embedding/local.js'
-import { HttpProvider } from '../../core/embedding/http.js'
+import { buildProvider } from '../../core/embedding/providerFactory.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { DEFAULT_MAX_SIZE, showBlob } from '../../core/git/showBlob.js'
 import { resolveBlobAtRef } from '../../core/search/evolution.js'
@@ -29,15 +28,12 @@ export async function indexFileCommand(filePath: string, options: { chunker?: st
   const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
 
   let provider: EmbeddingProvider
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    provider = new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
-  } else {
-    provider = new OllamaProvider({ model })
+  try {
+    provider = buildProvider(providerType, model)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+    throw err
   }
 
   // Resolve blob at HEAD; if running from a subdirectory `filePath` may be
@@ -239,16 +235,14 @@ function renderProgress(stats: IndexStats): string {
   )
 }
 
-function buildProvider(providerType: string, model: string): EmbeddingProvider {
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
+  try {
+    return buildProvider(providerType, model)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+    throw err
   }
-  return new OllamaProvider({ model })
 }
 
 /**
@@ -345,9 +339,9 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   // Code model — defaults to the text model when not set, keeping single-model behaviour
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
 
-  const textProvider = buildProvider(providerType, textModel)
+  const textProvider = buildProviderOrExit(providerType, textModel)
   // Only build a separate code provider when the models differ
-  const codeProvider = codeModel !== textModel ? buildProvider(providerType, codeModel) : undefined
+  const codeProvider = codeModel !== textModel ? buildProviderOrExit(providerType, codeModel) : undefined
 
   // Parse concurrency
   const concurrency = options.concurrency !== undefined ? parseInt(options.concurrency, 10) : 4

@@ -360,3 +360,16 @@ export function mergeSearchResults(
     .sort((x, y) => y.score - x.score)
     .slice(0, topK)
 }
+
+/**
+ * Returns the set of blob hashes that appear on a specific branch,
+ * according to the `blob_branches` table.  Returns an empty set when the
+ * branch has no indexed blobs or the table is empty.
+ */
+export function getBranchBlobHashSet(branch: string): Set<string> {
+  const { rawDb } = getActiveSession()
+  const rows = rawDb
+    .prepare('SELECT DISTINCT blob_hash FROM blob_branches WHERE branch_name = ?')
+    .all(branch) as Array<{ blob_hash: string }>
+  return new Set(rows.map((r) => r.blob_hash))
+}

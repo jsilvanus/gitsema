@@ -1,7 +1,7 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import type { Embedding } from '../models/types.js'
 
 /**
@@ -39,6 +39,13 @@ export interface AuthorSearchOptions {
   since?: number
   /** Include per-blob contribution detail in results. Default false. */
   detail?: boolean
+  /** When provided, restrict blobs to those seen on this branch. */
+  branch?: string
+  /**
+   * Pre-scored blobs (e.g. from hybridSearch).  When supplied the cosine-
+   * scoring step is skipped and these scores are used directly.
+   */
+  candidateBlobs?: Array<{ blobHash: string; score: number }>
 }
 
 /** Deserializes a Float32Array stored as a Buffer back to number[]. */
@@ -54,27 +61,43 @@ export async function computeAuthorContributions(
   queryEmbedding: Embedding,
   options: AuthorSearchOptions = {},
 ): Promise<AuthorContribution[]> {
-  const { topK = 50, topAuthors = 10, since, detail = false } = options
+  const { topK = 50, topAuthors = 10, since, detail = false, branch, candidateBlobs } = options
   const { db } = getActiveSession()
 
-  // 1. Load all blob embeddings
-  const allEmbRows = db
-    .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
-    .from(embeddings)
-    .all()
-
-  if (allEmbRows.length === 0) return []
-
-  // 2. Score each blob against the query embedding
+  // 1. Determine top blobs: use pre-scored candidates if provided, otherwise
+  //    load all embeddings and score by cosine similarity.
   type ScoredBlob = { blobHash: string; score: number }
-  const scored: ScoredBlob[] = allEmbRows.map((row) => ({
-    blobHash: row.blobHash,
-    score: cosineSimilarity(queryEmbedding, bufferToEmbedding(row.vector as Buffer)),
-  }))
+  let topBlobs: ScoredBlob[]
 
-  // Sort descending and take top-K
-  scored.sort((a, b) => b.score - a.score)
-  const topBlobs = scored.slice(0, topK)
+  if (candidateBlobs !== undefined) {
+    // Pre-scored candidates supplied (e.g. from hybridSearch)
+    topBlobs = candidateBlobs.slice(0, topK)
+  } else {
+    // Load all blob embeddings
+    let allEmbRows = db
+      .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
+      .from(embeddings)
+      .all()
+
+    if (allEmbRows.length === 0) return []
+
+    // Apply branch filter
+    if (branch) {
+      const branchSet = getBranchBlobHashSet(branch)
+      allEmbRows = allEmbRows.filter((r) => branchSet.has(r.blobHash))
+      if (allEmbRows.length === 0) return []
+    }
+
+    // Score each blob against the query embedding
+    const scored: ScoredBlob[] = allEmbRows.map((row) => ({
+      blobHash: row.blobHash,
+      score: cosineSimilarity(queryEmbedding, bufferToEmbedding(row.vector as Buffer)),
+    }))
+
+    scored.sort((a, b) => b.score - a.score)
+    topBlobs = scored.slice(0, topK)
+  }
+
   if (topBlobs.length === 0) return []
 
   const topBlobHashes = topBlobs.map((b) => b.blobHash)

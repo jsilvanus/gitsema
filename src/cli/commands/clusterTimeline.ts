@@ -21,6 +21,7 @@ export interface ClusterTimelineCommandOptions {
   html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
+  branch?: string
 }
 
 /**
@@ -80,6 +81,7 @@ export async function clusterTimelineCommand(options: ClusterTimelineCommandOpti
       topKeywords: 5,
       useEnhancedLabels,
       enhancedKeywordsN,
+      branch: options.branch,
     })
 
     if (report.steps.length === 0) {

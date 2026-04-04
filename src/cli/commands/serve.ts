@@ -1,6 +1,5 @@
 import { createServer } from 'node:http'
-import { OllamaProvider } from '../../core/embedding/local.js'
-import { HttpProvider } from '../../core/embedding/http.js'
+import { buildProvider } from '../../core/embedding/providerFactory.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { createApp } from '../../server/app.js'
@@ -13,16 +12,14 @@ export interface ServeCommandOptions {
   concurrency?: string
 }
 
-function buildProvider(providerType: string, model: string): EmbeddingProvider {
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
+  try {
+    return buildProvider(providerType, model)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+    throw err
   }
-  return new OllamaProvider({ model })
 }
 
 export async function serveCommand(options: ServeCommandOptions): Promise<void> {
@@ -59,8 +56,8 @@ export async function serveCommand(options: ServeCommandOptions): Promise<void> 
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
 
-  const textProvider = buildProvider(providerType, textModel)
-  const codeProvider = codeModel !== textModel ? buildProvider(providerType, codeModel) : undefined
+  const textProvider = buildProviderOrExit(providerType, textModel)
+  const codeProvider = codeModel !== textModel ? buildProviderOrExit(providerType, codeModel) : undefined
 
   const app = createApp({ textProvider, codeProvider, chunkerStrategy, concurrency })
   const server = createServer(app)

@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getActiveSession } from '../db/sqlite.js'
-import { embeddings, paths, commits } from '../db/schema.js'
-import { inArray } from 'drizzle-orm'
+import { embeddings, paths, commits, symbols, symbolEmbeddings } from '../db/schema.js'
+import { inArray, eq } from 'drizzle-orm'
 import { cosineSimilarity } from './vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
@@ -31,6 +31,10 @@ export interface SemanticBlameNeighbor {
   message: string | null
   /** Author name and email from the commit, or null. */
   author: string | null
+  /** Symbol name, present when --level symbol is used. */
+  symbolName?: string
+  /** Symbol kind (e.g. function, class), present when --level symbol is used. */
+  symbolKind?: string
 }
 
 /** Semantic blame result for one logical block of the file. */
@@ -144,9 +148,9 @@ export async function computeSemanticBlame(
   filePath: string,
   content: string,
   provider: EmbeddingProvider,
-  opts: { topK?: number; repoPath?: string } = {},
+  opts: { topK?: number; searchSymbols?: boolean; repoPath?: string } = {},
 ): Promise<SemanticBlameEntry[]> {
-  const { topK = 3, repoPath = '.' } = opts
+  const { topK = 3, searchSymbols = false, repoPath = '.' } = opts
   const { db } = getActiveSession()
 
   // --- Chunk the file ---
@@ -160,14 +164,45 @@ export async function computeSemanticBlame(
     chunks = fixed.chunk(content, filePath)
   }
 
-  // --- Load all stored embeddings once ---
-  const allEmbeddings = db
-    .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
-    .from(embeddings)
-    .all()
+  // --- Load all stored embeddings once (file-level or symbol-level) ---
+  type StoredVector = { blobHash: string; vec: number[]; symbolName?: string; symbolKind?: string; startLine?: number | null; endLine?: number | null }
+
+  let storedVectors: StoredVector[]
+
+  if (searchSymbols) {
+    const symRows = db
+      .select({
+        blobHash: symbols.blobHash,
+        startLine: symbols.startLine,
+        endLine: symbols.endLine,
+        symbolName: symbols.symbolName,
+        symbolKind: symbols.symbolKind,
+        vector: symbolEmbeddings.vector,
+      })
+      .from(symbolEmbeddings)
+      .innerJoin(symbols, eq(symbolEmbeddings.symbolId, symbols.id))
+      .all()
+    storedVectors = symRows.map((row) => ({
+      blobHash: row.blobHash,
+      vec: bufferToEmbedding(row.vector as Buffer),
+      symbolName: row.symbolName ?? undefined,
+      symbolKind: row.symbolKind ?? undefined,
+      startLine: row.startLine,
+      endLine: row.endLine,
+    }))
+  } else {
+    const allEmbeddings = db
+      .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
+      .from(embeddings)
+      .all()
+    storedVectors = allEmbeddings.map((row) => ({
+      blobHash: row.blobHash,
+      vec: bufferToEmbedding(row.vector as Buffer),
+    }))
+  }
 
   // Early return: no indexed blobs yet
-  if (allEmbeddings.length === 0) {
+  if (storedVectors.length === 0) {
     return chunks.map((chunk) => ({
       startLine: chunk.startLine,
       endLine: chunk.endLine,
@@ -175,11 +210,6 @@ export async function computeSemanticBlame(
       neighbors: [],
     }))
   }
-
-  const storedVectors = allEmbeddings.map((row) => ({
-    blobHash: row.blobHash,
-    vec: bufferToEmbedding(row.vector as Buffer),
-  }))
 
   // --- Score each chunk against all stored embeddings ---
   const commitHashesNeeded = new Set<string>()
@@ -237,6 +267,8 @@ export async function computeSemanticBlame(
         timestamp: info?.timestamp ?? null,
         message: null,
         author: null,
+        ...(s.symbolName !== undefined ? { symbolName: s.symbolName } : {}),
+        ...(s.symbolKind !== undefined ? { symbolKind: s.symbolKind } : {}),
       }
     })
 

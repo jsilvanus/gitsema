@@ -358,12 +358,19 @@ program
   .option('--branch <name>', 'only return blobs seen on this branch (short name, e.g. "main")')
   .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
   .option('--include-commits', 'also search commit message embeddings and display matching commits')
+  .option('--annotate-clusters', 'annotate each result with its cluster label from a prior `gitsema clusters` run')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .action(searchCommand)
 
 program
   .command('first-seen <query>')
   .description('Find when a concept first appeared in the codebase, sorted by date (see also: search, concept-evolution)')
   .option('-k, --top <n>', 'number of results to return', '10')
+  .option('--branch <name>', 'restrict results to blobs seen on this branch')
+  .option('--hybrid', 'blend vector similarity with BM25 keyword matching (requires prior backfill-fts)')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
+  .option('--include-commits', 'also search commit messages and show chronological commit results')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(firstSeenCommand)
 
@@ -374,9 +381,14 @@ program
     '--threshold <n>',
     'cosine distance threshold above which a version change is flagged as a large change (default 0.3)',
   )
+  .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
   .option(
     '--dump [file]',
     'output structured JSON of all evolution entries; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise file-evolution.html',
   )
   .option(
     '--include-content',
@@ -410,6 +422,7 @@ program
     '--include-content',
     'include the stored file content for each entry in the JSON dump (only used with --dump)',
   )
+  .option('--branch <name>', 'restrict evolution to blobs seen on this branch')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(conceptEvolutionCommand)
 
@@ -474,6 +487,7 @@ program
   .alias('semantic-blame')
   .description('Show semantic origin of each logical block in a file — nearest-neighbor blame (see also: file-evolution, impact)')
   .option('-k, --top <n>', 'number of nearest-neighbor blobs to show per block (default 3)', '3')
+  .option('--level <level>', 'search level: file (default) or symbol — symbol uses function-level embeddings')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -492,6 +506,11 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise dead-concepts.html',
+  )
+  .option('--branch <name>', 'restrict dead-concept candidates to blobs seen on this branch')
   .action(deadConceptsCommand)
 
 program
@@ -499,10 +518,12 @@ program
   .description('Compute semantically similar blobs across the codebase to highlight refactor impact (see also: blame, file-diff)')
   .option('-k, --top <n>', 'number of similar blobs to return', '10')
   .option('--chunks', 'include chunk-level embeddings for finer-grained coupling')
+  .option('--level <level>', 'search level: file (default), chunk, or symbol')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--branch <name>', 'restrict results to blobs seen on this branch')
   .action(impactCommand)
 
 program
@@ -522,6 +543,7 @@ program
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict clustering to blobs seen on this branch')
   .action(clustersCommand)
 
 program
@@ -541,6 +563,7 @@ program
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict clustering to blobs seen on this branch at each ref')
   .action(clusterDiffCommand)
 
 program
@@ -564,6 +587,7 @@ program
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
   .action(clusterTimelineCommand)
 
 program
@@ -574,9 +598,14 @@ program
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option('--branch <name>', 'restrict concept state to blobs seen on this branch')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise change-points.html',
   )
   .action(changePointsCommand)
 
@@ -585,11 +614,16 @@ program
   .description('Detect semantic change points in a file\'s Git history (see also: file-evolution, change-points)')
   .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
+  .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise file-change-points.html',
   )
   .action(fileChangePointsCommand)
 
@@ -609,6 +643,13 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-change-points.html',
+  )
+  .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
+  .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
   .action(clusterChangePointsCommand)
 
 program
@@ -620,6 +661,12 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise branch-summary.html',
+  )
+  .option('--enhanced-labels', 'show more keyword detail for concept clusters in the output')
+  .option('--enhanced-keywords-n <n>', 'number of keywords to display per cluster when --enhanced-labels is set (default 8)', '8')
   .action(branchSummaryCommand)
 
 program
@@ -639,6 +686,11 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise merge-audit.html',
+  )
+  .option('--enhanced-labels', 'show top keywords alongside cluster labels in collision output')
   .action(mergeAuditCommand)
 
 program
@@ -693,6 +745,9 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--branch <name>', 'restrict concept attribution to blobs seen on this branch')
+  .option('--hybrid', 'use hybrid (vector + BM25) search to find initial candidate blobs')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .action(authorCommand)
 
 program.parse()

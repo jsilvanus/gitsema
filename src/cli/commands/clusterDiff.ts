@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import {
   resolveRefToTimestamp,
   getBlobHashesUpTo,
+  getBlobHashesOnBranch,
   computeClusterSnapshot,
   compareClusterSnapshots,
   type TemporalClusterReport,
@@ -18,6 +19,7 @@ export interface ClusterDiffCommandOptions {
   html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
+  branch?: string
 }
 
 /**
@@ -65,9 +67,15 @@ export async function clusterDiffCommand(
       console.error('Warning: ref2 is older than ref1. The diff will show blobs removed going backwards in time.')
     }
 
-    // Load blob hashes visible at each ref
-    const hashes1 = getBlobHashesUpTo(ts1)
-    const hashes2 = getBlobHashesUpTo(ts2)
+    // Load blob hashes visible at each ref, optionally filtered by branch
+    let hashes1 = getBlobHashesUpTo(ts1)
+    let hashes2 = getBlobHashesUpTo(ts2)
+
+    if (options.branch) {
+      const branchSet = new Set(getBlobHashesOnBranch(options.branch))
+      hashes1 = hashes1.filter((h) => branchSet.has(h))
+      hashes2 = hashes2.filter((h) => branchSet.has(h))
+    }
 
     if (hashes1.length === 0 && hashes2.length === 0) {
       console.error('No indexed blobs found for either ref. Run `gitsema index` first.')
