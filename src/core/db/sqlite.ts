@@ -35,8 +35,9 @@ export interface DbSession {
  *   6 — Added idx_commits_timestamp index for temporal cluster queries (Phase 22)
  *   7 — Added commit_embeddings table for commit message semantic search (Phase 30)
  *   8 — Added author_name, author_email to commits (Phase 31)
+ *   9 — Added is_merge_commit to commits (Phase 32)
  */
-const CURRENT_SCHEMA_VERSION = 8
+const CURRENT_SCHEMA_VERSION = 9
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -176,7 +177,18 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 8
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('8')
   }
+
+  // v8 → v9: add is_merge_commit to commits (Phase 32)
+  if (version < 9) {
+    const commitCols = sqlite.prepare('PRAGMA table_info(commits)').all() as Array<{ name: string }>
+    if (!commitCols.some((c) => c.name === 'is_merge_commit')) {
+      sqlite.exec(`ALTER TABLE commits ADD COLUMN is_merge_commit INTEGER DEFAULT 0`)
+    }
+    version = 9
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('9')
+  }
 }
+
 
 /** The full CREATE TABLE block used for every new database file. */
 function initTables(sqlite: InstanceType<typeof Database>): void {
@@ -206,7 +218,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       timestamp INTEGER NOT NULL,
       message TEXT NOT NULL,
       author_name TEXT,
-      author_email TEXT
+      author_email TEXT,
+      is_merge_commit INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS blob_commits (

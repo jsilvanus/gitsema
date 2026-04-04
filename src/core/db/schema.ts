@@ -49,6 +49,8 @@ export const commits = sqliteTable('commits', {
   message: text('message').notNull(),
   authorName: text('author_name'),
   authorEmail: text('author_email'),
+  // Indicates whether this commit has more than one parent (merge commit)
+  isMergeCommit: integer('is_merge_commit').default(0),
 })
 
 export const blobCommits = sqliteTable('blob_commits', {

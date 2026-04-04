@@ -511,7 +511,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   async function flushPendingCommit(): Promise<void> {
     if (!pendingCommit) return
-    const stored = storeCommitWithBlobs(pendingCommit, pendingBlobHashes)
+    const stored = storeCommitWithBlobs(pendingCommit, pendingBlobHashes, { isMergeCommit: pendingCommit.isMergeCommit })
     stats.commits++
     stats.blobCommits += stored
 

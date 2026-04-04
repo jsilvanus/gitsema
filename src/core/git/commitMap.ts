@@ -12,6 +12,8 @@ export interface CommitEntry {
   authorEmail?: string
   /** Branch names (short local names) that reference this commit or have it in their history. */
   branches: string[]
+  /** True when the commit has multiple parents (a merge commit). */
+  isMergeCommit?: boolean
 }
 
 export interface BlobCommitEntry {
@@ -98,7 +100,7 @@ export function streamCommitMap(repoPath: string = '.', options: CommitMapOption
   // Use refs/heads/<branch> when a branch filter is set, otherwise walk all refs
   const refScope = branch ? [`refs/heads/${branch}`] : ['--all']
   // Use unit separator (ASCII 31) to safely separate fields that may contain spaces
-  const args = ['log', ...refScope, '--raw', '--no-abbrev', '--format=COMMIT %H%x1f%ct%x1f%aN%x1f%aE%x1f%s']
+  const args = ['log', ...refScope, '--raw', '--no-abbrev', '--format=COMMIT %H%x1f%ct%x1f%aN%x1f%aE%x1f%s%x1f%P']
   if (maxCommits && maxCommits > 0) {
     args.push(`--max-count=${maxCommits}`)
   }
@@ -127,9 +129,12 @@ export function streamCommitMap(repoPath: string = '.', options: CommitMapOption
       const authorName = fields[2]
       const authorEmail = fields[3]
       const message = fields[4] ?? ''
+      const parentsField = fields[5] ?? ''
+      const parents = parentsField.split(' ').map((p) => p.trim()).filter(Boolean)
+      const isMerge = parents.length > 1
       currentCommitHash = commitHash
       const branches = commitBranchMap.get(commitHash) ?? []
-      out.push({ type: 'commit', data: { commitHash, timestamp, message, authorName, authorEmail, branches } } satisfies CommitMapEvent)
+      out.push({ type: 'commit', data: { commitHash, timestamp, message, authorName, authorEmail, branches, isMergeCommit: isMerge } } satisfies CommitMapEvent)
     } else if (line.startsWith(':') && currentCommitHash) {
       // Raw diff line: ":old_mode new_mode old_hash new_hash status\tpath"
       const tabIdx = line.indexOf('\t')
