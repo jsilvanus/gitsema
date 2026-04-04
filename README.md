@@ -582,20 +582,23 @@ ln -s ../../scripts/hooks/post-commit  .git/hooks/post-commit
 ln -s ../../scripts/hooks/post-merge   .git/hooks/post-merge
 ```
 
-### Future: toggle via `gitsema config`
+### Toggle via `gitsema config`
 
-A planned enhancement (tracked in the `gitsema config` feature) will let you
-enable or disable hooks without touching `.git/hooks/` manually:
+The `gitsema config` command can install or remove the hooks automatically —
+no manual file copying required:
 
 ```bash
-# Install / enable hooks for the current repo
+# Install hooks for the current repository (symlinks into .git/hooks/)
 gitsema config set hooks.enabled true
 
-# Disable without removing the scripts
+# Remove the managed hooks
 gitsema config set hooks.enabled false
 ```
 
-Until `gitsema config` is available, use the manual installation steps above.
+The config value is persisted in `.gitsema/config.json` so hooks are
+re-enabled automatically when you run `gitsema config set hooks.enabled true`
+again after a re-clone.  The manual copy/symlink steps above remain a valid
+alternative if you prefer not to use the config command.
 
 ---
 
