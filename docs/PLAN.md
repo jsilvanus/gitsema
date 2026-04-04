@@ -45,6 +45,12 @@
 |   [Phase 24 — Enhanced cluster labeling](#phase-24-—-enhanced-cluster-labeling) | — |
 |   [Phase 25 — Interactive HTML visualizations](#phase-25-—-interactive-html-visualizations) | — |
 |   [Phase 26 — CLI naming consolidation & conceptual diff](#phase-26-—-cli-naming-consolidation-conceptual-diff) | — |
+|   [Phase 27 — Semantic change-point detection](#phase-27-—-semantic-change-point-detection) | — |
+|   [Phase 28 — Persistent configuration management](#phase-28-—-persistent-configuration-management) | — |
+|   [Phase 29 — Automated indexing via Git hooks](#phase-29-—-automated-indexing-via-git-hooks) | — |
+|   [Phase 30 — Commit message semantic indexing](#phase-30-—-commit-message-semantic-indexing) | — |
+|   [Phase 31 — Semantic concept authorship ranking](#phase-31-—-semantic-concept-authorship-ranking) | — |
+|   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | — |
 | [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
 |   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
 |   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
@@ -149,6 +155,8 @@ gitsema/
 
 ### Phase 1 — Foundation
 
+**Version:** implemented in 0.0.1
+
 **Goal:** Everything compiles, nothing runs yet.
 
 Establish the project scaffold: ESM `package.json`, TypeScript config, directory
@@ -189,6 +197,8 @@ Wire up the SQLite connection via Drizzle ORM. Define the minimal Phase 1 schema
 
 ### Phase 2 — Git walking
 
+**Version:** implemented in 0.0.1
+
 **Goal:** Stream all blobs from a repo without touching the embedding engine.
 
 Implement the two Git primitives that underpin everything:
@@ -210,6 +220,8 @@ of thousands of blobs. Buffering them in memory before processing is not an opti
 ---
 
 ### Phase 3 — Embedding system
+
+**Version:** implemented in 0.0.1
 
 **Goal:** A swappable embedding abstraction with a working local implementation.
 
@@ -247,6 +259,8 @@ A standalone `embed.ts` script embeds a test string and prints the vector length
 
 ### Phase 4 — Indexing
 
+**Version:** implemented in 0.0.1
+
 **Goal:** `gitsema index` works end-to-end.
 
 Compose the walker, deduper, embedding engine, and database writes into a
@@ -270,6 +284,8 @@ database is populated and queryable with raw SQL.
 ---
 
 ### Phase 5 — Search  ·  *MVP deliverable*
+
+**Version:** implemented in 0.0.1
 
 **Goal:** `gitsema search "query"` returns ranked results.
 
@@ -301,6 +317,8 @@ development work, even without any commit awareness.
 ---
 
 ### Phase 6 — Commit mapping
+
+**Version:** implemented in 0.0.1
 
 **Goal:** The database understands Git history.
 
@@ -337,6 +355,8 @@ Verify with raw SQL that `first-seen` queries are possible before building the C
 
 ### Phase 7 — Time-aware queries  ·  *Phase 2 deliverable*
 
+**Version:** implemented in 0.0.1
+
 **Goal:** The index understands time.
 
 Add three new capabilities:
@@ -367,6 +387,8 @@ questions with a temporal dimension, which is the core differentiator of
 ---
 
 ### Phase 8 — File-type-aware embedding models
+
+**Version:** implemented in 0.0.1
 
 **Goal:** Use the optimal embedding model per content type — a code-aware model for source files and a text model for documentation and prose.
 
@@ -404,6 +426,8 @@ Search queries have no file path. `RoutingProvider.embed()` always delegates to 
 
 ### Phase 9 — Performance
 
+**Version:** implemented in 0.0.1
+
 **Goal:** Practical daily use on large repositories.
 
 Three independent improvements, each mergeable separately:
@@ -439,6 +463,8 @@ in under 5 minutes on commodity hardware with a local Ollama instance.
 ---
 
 ### Phase 10 — Smarter semantics
+
+**Version:** implemented in 0.0.1
 
 **Goal:** Better results without changing the core architecture.
 
@@ -482,6 +508,8 @@ indexing.
 ---
 
 ### Phase 11 — Advanced features + MCP
+
+**Version:** implemented in 0.0.1
 
 **Goal:** The full platform.
 
@@ -551,6 +579,8 @@ server for AI-assisted workflows.
 ---
 
 ### Phase 11b — Content access and semantic concept tracking
+
+**Version:** implemented in 0.0.1
 
 **Goal:** Make the index richer for agent consumption; add concept-level evolution across history.
 
@@ -691,6 +721,8 @@ entire codebase history — not just within a single file.
 
 ### Phase 12 — CLI consolidation & robust per-file indexing
 
+**Version:** implemented in 0.12.0
+
 **Goal:** Reduce top-level commands and make single-file indexing first-class and resilient.
 
 Summary of recent changes:
@@ -734,6 +766,8 @@ These items reflect recent development iterations focused on reliability and obs
 ---
 
 ### Phase 13 — Standalone model server for embeddings
+
+**Version:** implemented in 0.13.0
 
 **Goal:** Provide a lightweight, local HTTP model-server that can download embedding models from Hugging Face, host them locally, and expose a stable HTTP embedding API for `gitsema` (or other tools) to consume. This decouples model hosting from the CLI, reduces cross-language integration friction, and makes it easier to run models on dedicated machines with GPUs.
 
@@ -816,6 +850,8 @@ Run attempt note:
 
 ### Phase 14 — Infrastructure, tooling, and maintenance
 
+**Version:** implemented in 0.14.0
+
 **Goal:** Close the operational gaps that exist now that the feature set is complete. No new search or indexing capabilities — this phase is about making the project reliable, testable, and easy to onboard.
 
 **Items (priority order):**
@@ -871,6 +907,8 @@ CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ### Phase 14b — Search result deduplication
 
+**Version:** implemented in 0.15.1
+
 **Goal:** Each unique blob appears at most once in search results, even when chunk embeddings are included.
 
 **Problem:** When `--chunks` is used (or chunks were indexed), `vectorSearch` adds one candidate entry per chunk for a given blob hash. After scoring, the top-K slice can return multiple entries for the same blob (e.g. chunks 3, 7, and 11 of the same file all land in the top 10). The caller sees the same file path listed three times with slightly different scores — confusing and wasteful.
@@ -902,6 +940,8 @@ This is strictly an improvement: the same blob hash appearing twice was never us
 ---
 
 ### Phase 15 — Branch awareness
+
+**Version:** implemented in 0.15.0
 
 **Goal:** Correct `--since <ref>` indexing across all branches and add branch metadata to enable branch-scoped search.
 
@@ -972,6 +1012,8 @@ gitsema search "auth middleware" --branch main
 ---
 
 ### Phase 16 — Remote-repository indexing (server-managed clone, RAM-backed working tree, persistent DB)
+
+**Version:** implemented in 0.16.0
 
 **Goal:** Add a third operational mode in which the user supplies only a remote Git URL and optional credentials. The gitsema server clones the repository into a RAM-backed temporary directory (so the working tree never touches persistent storage), runs the full indexing pipeline, and writes the resulting embeddings index to the normal on-disk SQLite database. The repo exists transiently in server memory; the index DB is always durable.
 
@@ -1229,6 +1271,8 @@ These items are deferred to **Phase 17** (see below).
 
 ### Phase 17 — Remote-indexing hardening and SSH support
 
+**Version:** implemented in 0.17.0
+
 **Goal:** Harden the Phase 16 remote-indexing mode with credential isolation, SSH support, per-repo database sessions, and live progress streaming.
 
 **Items:**
@@ -1298,6 +1342,8 @@ Update the CLI command (`src/cli/commands/remoteIndex.ts`) to use the async job 
 
 ### Phase 18 — Reliability, tests, and query caching
 
+**Version:** implemented in 0.18.0
+
 **Goals:** Fix the remote job registry memory leak, add a comprehensive test suite, and introduce a query embedding cache in the DB to accelerate repeated queries.
 
 - **Remote job registry stability:** Implement eviction and durable housekeeping for the in-memory job registry. Add a TTL, size cap, LRU eviction, and an option to persist recent job metadata to disk so completed jobs can be resurrected after a restart for debugging. Add monitoring metrics (job count, retained entries, eviction rate).
@@ -1309,6 +1355,8 @@ Update the CLI command (`src/cli/commands/remoteIndex.ts`) to use the async job 
 ---
 
 ### Phase 19 — Smarter chunking, semantic blame & symbol-level embeddings
+
+**Version:** implemented in 0.19.0
 
 **Goals:** Improve chunk quality via AST-based splitting, implement a repo-wide semantic blame (nearest-neighbor blame) tool, and introduce symbol-level embeddings as a new indexing tier that captures function identity and enriched metadata.
 
@@ -1373,6 +1421,8 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 
 ### Phase 20 — Dead-concept detection & refactor impact analysis
 
+**Version:** implemented in 0.20.0
+
 **Goals:** Surface concepts that have vanished from HEAD but exist historically, and flag likely refactor impact before large structural changes.
 
 - **Dead concept detection:** Add `gitsema dead-concepts [--since] [-k]` which finds embeddings that score highly to a set of current blobs but whose earliest paths/commits are not present in HEAD. Report candidates with score, last-seen commit, and paths where they lived.
@@ -1383,6 +1433,8 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 ---
 
 ### Phase 21 — Semantic clustering & concept graph
+
+**Version:** implemented in 0.21.0
 
 **Goals:** Cluster embeddings into semantic regions and visualise a lightweight concept graph for onboarding and exploration.
 
@@ -1395,6 +1447,8 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 
 ### Phase 22 — Temporal cluster diff
 
+**Version:** implemented in 0.21.0
+
 **Goals:** Compare semantic cluster snapshots at two points in history.
 
 - **`gitsema cluster-diff <ref1> <ref2>`:** compute clusters for blobs visible at each ref and compare; reports new, dissolved, drifted, stable, and migrated clusters.
@@ -1405,6 +1459,8 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 ---
 
 ### Phase 23 — Cluster timeline
+
+**Version:** implemented in 0.22.0
 
 **Goals:** Track how semantic clusters shift across the full commit history via multi-step checkpoints.
 
@@ -1418,6 +1474,8 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 
 ### Phase 24 — Enhanced cluster labeling
 
+**Version:** implemented in 0.22.0
+
 **Goals:** Replace simple top-term labels with TF-IDF-weighted labels derived from path tokens and identifier splitting.
 
 - New module: `src/core/search/labelEnhancer.ts` with TF-IDF, identifier splitting, noise filtering, and normalization.
@@ -1429,6 +1487,8 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 ---
 
 ### Phase 25 — Interactive HTML visualizations
+
+**Version:** implemented in 0.22.0
 
 **Goals:** Add `--html [file]` output to cluster and concept-evolution commands.
 
@@ -1442,6 +1502,8 @@ This enriched text lets the embedding model resolve natural-language queries ("a
 ---
 
 ### Phase 26 — CLI naming consolidation & conceptual diff
+
+**Version:** implemented in 0.26.0
 
 **Goals:** Promote `evolution` as the primary name for the concept-evolution command, introduce a
 first-class `diff` command for semantic topic diffing across refs, and clean up the alias table.
@@ -1481,6 +1543,8 @@ conceptual-diff command, backward-compat alias for `concept-evolution`, updated 
 ---
 
 ### Phase 27 — Semantic change-point detection
+
+**Version:** implemented in 0.27.0
 
 **Goals:** Detect sharp semantic shifts across Git history with commit-level granularity — a complement to the evolution and cluster timeline commands that surfaces *where* abrupt conceptual changes happened rather than showing a continuous drift.
 
@@ -1535,6 +1599,211 @@ Detect change points in the repo's cluster structure.
 - Tests in `tests/changePoints.test.ts` cover: empty-index handling, change-point detection above threshold, sorting, topPoints limit, since/until filtering, metadata correctness.
 
 **Deliverables:** Three new CLI commands, JSON output schemas, tests, and updated README.
+
+---
+
+### Phase 28 — Persistent configuration management
+
+**Version:** implemented in 0.28.0
+
+**Goals:** Allow users to persist configuration values (embedding provider, model names, search defaults) in a JSON config file rather than relying solely on environment variables.
+
+#### `gitsema config <action> [key] [value]`
+
+Manages a two-tier configuration system (global `~/.config/gitsema/config.json` and local `.gitsema/config.json`). Local values take precedence over global; environment variables take precedence over both.
+
+- **`set <key> <value>`** — Write a key to the active config file. Use `--global` to write to `~/.config/gitsema/config.json` (user-level); default is `.gitsema/config.json` (repo-level).
+- **`get <key>`** — Show the resolved value and its source (`global`, `local`, or `env`).
+- **`list`** — Show all active configuration values and their sources as a table.
+- **`unset <key>`** — Remove a key from the config file.
+
+**Supported keys** (dot-notation): `provider`, `model`, `text_model`, `code_model`, `http_url`, `api_key`, `verbose`, `log_max_bytes`, `serve_port`, `serve_key`, `remote`, `hooks.enabled`.
+
+**Implementation notes:**
+- `src/core/config/configManager.ts` — `loadConfig()`, `saveConfig()`, `resolveConfigValue()`, `applyConfigToEnv()`.
+- `src/cli/commands/config.ts` — Commander subcommands wired to config manager.
+- `applyConfigToEnv()` called at CLI startup in `src/cli/index.ts` so all downstream commands transparently pick up file-based defaults.
+- Tests in `tests/config.test.ts`.
+
+**Deliverables:** `config` CLI command, config file read/write, env-precedence merge, tests.
+
+---
+
+### Phase 29 — Automated indexing via Git hooks
+
+**Version:** implemented in 0.28.0
+
+**Goals:** Keep the semantic index up-to-date automatically after every local commit or merge, without requiring the user to run `gitsema index` manually.
+
+- **`hooks.enabled`** config key — when `true`, `gitsema config set hooks.enabled true` installs symlinks for `post-commit` and `post-merge` into `.git/hooks/`.  Running `gitsema config set hooks.enabled false` removes them.
+- The hook scripts call `gitsema index` (incremental, default options) so only new commits since the last run are processed.
+- **`src/core/config/hookManager.ts`** — `installHooks()` / `uninstallHooks()` — creates and removes the symlinks.  Handles the case where a hook file already exists (appends a call rather than overwriting).
+- Hook scripts live in `scripts/hooks/post-commit` and `scripts/hooks/post-merge`.
+- README section added explaining how to opt in.
+
+**Deliverables:** `hooks.enabled` config key, hookManager.ts, hook scripts, README guidance.
+
+---
+
+### Phase 30 — Commit message semantic indexing
+
+**Version:** implemented in 0.29.0
+
+**Goals:** Index not just *what* changed (blob content) but *why* it changed (the commit message), and expose that intent through search.  Links the semantic meaning of each commit to the code blobs it introduced.
+
+#### Schema changes (v7)
+
+New table `commit_embeddings`:
+```sql
+commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
+model TEXT NOT NULL,
+dimensions INTEGER NOT NULL,
+vector BLOB NOT NULL
+```
+One row per commit per model; populated by the indexer during Phase B (commit mapping).
+
+#### Indexing changes
+
+- `storeCommitEmbedding({ commitHash, model, embedding })` added to `src/core/indexing/blobStore.ts` — idempotent upsert (ON CONFLICT DO NOTHING), safe for re-index.
+- Phase B of `runIndex()` now embeds each commit's message with the text provider immediately after `storeCommitWithBlobs()` returns.  Failures are non-fatal: logged and counted in the new `IndexStats.commitEmbeddings` / `commitEmbedFailed` fields.
+- `gitsema index` summary line added: `Commit embeddings: N`.
+
+#### Search
+
+New `src/core/search/commitSearch.ts` exposes:
+
+```ts
+searchCommits(queryEmbedding, options?: { topK?, model? }): CommitSearchResult[]
+// CommitSearchResult: { commitHash, score, message, timestamp, paths[] }
+```
+
+`gitsema search <query> --include-commits` runs commit-message search in parallel with the blob search and appends ranked commit results:
+
+```
+Commit matches:
+0.847  a3f9c2d  2024-03-15  feat: add authentication token verification
+       src/auth/jwt.ts
+0.791  b19e4a1  2023-11-02  fix: validate token expiry on refresh
+       src/auth/session.ts
+```
+
+**Implementation notes:**
+- Only commits embedded after Phase 30 indexing will appear in commit search.
+- Query always uses the text provider (natural-language prose), matching the existing search convention.
+- Tests in `tests/commitEmbedding.test.ts` cover: storage idempotency, indexer integration, ranked search, empty-DB edge case, duplicate-free re-indexing.
+
+**Deliverables:** `commit_embeddings` table (schema v7), `storeCommitEmbedding()`, Phase B embedding loop, `searchCommits()`, `--include-commits` flag on `search`, tests.
+
+---
+
+### Phase 31 — Semantic concept authorship ranking
+
+**Version:** implemented in 0.30.0
+
+**Goals:** Answer "who has contributed most to [concept]?" by aggregating vector similarity scores across commit authors — a people-centric view over the semantic index rather than a per-file or per-commit view.
+
+#### `gitsema author <query>`
+
+Ranks contributors by their semantic proximity to a concept across the full indexed history.
+
+- **Algorithm:**
+  1. Embed the query with the text provider.
+  2. Rank all indexed blobs by cosine similarity to the query (top-K, default 50).
+  3. For each top-K blob, join `blob_commits → commits` to find the **earliest** commit (original author attribution).
+  4. Optionally filter by `--since <date>` Unix timestamp.
+  5. Aggregate similarity scores by `(authorName, authorEmail)`.
+  6. Return top-N sorted by total score.
+- **Options:** `--top <n>` (default 10), `--since <date>`, `--detail` (per-file breakdown), `--dump [file]` (JSON output).
+- Registered under the **Concept History** command group.
+
+**Example output:**
+```
+Author contributions for: "rate limiting"
+
+1. Jane Doe <jane@example.com>
+   Score: 0.920  |  Blobs: 14
+   · src/middleware/ratelimit.ts (14 blobs, score: 0.920)
+
+2. John Smith <john@example.com>
+   Score: 0.450  |  Blobs: 3
+   · src/api/config.ts (3 blobs, score: 0.450)
+```
+
+**Schema changes (v8):**
+- Added `author_name TEXT` and `author_email TEXT` (nullable) to the `commits` table.
+- Migration guard uses `PRAGMA table_info` before `ALTER TABLE` — safe for both fresh and existing DBs.
+
+**Git parsing changes (`commitMap.ts`):**
+- Switched `git log` format to use ASCII 31 unit separator (`%x1f`) to safely capture author fields containing spaces: `COMMIT %H%x1f%ct%x1f%aN%x1f%aE%x1f%s`
+- `CommitEntry` gains optional `authorName` and `authorEmail` fields.
+
+**Implementation notes:**
+- Core logic in `src/core/search/authorSearch.ts` — `computeAuthorContributions(queryEmbedding, options)`.
+- `storeCommitWithBlobs` in `blobStore.ts` persists `author_name`/`author_email` in both insert paths.
+- Tests in `tests/authorSearch.test.ts` cover: empty-index, score aggregation, top-N limit, since-filtering, per-file detail output.
+
+**Deliverables:** `gitsema author` CLI command, `authorSearch.ts` core module, schema v8 migration, `commitMap.ts` author parsing, tests.
+
+---
+
+### Phase 32 — Branch and merge awareness
+
+**Version:** implemented in 0.28.0
+
+**Goals:** Surface semantic conflicts and concept-level changes that exist between branches but are invisible to textual `git diff`.  The core insight: the `blob_branches` table records *reachability* (all blobs ever on a branch) but not *exclusivity* (blobs first introduced by a branch since it diverged).  All three commands in this phase pivot on branch-exclusive blobs.
+
+#### New Git primitive: `src/core/git/branchDiff.ts`
+
+- **`getMergeBase(branchA, branchB, repoPath?)`** — wraps `git merge-base <A> <B>` (`execFileSync`); returns the 40-character merge-base commit hash.  Foundation for all three commands.
+- **`getBranchExclusiveBlobs(branch, mergeBaseHash, repoPath?)`** — runs `git log <mergeBase>..<branch> --format=%H` to list commits exclusive to the branch, then batch-queries the existing `blob_commits` table (`SELECT DISTINCT blob_hash FROM blob_commits WHERE commit_hash IN (...)`) in batches of 500.  Returns the set of indexed blob hashes first introduced by the branch.  No schema changes required — `blob_commits` already records every (blob, commit) pair.
+
+#### `gitsema merge-audit <branch-a> <branch-b>`
+
+Detects **semantic collisions** between two branches: file pairs from opposite branches that are about the same concept (cosine similarity ≥ threshold) even when they don't share a single line of code.
+
+- **Algorithm (`computeSemanticCollisions` in `src/core/search/mergeAudit.ts`):**
+  1. Compute `getMergeBase(A, B)`.
+  2. Compute `getBranchExclusiveBlobs(A, mergeBase)` and `getBranchExclusiveBlobs(B, mergeBase)`.
+  3. Load embeddings for both sets.
+  4. O(|A|×|B|) cosine comparison; collect pairs above `threshold`.
+  5. Look up `cluster_assignments` to group collision pairs into **collision zones** by concept cluster.
+  6. Compute `centroid_A = mean(embeddings_A)` and `centroid_B = mean(embeddings_B)`; report `cosineSimilarity(centroid_A, centroid_B)` as a branch-level overlap score.
+- **Options:** `--base <ref>` (override merge base), `--threshold <n>` (default 0.85), `-k, --top <n>` (default 20), `--dump [file]`.
+- **Output includes:** centroid similarity interpretation label (LOW / MODERATE / HIGH / VERY HIGH), collision zones grouped by cluster, top-K pairs with similarity scores.
+
+#### `gitsema branch-summary <branch>`
+
+Generates a semantic description of what a branch "is about" compared to its base.
+
+- **Algorithm (`computeBranchSummary` in `src/core/search/branchSummary.ts`):**
+  1. Resolve merge base; collect branch-exclusive blobs.
+  2. Load embeddings; compute unweighted branch centroid.
+  3. Score every stored cluster (`blob_clusters`) by `cosineSimilarity(branchCentroid, clusterCentroid)`; return top-K nearest as "this branch is about…".
+  4. For each file path touched by the branch, run `computeEvolution(path)` and report `distFromPrev` of the latest version as per-file semantic drift.
+- **Options:** `--base <branch>` (default `main`), `-k, --top <n>` (default 5 clusters), `--dump [file]`.
+
+#### `gitsema merge-preview <branch>`
+
+Predicts how the concept landscape will shift after merging the branch — i.e. "cluster-diff but driven by branch-exclusive blobs instead of timestamps."
+
+- **Algorithm (`computeMergeImpact` in `src/core/search/mergeAudit.ts`):**
+  1. Get merge base and branch-exclusive blobs.
+  2. Compute base-branch blobs via `getBlobHashesUpTo(resolveRefToTimestamp(baseBranch))`.
+  3. `snapshot_before = computeClusterSnapshot({ blobHashFilter: baseBranchBlobs })`.
+  4. `snapshot_after = computeClusterSnapshot({ blobHashFilter: [...baseBranchBlobs, ...branchExclusiveBlobs] })`.
+  5. Return `compareClusterSnapshots(snapshot_before, snapshot_after, baseBranch, branch)` — identical result type to `cluster-diff` (`TemporalClusterReport`), zero new types required.
+- **Options:** `--into <branch>` (default `main`), `--k <n>` (default 8), `--dump [file]`, `--html [file]` (reuses `renderClusterDiffHtml` unchanged).
+
+#### MCP tools
+
+`branch_summary`, `merge_audit`, `merge_preview` added to `src/mcp/server.ts` as thin adapters (same parameter surface as the CLI counterparts, following the CLI-first design constraint).
+
+**Implementation notes:**
+- No schema changes — the existing `blob_commits`, `blob_branches`, `blob_clusters`, and `cluster_assignments` tables provide all required data.
+- All three commands registered under the **Cluster Analysis** group in the CLI help formatter.
+- Tests in `tests/branchDiff.test.ts` (5 tests), `tests/mergeAudit.test.ts` (12 tests), `tests/branchSummary.test.ts` (7 tests).
+
+**Deliverables:** `src/core/git/branchDiff.ts`, `src/core/search/mergeAudit.ts`, `src/core/search/branchSummary.ts`, three CLI command files, three MCP tools, 24 unit tests.
 
 ---
 
