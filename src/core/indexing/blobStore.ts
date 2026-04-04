@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
+import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches, symbols, symbolEmbeddings, commitEmbeddings, moduleEmbeddings } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
@@ -121,7 +121,7 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
 
   if (blobHashes.length === 0) {
     db.insert(commits)
-      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message })
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null })
       .onConflictDoNothing()
       .run()
     return 0
@@ -146,7 +146,7 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
 
   db.transaction((tx) => {
     tx.insert(commits)
-      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message })
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null })
       .onConflictDoNothing()
       .run()
 
@@ -274,6 +274,7 @@ export interface StoreSymbolArgs {
   language: string
   model: string
   embedding: Embedding
+  /** Optional FK linking this symbol to its source chunk row (Phase 33). */
   chunkId?: number
 }
 
@@ -325,6 +326,33 @@ export function storeSymbol(args: StoreSymbolArgs): number {
 
     return symbolRow.id
   })
+}
+
+export interface StoreCommitEmbeddingArgs {
+  commitHash: string
+  model: string
+  embedding: Embedding
+}
+
+/**
+ * Stores the embedding for a commit message in the `commit_embeddings` table.
+ *
+ * Each commit gets at most one embedding per model (keyed by commit_hash).
+ * Safe to call multiple times for the same commitHash — duplicate inserts
+ * are silently ignored via ON CONFLICT DO NOTHING, so re-indexing is safe.
+ *
+ * The commit row must already exist in the `commits` table before calling
+ * this function (it is inserted by `storeCommitWithBlobs`).
+ */
+export function storeCommitEmbedding(args: StoreCommitEmbeddingArgs): void {
+  const { commitHash, model, embedding } = args
+  const { db } = getActiveSession()
+  const vector = Buffer.from(new Float32Array(embedding).buffer)
+
+  db.insert(commitEmbeddings)
+    .values({ commitHash, model, dimensions: embedding.length, vector })
+    .onConflictDoNothing()
+    .run()
 }
 
 export interface StoreModuleEmbeddingArgs {

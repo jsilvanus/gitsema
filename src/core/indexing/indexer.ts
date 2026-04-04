@@ -2,7 +2,7 @@ import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
 import { isIndexed } from './deduper.js'
-import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
+import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
@@ -75,7 +75,7 @@ export interface IndexerOptions {
    * will pass `refs/heads/<name>` to `revList` and `streamCommitMap`.
    */
   branchFilter?: string
-  /** When true, update module (directory) centroid embeddings inline while indexing. */
+  /** When true, update module (directory) centroid embeddings inline while indexing (Phase 33). Default: true. */
   computeModuleEmbedding?: boolean
   onProgress?: (stats: IndexStats) => void
 }
@@ -105,7 +105,12 @@ export interface IndexStats {
   blobCommits: number   // Phase 6: blob-commit links stored
   chunks: number        // Phase 10: chunk embeddings stored
   symbols: number       // Phase 19: symbol-level embeddings stored
+  /** Number of module (directory) centroid embeddings updated (Phase 33). */
   moduleEmbeddings: number
+  /** Number of commit message embeddings stored (Phase 30). */
+  commitEmbeddings: number
+  /** Number of commit message embedding failures (Phase 30). */
+  commitEmbedFailed: number
 }
 
 /**
@@ -215,7 +220,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     seen: 0, indexed: 0, skipped: 0, oversized: 0, filtered: 0, failed: 0,
     embedFailed: 0, otherFailed: 0,
     fbFunction: 0, fbFixed: 0,
-    queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0, symbols: 0, moduleEmbeddings: 0,
+    queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0, symbols: 0,
+    moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0,
   }
   const start = Date.now()
   const seenHashes = new Set<string>()
@@ -287,16 +293,15 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         const text = content.toString('utf8')
 
         if (useChunking) {
-          // Chunked indexing: always produce a Level-1 whole-file embedding first,
-          // then also store per-chunk embeddings in chunk_embeddings / symbol_embeddings.
+          // Chunked indexing: always produce a Level-1 whole-file embedding first
+          // (so search/evolution/clustering work), then additionally store per-chunk
+          // embeddings in chunk_embeddings / symbol_embeddings.
           const blobChunks = chunker.chunk(text, path)
           let allOk = true
 
           // Level-1: attempt to embed the whole file. If successful, persist via
-          // storeBlob (which writes the blob record, embedding, path, and FTS5 content
-          // in one call). If the embedding fails or computeModuleEmbedding is false,
-          // fall back to storeBlobRecord (blob + path, no embedding) so the chunked
-          // embeddings still have a valid parent row.
+          // storeBlob (writes blob + embedding + path + FTS5 in one call). If the
+          // embedding fails, fall back to storeBlobRecord (blob + path, no embedding).
           let wholeEmbedding: number[] | null = null
           if (computeModuleEmbedding) {
             try {
@@ -308,7 +313,6 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
           try {
             if (wholeEmbedding !== null) {
-              // storeBlob writes blob + embedding + path + FTS5 in one transaction.
               storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding: wholeEmbedding, fileType, content: text })
             } else {
               storeBlobRecord({ blobHash, size: content.length, path, content: text })
@@ -352,44 +356,45 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               continue
             }
 
+            let chunkId: number | undefined
             try {
-              const chunkId = storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
+              chunkId = storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
               stats.chunks++
-
-              // When using the function chunker AND the chunk carries a symbol name,
-              // also embed the enriched text and store in symbols/symbol_embeddings.
-              if (useSymbols && chunk.symbolName) {
-                const lang = detectLanguageForPath(path)
-                const enriched = buildEnrichedText(
-                  path, chunk.startLine, chunk.endLine,
-                  chunk.symbolKind ?? 'function', chunk.symbolName, chunk.content,
-                )
-                let symbolEmbedding: number[]
-                try {
-                  symbolEmbedding = await activeProvider.embed(enriched)
-                } catch (err) {
-                  logger.debug?.(`Symbol embedding failed for ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
-                  // Symbol embedding failure is non-fatal — the chunk embedding succeeded
-                  onProgress?.({ ...stats, elapsed: Date.now() - start })
-                  continue
-                }
-                try {
-                  storeSymbol({
-                    blobHash, startLine: chunk.startLine, endLine: chunk.endLine,
-                    symbolName: chunk.symbolName, symbolKind: chunk.symbolKind ?? 'function',
-                    language: lang, model: activeProvider.model, embedding: symbolEmbedding, chunkId,
-                  })
-                  stats.symbols++
-                } catch (err) {
-                  logger.error(`Failed to store symbol ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
-                  // Non-fatal: symbol storage failure does not roll back the chunk embedding
-                }
-              }
             } catch (err) {
               logger.error(`Failed to store chunk for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err instanceof Error ? err.message : String(err)}`)
               allOk = false
               stats.failed++
               stats.otherFailed++
+            }
+
+            // When using the function chunker AND the chunk carries a symbol name,
+            // also embed the enriched text and store in symbols/symbol_embeddings.
+            if (useSymbols && chunk.symbolName) {
+              const lang = detectLanguageForPath(path)
+              const enriched = buildEnrichedText(
+                path, chunk.startLine, chunk.endLine,
+                chunk.symbolKind ?? 'function', chunk.symbolName, chunk.content,
+              )
+              let symbolEmbedding: number[]
+              try {
+                symbolEmbedding = await activeProvider.embed(enriched)
+              } catch (err) {
+                logger.debug?.(`Symbol embedding failed for ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
+                // Symbol embedding failure is non-fatal — the chunk embedding succeeded
+                onProgress?.({ ...stats, elapsed: Date.now() - start })
+                continue
+              }
+              try {
+                storeSymbol({
+                  blobHash, startLine: chunk.startLine, endLine: chunk.endLine,
+                  symbolName: chunk.symbolName, symbolKind: chunk.symbolKind ?? 'function',
+                  language: lang, model: activeProvider.model, embedding: symbolEmbedding, chunkId,
+                })
+                stats.symbols++
+              } catch (err) {
+                logger.error(`Failed to store symbol ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
+                // Non-fatal: symbol storage failure does not roll back the chunk embedding
+              }
             }
           }
 
@@ -563,7 +568,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   let pendingCommit: CommitEntry | null = null
   let pendingBlobHashes: string[] = []
 
-  function flushPendingCommit(): void {
+  async function flushPendingCommit(): Promise<void> {
     if (!pendingCommit) return
     const stored = storeCommitWithBlobs(pendingCommit, pendingBlobHashes)
     stats.commits++
@@ -576,6 +581,23 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       }
     }
 
+    // Embed the commit message using the text provider (natural-language prose).
+    // Failures are non-fatal: we log and count them, then move on.
+    if (pendingCommit.message.trim().length > 0) {
+      try {
+        const msgEmbedding = await provider.embed(pendingCommit.message)
+        storeCommitEmbedding({
+          commitHash: pendingCommit.commitHash,
+          model: provider.model,
+          embedding: msgEmbedding,
+        })
+        stats.commitEmbeddings++
+      } catch (err) {
+        logger.debug?.(`Failed to embed commit message ${pendingCommit.commitHash}: ${err instanceof Error ? err.message : String(err)}`)
+        stats.commitEmbedFailed++
+      }
+    }
+
     // Record commit as fully indexed for future incremental runs
     markCommitIndexed(pendingCommit.commitHash)
 
@@ -585,7 +607,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   for await (const event of commitStream) {
     if (event.type === 'commit') {
-      flushPendingCommit()
+      await flushPendingCommit()
       pendingCommit = event.data
       pendingBlobHashes = []
     } else if (event.type === 'blob') {
@@ -594,7 +616,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     onProgress?.({ ...stats, elapsed: Date.now() - start })
   }
 
-  flushPendingCommit()
+  await flushPendingCommit()
 
   stats.elapsed = Date.now() - start
   return stats

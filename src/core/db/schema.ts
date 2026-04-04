@@ -47,6 +47,8 @@ export const commits = sqliteTable('commits', {
   commitHash: text('commit_hash').primaryKey(),
   timestamp: integer('timestamp').notNull(),
   message: text('message').notNull(),
+  authorName: text('author_name'),
+  authorEmail: text('author_email'),
 })
 
 export const blobCommits = sqliteTable('blob_commits', {
@@ -141,6 +143,20 @@ export const symbols = sqliteTable('symbols', {
  */
 export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
   symbolId: integer('symbol_id').primaryKey().references(() => symbols.id),
+  model: text('model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+})
+
+/**
+ * Semantic embedding of a Git commit message (Phase 30).
+ *
+ * Stores the vector representation of a commit's message text so the index
+ * can answer questions like "find commits related to authentication refactoring".
+ * Keyed by commit_hash (one embedding per commit per model).
+ */
+export const commitEmbeddings = sqliteTable('commit_embeddings', {
+  commitHash: text('commit_hash').primaryKey().references(() => commits.commitHash),
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),

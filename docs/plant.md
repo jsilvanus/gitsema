@@ -1,8 +1,8 @@
 # Phase 33 — Multi-Level Hierarchical Indexing
 
 > **Status:** Implemented  
-> **Schema version:** 7 (v6 → v7)  
-> **Package version:** 0.28.0
+> **Schema version:** 9 (v8 → v9)  
+> **Package version:** 0.32.0
 
 ---
 
@@ -78,7 +78,7 @@ This flag caused the chunking branch to call `storeBlobRecord` (no embedding) in
 
 ---
 
-## Schema Changes (v6 → v7)
+## Schema Changes (v8 → v9)
 
 ### New table: `module_embeddings`
 
@@ -215,7 +215,7 @@ Pure-JS cosine scan at 100K blobs takes ~50ms. At 500K, it becomes noticeable. T
 | File | Change |
 |---|---|
 | `src/core/db/schema.ts` | Added `moduleEmbeddings` table; added `chunkId` to `symbols` |
-| `src/core/db/sqlite.ts` | Schema v7 migration; `module_embeddings` in `initTables` |
+| `src/core/db/sqlite.ts` | Schema v9 migration; `module_embeddings` in `initTables` |
 | `src/core/indexing/blobStore.ts` | `storeModuleEmbedding`, `getModuleEmbedding`, `getAllBlobEmbeddingsWithPaths`, `deleteAllModuleEmbeddings`; `chunkId` in `storeSymbol` |
 | `src/core/indexing/indexer.ts` | Level-1 whole-file embedding in chunking branch; module centroid updates; `chunkId` propagation |
 | `src/core/search/vectorSearch.ts` | `searchModules` option; module candidate pool; module result mapping |

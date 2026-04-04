@@ -28,6 +28,9 @@ import type { SearchResult } from '../core/models/types.js'
 import { formatDate } from '../core/search/ranking.js'
 import { parseDateArg } from '../core/search/timeSearch.js'
 import { DEFAULT_MAX_SIZE } from '../core/git/showBlob.js'
+import { getMergeBase, getBranchExclusiveBlobs } from '../core/git/branchDiff.js'
+import { computeSemanticCollisions, computeMergeImpact } from '../core/search/mergeAudit.js'
+import { computeBranchSummary } from '../core/search/branchSummary.js'
 
 // ---------------------------------------------------------------------------
 // Provider factory (mirrors the logic in CLI commands)
@@ -447,6 +450,175 @@ export async function startMcpServer(): Promise<void> {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error during indexing: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: branch_summary
+  // -------------------------------------------------------------------------
+  server.tool(
+    'branch_summary',
+    'Generate a semantic summary of what a branch is about compared to its base branch. Shows the nearest concept clusters and the files with the highest semantic drift.',
+    {
+      branch: z.string().describe('Branch to summarise (short name, e.g. "feature/auth")'),
+      base_branch: z.string().optional().default('main').describe('Base branch to compare against (default "main")'),
+      top_concepts: z.number().int().positive().optional().default(5).describe('Number of nearest concept clusters to return'),
+    },
+    async ({ branch, base_branch, top_concepts }) => {
+      try {
+        const result = await computeBranchSummary(branch, base_branch, { topConcepts: top_concepts })
+
+        if (result.exclusiveBlobCount === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Branch "${branch}" has no exclusive blobs compared to "${base_branch}" (merge base: ${result.mergeBase.slice(0, 8)}).\nEnsure the branch is indexed with the index tool first.`,
+              },
+            ],
+          }
+        }
+
+        const lines = [
+          `Branch summary: ${result.branch} vs ${result.baseBranch}`,
+          `Merge base: ${result.mergeBase.slice(0, 8)}`,
+          `Exclusive blobs: ${result.exclusiveBlobCount}`,
+          '',
+        ]
+
+        if (result.nearestConcepts.length > 0) {
+          lines.push('This branch is semantically about:')
+          for (const [i, c] of result.nearestConcepts.entries()) {
+            lines.push(`  ${i + 1}. "${c.clusterLabel}"  (similarity: ${c.similarity.toFixed(3)})`)
+          }
+          lines.push('')
+        } else {
+          lines.push('No concept clusters available. Run gitsema clusters first.')
+          lines.push('')
+        }
+
+        if (result.topChangedPaths.length > 0) {
+          lines.push('Top semantically-drifted files:')
+          for (const entry of result.topChangedPaths) {
+            lines.push(`  ${entry.path}  (drift: ${entry.semanticDrift.toFixed(3)})`)
+          }
+        }
+
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: merge_audit
+  // -------------------------------------------------------------------------
+  server.tool(
+    'merge_audit',
+    'Detect semantic collisions between two branches — pairs of files that are about the same concept even if they don\'t share lines. Returns collision pairs and a centroid-level branch overlap score.',
+    {
+      branch_a: z.string().describe('First branch name (e.g. "feature/auth")'),
+      branch_b: z.string().describe('Second branch name (e.g. "feature/payments")'),
+      base_commit: z.string().optional().describe('Override merge-base detection with this commit hash or ref'),
+      threshold: z.number().min(0).max(1).optional().default(0.85).describe('Cosine similarity threshold for a collision (0–1, default 0.85)'),
+      top_k: z.number().int().positive().optional().default(20).describe('Maximum collision pairs to return'),
+    },
+    async ({ branch_a, branch_b, base_commit, threshold, top_k }) => {
+      try {
+        let mergeBase: string
+        if (base_commit) {
+          mergeBase = base_commit
+        } else {
+          mergeBase = getMergeBase(branch_a, branch_b)
+        }
+
+        const blobsA = getBranchExclusiveBlobs(branch_a, mergeBase)
+        const blobsB = getBranchExclusiveBlobs(branch_b, mergeBase)
+
+        const report = computeSemanticCollisions(blobsA, blobsB, branch_a, branch_b, mergeBase, {
+          threshold,
+          topK: top_k,
+        })
+
+        const lines = [
+          `Merge audit: ${report.branchA} ↔ ${report.branchB}`,
+          `Merge base: ${report.mergeBase.slice(0, 8)}`,
+          `Branch A exclusive blobs: ${report.blobCountA}`,
+          `Branch B exclusive blobs: ${report.blobCountB}`,
+          `Centroid similarity: ${report.centroidSimilarity >= 0 ? report.centroidSimilarity.toFixed(3) : 'n/a'}`,
+          `Collisions found: ${report.collisionPairs.length}`,
+          '',
+        ]
+
+        if (report.collisionZones.length > 0) {
+          lines.push('Collision zones:')
+          for (const z of report.collisionZones) {
+            lines.push(`  "${z.clusterLabel}" — ${z.pairCount} pair(s)`)
+          }
+          lines.push('')
+        }
+
+        if (report.collisionPairs.length > 0) {
+          lines.push('Top collision pairs:')
+          for (const pair of report.collisionPairs.slice(0, 10)) {
+            const pathA = pair.blobA.paths[0] ?? pair.blobA.hash.slice(0, 7)
+            const pathB = pair.blobB.paths[0] ?? pair.blobB.hash.slice(0, 7)
+            lines.push(`  ${pair.similarity.toFixed(3)}  ${pathA}  ↔  ${pathB}`)
+          }
+        }
+
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: merge_preview
+  // -------------------------------------------------------------------------
+  server.tool(
+    'merge_preview',
+    'Predict how the semantic concept landscape will shift after merging a branch. Returns the same cluster diff report as cluster-diff but driven by branch-exclusive blobs rather than timestamps.',
+    {
+      branch: z.string().describe('Branch to merge (e.g. "feature/auth")'),
+      into: z.string().optional().default('main').describe('Target branch to merge into (default "main")'),
+      k: z.number().int().positive().optional().default(8).describe('Number of semantic clusters to compute'),
+    },
+    async ({ branch, into, k }) => {
+      try {
+        const report = await computeMergeImpact(branch, into, { k })
+
+        const lines = [
+          `Merge preview: ${branch} → ${into}`,
+          `Base blobs: ${report.before.totalBlobs}  |  Post-merge blobs: ${report.after.totalBlobs}`,
+          `Changes: ${report.newBlobsTotal} new, ${report.removedBlobsTotal} removed, ${report.movedBlobsTotal} moved, ${report.stableBlobsTotal} stable`,
+          '',
+          'Predicted cluster changes:',
+        ]
+
+        for (const change of report.changes) {
+          const after = change.afterCluster
+          const before = change.beforeCluster
+          if (after !== null && before !== null) {
+            lines.push(
+              `  "${after.label}"  drift: ${change.centroidDrift.toFixed(3)}  new: ${change.newBlobs}  stable: ${change.stable}`,
+            )
+          } else if (after !== null) {
+            lines.push(`  "${after.label}"  [NEW]  ${after.size} blobs`)
+          } else if (before !== null) {
+            lines.push(`  "${before.label}"  [DISSOLVED]`)
+          }
+        }
+
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
       }
     },
   )

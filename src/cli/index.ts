@@ -1,5 +1,12 @@
 import { Command } from 'commander'
 import { readFileSync } from 'node:fs'
+import { applyConfigToEnv } from '../core/config/configManager.js'
+import {
+  configSetCommand,
+  configGetCommand,
+  configListCommand,
+  configUnsetCommand,
+} from './commands/config.js'
 import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
@@ -22,6 +29,10 @@ import { clusterTimelineCommand } from './commands/clusterTimeline.js'
 import { changePointsCommand } from './commands/changePoints.js'
 import { fileChangePointsCommand } from './commands/fileChangePoints.js'
 import { clusterChangePointsCommand } from './commands/clusterChangePoints.js'
+import { mergeAuditCommand } from './commands/mergeAudit.js'
+import { branchSummaryCommand } from './commands/branchSummary.js'
+import { mergePreviewCommand } from './commands/mergePreview.js'
+import { authorCommand } from './commands/author.js'
 
 const program = new Command()
 
@@ -31,6 +42,15 @@ program.option('--verbose', 'Enable verbose debug logging')
 // Honor `--verbose` early by setting an env var so other modules (logger)
 // pick it up when they load.
 if (process.argv.includes('--verbose')) process.env.GITSEMA_VERBOSE = '1'
+
+// Apply file-based config defaults to process.env so all commands that read
+// env vars transparently pick up values from .gitsema/config.json or
+// ~/.config/gitsema/config.json.  Env vars already set take precedence.
+// This mirrors the --verbose pattern above: both run eagerly before any
+// command handler to ensure a consistent environment at parse time.
+// The CLI entry point is never imported as a library — it's always run
+// as the main script — so this side effect is safe here.
+applyConfigToEnv()
 
 // Read package.json version dynamically so `gitsema -V` matches package.json
 let pkgVersion = '0.0.0'
@@ -63,6 +83,7 @@ const GROUPS = [
 
 const COMMAND_GROUPS: Record<string, string> = {
   // Setup & Infrastructure
+  config:           'Setup & Infrastructure',
   status:           'Setup & Infrastructure',
   index:            'Setup & Infrastructure',
   serve:            'Setup & Infrastructure',
@@ -84,10 +105,14 @@ const COMMAND_GROUPS: Record<string, string> = {
   evolution:           'Concept History',   // primary name (was concept-evolution)
   'concept-evolution': 'Concept History',   // backward-compat alias
   diff:                'Concept History',   // semantic diff across refs
+  author:              'Concept History',
   // Cluster Analysis
   clusters:           'Cluster Analysis',
   'cluster-diff':     'Cluster Analysis',
   'cluster-timeline': 'Cluster Analysis',
+  'branch-summary':   'Cluster Analysis',
+  'merge-audit':      'Cluster Analysis',
+  'merge-preview':    'Cluster Analysis',
   // Change Detection
   'change-points':         'Change Detection',
   'file-change-points':    'Change Detection',
@@ -181,6 +206,80 @@ program.configureHelp({
 })
 
 program
+  .command('config <action> [key] [value]')
+  .description('Manage persistent configuration (set, get, list, unset)')
+  .option('--global', 'apply to global config (~/.config/gitsema/config.json)')
+  .option('--local', 'apply to local config (.gitsema/config.json, default for set/unset)')
+  .addHelpText(
+    'after',
+    `
+Subcommands:
+  set <key> <value>   Set a config value (--global for user-level, default: repo-level)
+  get <key>           Show the resolved value and its source
+  list                List all active configuration values and their sources
+  unset <key>         Remove a key from config (--global for user-level, default: repo-level)
+
+Supported keys (dot-notation for command defaults):
+  provider, model, textModel, codeModel, httpUrl, apiKey
+  verbose, logMaxBytes, servePort, serveKey, remoteUrl, remoteKey
+  index.concurrency, index.chunker, index.ext, index.maxSize, index.exclude
+  index.maxCommits, index.windowSize, index.overlap
+  search.top, search.hybrid, search.bm25Weight, search.recent
+  search.weightVector, search.weightRecency, search.weightPath
+  evolution.threshold, clusters.k
+
+Examples:
+  gitsema config set search.hybrid true
+  gitsema config set provider http --global
+  gitsema config set model text-embedding-3-small --global
+  gitsema config get search.hybrid
+  gitsema config list
+  gitsema config unset search.hybrid`,
+  )
+  .action(
+    async (
+      action: string,
+      key: string | undefined,
+      value: string | undefined,
+      options: { global?: boolean; local?: boolean },
+    ) => {
+      switch (action) {
+        case 'set':
+          if (!key) {
+            console.error('Error: key is required for config set')
+            process.exit(1)
+          }
+          if (value === undefined) {
+            console.error('Error: value is required for config set')
+            process.exit(1)
+          }
+          await configSetCommand(key as string, value as string, options)
+          break
+        case 'get':
+          if (!key) {
+            console.error('Error: key is required for config get')
+            process.exit(1)
+          }
+          await configGetCommand(key as string)
+          break
+        case 'list':
+          await configListCommand(options)
+          break
+        case 'unset':
+          if (!key) {
+            console.error('Error: key is required for config unset')
+            process.exit(1)
+          }
+          await configUnsetCommand(key as string, options)
+          break
+        default:
+          console.error(`Error: unknown config action '${action}'. Use: set, get, list, unset`)
+          process.exit(1)
+      }
+    },
+  )
+
+program
   .command('status [file]')
   .description('Show index status and database info, or status for a specific file')
   .option('--remote <url>', 'remote server URL (overrides GITSEMA_REMOTE)')
@@ -258,6 +357,7 @@ program
   .option('--remote <url>', 'proxy search to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--branch <name>', 'only return blobs seen on this branch (short name, e.g. "main")')
   .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
+  .option('--include-commits', 'also search commit message embeddings and display matching commits')
   .action(searchCommand)
 
 program
@@ -512,6 +612,56 @@ program
   .action(clusterChangePointsCommand)
 
 program
+  .command('branch-summary <branch>')
+  .description('Generate a semantic summary of what a branch is about compared to its base branch (see also: merge-audit, merge-preview)')
+  .option('--base <branch>', 'base branch to compare against (default: main)')
+  .option('-k, --top <n>', 'number of nearest concept clusters to show (default 5)', '5')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(branchSummaryCommand)
+
+program
+  .command('merge-audit <branch-a> <branch-b>')
+  .description('Detect semantic collisions between two branches — concept-level conflicts that textual diff cannot find (see also: branch-summary, merge-preview)')
+  .option(
+    '--base <commit>',
+    'override merge-base detection with this commit hash or ref',
+  )
+  .option(
+    '--threshold <n>',
+    'cosine similarity threshold for a collision (0–1, default 0.85)',
+    '0.85',
+  )
+  .option('-k, --top <n>', 'max collision pairs to display (default 20)', '20')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(mergeAuditCommand)
+
+program
+  .command('merge-preview <branch>')
+  .description('Predict semantic cluster shifts that will occur after merging a branch — merge impact analysis (see also: merge-audit, cluster-diff)')
+  .option('--into <branch>', 'target branch to merge into (default: main)')
+  .option('--k <n>', 'number of clusters to compute (default 8)', '8')
+  .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
+  .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
+  .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise merge-preview.html',
+  )
+  .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
+  .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .action(mergePreviewCommand)
+
+program
   .command('backfill-fts')
   .description('Populate FTS5 content for blobs indexed before Phase 11 (enables hybrid search and --include-content)')
   .action(async () => {
@@ -532,6 +682,18 @@ program
   .action(async () => {
     await startMcpServer()
   })
+
+program
+  .command('author <query>')
+  .description('Rank authors by semantic contribution to a concept (see also: search, evolution)')
+  .option('-k, --top <n>', 'number of top authors to return (default 10)', '10')
+  .option('--since <date>', 'only consider contributions since this date (YYYY-MM-DD)')
+  .option('--detail', 'show the specific files and commits that contributed to each author\'s ranking')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(authorCommand)
 
 program.parse()
 

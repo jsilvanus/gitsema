@@ -33,9 +33,11 @@ export interface DbSession {
  *   4 — Added symbols + symbol_embeddings tables (Phase 19)
  *   5 — Added blob_clusters + cluster_assignments tables (Phase 21)
  *   6 — Added idx_commits_timestamp index for temporal cluster queries (Phase 22)
- *   7 — Added module_embeddings table + chunk_id on symbols (Phase 33)
+ *   7 — Added commit_embeddings table for commit message semantic search (Phase 30)
+ *   8 — Added author_name, author_email to commits (Phase 31)
+ *   9 — Added module_embeddings table + chunk_id on symbols (Phase 33)
  */
-const CURRENT_SCHEMA_VERSION = 7
+const CURRENT_SCHEMA_VERSION = 9
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -148,8 +150,36 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('6')
   }
 
-  // v6 → v7: add module_embeddings table and chunk_id on symbols (Phase 33)
+  // v6 → v7: add commit_embeddings table for commit message semantic search (Phase 30)
   if (version < 7) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS commit_embeddings (
+        commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL
+      )
+    `)
+    version = 7
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('7')
+  }
+
+  // v7 → v8: add author_name and author_email columns to commits (Phase 31)
+  if (version < 8) {
+    // Guard against fresh DBs where initTables() already added these columns
+    const commitCols = sqlite.prepare('PRAGMA table_info(commits)').all() as Array<{ name: string }>
+    if (!commitCols.some((c) => c.name === 'author_name')) {
+      sqlite.exec(`ALTER TABLE commits ADD COLUMN author_name TEXT`)
+    }
+    if (!commitCols.some((c) => c.name === 'author_email')) {
+      sqlite.exec(`ALTER TABLE commits ADD COLUMN author_email TEXT`)
+    }
+    version = 8
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('8')
+  }
+
+  // v8 → v9: add module_embeddings table and chunk_id on symbols (Phase 33)
+  if (version < 9) {
     // Guard the ALTER TABLE: column may already exist when the DB was created
     // from scratch with the updated initTables (which already includes chunk_id).
     const symbolCols = sqlite.prepare(`PRAGMA table_info(symbols)`).all() as Array<{ name: string }>
@@ -168,8 +198,8 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
         updated_at INTEGER NOT NULL
       );
     `)
-    version = 7
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('7')
+    version = 9
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('9')
   }
 }
 
@@ -199,7 +229,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     CREATE TABLE IF NOT EXISTS commits (
       commit_hash TEXT PRIMARY KEY,
       timestamp INTEGER NOT NULL,
-      message TEXT NOT NULL
+      message TEXT NOT NULL,
+      author_name TEXT,
+      author_email TEXT
     );
 
     CREATE TABLE IF NOT EXISTS blob_commits (
@@ -287,7 +319,18 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       cluster_id INTEGER NOT NULL REFERENCES blob_clusters(id)
     );
 
-    -- Module embeddings table (Phase 33)
+    -- Commit message embeddings for semantic commit search (Phase 30)
+    CREATE TABLE IF NOT EXISTS commit_embeddings (
+      commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      vector BLOB NOT NULL
+    );
+
+    -- Index on commits.timestamp for fast temporal cluster filtering (Phase 22)
+    CREATE INDEX IF NOT EXISTS idx_commits_timestamp ON commits (timestamp);
+
+    -- Module-level directory centroid embeddings (Phase 33)
     CREATE TABLE IF NOT EXISTS module_embeddings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       module_path TEXT NOT NULL UNIQUE,
@@ -297,9 +340,6 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       blob_count INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-
-    -- Index on commits.timestamp for fast temporal cluster filtering (Phase 22)
-    CREATE INDEX IF NOT EXISTS idx_commits_timestamp ON commits (timestamp);
   `)
 }
 

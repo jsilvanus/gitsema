@@ -4,9 +4,10 @@ import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { getCachedQueryEmbedding, setCachedQueryEmbedding } from '../../core/embedding/queryCache.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
-import { renderResults, groupResults, type GroupMode } from '../../core/search/ranking.js'
+import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { remoteSearch } from '../../client/remoteClient.js'
+import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 
 export interface SearchCommandOptions {
   top?: string
@@ -28,6 +29,12 @@ export interface SearchCommandOptions {
    * Defaults to `true` (use cache). When `false`, skip both cache reads and writes.
    */
   cache?: boolean
+  /**
+   * When true, also searches commit message embeddings and displays matching
+   * commits alongside blob results.
+   */
+  includeCommits?: boolean
+  /** Search granularity level: 'file' (default), 'chunk', 'symbol', or 'module'. */
   level?: string
 }
 
@@ -69,6 +76,32 @@ async function embedQuery(
     }
   }
   return embedding
+}
+
+/**
+ * Renders a list of CommitSearchResults as human-readable CLI output.
+ *
+ * Example:
+ *   0.921  abc1234  2024-03-15  fix authentication token validation
+ *            src/auth/jwt.ts
+ *            src/auth/session.ts
+ */
+function renderCommitResults(results: CommitSearchResult[]): string {
+  if (results.length === 0) return '  (no commit results)'
+  const lines: string[] = []
+  for (const result of results) {
+    const score = formatScore(result.score)
+    const hash = shortHash(result.commitHash)
+    const date = formatDate(result.timestamp)
+    lines.push(`${score}  ${hash}  ${date}  ${result.message}`)
+    for (const p of result.paths.slice(0, 5)) {
+      lines.push(`       ${p}`)
+    }
+    if (result.paths.length > 5) {
+      lines.push(`       … and ${result.paths.length - 5} more file(s)`)
+    }
+  }
+  return lines.join('\n')
 }
 
 export async function searchCommand(query: string, options: SearchCommandOptions): Promise<void> {
@@ -195,22 +228,16 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   // Embed the query with the text model (natural-language prose)
   const textEmbedding = await embedQuery(textProvider, textModel, query, noCache)
 
+  // Resolve --level flag to per-table search flags
   let searchChunksFlag = options.chunks ?? false
   let searchSymbolsFlag = false
   let searchModulesFlag = false
   if (options.level) {
     switch (options.level) {
-      case 'file':
-        break
-      case 'chunk':
-        searchChunksFlag = true
-        break
-      case 'symbol':
-        searchSymbolsFlag = true
-        break
-      case 'module':
-        searchModulesFlag = true
-        break
+      case 'file': break
+      case 'chunk': searchChunksFlag = true; break
+      case 'symbol': searchSymbolsFlag = true; break
+      case 'module': searchModulesFlag = true; break
       default:
         console.error('Error: --level must be one of: file, chunk, symbol, module')
         process.exit(1)
@@ -253,5 +280,11 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   console.log(renderResults(results))
-}
 
+  // Optional commit message search
+  if (options.includeCommits) {
+    const commitResults = searchCommits(textEmbedding, { topK, model: textModel })
+    console.log('\nCommit matches:')
+    console.log(renderCommitResults(commitResults))
+  }
+}
