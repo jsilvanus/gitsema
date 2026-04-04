@@ -30,6 +30,11 @@ import { DEFAULT_MAX_SIZE } from '../core/git/showBlob.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../core/git/branchDiff.js'
 import { computeSemanticCollisions, computeMergeImpact } from '../core/search/mergeAudit.js'
 import { computeBranchSummary } from '../core/search/branchSummary.js'
+import { computeClusters } from '../core/search/clustering.js'
+import { computeConceptChangePoints } from '../core/search/changePoints.js'
+import { computeAuthorContributions } from '../core/search/authorSearch.js'
+import { computeImpact } from '../core/search/impact.js'
+import { findDeadConcepts } from '../core/search/deadConcepts.js'
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -601,6 +606,172 @@ export async function startMcpServer(): Promise<void> {
           }
         }
 
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: clusters
+  // -------------------------------------------------------------------------
+  server.tool(
+    'clusters',
+    'Cluster all indexed blobs into K semantic groups using k-means and return the cluster labels, sizes, and representative file paths.',
+    {
+      k: z.number().int().positive().optional().default(8).describe('Number of clusters to compute'),
+      top_keywords: z.number().int().positive().optional().default(5).describe('Number of keywords per cluster label'),
+      enhanced_labels: z.boolean().optional().default(false).describe('Use TF-IDF enhanced cluster labels'),
+      branch: z.string().optional().describe('Restrict clustering to blobs seen on this branch'),
+    },
+    async ({ k, top_keywords, enhanced_labels, branch }) => {
+      try {
+        let blobHashFilter: string[] | undefined
+        if (branch) {
+          const { getBlobHashesOnBranch } = await import('../core/search/clustering.js')
+          blobHashFilter = getBlobHashesOnBranch(branch)
+        }
+        const report = await computeClusters({ k, topKeywords: top_keywords, useEnhancedLabels: enhanced_labels, blobHashFilter })
+        const lines = [
+          `Clusters: ${report.k}  |  Total blobs: ${report.totalBlobs}`,
+          '',
+        ]
+        for (const c of report.clusters) {
+          const kws = enhanced_labels && c.enhancedKeywords.length > 0 ? c.enhancedKeywords : c.topKeywords
+          lines.push(`  [${c.id}] ${c.label}  (${c.size} blobs)  keywords: ${kws.join(', ')}`)
+          lines.push(`       paths: ${c.representativePaths.slice(0, 3).join(', ')}`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: change_points
+  // -------------------------------------------------------------------------
+  server.tool(
+    'change_points',
+    'Find the historical moments when a semantic concept underwent its largest shifts across the codebase.',
+    {
+      query: z.string().describe('Natural-language concept to track'),
+      top_k: z.number().int().positive().optional().default(50).describe('Number of top-matching blobs to scan'),
+      threshold: z.number().min(0).max(2).optional().default(0.3).describe('Cosine distance threshold for flagging a change point'),
+      top_points: z.number().int().positive().optional().default(5).describe('Number of change points to return'),
+      branch: z.string().optional().describe('Restrict to blobs seen on this branch'),
+    },
+    async ({ query, top_k, threshold, top_points, branch }) => {
+      try {
+        const provider = getTextProvider()
+        const queryEmbedding = await embedQuery(provider, query)
+        const report = computeConceptChangePoints(query, queryEmbedding, { topK: top_k, threshold, topPoints: top_points, branch })
+        if (report.points.length === 0) {
+          return { content: [{ type: 'text', text: 'No change points found above threshold.' }] }
+        }
+        const lines = [`Change points for: "${query}"  (threshold: ${threshold})\n`]
+        for (const pt of report.points) {
+          lines.push(`  ${pt.after.date}  dist: ${pt.distance.toFixed(3)}  before: [${pt.before.commit.slice(0, 7)}] → after: [${pt.after.commit.slice(0, 7)}]`)
+          const path = pt.after.topPaths[0] ?? pt.before.topPaths[0] ?? '(unknown path)'
+          lines.push(`    ${path}`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: author
+  // -------------------------------------------------------------------------
+  server.tool(
+    'author',
+    'Find which authors have contributed most to a semantic concept in the codebase.',
+    {
+      query: z.string().describe('Natural-language concept to attribute'),
+      top_k: z.number().int().positive().optional().default(50).describe('Number of top blobs to attribute'),
+      top_authors: z.number().int().positive().optional().default(10).describe('Number of top authors to return'),
+      branch: z.string().optional().describe('Restrict to blobs seen on this branch'),
+    },
+    async ({ query, top_k, top_authors, branch }) => {
+      try {
+        const provider = getTextProvider()
+        const queryEmbedding = await embedQuery(provider, query)
+        const contributions = await computeAuthorContributions(queryEmbedding, { topK: top_k, topAuthors: top_authors, branch })
+        if (contributions.length === 0) {
+          return { content: [{ type: 'text', text: 'No author contributions found.' }] }
+        }
+        const lines = [`Authors for: "${query}"\n`]
+        for (const c of contributions) {
+          lines.push(`  ${c.authorName} <${c.authorEmail}>  score: ${c.totalScore.toFixed(3)}  blobs: ${c.blobCount}`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: impact
+  // -------------------------------------------------------------------------
+  server.tool(
+    'impact',
+    'Find blobs most semantically coupled to a file — shows what else in the codebase will be affected by changes to that file.',
+    {
+      file: z.string().describe('Path to the file to analyse (relative to repo root)'),
+      top_k: z.number().int().positive().optional().default(10).describe('Number of similar blobs to return'),
+      branch: z.string().optional().describe('Restrict to blobs seen on this branch'),
+    },
+    async ({ file, top_k, branch }) => {
+      try {
+        const provider = getTextProvider()
+        const report = await computeImpact(file, provider, { topK: top_k, branch })
+        if (report.results.length === 0) {
+          return { content: [{ type: 'text', text: `No semantically coupled blobs found for: ${file}` }] }
+        }
+        const lines = [`Impact analysis: ${file}  (${report.results.length} neighbors)\n`]
+        for (const n of report.results) {
+          const path = n.paths[0] ?? '(unknown path)'
+          lines.push(`  ${n.score.toFixed(3)}  ${path}  [${n.blobHash.slice(0, 7)}]`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: dead_concepts
+  // -------------------------------------------------------------------------
+  server.tool(
+    'dead_concepts',
+    'Find blobs that existed historically but are no longer reachable from HEAD — deleted or removed concepts.',
+    {
+      top_k: z.number().int().positive().optional().default(10).describe('Number of dead blobs to return'),
+      branch: z.string().optional().describe('Restrict to blobs seen on this branch'),
+    },
+    async ({ top_k, branch }) => {
+      try {
+        const results = await findDeadConcepts({ topK: top_k, branch })
+        if (results.length === 0) {
+          return { content: [{ type: 'text', text: 'No dead concepts found.' }] }
+        }
+        const lines = [`Dead concepts (${results.length} found):\n`]
+        for (const r of results) {
+          const path = r.paths[0] ?? '(unknown path)'
+          const date = r.lastSeenDate !== null ? formatDate(r.lastSeenDate) : 'unknown date'
+          lines.push(`  ${r.score.toFixed(3)}  ${path}  last seen: ${date}`)
+          if (r.lastSeenMessage) lines.push(`    commit: ${r.lastSeenMessage}`)
+        }
         return { content: [{ type: 'text', text: lines.join('\n') }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)

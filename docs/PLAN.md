@@ -52,6 +52,7 @@
 |   [Phase 31 — Semantic concept authorship ranking](#phase-31-—-semantic-concept-authorship-ranking) | — |
 |   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | — |
 |   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | — |
+|   [Phase 34 — Feature adoption & cross-cutting improvements](#phase-34-—-feature-adoption--cross-cutting-improvements) | — |
 | [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
 |   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
 |   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
@@ -1861,6 +1862,44 @@ Maps to `searchChunks`, `searchSymbols`, `searchModules` flags in `vectorSearch`
 - 5 integration tests in `tests/moduleEmbeddings.test.ts`.
 
 **Deliverables:** `src/core/db/schema.ts` (schema v9), `src/core/db/sqlite.ts` (migration v8→v9), `src/core/indexing/blobStore.ts` (module embedding helpers), `src/core/indexing/indexer.ts` (Level-1 fix + module updates), `src/core/search/vectorSearch.ts` (`searchModules` option), `src/core/models/types.ts` (`modulePath` on `SearchResult`), `src/cli/commands/updateModules.ts`, `src/cli/commands/search.ts` (`--level` flag), 5 unit tests, `docs/plant.md`.
+
+---
+
+### Phase 34 — Feature adoption & cross-cutting improvements
+
+**Version:** 0.33.0
+
+A comprehensive cross-cutting feature-adoption pass based on a systematic review of all 27 CLI commands against 8 newer capabilities (hybrid search, commit embeddings, symbol-level search, module-level search, branch filtering, HTML output, query cache, enhanced cluster labels).
+
+#### Priority 1 — Quick wins (< 1 hr)
+
+- **`src/core/embedding/providerFactory.ts`** (new) — `buildProvider`, `getTextProvider`, `getCodeProvider` extracted from 9 identical local functions across CLI commands and the MCP server.
+- **`src/core/embedding/embedQuery.ts`** (new) — cache-aware `embedQuery()` shared helper; adopted in `search`, `first-seen`, `author`, `change-points`, `concept-evolution`, `diff`, and all 4 MCP query-embedding tools.
+- **`--dump [file]`** added to `search` and `first-seen`.
+- **`--branch <name>`** added to `first-seen`.
+
+#### Priority 2 — Incremental (1–3 hrs)
+
+- **`--branch <name>`** added to `author`, `dead-concepts`, `impact`, `concept-evolution`, `change-points`, `clusters`, `cluster-diff`, `cluster-timeline`, `cluster-change-points`.
+- **`--hybrid` + `--bm25-weight`** added to `first-seen` and `author`.
+- **`--include-commits`** added to `first-seen`.
+- **`--enhanced-labels`** added to `cluster-change-points`, `branch-summary`, `merge-audit`.
+- New `getBranchBlobHashSet()` in `vectorSearch.ts` and `getBlobHashesOnBranch()` in `clustering.ts`.
+
+#### Priority 3 — Medium effort (3–8 hrs)
+
+- **`--html [file]`** added to 7 commands: `file-evolution`, `change-points`, `file-change-points`, `cluster-change-points`, `dead-concepts`, `merge-audit`, `branch-summary`. Seven new render functions in `src/core/viz/htmlRenderer.ts`.
+- **`--level symbol`** added to `impact` and `blame`. `computeImpact` and `computeSemanticBlame` extended with `searchSymbols` option.
+- **Extended `status` output** — row counts for `chunks`, `chunk_embeddings`, `symbols`, `symbol_embeddings`, `commit_embeddings`, `module_embeddings`.
+
+#### Priority 4 — Larger effort (> 3 hrs)
+
+- **`--annotate-clusters`** on `search` — joins `cluster_assignments`/`blob_clusters` after search; adds `clusterLabel` to `SearchResult`; shown in `renderResults` and `--dump` JSON.
+- **`--level symbol`** on `file-evolution` and `file-change-points` — `computeEvolution` computes per-symbol embedding centroids when `useSymbolLevel=true`; threaded through `computeFileChangePoints`.
+- **5 new MCP tools** (item 15): `clusters`, `change_points`, `author`, `impact`, `dead_concepts`.
+- **HTTP analysis routes** (item 16): `POST /api/v1/analysis/clusters`, `/change-points`, `/author`, `/impact` — new `src/server/routes/analysis.ts` + wired into `app.ts`.
+
+**Deliverables:** `src/core/embedding/providerFactory.ts`, `src/core/embedding/embedQuery.ts`, updated CLI commands (18 files), `src/core/viz/htmlRenderer.ts` (7 new render fns), `src/core/models/types.ts` (`clusterLabel` on `SearchResult`), `src/core/search/evolution.ts` (`useSymbolLevel`), `src/core/search/changePoints.ts` (`useSymbolLevel`), `src/mcp/server.ts` (5 new tools, 14 total), `src/server/routes/analysis.ts` (new), `src/server/app.ts`, `docs/review.md`.
 
 ---
 
