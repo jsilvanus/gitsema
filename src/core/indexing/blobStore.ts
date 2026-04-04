@@ -116,12 +116,13 @@ export function storeFtsContent(blobHash: string, content: string): void {
  * Only creates blobCommit rows for blobs that are already indexed in the blobs table.
  * Returns the number of blobCommit rows stored.
  */
-export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]): number {
+export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[], options?: { isMergeCommit?: boolean }): number {
   const { db } = getActiveSession()
+  const optIsMerge = options?.isMergeCommit ?? commit.isMergeCommit ?? false
 
   if (blobHashes.length === 0) {
     db.insert(commits)
-      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null })
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null, isMergeCommit: optIsMerge ? 1 : 0 })
       .onConflictDoNothing()
       .run()
     return 0
@@ -146,7 +147,7 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
 
   db.transaction((tx) => {
     tx.insert(commits)
-      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null })
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null, isMergeCommit: optIsMerge ? 1 : 0 })
       .onConflictDoNothing()
       .run()
 
@@ -160,7 +161,6 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
 
   return indexedHashes.length
 }
-
 /**
  * Records a commit hash in the `indexed_commits` table, marking it as fully
  * processed by the indexer. Used by incremental indexing to determine the

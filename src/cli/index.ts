@@ -29,6 +29,8 @@ import { changePointsCommand } from './commands/changePoints.js'
 import { fileChangePointsCommand } from './commands/fileChangePoints.js'
 import { clusterChangePointsCommand } from './commands/clusterChangePoints.js'
 import { authorCommand } from './commands/author.js'
+import { branchDiffCommand } from './commands/branchDiff.js'
+import { branchesCommand } from './commands/branches.js'
 
 const program = new Command()
 
@@ -74,6 +76,7 @@ const GROUPS = [
   'File History',
   'Concept History',
   'Cluster Analysis',
+  'Branch Analysis',
   'Change Detection',
 ] as const
 
@@ -105,6 +108,9 @@ const COMMAND_GROUPS: Record<string, string> = {
   clusters:           'Cluster Analysis',
   'cluster-diff':     'Cluster Analysis',
   'cluster-timeline': 'Cluster Analysis',
+  // Branch Analysis
+  'branch-diff':       'Branch Analysis',
+  branches:            'Branch Analysis',
   // Change Detection
   'change-points':         'Change Detection',
   'file-change-points':    'Change Detection',
@@ -556,6 +562,19 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .action(clusterTimelineCommand)
+
+program
+  .command('branch-diff <branch1> <branch2>')
+  .description('compare semantic content across two branches')
+  .option('-k, --top <n>', 'maximum results per branch', '20')
+  .option('--query <q>', 'filter by semantic similarity to this query')
+  .option('--dump [file]', 'output JSON to a file (or stdout if no file specified)')
+  .action(branchDiffCommand)
+
+program
+  .command('branches')
+  .description('list all indexed branches with blob counts')
+  .action(branchesCommand)
 
 program
   .command('change-points <query>')
