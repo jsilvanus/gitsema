@@ -96,6 +96,8 @@ export const ALL_KEYS: ReadonlyArray<string> = [
   'evolution.threshold',
   // cluster command defaults
   'clusters.k',
+  // hooks
+  'hooks.enabled',
 ]
 
 // ---------------------------------------------------------------------------
@@ -203,7 +205,18 @@ export function setDeep(obj: ConfigData, key: string, value: unknown): void {
   if (FORBIDDEN_KEYS.has(lastPart)) {
     throw new Error(`Invalid config key segment: '${lastPart}'`)
   }
-  current[lastPart] = value
+  // Guard against prototype pollution: reject assignment onto prototype objects.
+  if (current === Object.prototype || current === Function.prototype) {
+    throw new Error('Cannot write to prototype object')
+  }
+  // Use Object.defineProperty so static analysis can confirm we're not
+  // writing to a prototype chain (CodeQL js/prototype-pollution-utility).
+  Object.defineProperty(current, lastPart, {
+    value,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  })
 }
 
 /**

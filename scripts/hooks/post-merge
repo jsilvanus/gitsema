@@ -1,0 +1,42 @@
+#!/usr/bin/env sh
+# gitsema post-merge hook
+#
+# Incrementally indexes changes introduced by a merge or pull so the semantic
+# index stays up-to-date after every 'git pull' or 'git merge'.
+#
+# Install:
+#   cp scripts/hooks/post-merge .git/hooks/post-merge
+#   chmod +x .git/hooks/post-merge
+#
+# Or use the symlink approach so the script stays in sync with the repo:
+#   ln -s ../../scripts/hooks/post-merge .git/hooks/post-merge
+
+set -e
+
+# Only run if gitsema is available on PATH
+if ! command -v gitsema > /dev/null 2>&1; then
+  echo "[gitsema] skipping post-merge hook: 'gitsema' not found on PATH" >&2
+  exit 0
+fi
+
+# Only run inside a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+  exit 0
+fi
+
+# Only run if the index database already exists
+GITSEMA_DB="$(git rev-parse --show-toplevel)/.gitsema/index.db"
+if [ ! -f "$GITSEMA_DB" ]; then
+  echo "[gitsema] skipping post-merge hook: index not initialised (run 'gitsema index' first)" >&2
+  exit 0
+fi
+
+# ORIG_HEAD is set by git to the pre-merge HEAD; fall back to HEAD~1 if unset
+if git rev-parse --verify ORIG_HEAD > /dev/null 2>&1; then
+  SINCE="ORIG_HEAD"
+else
+  SINCE="HEAD~1"
+fi
+
+echo "[gitsema] indexing merged changes (since ${SINCE})…"
+gitsema index --since "${SINCE}"

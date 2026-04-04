@@ -21,6 +21,7 @@ import {
   unsetConfigValue,
   type ConfigScope,
 } from '../../core/config/configManager.js'
+import { installHooks, uninstallHooks } from '../../core/config/hookManager.js'
 
 // ---------------------------------------------------------------------------
 // Subcommand: set
@@ -40,6 +41,35 @@ export async function configSetCommand(
   setConfigValue(key, value, scope)
   const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath()
   console.log(`Set ${scope} ${key} = ${JSON.stringify(value)}  (${filePath})`)
+
+  // Special handling: hooks.enabled toggles Git hook installation
+  if (key === 'hooks.enabled') {
+    if (value === true) {
+      const result = installHooks()
+      for (const hook of result.installed) {
+        console.log(`  ✔  Installed hook: ${hook}`)
+      }
+      for (const hook of result.skipped) {
+        console.log(`  ⚠  Skipped (already exists): ${hook}`)
+      }
+      for (const err of result.errors) {
+        console.error(`  ✖  ${err}`)
+      }
+      if (result.errors.length > 0) process.exitCode = 1
+    } else {
+      const result = uninstallHooks()
+      for (const hook of result.removed) {
+        console.log(`  ✔  Removed hook: ${hook}`)
+      }
+      for (const hook of result.skipped) {
+        console.log(`  ⚠  Skipped (not a symlink, remove manually): ${hook}`)
+      }
+      for (const err of result.errors) {
+        console.error(`  ✖  ${err}`)
+      }
+      if (result.errors.length > 0) process.exitCode = 1
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
