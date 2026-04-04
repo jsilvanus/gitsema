@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { computeClusters, getBlobHashesOnBranch, type ClusterReport } from '../../core/search/clustering.js'
 import { renderClustersHtml } from '../../core/viz/htmlRenderer.js'
+import { applyModelOverrides } from '../../core/embedding/providerFactory.js'
 
 export interface ClustersCommandOptions {
   k?: string
@@ -12,9 +13,16 @@ export interface ClustersCommandOptions {
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
   branch?: string
+  // CLI model overrides
+  model?: string
+  textModel?: string
+  codeModel?: string
 }
 
 export async function clustersCommand(options: ClustersCommandOptions): Promise<void> {
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+
   const k = options.k !== undefined ? parseInt(options.k, 10) : 8
   const top = options.top !== undefined ? parseInt(options.top, 10) : 5
   const iterations = options.iterations !== undefined ? parseInt(options.iterations, 10) : 20

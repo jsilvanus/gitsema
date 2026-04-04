@@ -95,6 +95,22 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   } else {
     printKV('Model:', textModel)
   }
+
+  // Warn when the configured model(s) differ from models present in the DB
+  const dbModels = (rawDb.prepare('SELECT DISTINCT model FROM embeddings').all() as Array<{ model: string }>)
+    .map((r) => r.model)
+  if (dbModels.length > 0) {
+    const dbModelSet = new Set(dbModels)
+    const missing: string[] = []
+    if (!dbModelSet.has(textModel)) missing.push(`text model '${textModel}'`)
+    if (dualModel && !dbModelSet.has(codeModel)) missing.push(`code model '${codeModel}'`)
+    if (missing.length > 0) {
+      console.warn(`\nWarning: ${missing.join(' and ')} ${missing.length > 1 ? 'have' : 'has'} no embeddings in DB.`)
+      console.warn(`  DB model(s): ${dbModels.join(', ')}`)
+      console.warn(`  Re-index with the current model, or run: gitsema clear-model <old-model>`)
+    }
+  }
+
   const branchCount = (getRawDb()
     .prepare('SELECT COUNT(DISTINCT branch_name) AS c FROM blob_branches')
     .get() as { c: number } | undefined)?.c ?? 0

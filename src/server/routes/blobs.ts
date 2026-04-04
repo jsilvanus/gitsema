@@ -4,7 +4,7 @@ import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { RoutingProvider } from '../../core/embedding/router.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { createChunker } from '../../core/chunking/chunker.js'
-import { filterNewBlobs } from '../../core/indexing/deduper.js'
+import { filterNewBlobs, isIndexed } from '../../core/indexing/deduper.js'
 import { storeBlob, storeBlobRecord, storeChunk } from '../../core/indexing/blobStore.js'
 import { logger } from '../../utils/logger.js'
 import { createLimiter } from '../../utils/concurrency.js'
@@ -140,7 +140,8 @@ export function blobsRouter(deps: BlobsRouterDeps): Router {
       res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
       return
     }
-    const missing = [...await filterNewBlobs(parsed.data.hashes)]
+    // Use the server's default text model for bulk checks
+    const missing = [...await filterNewBlobs(parsed.data.hashes, textProvider.model)]
     res.json({ missing })
   })
 
@@ -156,22 +157,19 @@ export function blobsRouter(deps: BlobsRouterDeps): Router {
     let skipped = 0
     let failed = 0
 
-    // Filter blobs the server already has
-    const hashes = parsed.data.map((b) => b.blobHash)
-    const newSet = await filterNewBlobs(hashes)
-
     await Promise.all(
       parsed.data.map((payload) =>
         limit(async () => {
-          if (!newSet.has(payload.blobHash)) {
-            skipped++
-            return
-          }
-
           const fileType = payload.fileType ?? 'other'
           const activeProvider = routingProvider
             ? routingProvider.providerForFile(payload.path)
             : textProvider
+
+          // Per-blob model-aware skip check
+          if (isIndexed(payload.blobHash, activeProvider.model)) {
+            skipped++
+            return
+          }
 
           try {
             await embedAndStore(

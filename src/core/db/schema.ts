@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, blob, primaryKey } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, blob, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 /**
  * Sub-file fragments produced by a chunker (function / fixed strategy).
@@ -16,11 +16,13 @@ export const chunks = sqliteTable('chunks', {
  * Vector embedding for a chunk.  Keyed by chunk_id; one embedding per chunk.
  */
 export const chunkEmbeddings = sqliteTable('chunk_embeddings', {
-  chunkId: integer('chunk_id').primaryKey().references(() => chunks.id),
+  chunkId: integer('chunk_id').notNull().references(() => chunks.id),
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
-})
+}, (table) => ({
+  pk: primaryKey({ columns: [table.chunkId, table.model] }),
+}))
 
 export const blobs = sqliteTable('blobs', {
   blobHash: text('blob_hash').primaryKey(),
@@ -29,13 +31,15 @@ export const blobs = sqliteTable('blobs', {
 })
 
 export const embeddings = sqliteTable('embeddings', {
-  blobHash: text('blob_hash').primaryKey().references(() => blobs.blobHash),
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
   /** File category used when selecting the embedding model: 'code' | 'text' | 'other'. */
   fileType: text('file_type'),
-})
+}, (table) => ({
+  pk: primaryKey({ columns: [table.blobHash, table.model] }),
+}))
 
 export const paths = sqliteTable('paths', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -142,11 +146,13 @@ export const symbols = sqliteTable('symbols', {
  * symbols compared with embedding the bare code snippet alone.
  */
 export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
-  symbolId: integer('symbol_id').primaryKey().references(() => symbols.id),
+  symbolId: integer('symbol_id').notNull().references(() => symbols.id),
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
-})
+}, (table) => ({
+  pk: primaryKey({ columns: [table.symbolId, table.model] }),
+}))
 
 /**
  * Semantic embedding of a Git commit message (Phase 30).
@@ -156,11 +162,13 @@ export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
  * Keyed by commit_hash (one embedding per commit per model).
  */
 export const commitEmbeddings = sqliteTable('commit_embeddings', {
-  commitHash: text('commit_hash').primaryKey().references(() => commits.commitHash),
+  commitHash: text('commit_hash').notNull().references(() => commits.commitHash),
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
-})
+}, (table) => ({
+  pk: primaryKey({ columns: [table.commitHash, table.model] }),
+}))
 
 /**
  * One row per clustering run's cluster (Phase 21).
@@ -197,10 +205,12 @@ export const clusterAssignments = sqliteTable('cluster_assignments', {
 // ---------------------------------------------------------------------------
 export const moduleEmbeddings = sqliteTable('module_embeddings', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  modulePath: text('module_path').notNull().unique(),
+  modulePath: text('module_path').notNull(),
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
   blobCount: integer('blob_count').notNull(),
   updatedAt: integer('updated_at').notNull(),
-})
+}, (table) => ({
+  uniq: uniqueIndex('idx_module_embeddings_path_model').on(table.modulePath, table.model),
+}))

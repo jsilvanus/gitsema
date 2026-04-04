@@ -36,8 +36,9 @@ export interface DbSession {
  *   7 — Added commit_embeddings table for commit message semantic search (Phase 30)
  *   8 — Added author_name, author_email to commits (Phase 31)
  *   9 — Added module_embeddings table + chunk_id on symbols (Phase 33)
+ *  10 — Reworked embedding tables to support multi-model embeddings per blob/chunk/symbol/commit/module
  */
-const CURRENT_SCHEMA_VERSION = 9
+const CURRENT_SCHEMA_VERSION = 10
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -201,6 +202,74 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 9
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('9')
   }
+
+  // v9 → v10: rebuild embedding tables with composite (hash, model) PKs
+  if (version < 10) {
+    sqlite.pragma('foreign_keys = OFF')
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS embeddings_v10 (
+        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        file_type TEXT,
+        PRIMARY KEY (blob_hash, model)
+      );
+      INSERT OR IGNORE INTO embeddings_v10 SELECT blob_hash, model, dimensions, vector, file_type FROM embeddings;
+      DROP TABLE embeddings;
+      ALTER TABLE embeddings_v10 RENAME TO embeddings;
+
+      CREATE TABLE IF NOT EXISTS chunk_embeddings_v10 (
+        chunk_id INTEGER NOT NULL REFERENCES chunks(id),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        PRIMARY KEY (chunk_id, model)
+      );
+      INSERT OR IGNORE INTO chunk_embeddings_v10 SELECT chunk_id, model, dimensions, vector FROM chunk_embeddings;
+      DROP TABLE chunk_embeddings;
+      ALTER TABLE chunk_embeddings_v10 RENAME TO chunk_embeddings;
+
+      CREATE TABLE IF NOT EXISTS symbol_embeddings_v10 (
+        symbol_id INTEGER NOT NULL REFERENCES symbols(id),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        PRIMARY KEY (symbol_id, model)
+      );
+      INSERT OR IGNORE INTO symbol_embeddings_v10 SELECT symbol_id, model, dimensions, vector FROM symbol_embeddings;
+      DROP TABLE symbol_embeddings;
+      ALTER TABLE symbol_embeddings_v10 RENAME TO symbol_embeddings;
+
+      CREATE TABLE IF NOT EXISTS commit_embeddings_v10 (
+        commit_hash TEXT NOT NULL REFERENCES commits(commit_hash),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        PRIMARY KEY (commit_hash, model)
+      );
+      INSERT OR IGNORE INTO commit_embeddings_v10 SELECT commit_hash, model, dimensions, vector FROM commit_embeddings;
+      DROP TABLE commit_embeddings;
+      ALTER TABLE commit_embeddings_v10 RENAME TO commit_embeddings;
+
+      CREATE TABLE IF NOT EXISTS module_embeddings_v10 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module_path TEXT NOT NULL,
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        blob_count INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (module_path, model)
+      );
+      INSERT OR IGNORE INTO module_embeddings_v10 SELECT id, module_path, model, dimensions, vector, blob_count, updated_at FROM module_embeddings;
+      DROP TABLE module_embeddings;
+      ALTER TABLE module_embeddings_v10 RENAME TO module_embeddings;
+    `)
+    sqlite.pragma('foreign_keys = ON')
+    version = 10
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('10')
+  }
 }
 
 /** The full CREATE TABLE block used for every new database file. */
@@ -213,11 +282,12 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     );
 
     CREATE TABLE IF NOT EXISTS embeddings (
-      blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
+      blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL,
-      file_type TEXT
+      file_type TEXT,
+      PRIMARY KEY (blob_hash, model)
     );
 
     CREATE TABLE IF NOT EXISTS paths (
@@ -253,10 +323,11 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     );
 
     CREATE TABLE IF NOT EXISTS chunk_embeddings (
-      chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id),
+      chunk_id INTEGER NOT NULL REFERENCES chunks(id),
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
-      vector BLOB NOT NULL
+      vector BLOB NOT NULL,
+      PRIMARY KEY (chunk_id, model)
     );
 
     -- FTS5 virtual table for hybrid (BM25 + vector) search (Phase 11)
@@ -298,10 +369,11 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 
     -- Enriched embeddings for symbol-level semantic search (Phase 19)
     CREATE TABLE IF NOT EXISTS symbol_embeddings (
-      symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id),
+      symbol_id INTEGER NOT NULL REFERENCES symbols(id),
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
-      vector BLOB NOT NULL
+      vector BLOB NOT NULL,
+      PRIMARY KEY (symbol_id, model)
     );
 
     CREATE TABLE IF NOT EXISTS blob_clusters (
@@ -321,10 +393,11 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 
     -- Commit message embeddings for semantic commit search (Phase 30)
     CREATE TABLE IF NOT EXISTS commit_embeddings (
-      commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
+      commit_hash TEXT NOT NULL REFERENCES commits(commit_hash),
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
-      vector BLOB NOT NULL
+      vector BLOB NOT NULL,
+      PRIMARY KEY (commit_hash, model)
     );
 
     -- Index on commits.timestamp for fast temporal cluster filtering (Phase 22)
@@ -333,12 +406,13 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     -- Module-level directory centroid embeddings (Phase 33)
     CREATE TABLE IF NOT EXISTS module_embeddings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      module_path TEXT NOT NULL UNIQUE,
+      module_path TEXT NOT NULL,
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL,
       blob_count INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      UNIQUE (module_path, model)
     );
   `)
 }
