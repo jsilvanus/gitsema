@@ -474,4 +474,8 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   }
   console.log(`  Commits mapped:      ${stats.commits}`)
   console.log(`  Blob-commit links:   ${stats.blobCommits}`)
+  console.log(`  Commit embeddings:   ${stats.commitEmbeddings}`)
+  if (stats.commitEmbedFailed > 0) {
+    console.log(`  Commit embed failed: ${stats.commitEmbedFailed}`)
+  }
 }

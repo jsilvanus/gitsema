@@ -2,7 +2,7 @@ import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
 import { isIndexed } from './deduper.js'
-import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches } from './blobStore.js'
+import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
@@ -103,6 +103,10 @@ export interface IndexStats {
   blobCommits: number   // Phase 6: blob-commit links stored
   chunks: number        // Phase 10: chunk embeddings stored
   symbols: number       // Phase 19: symbol-level embeddings stored
+  /** Number of commit message embeddings stored (Phase 30). */
+  commitEmbeddings: number
+  /** Number of commit message embedding failures (Phase 30). */
+  commitEmbedFailed: number
 }
 
 /**
@@ -212,6 +216,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     embedFailed: 0, otherFailed: 0,
     fbFunction: 0, fbFixed: 0,
     queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0, symbols: 0,
+    commitEmbeddings: 0, commitEmbedFailed: 0,
   }
   const start = Date.now()
   const seenHashes = new Set<string>()
@@ -504,7 +509,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   let pendingCommit: CommitEntry | null = null
   let pendingBlobHashes: string[] = []
 
-  function flushPendingCommit(): void {
+  async function flushPendingCommit(): Promise<void> {
     if (!pendingCommit) return
     const stored = storeCommitWithBlobs(pendingCommit, pendingBlobHashes)
     stats.commits++
@@ -517,6 +522,23 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       }
     }
 
+    // Embed the commit message using the text provider (natural-language prose).
+    // Failures are non-fatal: we log and count them, then move on.
+    if (pendingCommit.message.trim().length > 0) {
+      try {
+        const msgEmbedding = await provider.embed(pendingCommit.message)
+        storeCommitEmbedding({
+          commitHash: pendingCommit.commitHash,
+          model: provider.model,
+          embedding: msgEmbedding,
+        })
+        stats.commitEmbeddings++
+      } catch (err) {
+        logger.debug?.(`Failed to embed commit message ${pendingCommit.commitHash}: ${err instanceof Error ? err.message : String(err)}`)
+        stats.commitEmbedFailed++
+      }
+    }
+
     // Record commit as fully indexed for future incremental runs
     markCommitIndexed(pendingCommit.commitHash)
 
@@ -526,7 +548,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   for await (const event of commitStream) {
     if (event.type === 'commit') {
-      flushPendingCommit()
+      await flushPendingCommit()
       pendingCommit = event.data
       pendingBlobHashes = []
     } else if (event.type === 'blob') {
@@ -535,7 +557,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     onProgress?.({ ...stats, elapsed: Date.now() - start })
   }
 
-  flushPendingCommit()
+  await flushPendingCommit()
 
   stats.elapsed = Date.now() - start
   return stats

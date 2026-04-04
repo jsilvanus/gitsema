@@ -45,6 +45,10 @@
 |   [Phase 24 — Enhanced cluster labeling](#phase-24-—-enhanced-cluster-labeling) | — |
 |   [Phase 25 — Interactive HTML visualizations](#phase-25-—-interactive-html-visualizations) | — |
 |   [Phase 26 — CLI naming consolidation & conceptual diff](#phase-26-—-cli-naming-consolidation-conceptual-diff) | — |
+|   [Phase 27 — Semantic change-point detection](#phase-27-—-semantic-change-point-detection) | — |
+|   [Phase 28 — Persistent configuration management](#phase-28-—-persistent-configuration-management) | — |
+|   [Phase 29 — Automated indexing via Git hooks](#phase-29-—-automated-indexing-via-git-hooks) | — |
+|   [Phase 30 — Commit message semantic indexing](#phase-30-—-commit-message-semantic-indexing) | — |
 | [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
 |   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
 |   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
@@ -1535,6 +1539,94 @@ Detect change points in the repo's cluster structure.
 - Tests in `tests/changePoints.test.ts` cover: empty-index handling, change-point detection above threshold, sorting, topPoints limit, since/until filtering, metadata correctness.
 
 **Deliverables:** Three new CLI commands, JSON output schemas, tests, and updated README.
+
+---
+
+### Phase 28 — Persistent configuration management
+
+**Goals:** Allow users to persist configuration values (embedding provider, model names, search defaults) in a JSON config file rather than relying solely on environment variables.
+
+#### `gitsema config <action> [key] [value]`
+
+Manages a two-tier configuration system (global `~/.config/gitsema/config.json` and local `.gitsema/config.json`). Local values take precedence over global; environment variables take precedence over both.
+
+- **`set <key> <value>`** — Write a key to the active config file. Use `--global` to write to `~/.config/gitsema/config.json` (user-level); default is `.gitsema/config.json` (repo-level).
+- **`get <key>`** — Show the resolved value and its source (`global`, `local`, or `env`).
+- **`list`** — Show all active configuration values and their sources as a table.
+- **`unset <key>`** — Remove a key from the config file.
+
+**Supported keys** (dot-notation): `provider`, `model`, `text_model`, `code_model`, `http_url`, `api_key`, `verbose`, `log_max_bytes`, `serve_port`, `serve_key`, `remote`, `hooks.enabled`.
+
+**Implementation notes:**
+- `src/core/config/configManager.ts` — `loadConfig()`, `saveConfig()`, `resolveConfigValue()`, `applyConfigToEnv()`.
+- `src/cli/commands/config.ts` — Commander subcommands wired to config manager.
+- `applyConfigToEnv()` called at CLI startup in `src/cli/index.ts` so all downstream commands transparently pick up file-based defaults.
+- Tests in `tests/config.test.ts`.
+
+**Deliverables:** `config` CLI command, config file read/write, env-precedence merge, tests.
+
+---
+
+### Phase 29 — Automated indexing via Git hooks
+
+**Goals:** Keep the semantic index up-to-date automatically after every local commit or merge, without requiring the user to run `gitsema index` manually.
+
+- **`hooks.enabled`** config key — when `true`, `gitsema config set hooks.enabled true` installs symlinks for `post-commit` and `post-merge` into `.git/hooks/`.  Running `gitsema config set hooks.enabled false` removes them.
+- The hook scripts call `gitsema index` (incremental, default options) so only new commits since the last run are processed.
+- **`src/core/config/hookManager.ts`** — `installHooks()` / `uninstallHooks()` — creates and removes the symlinks.  Handles the case where a hook file already exists (appends a call rather than overwriting).
+- Hook scripts live in `scripts/hooks/post-commit` and `scripts/hooks/post-merge`.
+- README section added explaining how to opt in.
+
+**Deliverables:** `hooks.enabled` config key, hookManager.ts, hook scripts, README guidance.
+
+---
+
+### Phase 30 — Commit message semantic indexing
+
+**Goals:** Index not just *what* changed (blob content) but *why* it changed (the commit message), and expose that intent through search.  Links the semantic meaning of each commit to the code blobs it introduced.
+
+#### Schema changes (v7)
+
+New table `commit_embeddings`:
+```sql
+commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
+model TEXT NOT NULL,
+dimensions INTEGER NOT NULL,
+vector BLOB NOT NULL
+```
+One row per commit per model; populated by the indexer during Phase B (commit mapping).
+
+#### Indexing changes
+
+- `storeCommitEmbedding({ commitHash, model, embedding })` added to `src/core/indexing/blobStore.ts` — idempotent upsert (ON CONFLICT DO NOTHING), safe for re-index.
+- Phase B of `runIndex()` now embeds each commit's message with the text provider immediately after `storeCommitWithBlobs()` returns.  Failures are non-fatal: logged and counted in the new `IndexStats.commitEmbeddings` / `commitEmbedFailed` fields.
+- `gitsema index` summary line added: `Commit embeddings: N`.
+
+#### Search
+
+New `src/core/search/commitSearch.ts` exposes:
+
+```ts
+searchCommits(queryEmbedding, options?: { topK?, model? }): CommitSearchResult[]
+// CommitSearchResult: { commitHash, score, message, timestamp, paths[] }
+```
+
+`gitsema search <query> --include-commits` runs commit-message search in parallel with the blob search and appends ranked commit results:
+
+```
+Commit matches:
+0.847  a3f9c2d  2024-03-15  feat: add authentication token verification
+       src/auth/jwt.ts
+0.791  b19e4a1  2023-11-02  fix: validate token expiry on refresh
+       src/auth/session.ts
+```
+
+**Implementation notes:**
+- Only commits embedded after Phase 30 indexing will appear in commit search.
+- Query always uses the text provider (natural-language prose), matching the existing search convention.
+- Tests in `tests/commitEmbedding.test.ts` cover: storage idempotency, indexer integration, ranked search, empty-DB edge case, duplicate-free re-indexing.
+
+**Deliverables:** `commit_embeddings` table (schema v7), `storeCommitEmbedding()`, Phase B embedding loop, `searchCommits()`, `--include-commits` flag on `search`, tests.
 
 ---
 
