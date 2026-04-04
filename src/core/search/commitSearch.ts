@@ -32,7 +32,7 @@ export interface CommitSearchOptions {
  * how semantically similar their message is to the query.
  *
  * Only commits that have been embedded (i.e. rows in `commit_embeddings`)
- * are considered.  Commits indexed before Phase 28 will not appear.
+ * are considered.  Commits indexed before Phase 30 will not appear.
  *
  * @param queryEmbedding - pre-computed embedding of the search query
  * @param options        - optional filters / topK

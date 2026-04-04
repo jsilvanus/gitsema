@@ -103,9 +103,9 @@ export interface IndexStats {
   blobCommits: number   // Phase 6: blob-commit links stored
   chunks: number        // Phase 10: chunk embeddings stored
   symbols: number       // Phase 19: symbol-level embeddings stored
-  /** Number of commit message embeddings stored (Phase 28). */
+  /** Number of commit message embeddings stored (Phase 30). */
   commitEmbeddings: number
-  /** Number of commit message embedding failures (Phase 28). */
+  /** Number of commit message embedding failures (Phase 30). */
   commitEmbedFailed: number
 }
 

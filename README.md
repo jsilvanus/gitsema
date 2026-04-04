@@ -545,6 +545,63 @@ gitsema cluster-change-points --k 6 --threshold 0.4 --top-points 3
 gitsema cluster-change-points --max-commits 200 --dump cluster-changes.json
 ```
 
+## Automated Indexing (Git Hooks)
+
+You can keep the semantic index in sync with your repository automatically by
+installing the provided Git hook scripts.  Once installed, `gitsema index` runs
+in the background after every `git commit` and every `git pull` / `git merge` —
+no manual intervention required.
+
+### How it works
+
+| Hook | Trigger | Command run |
+|---|---|---|
+| `post-commit` | After every `git commit` | `gitsema index --since HEAD~1` |
+| `post-merge` | After every `git pull` / `git merge` | `gitsema index --since ORIG_HEAD` |
+
+Both hooks are safe no-ops when:
+- `gitsema` is not on your `PATH`, or
+- the index has not been initialised yet (run `gitsema index` once first).
+
+### Installation (manual)
+
+**Copy** the scripts into your repository's `.git/hooks/` directory and make
+them executable:
+
+```bash
+cp scripts/hooks/post-commit  .git/hooks/post-commit
+cp scripts/hooks/post-merge   .git/hooks/post-merge
+chmod +x .git/hooks/post-commit .git/hooks/post-merge
+```
+
+**Alternatively**, use symlinks so the scripts stay in sync whenever you pull
+updates to the `scripts/hooks/` directory:
+
+```bash
+ln -s ../../scripts/hooks/post-commit  .git/hooks/post-commit
+ln -s ../../scripts/hooks/post-merge   .git/hooks/post-merge
+```
+
+### Toggle via `gitsema config`
+
+The `gitsema config` command can install or remove the hooks automatically —
+no manual file copying required:
+
+```bash
+# Install hooks for the current repository (symlinks into .git/hooks/)
+gitsema config set hooks.enabled true
+
+# Remove the managed hooks
+gitsema config set hooks.enabled false
+```
+
+The config value is persisted in `.gitsema/config.json` so hooks are
+re-enabled automatically when you run `gitsema config set hooks.enabled true`
+again after a re-clone.  The manual copy/symlink steps above remain a valid
+alternative if you prefer not to use the config command.
+
+---
+
 ## Data storage
 
 The index is stored in `.gitsema/index.db` (SQLite) in the root of the repository. Add it to `.gitignore` to avoid committing it:

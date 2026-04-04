@@ -1,5 +1,5 @@
 /**
- * Tests for commit message embeddings (Phase 28).
+ * Tests for commit message embeddings (Phase 30).
  *
  * Covers:
  *  1. storeCommitEmbedding() writes to the commit_embeddings table

@@ -145,7 +145,7 @@ export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
 })
 
 /**
- * Semantic embedding of a Git commit message (Phase 28).
+ * Semantic embedding of a Git commit message (Phase 30).
  *
  * Stores the vector representation of a commit's message text so the index
  * can answer questions like "find commits related to authentication refactoring".
