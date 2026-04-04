@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { computeClusters, type ClusterReport } from '../../core/search/clustering.js'
+import { computeClusters, getBlobHashesOnBranch, type ClusterReport } from '../../core/search/clustering.js'
 import { renderClustersHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface ClustersCommandOptions {
@@ -11,6 +11,7 @@ export interface ClustersCommandOptions {
   html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
+  branch?: string
 }
 
 export async function clustersCommand(options: ClustersCommandOptions): Promise<void> {
@@ -27,6 +28,7 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
   }
 
   try {
+    const blobHashFilter = options.branch ? getBlobHashesOnBranch(options.branch) : undefined
     const report: ClusterReport = await computeClusters({
       k,
       maxIterations: iterations,
@@ -35,6 +37,7 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
       topKeywords: 5,
       useEnhancedLabels,
       enhancedKeywordsN,
+      blobHashFilter,
     })
 
     if (options.dump !== undefined) {

@@ -16,6 +16,7 @@ export interface ConceptEvolutionCommandOptions {
   html?: string | boolean
   includeContent?: boolean
   remote?: string
+  branch?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -177,7 +178,7 @@ export async function conceptEvolutionCommand(
     throw err
   }
 
-  const entries = computeConceptEvolution(queryEmbedding, topK)
+  const entries = computeConceptEvolution(queryEmbedding, topK, options.branch)
 
   // --dump: emit structured JSON to a file or stdout
   if (options.dump !== undefined) {

@@ -20,6 +20,8 @@ export interface ImpactCommandOptions {
    * boolean `true` means print JSON to stdout.
    */
   dump?: string | boolean
+  /** When set, restrict results to blobs seen on this branch. */
+  branch?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -114,6 +116,7 @@ export async function impactCommand(
     report = await computeImpact(resolvedPath, provider, {
       topK,
       searchChunks: options.chunks ?? false,
+      branch: options.branch,
     })
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)

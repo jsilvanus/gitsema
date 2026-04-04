@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
 // ---------------------------------------------------------------------------
@@ -149,9 +149,9 @@ export function buildModuleGroups(results: ImpactResult[]): ModuleGroup[] {
 export async function computeImpact(
   filePath: string,
   provider: EmbeddingProvider,
-  opts: { topK?: number; searchChunks?: boolean; repoPath?: string } = {},
+  opts: { topK?: number; searchChunks?: boolean; repoPath?: string; branch?: string } = {},
 ): Promise<ImpactReport> {
-  const { topK = 10, searchChunks = false } = opts
+  const { topK = 10, searchChunks = false, branch } = opts
   const { db } = getActiveSession()
 
   // --- Read and embed target file ---
@@ -193,10 +193,16 @@ export async function computeImpact(
     endLine?: number
   }
 
-  const allEmbRows: Array<{ blobHash: string; vector: unknown }> = db
+  let allEmbRows: Array<{ blobHash: string; vector: unknown }> = db
     .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
     .from(embeddings)
     .all()
+
+  // Apply branch filter
+  if (branch) {
+    const branchSet = getBranchBlobHashSet(branch)
+    allEmbRows = allEmbRows.filter((r) => branchSet.has(r.blobHash))
+  }
 
   let candidates: CandidateRow[] = allEmbRows.map((r) => ({
     blobHash: r.blobHash,

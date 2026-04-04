@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { db } from '../db/sqlite.js'
 import { embeddings, paths, blobCommits, commits } from '../db/schema.js'
 import { eq, inArray } from 'drizzle-orm'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
 
 export interface EvolutionEntry {
@@ -412,14 +412,22 @@ export interface ConceptEvolutionEntry {
 export function computeConceptEvolution(
   queryEmbedding: number[],
   topK = 50,
+  branch?: string,
 ): ConceptEvolutionEntry[] {
   // 1. Load all stored embeddings and score against the query
-  const allRows = db
+  let allRows = db
     .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
     .from(embeddings)
     .all()
 
   if (allRows.length === 0) return []
+
+  // Apply branch filter when requested
+  if (branch) {
+    const branchSet = getBranchBlobHashSet(branch)
+    allRows = allRows.filter((r) => branchSet.has(r.blobHash))
+    if (allRows.length === 0) return []
+  }
 
   const scored = allRows
     .map((r) => {
@@ -436,7 +444,7 @@ export function computeConceptEvolution(
   if (scored.length === 0) return []
 
   const topHashes = scored.map((s) => s.blobHash)
-  const embByHash = new Map(scored.map((s) => [s.blobHash, { emb: s.emb, score: s.score }]))
+  const embByHash = new Map<string, { emb: number[]; score: number }>(scored.map((s) => [s.blobHash, { emb: s.emb, score: s.score }]))
 
   // 2. Resolve earliest commit for each blob
   const firstSeenMap = getFirstSeenMap(topHashes)

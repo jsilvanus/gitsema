@@ -14,6 +14,9 @@ export interface ClusterChangePointsCommandOptions {
   until?: string
   maxCommits?: string
   dump?: string | boolean
+  enhancedLabels?: boolean
+  enhancedKeywordsN?: string
+  branch?: string
 }
 
 function renderClusterChangePoint(point: ClusterChangePoint, rank: number): string {
@@ -124,6 +127,9 @@ export async function clusterChangePointsCommand(
       since,
       until,
       maxCommits,
+      useEnhancedLabels: options.enhancedLabels ?? false,
+      enhancedKeywordsN: options.enhancedKeywordsN !== undefined ? parseInt(options.enhancedKeywordsN, 10) : 5,
+      branch: options.branch,
     })
 
     if (report.range.since === '' && report.range.until === '') {

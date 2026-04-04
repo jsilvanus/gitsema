@@ -17,6 +17,7 @@ export interface ChangePointsCommandOptions {
   until?: string
   dump?: string | boolean
   includeContent?: boolean
+  branch?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -136,6 +137,7 @@ export async function changePointsCommand(
       topPoints,
       since,
       until,
+      branch: options.branch,
     })
 
     if (options.dump !== undefined) {

@@ -19,6 +19,8 @@ export interface DeadConceptsCommandOptions {
    * boolean `true` means print JSON to stdout.
    */
   dump?: string | boolean
+  /** When set, restrict dead-concept candidates to blobs seen on this branch. */
+  branch?: string
 }
 
 function formatDate(timestamp: number | null): string {
@@ -84,7 +86,7 @@ export async function deadConceptsCommand(
 
   let results: DeadConceptResult[] = []
   try {
-    results = await findDeadConcepts({ topK, since, repoPath: '.' })
+    results = await findDeadConcepts({ topK, since, repoPath: '.', branch: options.branch })
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

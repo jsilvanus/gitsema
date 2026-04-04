@@ -3,6 +3,7 @@ import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { computeAuthorContributions, type AuthorContribution } from '../../core/search/authorSearch.js'
+import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { logger } from '../../utils/logger.js'
 
@@ -11,6 +12,9 @@ export interface AuthorCommandOptions {
   since?: string
   detail?: boolean
   dump?: string | boolean
+  branch?: string
+  hybrid?: boolean
+  bm25Weight?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -31,6 +35,8 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
 
   const topAuthors = options.top !== undefined ? parseInt(options.top, 10) : 10
   const detail = options.detail ?? false
+  const useHybrid = options.hybrid ?? false
+  const bm25Weight = options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : 0.3
 
   let since: number | undefined
   if (options.since) {
@@ -56,11 +62,24 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     throw err
   }
 
+  // When --hybrid is set, use hybrid search to get pre-scored candidates
+  let candidateBlobs: Array<{ blobHash: string; score: number }> | undefined
+  if (useHybrid) {
+    const hybridResults = hybridSearch(query.trim(), queryEmbedding, {
+      topK: 50,
+      bm25Weight,
+      branch: options.branch,
+    })
+    candidateBlobs = hybridResults.map((r) => ({ blobHash: r.blobHash, score: r.score }))
+  }
+
   const results = await computeAuthorContributions(queryEmbedding, {
     topK: 50,
     topAuthors,
     since,
     detail,
+    branch: options.branch,
+    candidateBlobs,
   })
 
   if (options.dump !== undefined) {

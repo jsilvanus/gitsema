@@ -5,12 +5,14 @@ import {
   type SemanticCollisionReport,
   type CollisionPair,
 } from '../../core/search/mergeAudit.js'
+import { getActiveSession } from '../../core/db/sqlite.js'
 
 export interface MergeAuditCommandOptions {
   base?: string
   threshold?: string
   top?: string
   dump?: string | boolean
+  enhancedLabels?: boolean
 }
 
 /**
@@ -80,7 +82,7 @@ export async function mergeAuditCommand(
       return
     }
 
-    printReport(report, threshold)
+    printReport(report, threshold, options.enhancedLabels ?? false)
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
@@ -106,7 +108,21 @@ function centroidOverlapLabel(sim: number): string {
   return 'LOW — branches are semantically distinct'
 }
 
-function printPair(pair: CollisionPair, index: number): void {
+/** Loads top_keywords for a cluster label from blob_clusters (best-effort). */
+function loadClusterKeywords(label: string): string[] {
+  try {
+    const { rawDb } = getActiveSession()
+    const row = rawDb
+      .prepare(`SELECT top_keywords FROM blob_clusters WHERE label = ? LIMIT 1`)
+      .get(label) as { top_keywords: string } | undefined
+    if (!row) return []
+    return JSON.parse(row.top_keywords) as string[]
+  } catch {
+    return []
+  }
+}
+
+function printPair(pair: CollisionPair, index: number, enhancedLabels: boolean): void {
   const pathA = pair.blobA.paths[0] ?? pair.blobA.hash.slice(0, 7)
   const pathB = pair.blobB.paths[0] ?? pair.blobB.hash.slice(0, 7)
   const label = similarityLabel(pair.similarity)
@@ -116,11 +132,17 @@ function printPair(pair: CollisionPair, index: number): void {
   console.log(`     ↳ ${pathA}`)
   console.log(`     ↳ ${pathB}`)
   if (pair.clusterLabel) {
-    console.log(`        (cluster: ${pair.clusterLabel})`)
+    const kwPart = enhancedLabels
+      ? (() => {
+          const kws = loadClusterKeywords(pair.clusterLabel)
+          return kws.length > 0 ? ` [${kws.slice(0, 8).join(', ')}]` : ''
+        })()
+      : ''
+    console.log(`        (cluster: ${pair.clusterLabel}${kwPart})`)
   }
 }
 
-function printReport(report: SemanticCollisionReport, threshold: number): void {
+function printReport(report: SemanticCollisionReport, threshold: number, enhancedLabels: boolean): void {
   console.log(`Merge audit: ${report.branchA} ↔ ${report.branchB}`)
   console.log(`Merge base:  ${report.mergeBase.slice(0, 8)}`)
   console.log(`  Branch A exclusive blobs: ${report.blobCountA}  (${report.branchA})`)
@@ -152,7 +174,13 @@ function printReport(report: SemanticCollisionReport, threshold: number): void {
   if (report.collisionZones.length > 0) {
     console.log('Collision zones (by concept cluster):')
     for (const zone of report.collisionZones) {
-      console.log(`  "${zone.clusterLabel}" — ${zone.pairCount} pair(s)`)
+      const kwPart = enhancedLabels
+        ? (() => {
+            const kws = loadClusterKeywords(zone.clusterLabel)
+            return kws.length > 0 ? `  [${kws.slice(0, 8).join(', ')}]` : ''
+          })()
+        : ''
+      console.log(`  "${zone.clusterLabel}"${kwPart} — ${zone.pairCount} pair(s)`)
       for (const p of zone.topPaths.slice(0, 4)) {
         console.log(`    • ${p}`)
       }
@@ -161,5 +189,5 @@ function printReport(report: SemanticCollisionReport, threshold: number): void {
   }
 
   console.log('Top collision pairs:')
-  report.collisionPairs.forEach((pair, i) => printPair(pair, i))
+  report.collisionPairs.forEach((pair, i) => printPair(pair, i, enhancedLabels))
 }

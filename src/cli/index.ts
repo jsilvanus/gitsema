@@ -366,6 +366,9 @@ program
   .description('Find when a concept first appeared in the codebase, sorted by date (see also: search, concept-evolution)')
   .option('-k, --top <n>', 'number of results to return', '10')
   .option('--branch <name>', 'restrict results to blobs seen on this branch')
+  .option('--hybrid', 'blend vector similarity with BM25 keyword matching (requires prior backfill-fts)')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
+  .option('--include-commits', 'also search commit messages and show chronological commit results')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(firstSeenCommand)
@@ -413,6 +416,7 @@ program
     '--include-content',
     'include the stored file content for each entry in the JSON dump (only used with --dump)',
   )
+  .option('--branch <name>', 'restrict evolution to blobs seen on this branch')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(conceptEvolutionCommand)
 
@@ -495,6 +499,7 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--branch <name>', 'restrict dead-concept candidates to blobs seen on this branch')
   .action(deadConceptsCommand)
 
 program
@@ -506,6 +511,7 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--branch <name>', 'restrict results to blobs seen on this branch')
   .action(impactCommand)
 
 program
@@ -525,6 +531,7 @@ program
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict clustering to blobs seen on this branch')
   .action(clustersCommand)
 
 program
@@ -544,6 +551,7 @@ program
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict clustering to blobs seen on this branch at each ref')
   .action(clusterDiffCommand)
 
 program
@@ -567,6 +575,7 @@ program
   )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
   .action(clusterTimelineCommand)
 
 program
@@ -577,6 +586,7 @@ program
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option('--branch <name>', 'restrict concept state to blobs seen on this branch')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -612,6 +622,9 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
+  .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
   .action(clusterChangePointsCommand)
 
 program
@@ -623,6 +636,8 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--enhanced-labels', 'show more keyword detail for concept clusters in the output')
+  .option('--enhanced-keywords-n <n>', 'number of keywords to display per cluster when --enhanced-labels is set (default 8)', '8')
   .action(branchSummaryCommand)
 
 program
@@ -642,6 +657,7 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--enhanced-labels', 'show top keywords alongside cluster labels in collision output')
   .action(mergeAuditCommand)
 
 program
@@ -696,6 +712,9 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--branch <name>', 'restrict concept attribution to blobs seen on this branch')
+  .option('--hybrid', 'use hybrid (vector + BM25) search to find initial candidate blobs')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .action(authorCommand)
 
 program.parse()

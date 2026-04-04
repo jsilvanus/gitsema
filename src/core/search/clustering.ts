@@ -465,6 +465,8 @@ export async function computeClusters(opts: {
   useEnhancedLabels?: boolean
   /** Number of enhanced keywords to compute per cluster (default: 5) */
   enhancedKeywordsN?: number
+  /** When provided, only these blob hashes are clustered (e.g. branch-scoped). */
+  blobHashFilter?: string[]
 } = {}): Promise<ClusterReport> {
   const kOpt = opts.k ?? 8
   const maxIterations = opts.maxIterations ?? 20
@@ -476,8 +478,12 @@ export async function computeClusters(opts: {
 
   const { db, rawDb } = getActiveSession()
 
-  // load all embeddings
-  const rows = db.select({ blobHash: embeddings.blobHash, vector: embeddings.vector }).from(embeddings).all()
+  // load all embeddings, optionally filtered by blob hash
+  let rows = db.select({ blobHash: embeddings.blobHash, vector: embeddings.vector }).from(embeddings).all()
+  if (opts.blobHashFilter !== undefined) {
+    const filterSet = new Set(opts.blobHashFilter)
+    rows = rows.filter((r) => filterSet.has(r.blobHash))
+  }
   const totalBlobs = rows.length
   if (totalBlobs === 0) {
     return { clusters: [], edges: [], totalBlobs: 0, k: 0, clusteredAt: Math.floor(Date.now() / 1000) }
@@ -599,6 +605,21 @@ export function getBlobHashesUpTo(timestamp: number): string[] {
     JOIN commits c ON bc.commit_hash = c.commit_hash
     WHERE c.timestamp <= ?
   `).all(timestamp) as Array<{ blob_hash: string }>
+  return rows.map((r) => r.blob_hash)
+}
+
+/**
+ * Returns blob hashes (from the embeddings table) that appear on a specific
+ * branch according to the `blob_branches` table.
+ */
+export function getBlobHashesOnBranch(branchName: string): string[] {
+  const { rawDb } = getActiveSession()
+  const rows = rawDb.prepare(`
+    SELECT DISTINCT e.blob_hash
+    FROM embeddings e
+    JOIN blob_branches bb ON e.blob_hash = bb.blob_hash
+    WHERE bb.branch_name = ?
+  `).all(branchName) as Array<{ blob_hash: string }>
   return rows.map((r) => r.blob_hash)
 }
 
@@ -937,6 +958,8 @@ export async function computeClusterTimeline(opts: {
   useEnhancedLabels?: boolean
   /** Number of enhanced keywords to compute per cluster (default: 5) */
   enhancedKeywordsN?: number
+  /** When set, restrict the blob pool to blobs seen on this branch. */
+  branch?: string
 } = {}): Promise<ClusterTimelineReport> {
   const steps = Math.max(1, opts.steps ?? 5)
   const kOpt = opts.k ?? 8
@@ -951,6 +974,9 @@ export async function computeClusterTimeline(opts: {
   }
 
   const { rawDb } = getActiveSession()
+
+  // Pre-compute branch blob hash set once (if requested)
+  const branchHashSet = opts.branch ? new Set(getBlobHashesOnBranch(opts.branch)) : null
 
   // Find the timestamp range from the commits table
   const rangeRow = rawDb.prepare(`SELECT MIN(timestamp) AS minTs, MAX(timestamp) AS maxTs FROM commits`)
@@ -988,7 +1014,8 @@ export async function computeClusterTimeline(opts: {
   const effectiveTimestamps: number[] = []
 
   for (const ts of snapTimestamps) {
-    const blobHashes = getBlobHashesUpTo(ts)
+    let blobHashes = getBlobHashesUpTo(ts)
+    if (branchHashSet) blobHashes = blobHashes.filter((h) => branchHashSet.has(h))
     const snapshot = await computeClusterSnapshot({ ...snapshotOpts, blobHashFilter: blobHashes })
     snapshots.push(snapshot)
     effectiveTimestamps.push(ts)
@@ -1110,6 +1137,12 @@ export async function computeClusterChangePoints(opts: {
   maxCommits?: number
   maxIterations?: number
   topPaths?: number
+  /** When true, enhance cluster labels with TF-IDF keyword extraction (default: false) */
+  useEnhancedLabels?: boolean
+  /** Number of enhanced keywords to compute per cluster (default: 5) */
+  enhancedKeywordsN?: number
+  /** When set, restrict the blob pool to blobs seen on this branch. */
+  branch?: string
 } = {}): Promise<ClusterChangePointReport> {
   const kOpt = opts.k ?? 8
   const threshold = opts.threshold ?? 0.3
@@ -1123,11 +1156,14 @@ export async function computeClusterChangePoints(opts: {
     edgeThreshold: 0.3,
     topPaths: topPathsN,
     topKeywords: 5,
-    useEnhancedLabels: false,
-    enhancedKeywordsN: 5,
+    useEnhancedLabels: opts.useEnhancedLabels ?? false,
+    enhancedKeywordsN: opts.enhancedKeywordsN ?? 5,
   }
 
   const { rawDb } = getActiveSession()
+
+  // Pre-compute branch blob hash set once (if requested)
+  const branchHashSet = opts.branch ? new Set(getBlobHashesOnBranch(opts.branch)) : null
 
   // Find the timestamp range
   const rangeRow = rawDb.prepare(`SELECT MIN(timestamp) AS minTs, MAX(timestamp) AS maxTs FROM commits`)
@@ -1175,7 +1211,8 @@ export async function computeClusterChangePoints(opts: {
   const allChangePoints: ClusterChangePoint[] = []
 
   for (const ts of timestamps) {
-    const blobHashes = getBlobHashesUpTo(ts)
+    let blobHashes = getBlobHashesUpTo(ts)
+    if (branchHashSet) blobHashes = blobHashes.filter((h) => branchHashSet.has(h))
     // Skip if the visible blob set hasn't grown (saves unnecessary k-means runs)
     if (blobHashes.length === prevBlobCount && prevSnapshot !== null) {
       prevTs = ts
