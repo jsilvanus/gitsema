@@ -358,12 +358,15 @@ program
   .option('--branch <name>', 'only return blobs seen on this branch (short name, e.g. "main")')
   .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
   .option('--include-commits', 'also search commit message embeddings and display matching commits')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .action(searchCommand)
 
 program
   .command('first-seen <query>')
   .description('Find when a concept first appeared in the codebase, sorted by date (see also: search, concept-evolution)')
   .option('-k, --top <n>', 'number of results to return', '10')
+  .option('--branch <name>', 'restrict results to blobs seen on this branch')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(firstSeenCommand)
 

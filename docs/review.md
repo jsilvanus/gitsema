@@ -632,15 +632,19 @@ These omissions mean the remote-client pattern (`src/client/remoteClient.ts`) ca
 
 The following items are ordered by impact (most valuable first) and grouped by effort.
 
-### Priority 1 — Quick wins (< 1 hour each)
+### Priority 1 — Quick wins (< 1 hour each) ✅ *Implemented*
 
 1. **Extract `buildProvider()` to `src/core/embedding/providerFactory.ts`** and update all 10 call sites. Eliminates ~100 lines of duplication. No behaviour change.
+   - **Done** (`src/core/embedding/providerFactory.ts` exports `buildProvider`, `getTextProvider`, `getCodeProvider`; all CLI commands and MCP server now import from the shared factory.)
 
 2. **Add `embedQuery()` helper wrapping the query cache** and use it in `first-seen`, `author`, `change-points`, `concept-evolution`, `diff`, and MCP tools. Eliminates repeated embedding latency on re-runs with the same query.
+   - **Done** (`src/core/embedding/embedQuery.ts` exports a cache-aware `embedQuery()`; adopted in `search`, `first-seen`, `author`, `change-points`, `concept-evolution`, `diff`, and all four MCP tools that embed queries.)
 
 3. **Add `--dump [file]` to `search` and `first-seen`** for JSON output, consistent with all other commands.
+   - **Done** — both commands now accept `--dump [file]`.
 
 4. **Add `--branch <name>` to `first-seen`** — `vectorSearch` already supports it; it's a one-line option registration and a pass-through.
+   - **Done** — `first-seen` now accepts `--branch <name>` and passes it to `vectorSearch`.
 
 ### Priority 2 — High-value feature additions (1–3 hours each)
 

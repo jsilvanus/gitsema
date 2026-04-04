@@ -1,10 +1,10 @@
 import { writeFileSync } from 'node:fs'
-import { OllamaProvider } from '../../core/embedding/local.js'
-import { HttpProvider } from '../../core/embedding/http.js'
+import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { embedQuery } from '../../core/embedding/embedQuery.js'
+import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { computeAuthorContributions, type AuthorContribution } from '../../core/search/authorSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { logger } from '../../utils/logger.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 
 export interface AuthorCommandOptions {
   top?: string
@@ -13,16 +13,14 @@ export interface AuthorCommandOptions {
   dump?: string | boolean
 }
 
-function buildProvider(providerType: string, model: string): EmbeddingProvider {
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
+  try {
+    return buildProvider(providerType, model)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+    throw err
   }
-  return new OllamaProvider({ model })
 }
 
 export async function authorCommand(query: string, options: AuthorCommandOptions): Promise<void> {
@@ -46,15 +44,16 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProvider(providerType, textModel)
+  const provider = buildProviderOrExit(providerType, textModel)
 
   let queryEmbedding: number[]
   try {
-    queryEmbedding = await provider.embed(query)
+    queryEmbedding = await embedQuery(provider, query)
   } catch (err) {
     logger.error('Failed to embed query')
     console.error('Failed to embed query. Is the embedding provider running?')
     process.exit(1)
+    throw err
   }
 
   const results = await computeAuthorContributions(queryEmbedding, {

@@ -1,5 +1,6 @@
-import { OllamaProvider } from '../../core/embedding/local.js'
-import { HttpProvider } from '../../core/embedding/http.js'
+import { writeFileSync } from 'node:fs'
+import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { renderFirstSeenResults } from '../../core/search/ranking.js'
@@ -8,6 +9,12 @@ import { remoteFirstSeen } from '../../client/remoteClient.js'
 export interface FirstSeenCommandOptions {
   top?: string
   remote?: string
+  branch?: string
+  /**
+   * When present, write JSON output.  A string value is the output file path;
+   * boolean `true` means print JSON to stdout.
+   */
+  dump?: string | boolean
 }
 
 export async function firstSeenCommand(query: string, options: FirstSeenCommandOptions): Promise<void> {
@@ -37,32 +44,42 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
   }
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
 
   let provider: EmbeddingProvider
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    provider = new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
-  } else {
-    provider = new OllamaProvider({ model })
+  try {
+    provider = buildProvider(providerType, model)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+    throw err
   }
 
   let queryEmbedding: number[]
   try {
-    queryEmbedding = await provider.embed(query)
+    queryEmbedding = await embedQuery(provider, query)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: could not embed query — ${msg}`)
     process.exit(1)
+    throw err
   }
 
   // Get top-k results by semantic similarity; vectorSearch populates firstSeen/firstCommit.
   // renderFirstSeenResults re-sorts by earliest date so the output shows when each
   // concept first appeared in the codebase.
-  const results = vectorSearch(queryEmbedding, { topK })
+  const results = vectorSearch(queryEmbedding, { topK, branch: options.branch })
+
+  if (options.dump !== undefined) {
+    const json = JSON.stringify(results, null, 2)
+    if (typeof options.dump === 'string') {
+      writeFileSync(options.dump, json, 'utf8')
+      console.log(`First-seen results JSON written to: ${options.dump}`)
+    } else {
+      process.stdout.write(json + '\n')
+    }
+    return
+  }
+
   console.log(renderFirstSeenResults(results))
 }

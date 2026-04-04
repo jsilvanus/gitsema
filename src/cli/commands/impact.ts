@@ -1,7 +1,6 @@
 import { resolve } from 'node:path'
 import { existsSync, writeFileSync } from 'node:fs'
-import { OllamaProvider } from '../../core/embedding/local.js'
-import { HttpProvider } from '../../core/embedding/http.js'
+import { buildProvider } from '../../core/embedding/providerFactory.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import {
   computeImpact,
@@ -23,16 +22,14 @@ export interface ImpactCommandOptions {
   dump?: string | boolean
 }
 
-function buildProvider(providerType: string, model: string): EmbeddingProvider {
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
+  try {
+    return buildProvider(providerType, model)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+    throw err
   }
-  return new OllamaProvider({ model })
 }
 
 /**
@@ -110,7 +107,7 @@ export async function impactCommand(
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProvider(providerType, model)
+  const provider = buildProviderOrExit(providerType, model)
 
   let report: ImpactReport = { targetPath: filePath, targetBlobHash: null, results: [], moduleGroups: [] }
   try {

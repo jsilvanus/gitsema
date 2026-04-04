@@ -1,7 +1,7 @@
-import { OllamaProvider } from '../../core/embedding/local.js'
-import { HttpProvider } from '../../core/embedding/http.js'
+import { writeFileSync } from 'node:fs'
+import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
-import { getCachedQueryEmbedding, setCachedQueryEmbedding } from '../../core/embedding/queryCache.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
@@ -36,46 +36,21 @@ export interface SearchCommandOptions {
   includeCommits?: boolean
   /** Search granularity level: 'file' (default), 'chunk', 'symbol', or 'module'. */
   level?: string
+  /**
+   * When present, write JSON output.  A string value is the output file path;
+   * boolean `true` means print JSON to stdout.
+   */
+  dump?: string | boolean
 }
 
-function buildProvider(providerType: string, model: string): EmbeddingProvider {
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
-  }
-  return new OllamaProvider({ model })
-}
-
-async function embedQuery(
-  provider: EmbeddingProvider,
-  model: string,
-  query: string,
-  noCache: boolean,
-): Promise<number[]> {
-  if (!noCache) {
-    const cached = getCachedQueryEmbedding(query, model)
-    if (cached) return cached
-  }
-  let embedding: number[]
+function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
   try {
-    embedding = await provider.embed(query)
+    return buildProvider(providerType, model)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`Error: could not embed query with ${model} — ${msg}`)
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
+    throw err
   }
-  if (!noCache) {
-    try {
-      setCachedQueryEmbedding(query, model, embedding)
-    } catch {
-      // Cache write failures are non-fatal
-    }
-  }
-  return embedding
 }
 
 /**
@@ -222,11 +197,19 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   const dualModel = codeModel !== textModel
   const noCache = options.cache === false
 
-  const textProvider = buildProvider(providerType, textModel)
-  const codeProvider = dualModel ? buildProvider(providerType, codeModel) : null
+  const textProvider = buildProviderOrExit(providerType, textModel)
+  const codeProvider = dualModel ? buildProviderOrExit(providerType, codeModel) : null
 
   // Embed the query with the text model (natural-language prose)
-  const textEmbedding = await embedQuery(textProvider, textModel, query, noCache)
+  let textEmbedding: number[]
+  try {
+    textEmbedding = await sharedEmbedQuery(textProvider, query, { noCache })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`Error: could not embed query — ${msg}`)
+    process.exit(1)
+    throw err
+  }
 
   // Resolve --level flag to per-table search flags
   let searchChunksFlag = options.chunks ?? false
@@ -266,7 +249,15 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
   } else if (dualModel && codeProvider) {
     // Dual-model search: embed with both models and merge results
-    const codeEmbedding = await embedQuery(codeProvider, codeModel, query, noCache)
+    let codeEmbedding: number[]
+    try {
+      codeEmbedding = await sharedEmbedQuery(codeProvider, query, { noCache })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error: could not embed query — ${msg}`)
+      process.exit(1)
+      throw err
+    }
     const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel })
     const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel })
     results = mergeSearchResults(textResults, codeResults, topK)
@@ -279,11 +270,29 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     results = groupResults(results, groupMode, topK)
   }
 
+  // Optional commit message search
+  let commitResults
+  if (options.includeCommits) {
+    commitResults = searchCommits(textEmbedding, { topK, model: textModel })
+  }
+
+  // --dump: emit structured JSON instead of human-readable output
+  if (options.dump !== undefined) {
+    const payload: Record<string, unknown> = { results }
+    if (commitResults) payload.commits = commitResults
+    const json = JSON.stringify(payload, null, 2)
+    if (typeof options.dump === 'string') {
+      writeFileSync(options.dump, json, 'utf8')
+      console.log(`Search results JSON written to: ${options.dump}`)
+    } else {
+      process.stdout.write(json + '\n')
+    }
+    return
+  }
+
   console.log(renderResults(results))
 
-  // Optional commit message search
-  if (options.includeCommits) {
-    const commitResults = searchCommits(textEmbedding, { topK, model: textModel })
+  if (commitResults) {
     console.log('\nCommit matches:')
     console.log(renderCommitResults(commitResults))
   }

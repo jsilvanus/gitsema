@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs'
-import { OllamaProvider } from '../../core/embedding/local.js'
-import { HttpProvider } from '../../core/embedding/http.js'
+import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { computeConceptEvolution } from '../../core/search/evolution.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
@@ -18,16 +18,14 @@ export interface ConceptEvolutionCommandOptions {
   remote?: string
 }
 
-function buildProvider(providerType: string, model: string): EmbeddingProvider {
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      console.error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-      process.exit(1)
-    }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
+  try {
+    return buildProvider(providerType, model)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+    throw err
   }
-  return new OllamaProvider({ model })
 }
 
 /**
@@ -167,15 +165,16 @@ export async function conceptEvolutionCommand(
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model =
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProvider(providerType, model)
+  const provider = buildProviderOrExit(providerType, model)
 
   let queryEmbedding: number[]
   try {
-    queryEmbedding = await provider.embed(query.trim())
+    queryEmbedding = await embedQuery(provider, query.trim())
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`Error: could not embed query — ${msg}`)
+    console.error(`Error:  could not embed query — ${msg}`)
     process.exit(1)
+    throw err
   }
 
   const entries = computeConceptEvolution(queryEmbedding, topK)

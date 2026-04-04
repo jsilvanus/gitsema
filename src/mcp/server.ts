@@ -21,9 +21,8 @@ import { vectorSearch } from '../core/search/vectorSearch.js'
 import { computeEvolution, computeConceptEvolution } from '../core/search/evolution.js'
 import { runIndex } from '../core/indexing/indexer.js'
 import { getBlobContent } from '../core/indexing/blobStore.js'
-import { OllamaProvider } from '../core/embedding/local.js'
-import { HttpProvider } from '../core/embedding/http.js'
-import type { EmbeddingProvider } from '../core/embedding/provider.js'
+import { buildProvider, getTextProvider } from '../core/embedding/providerFactory.js'
+import { embedQuery } from '../core/embedding/embedQuery.js'
 import type { SearchResult } from '../core/models/types.js'
 import { formatDate } from '../core/search/ranking.js'
 import { parseDateArg } from '../core/search/timeSearch.js'
@@ -33,26 +32,6 @@ import { computeSemanticCollisions, computeMergeImpact } from '../core/search/me
 import { computeBranchSummary } from '../core/search/branchSummary.js'
 
 // ---------------------------------------------------------------------------
-// Provider factory (mirrors the logic in CLI commands)
-// ---------------------------------------------------------------------------
-
-function buildProvider(providerType: string, model: string): EmbeddingProvider {
-  if (providerType === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-    }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
-  }
-  return new OllamaProvider({ model })
-}
-
-function getTextProvider(): EmbeddingProvider {
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  return buildProvider(providerType, model)
-}
-
 // ---------------------------------------------------------------------------
 // Result serialization helpers
 // ---------------------------------------------------------------------------
@@ -98,7 +77,7 @@ export async function startMcpServer(): Promise<void> {
       const provider = getTextProvider()
       let queryEmbedding: number[]
       try {
-        queryEmbedding = await provider.embed(query)
+        queryEmbedding = await embedQuery(provider, query)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
@@ -143,7 +122,7 @@ export async function startMcpServer(): Promise<void> {
       const provider = getTextProvider()
       let queryEmbedding: number[]
       try {
-        queryEmbedding = await provider.embed(query)
+        queryEmbedding = await embedQuery(provider, query)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
@@ -192,7 +171,7 @@ export async function startMcpServer(): Promise<void> {
       const provider = getTextProvider()
       let queryEmbedding: number[]
       try {
-        queryEmbedding = await provider.embed(query)
+        queryEmbedding = await embedQuery(provider, query)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
@@ -313,7 +292,7 @@ export async function startMcpServer(): Promise<void> {
       const provider = getTextProvider()
       let queryEmbedding: number[]
       try {
-        queryEmbedding = await provider.embed(query)
+        queryEmbedding = await embedQuery(provider, query)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
@@ -403,8 +382,15 @@ export async function startMcpServer(): Promise<void> {
       const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
       const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
       const codeModelName = process.env.GITSEMA_CODE_MODEL ?? textModel
-      const textProvider = buildProvider(providerType, textModel)
-      const codeProvider = codeModelName !== textModel ? buildProvider(providerType, codeModelName) : undefined
+      let textProvider
+      let codeProvider
+      try {
+        textProvider = buildProvider(providerType, textModel)
+        codeProvider = codeModelName !== textModel ? buildProvider(providerType, codeModelName) : undefined
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
 
       // Parse max_size (simple: accept bytes or kb/mb suffixes)
       let maxBlobSize = DEFAULT_MAX_SIZE
