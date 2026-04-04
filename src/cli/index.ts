@@ -28,6 +28,9 @@ import { clusterTimelineCommand } from './commands/clusterTimeline.js'
 import { changePointsCommand } from './commands/changePoints.js'
 import { fileChangePointsCommand } from './commands/fileChangePoints.js'
 import { clusterChangePointsCommand } from './commands/clusterChangePoints.js'
+import { mergeAuditCommand } from './commands/mergeAudit.js'
+import { branchSummaryCommand } from './commands/branchSummary.js'
+import { mergePreviewCommand } from './commands/mergePreview.js'
 import { authorCommand } from './commands/author.js'
 
 const program = new Command()
@@ -105,6 +108,9 @@ const COMMAND_GROUPS: Record<string, string> = {
   clusters:           'Cluster Analysis',
   'cluster-diff':     'Cluster Analysis',
   'cluster-timeline': 'Cluster Analysis',
+  'branch-summary':   'Cluster Analysis',
+  'merge-audit':      'Cluster Analysis',
+  'merge-preview':    'Cluster Analysis',
   // Change Detection
   'change-points':         'Change Detection',
   'file-change-points':    'Change Detection',
@@ -601,6 +607,56 @@ program
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .action(clusterChangePointsCommand)
+
+program
+  .command('branch-summary <branch>')
+  .description('Generate a semantic summary of what a branch is about compared to its base branch (see also: merge-audit, merge-preview)')
+  .option('--base <branch>', 'base branch to compare against (default: main)')
+  .option('-k, --top <n>', 'number of nearest concept clusters to show (default 5)', '5')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(branchSummaryCommand)
+
+program
+  .command('merge-audit <branch-a> <branch-b>')
+  .description('Detect semantic collisions between two branches — concept-level conflicts that textual diff cannot find (see also: branch-summary, merge-preview)')
+  .option(
+    '--base <commit>',
+    'override merge-base detection with this commit hash or ref',
+  )
+  .option(
+    '--threshold <n>',
+    'cosine similarity threshold for a collision (0–1, default 0.85)',
+    '0.85',
+  )
+  .option('-k, --top <n>', 'max collision pairs to display (default 20)', '20')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(mergeAuditCommand)
+
+program
+  .command('merge-preview <branch>')
+  .description('Predict semantic cluster shifts that will occur after merging a branch — merge impact analysis (see also: merge-audit, cluster-diff)')
+  .option('--into <branch>', 'target branch to merge into (default: main)')
+  .option('--k <n>', 'number of clusters to compute (default 8)', '8')
+  .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
+  .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
+  .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise merge-preview.html',
+  )
+  .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
+  .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+  .action(mergePreviewCommand)
 
 program
   .command('backfill-fts')
