@@ -2,7 +2,7 @@
 
 **Reviewed against:** v0.32.0  
 **Date:** 2026-04-04  
-**Scope:** All 27 CLI commands, the MCP server (9 tools), and the HTTP API server.
+**Scope:** All 27 CLI commands (26 command files + `mcp` inline in `src/cli/index.ts`), the MCP server (9 tools), and the HTTP API server.
 
 ---
 
@@ -42,7 +42,7 @@ The result is a **two-tier system**: newer commands (cluster analysis, change de
 
 ## 2. Feature Map
 
-The table below shows which **newer shared features** each command uses today versus what it plausibly _should_ use.
+The table below shows which **newer shared features** each search/analysis command uses today versus what it plausibly _should_ use. The eight infrastructure commands (`config`, `status`, `index`, `update-modules`, `backfill-fts`, `serve`, `remote-index`, `mcp`) interact with the feature layer differently and are discussed individually in §3.1.
 
 Legend: ✅ implemented · ⬜ not applicable · 🔶 partial · ❌ gap (should be added)
 
@@ -257,10 +257,12 @@ firstSeenCommand() should mirror searchCommand() for all flags that feed vectorS
 
 **What it does:** Computes cosine distance between two versions of a file (`<ref1> <ref2> <path>`). Optionally shows nearest-neighbour blobs for each version.
 
+**Naming note:** This command is registered as `file-diff` in `src/cli/index.ts:417`. It is distinct from the concept-level `diff <ref1> <ref2> <query>` command (registered at line 426, implemented in `src/cli/commands/semanticDiff.ts`). The two commands have different positional arguments — `file-diff` takes a file *path* as the third argument while `diff` takes a *query string* — so there is no collision, but users should be aware of the distinction.
+
 **Feature gaps:**
 - ❌ **No symbol-level diff.** The command computes the distance between whole-file embeddings. Symbol embeddings would allow a function-level semantic diff ("which functions changed semantically?").
 - ❌ **Module embedding comparison is absent.** `module_embeddings` could show whether the module centroid drifted between refs.
-- This command (`src/cli/commands/diff.ts`) is distinct from the *semantic diff* command (`src/cli/commands/semanticDiff.ts`). The naming is potentially confusing: `gitsema diff` does a file-level semantic diff, while `gitsema diff <ref1> <ref2> <query>` is a concept-level diff. They are registered separately in `src/cli/index.ts`.
+- This command (`src/cli/commands/diff.ts`) is distinct from the *file-diff* command (`src/cli/commands/diff.ts` is registered as `file-diff` at `src/cli/index.ts:417`). See the naming note at the start of this section.
 
 ---
 
@@ -331,9 +333,8 @@ firstSeenCommand() should mirror searchCommand() for all flags that feed vectorS
 **Feature gaps:**
 - ❌ **No `--branch` flag.** Clustering operates on all indexed blobs regardless of branch. Branch-scoped clustering (`getBlobHashesUpTo` already exists at `src/core/search/clustering.ts:593`; a `getBlobHashesOnBranch` variant is missing) would enable per-branch concept maps.
 - ❌ **No `--level` flag.** Clustering is always on whole-file embeddings. Clustering on chunk or symbol embeddings would give finer-grained topic models.
-- ❌ **No `--save-clusters` flag** to persist k-means results to the `blob_clusters` / `cluster_assignments` tables so that other commands (like `search --annotate`) can annotate results with cluster labels.
 
-**Note:** The `blob_clusters` and `cluster_assignments` tables exist in the schema (`src/core/db/schema.ts`) but are never written by the `clusters` command today — they appear to be reserved for a future "persist clusters" phase.
+**Note:** `computeClusters()` already persists k-means results to the `blob_clusters` and `cluster_assignments` tables atomically on every run (`src/core/search/clustering.ts:502–507`). These persisted results are read by `merge-audit` (`src/core/search/mergeAudit.ts:137,149`) and `branch-summary` (`src/core/search/branchSummary.ts:144`). However, `computeClusterSnapshot()` (used by `cluster-diff`) and `computeClusterTimeline()` do **not** persist — they work in-memory only. Adding a `--save-snapshots` flag would let those commands also update the persistent tables.
 
 ---
 
@@ -444,11 +445,12 @@ The following files each contain an **identical** `buildProvider(providerType, m
 | `src/cli/commands/serve.ts` | 16–26 |
 | `src/mcp/server.ts` | 42–50 (as `buildProvider` + `getTextProvider`) |
 
-**Recommendation:** Extract to `src/core/embedding/providerFactory.ts` with exports:
+**Recommendation:** Extract to `src/core/embedding/providerFactory.ts` with exports (illustrative — full imports from `./local.js`, `./http.js`, `./provider.js` would be needed):
 ```ts
-export function buildProvider(type: string, model: string): EmbeddingProvider
-export function getTextProvider(): EmbeddingProvider
-export function getCodeProvider(): EmbeddingProvider
+// src/core/embedding/providerFactory.ts  (illustrative)
+export function buildProvider(type: string, model: string): EmbeddingProvider { ... }
+export function getTextProvider(): EmbeddingProvider { ... }
+export function getCodeProvider(): EmbeddingProvider { ... }
 ```
 All ten locations import from there. The MCP server already has a local pattern (`getTextProvider`) that could become the canonical implementation.
 
@@ -470,9 +472,11 @@ Commands that call `provider.embed(query)` without caching:
 | `semantic-blame` | `src/cli/commands/semanticBlame.ts` | per-block embedding |
 | MCP tools | `src/mcp/server.ts` | multiple |
 
-**Recommendation:** Replace direct `provider.embed()` calls with a shared helper that wraps the cache:
+**Recommendation:** Replace direct `provider.embed()` calls with a shared helper that wraps the cache (illustrative — imports from `./queryCache.js` and `./provider.js` would be needed):
 ```ts
-// src/core/embedding/embedQuery.ts
+// src/core/embedding/embedQuery.ts  (illustrative)
+// import { getCachedQueryEmbedding, setCachedQueryEmbedding } from './queryCache.js'
+// import type { EmbeddingProvider } from './provider.js'
 export async function embedQuery(provider: EmbeddingProvider, query: string): Promise<number[]> {
   const cached = getCachedQueryEmbedding(query, provider.model)
   if (cached) return cached
@@ -658,7 +662,7 @@ The following items are ordered by impact (most valuable first) and grouped by e
 
 ### Priority 4 — Larger refactors / new capabilities (> 8 hours each)
 
-14. **Persist cluster results to `blob_clusters` / `cluster_assignments`** — add a `--save-clusters` flag to `clusters` so that `search` can annotate results with their cluster label (the tables already exist in the schema).
+14. **Expose persisted cluster data in `search` results** — `computeClusters()` already writes to `blob_clusters` / `cluster_assignments` atomically (`src/core/search/clustering.ts:502–507`). After running `gitsema clusters`, annotate `search` results with the cluster label from `cluster_assignments` (add a `--annotate-clusters` flag to `search`). Both `merge-audit` and `branch-summary` already read those tables — `search` should too.
 
 15. **Add missing MCP tools** — at minimum: `clusters`, `change_points`, `author`, `impact`, `dead_concepts`.
 
