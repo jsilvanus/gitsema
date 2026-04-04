@@ -6,12 +6,14 @@ import {
   type CollisionPair,
 } from '../../core/search/mergeAudit.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
+import { renderMergeAuditHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface MergeAuditCommandOptions {
   base?: string
   threshold?: string
   top?: string
   dump?: string | boolean
+  html?: string | boolean
   enhancedLabels?: boolean
 }
 
@@ -79,6 +81,14 @@ export async function mergeAuditCommand(
       } else {
         console.log(json)
       }
+      return
+    }
+
+    if (options.html !== undefined) {
+      const html = renderMergeAuditHtml(report)
+      const outFile = typeof options.html === 'string' ? options.html : 'merge-audit.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Merge audit HTML written to: ${outFile}`)
       return
     }
 

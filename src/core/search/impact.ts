@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { getActiveSession } from '../db/sqlite.js'
-import { embeddings, paths, chunks, chunkEmbeddings } from '../db/schema.js'
+import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
@@ -149,9 +149,9 @@ export function buildModuleGroups(results: ImpactResult[]): ModuleGroup[] {
 export async function computeImpact(
   filePath: string,
   provider: EmbeddingProvider,
-  opts: { topK?: number; searchChunks?: boolean; repoPath?: string; branch?: string } = {},
+  opts: { topK?: number; searchChunks?: boolean; searchSymbols?: boolean; repoPath?: string; branch?: string } = {},
 ): Promise<ImpactReport> {
-  const { topK = 10, searchChunks = false, branch } = opts
+  const { topK = 10, searchChunks = false, searchSymbols = false, branch } = opts
   const { db } = getActiveSession()
 
   // --- Read and embed target file ---
@@ -191,6 +191,10 @@ export async function computeImpact(
     chunkId?: number
     startLine?: number
     endLine?: number
+    symbolId?: number
+    symbolName?: string
+    symbolKind?: string
+    language?: string
   }
 
   let allEmbRows: Array<{ blobHash: string; vector: unknown }> = db
@@ -233,6 +237,36 @@ export async function computeImpact(
     }
   }
 
+  if (searchSymbols) {
+    const symRows = db
+      .select({
+        blobHash: symbols.blobHash,
+        startLine: symbols.startLine,
+        endLine: symbols.endLine,
+        symbolId: symbols.id,
+        symbolName: symbols.symbolName,
+        symbolKind: symbols.symbolKind,
+        language: symbols.language,
+        vector: symbolEmbeddings.vector,
+      })
+      .from(symbolEmbeddings)
+      .innerJoin(symbols, eq(symbolEmbeddings.symbolId, symbols.id))
+      .all()
+
+    for (const row of symRows) {
+      candidates.push({
+        blobHash: row.blobHash,
+        vector: row.vector as Buffer,
+        symbolId: row.symbolId,
+        symbolName: row.symbolName,
+        symbolKind: row.symbolKind,
+        language: row.language,
+        startLine: row.startLine,
+        endLine: row.endLine,
+      })
+    }
+  }
+
   // Exclude the target blob itself
   if (targetBlobHash) {
     candidates = candidates.filter((c) => c.blobHash !== targetBlobHash)
@@ -249,12 +283,12 @@ export async function computeImpact(
     score: cosineSimilarity(targetEmbedding, bufferToEmbedding(c.vector)),
   }))
 
-  // Sort descending, deduplicate by blobHash (keep best score per blob unless chunk-level)
+  // Sort descending, deduplicate by blobHash (keep best score per blob unless chunk/symbol-level)
   scored.sort((a, b) => b.score - a.score)
 
   let topEntries: ScoredCandidate[]
-  if (searchChunks) {
-    // When chunk-level results are requested, keep distinct (blobHash, chunkId) pairs
+  if (searchChunks || searchSymbols) {
+    // When chunk/symbol-level results are requested, keep distinct (blobHash, chunkId/symbolId) pairs
     topEntries = scored.slice(0, topK)
   } else {
     const bestByBlob = new Map<string, ScoredCandidate>()

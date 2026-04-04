@@ -5,6 +5,7 @@ import {
   type ClusterChangePointReport,
   type ClusterChangePoint,
 } from '../../core/search/clustering.js'
+import { renderClusterChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface ClusterChangePointsCommandOptions {
   k?: string
@@ -14,6 +15,7 @@ export interface ClusterChangePointsCommandOptions {
   until?: string
   maxCommits?: string
   dump?: string | boolean
+  html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
   branch?: string
@@ -146,6 +148,14 @@ export async function clusterChangePointsCommand(
         process.stdout.write(json + '\n')
         return
       }
+    }
+
+    if (options.html !== undefined) {
+      const html = renderClusterChangePointsHtml(report)
+      const outFile = typeof options.html === 'string' ? options.html : 'cluster-change-points.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Cluster change points HTML written to: ${outFile}`)
+      return
     }
 
     console.log('Cluster change points')

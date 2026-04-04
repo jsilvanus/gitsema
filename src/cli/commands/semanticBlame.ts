@@ -11,6 +11,8 @@ import { shortHash } from '../../core/search/ranking.js'
 export interface SemanticBlameCommandOptions {
   /** Number of nearest-neighbor blobs per block (default 3). */
   top?: string
+  /** Search level: file (default) or symbol. */
+  level?: string
   /**
    * When present, write JSON output.  If a string, treat it as the output
    * file path; if a boolean `true`, print JSON to stdout.
@@ -111,7 +113,7 @@ export async function semanticBlameCommand(
 
   let entries: SemanticBlameEntry[]
   try {
-    entries = await computeSemanticBlame(filePath.trim(), content, provider, { topK })
+    entries = await computeSemanticBlame(filePath.trim(), content, provider, { topK, searchSymbols: options.level === 'symbol' })
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

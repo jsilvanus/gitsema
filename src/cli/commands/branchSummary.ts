@@ -4,11 +4,13 @@ import {
   type BranchSummaryResult,
   type DriftedPath,
 } from '../../core/search/branchSummary.js'
+import { renderBranchSummaryHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface BranchSummaryCommandOptions {
   base?: string
   top?: string
   dump?: string | boolean
+  html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
 }
@@ -48,6 +50,14 @@ export async function branchSummaryCommand(
       } else {
         console.log(json)
       }
+      return
+    }
+
+    if (options.html !== undefined) {
+      const html = renderBranchSummaryHtml(result)
+      const outFile = typeof options.html === 'string' ? options.html : 'branch-summary.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Branch summary HTML written to: ${outFile}`)
       return
     }
 

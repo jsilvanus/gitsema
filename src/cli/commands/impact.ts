@@ -15,6 +15,8 @@ export interface ImpactCommandOptions {
   top?: string
   /** When true, include chunk-level embeddings for finer-grained coupling. */
   chunks?: boolean
+  /** Search level: file (default), chunk, or symbol. */
+  level?: string
   /**
    * When present, write JSON output.  A string value is the output file path;
    * boolean `true` means print JSON to stdout.
@@ -115,7 +117,8 @@ export async function impactCommand(
   try {
     report = await computeImpact(resolvedPath, provider, {
       topK,
-      searchChunks: options.chunks ?? false,
+      searchChunks: options.level === 'chunk' || (options.chunks ?? false),
+      searchSymbols: options.level === 'symbol',
       branch: options.branch,
     })
   } catch (err) {

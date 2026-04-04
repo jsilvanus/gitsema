@@ -4,10 +4,12 @@ import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
 import { remoteFileEvolution } from '../../client/remoteClient.js'
+import { renderFileEvolutionHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface EvolutionCommandOptions {
   threshold?: string
   dump?: string | boolean
+  html?: string | boolean
   includeContent?: boolean
   origin?: string
   remote?: string
@@ -275,6 +277,21 @@ export async function evolutionCommand(
   console.log(`Evolution of: ${filePath}`)
   if (options.origin) console.log(`Origin blob: ${options.origin}`)
   console.log(`Versions found: ${entries.length}`)
+
+  // --html: emit interactive HTML visualization
+  if (options.html !== undefined) {
+    const html = renderFileEvolutionHtml(filePath.trim(), entries, threshold)
+    const outFile = typeof options.html === 'string' ? options.html : 'file-evolution.html'
+    try {
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`File-evolution HTML written to: ${outFile}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error writing HTML file: ${msg}`)
+      process.exit(1)
+    }
+    return
+  }
 
   if (enrichedAlerts !== undefined) {
     // --alerts mode: show alerts section (optionally in addition to the full timeline)

@@ -8,6 +8,7 @@ import {
   type ConceptChangePoint,
 } from '../../core/search/changePoints.js'
 import { resolveRefToTimestamp } from '../../core/search/clustering.js'
+import { renderConceptChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface ChangePointsCommandOptions {
   top?: string
@@ -16,6 +17,7 @@ export interface ChangePointsCommandOptions {
   since?: string
   until?: string
   dump?: string | boolean
+  html?: string | boolean
   includeContent?: boolean
   branch?: string
 }
@@ -149,6 +151,14 @@ export async function changePointsCommand(
         process.stdout.write(json + '\n')
         return
       }
+    }
+
+    if (options.html !== undefined) {
+      const html = renderConceptChangePointsHtml(report)
+      const outFile = typeof options.html === 'string' ? options.html : 'change-points.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Change points HTML written to: ${outFile}`)
+      return
     }
 
     console.log(`Concept change points: "${query}"`)

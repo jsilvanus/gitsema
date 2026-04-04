@@ -385,6 +385,10 @@ program
     'output structured JSON of all evolution entries; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise file-evolution.html',
+  )
+  .option(
     '--include-content',
     'include the stored file content for each version in the JSON dump (only used with --dump)',
   )
@@ -481,6 +485,7 @@ program
   .alias('semantic-blame')
   .description('Show semantic origin of each logical block in a file — nearest-neighbor blame (see also: file-evolution, impact)')
   .option('-k, --top <n>', 'number of nearest-neighbor blobs to show per block (default 3)', '3')
+  .option('--level <level>', 'search level: file (default) or symbol — symbol uses function-level embeddings')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -499,6 +504,10 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise dead-concepts.html',
+  )
   .option('--branch <name>', 'restrict dead-concept candidates to blobs seen on this branch')
   .action(deadConceptsCommand)
 
@@ -507,6 +516,7 @@ program
   .description('Compute semantically similar blobs across the codebase to highlight refactor impact (see also: blame, file-diff)')
   .option('-k, --top <n>', 'number of similar blobs to return', '10')
   .option('--chunks', 'include chunk-level embeddings for finer-grained coupling')
+  .option('--level <level>', 'search level: file (default), chunk, or symbol')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -591,6 +601,10 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise change-points.html',
+  )
   .action(changePointsCommand)
 
 program
@@ -603,6 +617,10 @@ program
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise file-change-points.html',
   )
   .action(fileChangePointsCommand)
 
@@ -622,6 +640,10 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-change-points.html',
+  )
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
@@ -635,6 +657,10 @@ program
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise branch-summary.html',
   )
   .option('--enhanced-labels', 'show more keyword detail for concept clusters in the output')
   .option('--enhanced-keywords-n <n>', 'number of keywords to display per cluster when --enhanced-labels is set (default 8)', '8')
@@ -656,6 +682,10 @@ program
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise merge-audit.html',
   )
   .option('--enhanced-labels', 'show top keywords alongside cluster labels in collision output')
   .action(mergeAuditCommand)
