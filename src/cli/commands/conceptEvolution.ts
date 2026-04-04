@@ -172,7 +172,7 @@ export async function conceptEvolutionCommand(
     queryEmbedding = await embedQuery(provider, query.trim())
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`Error:  could not embed query — ${msg}`)
+    console.error(`Error: could not embed query — ${msg}`)
     process.exit(1)
     throw err
   }
