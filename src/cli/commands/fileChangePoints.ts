@@ -5,6 +5,7 @@ import {
   type FileChangePoint,
 } from '../../core/search/changePoints.js'
 import { resolveRefToTimestamp } from '../../core/search/clustering.js'
+import { renderFileChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface FileChangePointsCommandOptions {
   threshold?: string
@@ -12,6 +13,8 @@ export interface FileChangePointsCommandOptions {
   since?: string
   until?: string
   dump?: string | boolean
+  html?: string | boolean
+  level?: string
   includeContent?: boolean
 }
 
@@ -96,7 +99,7 @@ export async function fileChangePointsCommand(
   }
 
   try {
-    const report = computeFileChangePoints(filePath.trim(), { threshold, topPoints, since, until })
+    const report = computeFileChangePoints(filePath.trim(), { threshold, topPoints, since, until, useSymbolLevel: options.level === 'symbol' })
 
     if (options.dump !== undefined) {
       const json = JSON.stringify(report, null, 2)
@@ -107,6 +110,14 @@ export async function fileChangePointsCommand(
         process.stdout.write(json + '\n')
         return
       }
+    }
+
+    if (options.html !== undefined) {
+      const html = renderFileChangePointsHtml(report)
+      const outFile = typeof options.html === 'string' ? options.html : 'file-change-points.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`File change points HTML written to: ${outFile}`)
+      return
     }
 
     console.log(`File change points: "${filePath}"`)

@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { computeEvolution } from './evolution.js'
 
 // ---------------------------------------------------------------------------
@@ -86,6 +86,7 @@ export function computeConceptChangePoints(
     topPoints?: number
     since?: number
     until?: number
+    branch?: string
   } = {},
 ): ConceptChangePointReport {
   const topK = opts.topK ?? 50
@@ -97,12 +98,21 @@ export function computeConceptChangePoints(
   const { rawDb } = getActiveSession()
 
   // --- Load all embeddings and pre-score against the query ---
-  const embRows = rawDb
+  let embRows = rawDb
     .prepare('SELECT blob_hash, vector FROM embeddings')
     .all() as Array<{ blob_hash: string; vector: Buffer }>
 
   if (embRows.length === 0) {
     return { type: 'concept-change-points', query, k: topK, threshold, range: { since: sinceLabel, until: untilLabel }, points: [] }
+  }
+
+  // Apply branch filter
+  if (opts.branch) {
+    const branchSet = getBranchBlobHashSet(opts.branch)
+    embRows = embRows.filter((r) => branchSet.has(r.blob_hash))
+    if (embRows.length === 0) {
+      return { type: 'concept-change-points', query, k: topK, threshold, range: { since: sinceLabel, until: untilLabel }, points: [] }
+    }
   }
 
   const scoredBlobs = embRows.map((r) => ({
@@ -290,6 +300,7 @@ export function computeFileChangePoints(
     topPoints?: number
     since?: number
     until?: number
+    useSymbolLevel?: boolean
   } = {},
 ): FileChangePointReport {
   const threshold = opts.threshold ?? 0.3
@@ -297,7 +308,7 @@ export function computeFileChangePoints(
   const sinceLabel = opts.since ? new Date(opts.since * 1000).toISOString().slice(0, 10) : null
   const untilLabel = opts.until ? new Date(opts.until * 1000).toISOString().slice(0, 10) : null
 
-  const entries = computeEvolution(filePath)
+  const entries = computeEvolution(filePath, undefined, { useSymbolLevel: opts.useSymbolLevel })
 
   const allChangePoints: FileChangePoint[] = []
 

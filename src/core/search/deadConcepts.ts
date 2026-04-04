@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -117,20 +117,28 @@ export async function findDeadConcepts(opts: {
   topK?: number
   since?: number
   repoPath?: string
+  branch?: string
 }): Promise<DeadConceptResult[]> {
-  const { topK = 10, since, repoPath = '.' } = opts
+  const { topK = 10, since, repoPath = '.', branch } = opts
   const { db } = getActiveSession()
 
   // 1. Blobs reachable from HEAD
   const headHashes = await getHeadBlobHashes(repoPath)
 
   // 2. All indexed embeddings
-  const allEmbRows = db
+  let allEmbRows = db
     .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
     .from(embeddings)
     .all()
 
   if (allEmbRows.length === 0) return []
+
+  // Apply branch filter: restrict to blobs seen on the specified branch
+  if (branch) {
+    const branchSet = getBranchBlobHashSet(branch)
+    allEmbRows = allEmbRows.filter((r) => branchSet.has(r.blobHash))
+    if (allEmbRows.length === 0) return []
+  }
 
   // Partition into HEAD-present vs. dead
   const headVectors: number[][] = []

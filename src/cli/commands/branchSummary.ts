@@ -4,11 +4,15 @@ import {
   type BranchSummaryResult,
   type DriftedPath,
 } from '../../core/search/branchSummary.js'
+import { renderBranchSummaryHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface BranchSummaryCommandOptions {
   base?: string
   top?: string
   dump?: string | boolean
+  html?: string | boolean
+  enhancedLabels?: boolean
+  enhancedKeywordsN?: string
 }
 
 /**
@@ -23,6 +27,7 @@ export async function branchSummaryCommand(
 ): Promise<void> {
   const baseBranch = options.base ?? 'main'
   const topConcepts = options.top !== undefined ? parseInt(options.top, 10) : 5
+  const enhancedKeywordsN = options.enhancedKeywordsN !== undefined ? parseInt(options.enhancedKeywordsN, 10) : 8
 
   if (isNaN(topConcepts) || topConcepts < 1) {
     console.error('Error: --top must be a positive integer')
@@ -48,7 +53,15 @@ export async function branchSummaryCommand(
       return
     }
 
-    printResult(result, baseBranch)
+    if (options.html !== undefined) {
+      const html = renderBranchSummaryHtml(result)
+      const outFile = typeof options.html === 'string' ? options.html : 'branch-summary.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Branch summary HTML written to: ${outFile}`)
+      return
+    }
+
+    printResult(result, baseBranch, options.enhancedLabels ? enhancedKeywordsN : 5)
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
@@ -66,7 +79,7 @@ function driftLabel(drift: number): string {
   return 'large shift'
 }
 
-function printResult(result: BranchSummaryResult, baseBranch: string): void {
+function printResult(result: BranchSummaryResult, baseBranch: string, keywordsN = 5): void {
   console.log(
     `Branch summary: ${result.branch} vs ${baseBranch} (merge base: ${result.mergeBase.slice(0, 8)})`,
   )
@@ -90,7 +103,7 @@ function printResult(result: BranchSummaryResult, baseBranch: string): void {
         `  ${i + 1}. "${c.clusterLabel}"  — similarity ${c.similarity.toFixed(3)}`,
       )
       if (c.topKeywords.length > 0) {
-        console.log(`     Keywords: ${c.topKeywords.slice(0, 5).join(', ')}`)
+        console.log(`     Keywords: ${c.topKeywords.slice(0, keywordsN).join(', ')}`)
       }
     })
     console.log('')

@@ -15,6 +15,10 @@
  *   POST /evolution/file
  *   POST /evolution/concept
  *   POST /remote/index        (Phase 16 — server-managed clone + index)
+ *   POST /analysis/clusters   (Phase 34 — analysis commands)
+ *   POST /analysis/change-points
+ *   POST /analysis/author
+ *   POST /analysis/impact
  */
 
 import express from 'express'
@@ -28,6 +32,7 @@ import { commitsRouter } from './routes/commits.js'
 import { searchRouter } from './routes/search.js'
 import { evolutionRouter } from './routes/evolution.js'
 import { remoteRouter } from './routes/remote.js'
+import { analysisRouter } from './routes/analysis.js'
 
 export interface AppOptions {
   textProvider: EmbeddingProvider
@@ -69,6 +74,8 @@ export function createApp(options: AppOptions): Express {
     `${base}/remote`,
     remoteRouter({ textProvider, codeProvider, chunkerStrategy, concurrency }),
   )
+
+  app.use(`${base}/analysis`, analysisRouter({ textProvider }))
 
   return app
 }

@@ -5,6 +5,7 @@ import {
 } from '../../core/search/deadConcepts.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { shortHash } from '../../core/search/ranking.js'
+import { renderDeadConceptsHtml } from '../../core/viz/htmlRenderer.js'
 
 export interface DeadConceptsCommandOptions {
   /** Number of results to return (default 10). */
@@ -19,6 +20,13 @@ export interface DeadConceptsCommandOptions {
    * boolean `true` means print JSON to stdout.
    */
   dump?: string | boolean
+  /**
+   * When present, write interactive HTML output.  A string value is the output
+   * file path; boolean `true` writes to dead-concepts.html.
+   */
+  html?: string | boolean
+  /** When set, restrict dead-concept candidates to blobs seen on this branch. */
+  branch?: string
 }
 
 function formatDate(timestamp: number | null): string {
@@ -84,7 +92,7 @@ export async function deadConceptsCommand(
 
   let results: DeadConceptResult[] = []
   try {
-    results = await findDeadConcepts({ topK, since, repoPath: '.' })
+    results = await findDeadConcepts({ topK, since, repoPath: '.', branch: options.branch })
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
@@ -98,6 +106,14 @@ export async function deadConceptsCommand(
     } else {
       console.log(json)
     }
+    return
+  }
+
+  if (options.html !== undefined) {
+    const html = renderDeadConceptsHtml(results)
+    const outFile = typeof options.html === 'string' ? options.html : 'dead-concepts.html'
+    writeFileSync(outFile, html, 'utf8')
+    console.log(`Dead concepts HTML written to: ${outFile}`)
     return
   }
 
