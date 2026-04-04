@@ -300,6 +300,7 @@ export function computeFileChangePoints(
     topPoints?: number
     since?: number
     until?: number
+    useSymbolLevel?: boolean
   } = {},
 ): FileChangePointReport {
   const threshold = opts.threshold ?? 0.3
@@ -307,7 +308,7 @@ export function computeFileChangePoints(
   const sinceLabel = opts.since ? new Date(opts.since * 1000).toISOString().slice(0, 10) : null
   const untilLabel = opts.until ? new Date(opts.until * 1000).toISOString().slice(0, 10) : null
 
-  const entries = computeEvolution(filePath)
+  const entries = computeEvolution(filePath, undefined, { useSymbolLevel: opts.useSymbolLevel })
 
   const allChangePoints: FileChangePoint[] = []
 

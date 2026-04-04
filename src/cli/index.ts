@@ -358,6 +358,7 @@ program
   .option('--branch <name>', 'only return blobs seen on this branch (short name, e.g. "main")')
   .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
   .option('--include-commits', 'also search commit message embeddings and display matching commits')
+  .option('--annotate-clusters', 'annotate each result with its cluster label from a prior `gitsema clusters` run')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .action(searchCommand)
 
@@ -380,6 +381,7 @@ program
     '--threshold <n>',
     'cosine distance threshold above which a version change is flagged as a large change (default 0.3)',
   )
+  .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
   .option(
     '--dump [file]',
     'output structured JSON of all evolution entries; writes to <file> if given, otherwise prints JSON to stdout',
@@ -612,6 +614,7 @@ program
   .description('Detect semantic change points in a file\'s Git history (see also: file-evolution, change-points)')
   .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
+  .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option(

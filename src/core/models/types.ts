@@ -30,4 +30,6 @@ export interface SearchResult {
   language?: string
   /** When present, indicates this result is a module-level (directory) centroid match. */
   modulePath?: string
+  /** Cluster label from `cluster_assignments` — populated by `--annotate-clusters` on the search command. */
+  clusterLabel?: string
 }

@@ -10,6 +10,7 @@ export interface EvolutionCommandOptions {
   threshold?: string
   dump?: string | boolean
   html?: string | boolean
+  level?: string
   includeContent?: boolean
   origin?: string
   remote?: string
@@ -242,7 +243,7 @@ export async function evolutionCommand(
 
   const includeContent = options.includeContent ?? false
   const origin = options.origin
-  const entries = computeEvolution(filePath.trim(), origin)
+  const entries = computeEvolution(filePath.trim(), origin, { useSymbolLevel: options.level === 'symbol' })
 
   // Build and enrich alerts when --alerts is set.
   let enrichedAlerts: EvolutionAlert[] | undefined

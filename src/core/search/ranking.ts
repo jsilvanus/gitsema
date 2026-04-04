@@ -93,11 +93,12 @@ export function renderResults(results: SearchResult[]): string {
     const lineSuffix = result.startLine !== undefined && result.endLine !== undefined
       ? `:${result.startLine}-${result.endLine}`
       : ''
+    const clusterSuffix = result.clusterLabel ? `  [cluster: ${result.clusterLabel}]` : ''
     if (result.paths.length === 0) {
-      lines.push(`${score}  (unknown path)  [${hash}]${dateSuffix}`)
+      lines.push(`${score}  (unknown path)  [${hash}]${dateSuffix}${clusterSuffix}`)
     } else {
       const pathStr = result.paths[0] + lineSuffix
-      lines.push(`${score}  ${pathStr.padEnd(50)}  [${hash}]${dateSuffix}`)
+      lines.push(`${score}  ${pathStr.padEnd(50)}  [${hash}]${dateSuffix}${clusterSuffix}`)
       for (let i = 1; i < result.paths.length; i++) {
         lines.push(`       ${result.paths[i].padEnd(50)}`)
       }

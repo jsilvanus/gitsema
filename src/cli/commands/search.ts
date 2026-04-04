@@ -8,6 +8,7 @@ import { renderResults, groupResults, formatScore, formatDate, shortHash, type G
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
+import { getRawDb } from '../../core/db/sqlite.js'
 
 export interface SearchCommandOptions {
   top?: string
@@ -36,6 +37,11 @@ export interface SearchCommandOptions {
   includeCommits?: boolean
   /** Search granularity level: 'file' (default), 'chunk', 'symbol', or 'module'. */
   level?: string
+  /**
+   * When true, annotate each result with the cluster label from `cluster_assignments`
+   * (requires a prior `gitsema clusters` run to have populated the table).
+   */
+  annotateClusters?: boolean
   /**
    * When present, write JSON output.  A string value is the output file path;
    * boolean `true` means print JSON to stdout.
@@ -274,6 +280,25 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   let commitResults
   if (options.includeCommits) {
     commitResults = searchCommits(textEmbedding, { topK, model: textModel })
+  }
+
+  // --annotate-clusters: join each result with its cluster label (if a clustering run exists)
+  if (options.annotateClusters && results.length > 0) {
+    try {
+      const rawDb = getRawDb()
+      const hashes = results.map((r) => `'${r.blobHash}'`).join(',')
+      const rows = rawDb.prepare(
+        `SELECT ca.blob_hash, bc.label FROM cluster_assignments ca
+         JOIN blob_clusters bc ON bc.id = ca.cluster_id
+         WHERE ca.blob_hash IN (${hashes})`
+      ).all() as Array<{ blob_hash: string; label: string }>
+      const labelMap = new Map(rows.map((r) => [r.blob_hash, r.label]))
+      for (const r of results) {
+        if (labelMap.has(r.blobHash)) r.clusterLabel = labelMap.get(r.blobHash)
+      }
+    } catch {
+      // cluster_assignments table may not exist (no clustering run yet) — silently skip
+    }
   }
 
   // --dump: emit structured JSON instead of human-readable output

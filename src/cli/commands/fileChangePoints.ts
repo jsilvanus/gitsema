@@ -14,6 +14,7 @@ export interface FileChangePointsCommandOptions {
   until?: string
   dump?: string | boolean
   html?: string | boolean
+  level?: string
   includeContent?: boolean
 }
 
@@ -98,7 +99,7 @@ export async function fileChangePointsCommand(
   }
 
   try {
-    const report = computeFileChangePoints(filePath.trim(), { threshold, topPoints, since, until })
+    const report = computeFileChangePoints(filePath.trim(), { threshold, topPoints, since, until, useSymbolLevel: options.level === 'symbol' })
 
     if (options.dump !== undefined) {
       const json = JSON.stringify(report, null, 2)
