@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings } from '../db/schema.js'
+import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
@@ -68,6 +68,8 @@ export interface VectorSearchOptions {
   searchChunks?: boolean
   /** When true, search symbol-level embeddings (named function/class declarations). */
   searchSymbols?: boolean
+  /** When true, search module-level (directory centroid) embeddings. */
+  searchModules?: boolean
   /** When set, restrict results to blobs that appear on this branch (short name, e.g. "main"). */
   branch?: string
 }
@@ -82,7 +84,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const {
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',
-    searchChunks = false, searchSymbols = false, branch,
+    searchChunks = false, searchSymbols = false, searchModules = false, branch,
   } = options
 
   // Determine if three-signal ranking is active
@@ -108,6 +110,8 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     blobHash: string; vector: Buffer
     chunkId?: number; startLine?: number; endLine?: number
     symbolId?: number; symbolName?: string; symbolKind?: string; language?: string
+    /** Set for module-level results — the directory path. */
+    modulePath?: string
   }
   let candidatePool: CandidateRow[] = allRows.map((r) => ({
     blobHash: r.blobHash,
@@ -141,6 +145,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   }
 
   if (searchSymbols) {
+
     const symQuery = db.select({
       symbolId: symbols.id,
       blobHash: symbols.blobHash,
@@ -168,6 +173,26 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
         symbolName: row.symbolName,
         symbolKind: row.symbolKind,
         language: row.language,
+      })
+    }
+  }
+
+  if (searchModules) {
+    const modQuery = db.select({
+      id: moduleEmbeddings.id,
+      modulePath: moduleEmbeddings.modulePath,
+      vector: moduleEmbeddings.vector,
+    }).from(moduleEmbeddings)
+
+    const modRows = (model
+      ? modQuery.where(eq(moduleEmbeddings.model, model))
+      : modQuery).all()
+
+    for (const row of modRows) {
+      candidatePool.push({
+        blobHash: `module:${row.modulePath}`,
+        vector: row.vector as Buffer,
+        modulePath: row.modulePath,
       })
     }
   }
@@ -285,6 +310,18 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   return topEntries.map((b) => {
     const firstSeen = firstSeenMap.get(b.blobHash)
+    // Module results use a synthetic blobHash `module:<path>` and do not have
+    // entries in the paths table. Map them to modulePath and expose a single
+    // path equal to the modulePath for display purposes.
+    if (b.modulePath !== undefined) {
+      return {
+        blobHash: b.blobHash,
+        paths: [b.modulePath],
+        score: b.score,
+        modulePath: b.modulePath,
+      }
+    }
+
     return {
       blobHash: b.blobHash,
       paths: pathsByBlob!.get(b.blobHash) ?? [],

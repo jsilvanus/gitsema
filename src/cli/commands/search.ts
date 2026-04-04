@@ -28,6 +28,7 @@ export interface SearchCommandOptions {
    * Defaults to `true` (use cache). When `false`, skip both cache reads and writes.
    */
   cache?: boolean
+  level?: string
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -194,6 +195,28 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   // Embed the query with the text model (natural-language prose)
   const textEmbedding = await embedQuery(textProvider, textModel, query, noCache)
 
+  let searchChunksFlag = options.chunks ?? false
+  let searchSymbolsFlag = false
+  let searchModulesFlag = false
+  if (options.level) {
+    switch (options.level) {
+      case 'file':
+        break
+      case 'chunk':
+        searchChunksFlag = true
+        break
+      case 'symbol':
+        searchSymbolsFlag = true
+        break
+      case 'module':
+        searchModulesFlag = true
+        break
+      default:
+        console.error('Error: --level must be one of: file, chunk, symbol, module')
+        process.exit(1)
+    }
+  }
+
   const searchOpts = {
     topK,
     recent: options.recent ?? false,
@@ -204,7 +227,9 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     weightRecency,
     weightPath,
     query,
-    searchChunks: options.chunks ?? false,
+    searchChunks: searchChunksFlag,
+    searchSymbols: searchSymbolsFlag,
+    searchModules: searchModulesFlag,
     branch: options.branch,
   }
 

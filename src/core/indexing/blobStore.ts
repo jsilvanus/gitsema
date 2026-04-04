@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches, symbols, symbolEmbeddings } from '../db/schema.js'
+import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
@@ -274,6 +274,7 @@ export interface StoreSymbolArgs {
   language: string
   model: string
   embedding: Embedding
+  chunkId?: number
 }
 
 /**
@@ -292,7 +293,7 @@ export interface StoreSymbolArgs {
  * Returns the newly created (or existing) symbol id.
  */
 export function storeSymbol(args: StoreSymbolArgs): number {
-  const { blobHash, startLine, endLine, symbolName, symbolKind, language, model, embedding } = args
+  const { blobHash, startLine, endLine, symbolName, symbolKind, language, model, embedding, chunkId } = args
   const { db, rawDb } = getActiveSession()
   const vector = Buffer.from(new Float32Array(embedding).buffer)
 
@@ -314,7 +315,7 @@ export function storeSymbol(args: StoreSymbolArgs): number {
   return db.transaction((tx) => {
     const symbolRow = tx
       .insert(symbols)
-      .values({ blobHash, startLine, endLine, symbolName, symbolKind, language })
+      .values({ blobHash, startLine, endLine, symbolName, symbolKind, language, chunkId: chunkId ?? null })
       .returning({ id: symbols.id })
       .get()
 
@@ -324,4 +325,71 @@ export function storeSymbol(args: StoreSymbolArgs): number {
 
     return symbolRow.id
   })
+}
+
+export interface StoreModuleEmbeddingArgs {
+  modulePath: string
+  model: string
+  embedding: Embedding
+  blobCount: number
+}
+
+/**
+ * Upserts a module-level centroid embedding.
+ * Replaces any existing row for the same modulePath.
+ */
+export function storeModuleEmbedding(args: StoreModuleEmbeddingArgs): void {
+  const { modulePath, model, embedding, blobCount } = args
+  const { rawDb } = getActiveSession()
+  const vector = Buffer.from(new Float32Array(embedding).buffer)
+
+  // INSERT OR REPLACE upserts the module centroid row keyed on module_path (UNIQUE).
+  // The sub-select preserves the existing id so REPLACE doesn't increment the PK.
+  rawDb.prepare(`
+    INSERT OR REPLACE INTO module_embeddings
+      (id, module_path, model, dimensions, vector, blob_count, updated_at)
+    VALUES (
+      (SELECT id FROM module_embeddings WHERE module_path = ?),
+      ?, ?, ?, ?, ?, ?
+    )
+  `).run(modulePath, modulePath, model, embedding.length, vector, blobCount, Date.now())
+}
+
+/**
+ * Returns the stored module embedding for the given directory path, or null.
+ */
+export function getModuleEmbedding(modulePath: string): { vector: number[]; blobCount: number } | null {
+  const { rawDb } = getActiveSession()
+  const row = rawDb
+    .prepare('SELECT vector, blob_count FROM module_embeddings WHERE module_path = ?')
+    .get(modulePath) as { vector: Buffer; blob_count: number } | undefined
+  if (!row) return null
+  const f32 = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4)
+  return { vector: Array.from(f32), blobCount: row.blob_count }
+}
+
+/**
+ * Returns all stored whole-file embeddings with their first known path and model.
+ * Used by the update-modules command to recalculate all module centroids.
+ */
+export function getAllBlobEmbeddingsWithPaths(): Array<{ blobHash: string; vector: number[]; path: string; model: string }> {
+  const { rawDb } = getActiveSession()
+  const rows = rawDb
+    .prepare(
+      `SELECT e.blob_hash as blob_hash, e.vector as vector, e.model as model, p.path as path
+       FROM embeddings e
+       JOIN paths p ON p.blob_hash = e.blob_hash
+       WHERE p.id = (SELECT MIN(id) FROM paths WHERE blob_hash = e.blob_hash)`,
+    )
+    .all() as Array<{ blob_hash: string; vector: Buffer; path: string; model: string }>
+
+  return rows.map((r) => {
+    const f32 = new Float32Array(r.vector.buffer, r.vector.byteOffset, r.vector.byteLength / 4)
+    return { blobHash: r.blob_hash, vector: Array.from(f32), path: r.path, model: r.model }
+  })
+}
+
+export function deleteAllModuleEmbeddings(): void {
+  const { rawDb } = getActiveSession()
+  rawDb.prepare('DELETE FROM module_embeddings').run()
 }

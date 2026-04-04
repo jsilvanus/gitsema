@@ -119,6 +119,8 @@ export const symbols = sqliteTable('symbols', {
    * Stored so callers can format symbol-level search results appropriately.
    */
   language: text('language').notNull(),
+  // Optional chunk_id linking this symbol to its source chunk (nullable)
+  chunkId: integer('chunk_id'),
 })
 
 /**
@@ -172,4 +174,17 @@ export const blobClusters = sqliteTable('blob_clusters', {
 export const clusterAssignments = sqliteTable('cluster_assignments', {
   blobHash: text('blob_hash').primaryKey().references(() => blobs.blobHash),
   clusterId: integer('cluster_id').notNull().references(() => blobClusters.id),
+})
+
+// ---------------------------------------------------------------------------
+// Module-level embeddings (Phase 33)
+// ---------------------------------------------------------------------------
+export const moduleEmbeddings = sqliteTable('module_embeddings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  modulePath: text('module_path').notNull().unique(),
+  model: text('model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+  blobCount: integer('blob_count').notNull(),
+  updatedAt: integer('updated_at').notNull(),
 })
