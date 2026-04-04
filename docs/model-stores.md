@@ -1,6 +1,6 @@
-# Model Stores & Quantization — Research Document
+# Model Stores & Quantization
 
-> **Scope:** This document investigates (a) whether gitsema supports multiple model stores and how selection among them works, and (b) whether quantization is supported. It is a read-only research artifact — no code changes were made.
+> **Status (Phase 35):** Multi-model DB storage, per-command model flags, `clear-model` command, and multi-model search are now implemented. The sections below reflect the current state as of Phase 35 (v0.34.0).
 
 ---
 
@@ -92,30 +92,28 @@ When `codeProvider` is provided, the indexer wraps both into a `RoutingProvider`
 
 ## 3. Multiple Providers: What Is and Isn't Supported
 
-### What IS supported
+### What IS supported (Phase 35+)
 
 | Capability | Notes |
 |---|---|
 | **Two models simultaneously** (code + text) | Fully supported via `RoutingProvider`. Enabled by setting `GITSEMA_CODE_MODEL` ≠ `GITSEMA_TEXT_MODEL`. |
+| **Multiple embeddings per blob in DB** | **Phase 35**: `embeddings` table PK changed to `(blob_hash, model)`. A blob can now have embeddings from multiple models without conflict. |
 | **Ollama or HTTP backend** | Mutually exclusive per process; `GITSEMA_PROVIDER=ollama\|http`. |
 | **Remote server delegation** | `gitsema serve` runs as a standalone HTTP server; `GITSEMA_REMOTE` points the CLI at it. The server itself runs one provider pair. |
 | **Per-repo config overrides** | `.gitsema/config.json` can set different `model` / `codeModel` per repository. |
+| **Per-command model override** | **Phase 35**: `--model`, `--text-model`, `--code-model` flags on `index`, `search`, `first-seen`, `evolution`, `concept-evolution`, `diff`, `clusters`. |
+| **Removing old model data** | **Phase 35**: `gitsema clear-model <model>` deletes all embeddings and cache for a given model. |
+| **Multi-model search** | **Phase 35**: When `textModel ≠ codeModel`, `search` embeds the query with both models, runs two vector scans, and merges via `mergeSearchResults()`. |
 
 ### What is NOT supported
 
 | Capability | Status |
 |---|---|
 | **Three or more simultaneous providers** | Not supported. `RoutingProvider` is hard-wired to exactly two slots (`textProvider` + `codeProvider`). |
-| **Named "model store" profiles** (e.g., choose store "tomorrow" by name) | No such concept exists. There is no registry, profile, or named slot mechanism. |
-| **Selecting a provider at query time** (without changing env/config) | Not supported. The provider is constructed once at process start and used for the entire session. |
+| **Named "model store" profiles** | No registry or profile/named-slot mechanism. Workaround: use per-repo `.gitsema/config.json`. |
 | **Hot-switching models during a run** | Not supported. The indexer holds a single `RoutingProvider` for its entire lifetime. |
-| **Mixing Ollama and HTTP within the same run** | Not supported. `buildProvider()` in `src/cli/commands/serve.ts` (line 16) and the equivalent in `src/cli/commands/index.ts` use a single `GITSEMA_PROVIDER` value for both the text and code providers. Both providers must use the same backend type. |
+| **Mixing Ollama and HTTP within the same run** | Not supported. Both providers must use the same backend type (`GITSEMA_PROVIDER`). |
 | **Automatic backend discovery/fallback** | Not implemented. If the Ollama daemon is not running, the first `embed()` call throws. |
-
-**Key design constraint (from `CLAUDE.md`):**
-> Search queries always use the text provider (not the code provider), since queries are natural language.
-
-This constraint is implemented at `router.ts:42` and is not overridable at runtime.
 
 ---
 
@@ -124,7 +122,7 @@ This constraint is implemented at `router.ts:42` and is not overridable at runti
 ### Precedence chain (highest → lowest)
 
 ```
-Environment Variables
+Environment Variables (or CLI --model / --text-model / --code-model flags)
   > Local config (.gitsema/config.json)
     > Global config (~/.config/gitsema/config.json)
       > Hard-coded defaults
@@ -133,6 +131,8 @@ Environment Variables
 Implemented in `src/core/config/configManager.ts`, function `getConfigValue` (lines 278–304).
 
 At CLI startup, `applyConfigToEnv()` (lines 399–419 of `configManager.ts`) reads config files and injects any unset env vars — so config files transparently participate in the same precedence chain without requiring consumers to call `getConfigValue`.
+
+**Phase 35**: `applyModelOverrides()` in `src/core/embedding/providerFactory.ts` applies per-command `--model` / `--text-model` / `--code-model` overrides to `process.env` before any provider is constructed. This means a single command run can use a different model without affecting the persistent config.
 
 ### All model-related config keys
 
@@ -148,6 +148,12 @@ At CLI startup, `applyConfigToEnv()` (lines 399–419 of `configManager.ts`) rea
 Source: `ENV_KEY_MAP` in `configManager.ts` (lines 42–55) and `ALL_KEYS` (lines 61–101).
 
 ### How to select a different model without code changes
+
+**Via CLI flag (per-command, one-shot):**
+```bash
+gitsema index --model nomic-embed-code
+gitsema search "authentication" --code-model nomic-embed-code --text-model nomic-embed-text
+```
 
 **Via environment variables (session-level):**
 ```bash
@@ -177,6 +183,45 @@ export GITSEMA_MODEL=text-embedding-3-small
 export GITSEMA_API_KEY=sk-...
 gitsema index
 ```
+
+### Changing the model on an existing index
+
+Because the `embeddings` table now uses a composite `(blob_hash, model)` primary key (Phase 35, schema v10), **changing the model does not invalidate or remove existing embeddings**. Old embeddings remain in the DB under their original model name.
+
+When you re-index with a new model:
+- Blobs that don't yet have an embedding for the new model are indexed.
+- Blobs that already have an embedding for the new model are skipped.
+- Blobs that only have an embedding for an old model are re-indexed (they will have two rows in `embeddings` after the run).
+
+To remove old embeddings and free space:
+```bash
+gitsema clear-model nomic-embed-text   # removes all data for that model
+```
+
+### `gitsema clear-model <model>`
+
+**Phase 35**: New command. Deletes from:
+- `embeddings WHERE model = ?`
+- `chunk_embeddings WHERE model = ?`
+- `symbol_embeddings WHERE model = ?`
+- `commit_embeddings WHERE model = ?`
+- `module_embeddings WHERE model = ?`
+- `query_embeddings WHERE model = ?` (cache)
+
+Does **not** delete `blobs`, `paths`, or `blob_commits` rows — structural metadata is model-agnostic.
+
+```bash
+gitsema clear-model nomic-embed-text           # prompts for confirmation
+gitsema clear-model nomic-embed-text --yes     # skips confirmation
+```
+
+### Query cache behavior on model switch
+
+The `query_embeddings` cache (`src/core/embedding/queryCache.ts`) keys each entry on `(query_text, model)` (see `setCachedQueryEmbedding` line 43, sqlite migration v3 in `sqlite.ts`). This means:
+
+- **Switching the model does not serve stale cache entries.** A query run with model A is cached under `(query, model-A)`. The same query with model B will miss the cache and embed fresh, then be cached under `(query, model-B)`.
+- **Old cache entries for retired models persist** until TTL expiry (default 7 days, controlled by `GITSEMA_QUERY_CACHE_TTL_DAYS`) or until `gitsema clear-model <old-model>` is run.
+- **TTL and size cap** are governed by `pruneQueryEmbeddingCache()` in `queryCache.ts`: default TTL = 7 days, default max entries = 10,000. Called automatically during each search run.
 
 ### Serve-mode provider wiring
 
@@ -210,19 +255,14 @@ Quantization lives **entirely in the embedding backend**, not in gitsema:
 
 | Feature | Status |
 |---|---|
-| int8 output quantization (compress stored vectors) | **Not implemented** |
+| int8 output quantization (compress stored vectors) | **Not implemented** — see `docs/plan_vss.md` for the planned implementation |
 | int4 output quantization | **Not implemented** |
 | Binary / 1-bit embeddings | **Not implemented** |
 | Configuration for quantization type | **No config key exists** |
 
 Stored embeddings are always raw `Float32Array` bytes (4 bytes per dimension). See `blobStore.ts` for the storage format and `vectorSearch.ts` for the retrieval + cosine computation. Any dimension reduction or quantization of stored vectors would require schema changes to the `embeddings` table.
 
-### Risk register note
-
-The existing risk register in `docs/PLAN.md` (§ Risk register, ~line 671) notes:
-> Cosine at scale: Pure-JS cosine works to ~500K blobs. `sqlite-vss` or DuckDB migration path is in the risk register but not designed.
-
-Switching to a vector index library (e.g., `sqlite-vss`, `usearch`, `faiss`) would naturally bring int8 quantization into scope for stored vectors. This is the most likely future path for quantization.
+See **`docs/plan_vss.md`** for the detailed plan to add int8 vector quantization, a vector index (sqlite-vss / usearch), and ANN search as a future phase.
 
 ---
 
@@ -231,57 +271,37 @@ Switching to a vector index library (e.g., `sqlite-vss`, `usearch`, `faiss`) wou
 | Document | What it covers | Model store / quantization coverage |
 |---|---|---|
 | `CLAUDE.md` (root) | Architecture, CLI reference, config keys, design constraints | Model routing and env vars documented; quantization not mentioned |
-| `docs/PLAN.md` | Phase history, architecture decisions, risk register | Phase 8 covers `RoutingProvider`; quantization absent |
+| `docs/PLAN.md` | Phase history, architecture decisions, risk register | Phase 8 covers `RoutingProvider`; Phase 35 covers multi-model DB; quantization in risk register |
+| `docs/plan_vss.md` | **Phase 36 plan**: vector index, int8 quantization, ANN search | Full quantization design |
+| `docs/model-stores.md` (this file) | Model store architecture, multi-model, quantization, clear-model, cache behavior | Full coverage |
 | `docs/commands.md` | Command grouping analysis | No provider/model content |
 | `docs/SECTION2.md` | Known weaknesses: chunker, path scoring | No provider/model content |
-| `docs/SECTION3.md` | Potential future use-cases | No provider/model content |
-
-### Notable gaps
-
-1. No single reference document for all model-related configuration.
-2. No documentation on backend-side quantization (how to use a quantized model with Ollama or an HTTP server).
-3. No documentation on the `RoutingProvider` two-model routing logic or the file category classification.
-4. No documentation on the `query_embeddings` cache (`src/core/embedding/queryCache.ts`) — relevant to model switching (changing the model does not automatically invalidate the cache; entries are keyed on `(query_text, model)` which handles this correctly, but this is not documented anywhere).
 
 ---
 
 ## 7. Gaps & Recommended Improvements
 
-### A. Concurrency / multiple model store support
+### Implemented in Phase 35 ✅
 
-**Gap:** There is no mechanism for registering more than two models simultaneously, and no profile/named-store concept for "use model X for file group Y and model Z for file group W".
+- Multi-model DB schema (`embeddings` composite PK `(blob_hash, model)`) — schema v10
+- `gitsema clear-model <model>` command
+- `--model` / `--text-model` / `--code-model` per-command flags on `index`, `search`, `first-seen`, `evolution`, `concept-evolution`, `diff`, `clusters`
+- Multi-model search (dual-model merge in `search` command via `mergeSearchResults()`)
+- `gitsema status` model-mismatch warning
+- Query cache key strategy documented (this file, section 4)
 
-**Recommended improvements:**
+### Still pending
 
-1. **Extend `RoutingProvider` to support N models** — Replace the hard-wired `textProvider`/`codeProvider` pair with a `Map<FileCategory, EmbeddingProvider>` to allow finer-grained routing (e.g., separate models for SQL, shell scripts, Markdown).
-2. **Add named provider profiles** — Allow config keys like `profiles.default.codeModel = nomic-embed-code` and `profiles.fast.codeModel = mxbai-embed-large` with a `--profile` CLI flag on `index` and `search` commands.
-3. **Document the current two-model routing** — Add a section to `CLAUDE.md` or a new `docs/embedding-providers.md` explaining `RoutingProvider`, `fileType.ts`, and the query routing rule.
-
-### B. Quantization
-
-**Gap:** gitsema stores all vectors as float32 and has no int8/int4 quantization support for stored vectors.
-
-**Recommended improvements:**
-
-1. **Document backend quantization** — Add a note to `CLAUDE.md` and/or a new embedding guide explaining that Ollama quantized model tags work transparently (e.g., `nomic-embed-text:q4_K_M`).
-2. **Consider int8 scalar quantization of stored vectors** — For the ~500K-blob scale ceiling, int8 quantization of the stored `Float32Array` would reduce storage by 4× and speed up cosine computation. This requires a schema migration (add a `quantized` flag and change the `BLOB` storage type in `embeddings`) and updated cosine computation in `vectorSearch.ts`. This is low-risk and high-value as a Phase 34+ candidate.
-3. **Track in risk register** — Explicitly add "int8 vector quantization for scale" to the risk register alongside the existing `sqlite-vss` note.
-
-### C. Provider selection ergonomics
-
-**Gap:** There is no way to switch the active model without modifying env vars or config files and restarting the process. Per-command `--model` override does not exist.
-
-**Recommended improvements:**
-
-1. **Add `--model` / `--code-model` flags to `gitsema index`** — These would override `GITSEMA_MODEL`/`GITSEMA_CODE_MODEL` for a single run without touching config files.
-2. **Document the "double re-index" danger** — If the model is changed after a partial index, blobs already in the DB were embedded with the old model. The `model` column in `embeddings` records the model per blob, but there is no CLI warning when the configured model differs from the most recently stored model. A `gitsema status` warning for model mismatch would be a low-effort, high-value improvement.
-
-### D. Cache invalidation on model switch
-
-**Gap:** The `query_embeddings` cache in `src/core/embedding/queryCache.ts` keys entries on `(query_text, model)` (line 43). This is correct, but undocumented. If a user switches `GITSEMA_MODEL` and re-runs a search, the old cached embedding is silently ignored and a new one is computed. The cache is never invalidated when the `model` column changes in `embeddings` — stale cached entries for retired model names persist until TTL expiry (default 7 days).
-
-**Recommended:** Document the cache key strategy and add a `gitsema cache clear` command or expose cache pruning via `gitsema status`.
+| Item | Notes |
+|---|---|
+| **int8 vector quantization of stored vectors** | Planned in `docs/plan_vss.md`. Would reduce storage 4× and speed up cosine. |
+| **Three or more simultaneous models** | `RoutingProvider` only supports two slots. Extensible to N with a `Map<FileCategory, EmbeddingProvider>` refactor. |
+| **Named provider profiles** | No profile/named-slot mechanism. Workaround: per-repo config. |
+| **Per-command model flag on `author`, `impact`, `dead-concepts`, `semantic-blame`** | Not yet added. Follow the same `applyModelOverrides` pattern from `providerFactory.ts`. |
+| **`--hybrid` multi-model** | Hybrid (BM25 + vector) search uses only the text provider path; dual-model does not participate in hybrid mode. |
+| **`gitsema status --models` flag** | Lists all distinct models present in the DB. Currently only warns on mismatch. |
 
 ---
 
-*Document written 2026-04-04. Code base version: 0.32.0.*
+*Document updated Phase 35 (v0.34.0), 2026-04-04.*
+

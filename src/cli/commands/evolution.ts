@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { computeEvolution, getCommitAuthor, getRemoteUrl, buildCommitUrl } from '../../core/search/evolution.js'
+import { applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
@@ -16,6 +17,10 @@ export interface EvolutionCommandOptions {
   remote?: string
   /** Top-N largest-jump alerts. Pass `true` for default 5, or a numeric string for a custom count. */
   alerts?: string | boolean
+  // CLI model overrides
+  model?: string
+  textModel?: string
+  codeModel?: string
 }
 
 /** A single alert entry – one of the top-N largest semantic jumps for a file. */
@@ -186,6 +191,9 @@ export async function evolutionCommand(
     console.error('Error: file path is required')
     process.exit(1)
   }
+
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
 
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
   if (remoteUrl) {

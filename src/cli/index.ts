@@ -24,6 +24,7 @@ import { semanticBlameCommand } from './commands/semanticBlame.js'
 import { deadConceptsCommand } from './commands/deadConcepts.js'
 import { impactCommand } from './commands/impact.js'
 import { clustersCommand } from './commands/clusters.js'
+import { clearModelCommand } from './commands/clearModel.js'
 import { clusterDiffCommand } from './commands/clusterDiff.js'
 import { clusterTimelineCommand } from './commands/clusterTimeline.js'
 import { changePointsCommand } from './commands/changePoints.js'
@@ -336,6 +337,9 @@ program
     '--branch <name>',
     'restrict indexing to commits reachable from this branch (short name, e.g. "main")',
   )
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .action(indexCommand)
 
 program
@@ -359,6 +363,9 @@ program
   .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
   .option('--include-commits', 'also search commit message embeddings and display matching commits')
   .option('--annotate-clusters', 'annotate each result with its cluster label from a prior `gitsema clusters` run')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .action(searchCommand)
 
@@ -370,6 +377,9 @@ program
   .option('--hybrid', 'blend vector similarity with BM25 keyword matching (requires prior backfill-fts)')
   .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .option('--include-commits', 'also search commit messages and show chronological commit results')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(firstSeenCommand)
@@ -398,6 +408,9 @@ program
     '--alerts [n]',
     'show the top-N largest semantic jumps (default 5) with author and commit link; use with --dump to include in JSON output',
   )
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(evolutionCommand)
 
@@ -422,6 +435,9 @@ program
     '--include-content',
     'include the stored file content for each entry in the JSON dump (only used with --dump)',
   )
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .option('--branch <name>', 'restrict evolution to blobs seen on this branch')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .action(conceptEvolutionCommand)
@@ -439,6 +455,9 @@ program
   .command('diff <ref1> <ref2> <query>')
   .description('Compute a conceptual/semantic diff of a topic across two git refs — shows gained, lost, and stable concepts (see also: file-diff, evolution)')
   .option('-k, --top <n>', 'max results to show per group (gained/lost/stable)', '10')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -544,6 +563,9 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .option('--branch <name>', 'restrict clustering to blobs seen on this branch')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .action(clustersCommand)
 
 program
@@ -726,6 +748,14 @@ program
   .option('--verbose', 'enable verbose output')
   .action(async (opts) => {
     await updateModulesCommand({ verbose: opts.verbose })
+  })
+
+program
+  .command('clear-model <model>')
+  .description('Delete all stored embeddings and cache entries for a specific model')
+  .option('-y, --yes', 'skip confirmation prompt')
+  .action(async (model, opts) => {
+    await clearModelCommand(model, { yes: opts.yes })
   })
 
 program

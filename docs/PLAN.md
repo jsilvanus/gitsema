@@ -53,6 +53,7 @@
 |   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | — |
 |   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | — |
 |   [Phase 34 — Feature adoption & cross-cutting improvements](#phase-34-—-feature-adoption--cross-cutting-improvements) | — |
+|   [Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search](#phase-35-—-multi-model-db-per-command-model-flags-clear-model-multi-model-search) | — |
 | [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
 |   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
 |   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
@@ -1900,6 +1901,44 @@ A comprehensive cross-cutting feature-adoption pass based on a systematic review
 - **HTTP analysis routes** (item 16): `POST /api/v1/analysis/clusters`, `/change-points`, `/author`, `/impact` — new `src/server/routes/analysis.ts` + wired into `app.ts`.
 
 **Deliverables:** `src/core/embedding/providerFactory.ts`, `src/core/embedding/embedQuery.ts`, updated CLI commands (18 files), `src/core/viz/htmlRenderer.ts` (7 new render fns), `src/core/models/types.ts` (`clusterLabel` on `SearchResult`), `src/core/search/evolution.ts` (`useSymbolLevel`), `src/core/search/changePoints.ts` (`useSymbolLevel`), `src/mcp/server.ts` (5 new tools, 14 total), `src/server/routes/analysis.ts` (new), `src/server/app.ts`, `docs/review.md`.
+
+---
+
+### Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search
+
+**Version:** 0.34.0
+
+**Goal:** The DB schema now supports multiple embeddings per blob (one per model), model selection is available as per-command CLI flags, and search automatically leverages both models when text and code models differ.
+
+**Schema change (v10):** Rebuilt 5 embedding tables with composite primary/unique keys on `(hash, model)`:
+- `embeddings`: PK `(blob_hash, model)` — was `blob_hash` only
+- `chunk_embeddings`: PK `(chunk_id, model)` — was `chunk_id` only
+- `symbol_embeddings`: PK `(symbol_id, model)` — was `symbol_id` only
+- `commit_embeddings`: PK `(commit_hash, model)` — was `commit_hash` only
+- `module_embeddings`: UNIQUE `(module_path, model)` — was `module_path` only
+
+Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies existing data. Fully backward-compatible.
+
+**Deduplication change:** `isIndexed(blobHash, model)` checks `(blob_hash, model)` in `embeddings`. A blob indexed with model A is NOT skipped when indexing with model B. `filterNewBlobs(hashes, model)` similarly filters by model.
+
+**New modules:**
+- `src/core/embedding/providerFactory.ts` — `applyModelOverrides(opts)` helper that applies `--model` / `--text-model` / `--code-model` CLI flag values to `process.env` before provider construction.
+- `src/cli/commands/clearModel.ts` — `gitsema clear-model <model> [--yes]` command.
+
+**CLI changes:**
+- `--model`, `--text-model`, `--code-model` flags added to: `index`, `search`, `first-seen`, `evolution`, `concept-evolution`, `diff`, `clusters`.
+- `gitsema clear-model <model>` registered in the Setup & Infrastructure group.
+
+**Multi-model search:** When `GITSEMA_TEXT_MODEL ≠ GITSEMA_CODE_MODEL` (or overridden via flags), the `search` command embeds the query with both providers, runs two independent `vectorSearch()` calls (each filtered to its model), and merges results via `mergeSearchResults()` (highest score wins per blob).
+
+**Status warning:** `gitsema status` now queries `SELECT DISTINCT model FROM embeddings` and warns when the configured text/code model(s) are absent from the DB, with a suggestion to re-index or run `gitsema clear-model <old-model>`.
+
+**Documentation:**
+- `docs/model-stores.md` fully updated with Phase 35 coverage.
+- `docs/plan_vss.md` created: Phase 36 plan for int8 quantization + ANN index (sqlite-vss/usearch).
+- `docs/index.md` updated.
+
+**Deliverables:** `src/core/db/schema.ts`, `src/core/db/sqlite.ts` (migration v10), `src/core/indexing/deduper.ts`, `src/core/indexing/blobStore.ts`, `src/core/indexing/indexer.ts`, `src/core/embedding/providerFactory.ts` (`applyModelOverrides`), `src/cli/commands/clearModel.ts` (new), `src/cli/commands/status.ts`, `src/cli/commands/search.ts` (multi-model), 6 other CLI commands, `src/cli/index.ts`, `docs/model-stores.md`, `docs/plan_vss.md`, `docs/index.md`.
 
 ---
 

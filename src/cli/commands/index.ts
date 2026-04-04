@@ -1,6 +1,6 @@
 import { runIndex, type IndexStats } from '../../core/indexing/indexer.js'
 import { runRemoteIndex } from '../../core/indexing/remoteIndexer.js'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { DEFAULT_MAX_SIZE, showBlob } from '../../core/git/showBlob.js'
 import { resolveBlobAtRef } from '../../core/search/evolution.js'
@@ -271,9 +271,16 @@ export interface IndexCommandOptions {
   file?: string[]
   remote?: string
   branch?: string
+  // CLI model overrides
+  model?: string
+  textModel?: string
+  codeModel?: string
 }
 
 export async function indexCommand(options: IndexCommandOptions): Promise<void> {
+  // Apply CLI model overrides so provider factories pick them up
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+
   // Remote mode: ship blobs to a gitsema server instead of embedding locally
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
   if (remoteUrl) {

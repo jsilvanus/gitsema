@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
@@ -47,6 +47,10 @@ export interface SearchCommandOptions {
    * boolean `true` means print JSON to stdout.
    */
   dump?: string | boolean
+  // CLI model overrides
+  model?: string
+  textModel?: string
+  codeModel?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -90,6 +94,9 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     console.error('Error: query string is required')
     process.exit(1)
   }
+
+  // Apply CLI model overrides to environment so provider factories pick them up
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
 
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
   if (remoteUrl) {
@@ -264,8 +271,9 @@ export async function searchCommand(query: string, options: SearchCommandOptions
       process.exit(1)
       throw err
     }
-    const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel })
-    const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel })
+    const topKExtended = topK * 2
+    const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel, topK: topKExtended })
+    const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel, topK: topKExtended })
     results = mergeSearchResults(textResults, codeResults, topK)
   } else {
     // Single-model search (backward-compatible)
