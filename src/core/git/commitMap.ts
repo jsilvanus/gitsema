@@ -6,6 +6,10 @@ export interface CommitEntry {
   commitHash: string
   timestamp: number
   message: string
+  /** Short display name of the commit author. */
+  authorName?: string
+  /** Email address of the commit author. */
+  authorEmail?: string
   /** Branch names (short local names) that reference this commit or have it in their history. */
   branches: string[]
 }
@@ -93,7 +97,8 @@ export function streamCommitMap(repoPath: string = '.', options: CommitMapOption
   const commitBranchMap = buildCommitBranchMap(repoPath)
   // Use refs/heads/<branch> when a branch filter is set, otherwise walk all refs
   const refScope = branch ? [`refs/heads/${branch}`] : ['--all']
-  const args = ['log', ...refScope, '--raw', '--no-abbrev', '--format=COMMIT %H %ct %s']
+  // Use unit separator (ASCII 31) to safely separate fields that may contain spaces
+  const args = ['log', ...refScope, '--raw', '--no-abbrev', '--format=COMMIT %H%x1f%ct%x1f%aN%x1f%aE%x1f%s']
   if (maxCommits && maxCommits > 0) {
     args.push(`--max-count=${maxCommits}`)
   }
@@ -110,19 +115,21 @@ export function streamCommitMap(repoPath: string = '.', options: CommitMapOption
 
   rl.on('line', (line) => {
     if (line.startsWith('COMMIT ')) {
-      // Parse: "COMMIT <hash> <timestamp> <message>"
       const rest = line.slice('COMMIT '.length)
-      const parts = rest.split(' ')
-      if (parts.length < 2) return
-      const commitHash = parts[0]
-      // Validate that this looks like a real commit hash (SHA-1: 40 chars, SHA-256: 64 chars)
+      const fields = rest.split('\x1f')
+      if (fields.length < 2) return
+      const commitHash = fields[0].trim()
       if (!/^[0-9a-f]{40,64}$/.test(commitHash)) return
-      const timestamp = parseInt(parts[1], 10)
+      const timestampStr = fields[1]
+      if (!timestampStr) return
+      const timestamp = parseInt(timestampStr, 10)
       if (isNaN(timestamp)) return
-      const message = parts.slice(2).join(' ')
+      const authorName = fields[2]
+      const authorEmail = fields[3]
+      const message = fields[4] ?? ''
       currentCommitHash = commitHash
       const branches = commitBranchMap.get(commitHash) ?? []
-      out.push({ type: 'commit', data: { commitHash, timestamp, message, branches } } satisfies CommitMapEvent)
+      out.push({ type: 'commit', data: { commitHash, timestamp, message, authorName, authorEmail, branches } } satisfies CommitMapEvent)
     } else if (line.startsWith(':') && currentCommitHash) {
       // Raw diff line: ":old_mode new_mode old_hash new_hash status\tpath"
       const tabIdx = line.indexOf('\t')

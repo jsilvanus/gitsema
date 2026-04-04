@@ -1748,7 +1748,7 @@ Author contributions for: "rate limiting"
 
 ### Phase 32 — Branch and merge awareness
 
-**Version:** implemented in 0.28.0
+**Version:** implemented in 0.31.0
 
 **Goals:** Surface semantic conflicts and concept-level changes that exist between branches but are invisible to textual `git diff`.  The core insight: the `blob_branches` table records *reachability* (all blobs ever on a branch) but not *exclusivity* (blobs first introduced by a branch since it diverged).  All three commands in this phase pivot on branch-exclusive blobs.
 
