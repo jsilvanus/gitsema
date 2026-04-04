@@ -346,6 +346,7 @@ program
   .option('--remote <url>', 'proxy search to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--branch <name>', 'only return blobs seen on this branch (short name, e.g. "main")')
   .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
+  .option('--include-commits', 'also search commit message embeddings and display matching commits')
   .action(searchCommand)
 
 program
