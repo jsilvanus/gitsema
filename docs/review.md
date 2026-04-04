@@ -262,7 +262,6 @@ firstSeenCommand() should mirror searchCommand() for all flags that feed vectorS
 **Feature gaps:**
 - ❌ **No symbol-level diff.** The command computes the distance between whole-file embeddings. Symbol embeddings would allow a function-level semantic diff ("which functions changed semantically?").
 - ❌ **Module embedding comparison is absent.** `module_embeddings` could show whether the module centroid drifted between refs.
-- This command (`src/cli/commands/diff.ts`) is distinct from the *file-diff* command (`src/cli/commands/diff.ts` is registered as `file-diff` at `src/cli/index.ts:417`). See the naming note at the start of this section.
 
 ---
 
@@ -445,12 +444,16 @@ The following files each contain an **identical** `buildProvider(providerType, m
 | `src/cli/commands/serve.ts` | 16–26 |
 | `src/mcp/server.ts` | 42–50 (as `buildProvider` + `getTextProvider`) |
 
-**Recommendation:** Extract to `src/core/embedding/providerFactory.ts` with exports (illustrative — full imports from `./local.js`, `./http.js`, `./provider.js` would be needed):
+**Recommendation:** Extract to `src/core/embedding/providerFactory.ts` with exports. The snippet below shows the public API (pseudo-code — the actual implementation mirrors the identical body found in e.g. `src/cli/commands/search.ts:41–52` and would require imports from `./local.js`, `./http.js`, and `./provider.js`):
 ```ts
-// src/core/embedding/providerFactory.ts  (illustrative)
-export function buildProvider(type: string, model: string): EmbeddingProvider { ... }
-export function getTextProvider(): EmbeddingProvider { ... }
-export function getCodeProvider(): EmbeddingProvider { ... }
+// src/core/embedding/providerFactory.ts  (pseudo-code)
+import { OllamaProvider } from './local.js'
+import { HttpProvider } from './http.js'
+import type { EmbeddingProvider } from './provider.js'
+
+export function buildProvider(type: string, model: string): EmbeddingProvider { /* ... */ }
+export function getTextProvider(): EmbeddingProvider { /* ... */ }
+export function getCodeProvider(): EmbeddingProvider { /* ... */ }
 ```
 All ten locations import from there. The MCP server already has a local pattern (`getTextProvider`) that could become the canonical implementation.
 
@@ -472,11 +475,12 @@ Commands that call `provider.embed(query)` without caching:
 | `semantic-blame` | `src/cli/commands/semanticBlame.ts` | per-block embedding |
 | MCP tools | `src/mcp/server.ts` | multiple |
 
-**Recommendation:** Replace direct `provider.embed()` calls with a shared helper that wraps the cache (illustrative — imports from `./queryCache.js` and `./provider.js` would be needed):
+**Recommendation:** Replace direct `provider.embed()` calls with a shared helper that wraps the cache. The snippet below is pseudo-code showing the proposed implementation; the actual file would require the imports shown:
 ```ts
-// src/core/embedding/embedQuery.ts  (illustrative)
-// import { getCachedQueryEmbedding, setCachedQueryEmbedding } from './queryCache.js'
-// import type { EmbeddingProvider } from './provider.js'
+// src/core/embedding/embedQuery.ts  (pseudo-code)
+import { getCachedQueryEmbedding, setCachedQueryEmbedding } from './queryCache.js'
+import type { EmbeddingProvider } from './provider.js'
+
 export async function embedQuery(provider: EmbeddingProvider, query: string): Promise<number[]> {
   const cached = getCachedQueryEmbedding(query, provider.model)
   if (cached) return cached
