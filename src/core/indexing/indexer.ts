@@ -2,14 +2,14 @@ import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
 import { isIndexed } from './deduper.js'
-import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding } from './blobStore.js'
+import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
 import { createChunker, type ChunkStrategy, type ChunkOptions } from '../chunking/chunker.js'
 import { logger } from '../../utils/logger.js'
 import { createLimiter } from '../../utils/concurrency.js'
-import { extname } from 'node:path'
+import { extname, dirname } from 'node:path'
 
 export interface FilterOptions {
   /**
@@ -75,6 +75,8 @@ export interface IndexerOptions {
    * will pass `refs/heads/<name>` to `revList` and `streamCommitMap`.
    */
   branchFilter?: string
+  /** When true, update module (directory) centroid embeddings inline while indexing (Phase 33). Default: true. */
+  computeModuleEmbedding?: boolean
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -103,6 +105,8 @@ export interface IndexStats {
   blobCommits: number   // Phase 6: blob-commit links stored
   chunks: number        // Phase 10: chunk embeddings stored
   symbols: number       // Phase 19: symbol-level embeddings stored
+  /** Number of module (directory) centroid embeddings updated (Phase 33). */
+  moduleEmbeddings: number
   /** Number of commit message embeddings stored (Phase 30). */
   commitEmbeddings: number
   /** Number of commit message embedding failures (Phase 30). */
@@ -183,6 +187,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     chunker: chunkerStrategy = 'file',
     chunkerOptions = {},
     branchFilter,
+    computeModuleEmbedding = true,
     onProgress,
   } = options
 
@@ -216,7 +221,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     embedFailed: 0, otherFailed: 0,
     fbFunction: 0, fbFixed: 0,
     queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0, symbols: 0,
-    commitEmbeddings: 0, commitEmbedFailed: 0,
+    moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0,
   }
   const start = Date.now()
   const seenHashes = new Set<string>()
@@ -288,21 +293,54 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         const text = content.toString('utf8')
 
         if (useChunking) {
-          // Chunked indexing: split into chunks and embed each separately.
-          // Write the blob record and path once (no whole-file embedding),
-          // then store per-chunk embeddings in the chunk_embeddings table.
+          // Chunked indexing: always produce a Level-1 whole-file embedding first
+          // (so search/evolution/clustering work), then additionally store per-chunk
+          // embeddings in chunk_embeddings / symbol_embeddings.
           const blobChunks = chunker.chunk(text, path)
           let allOk = true
 
-          // Persist the blob record and path row exactly once before embedding chunks.
+          // Level-1: attempt to embed the whole file. If successful, persist via
+          // storeBlob (writes blob + embedding + path + FTS5 in one call). If the
+          // embedding fails, fall back to storeBlobRecord (blob + path, no embedding).
+          let wholeEmbedding: number[] | null = null
+          if (computeModuleEmbedding) {
+            try {
+              wholeEmbedding = await activeProvider.embed(text)
+            } catch (err) {
+              logger.debug?.(`Whole-file embedding failed for ${blobHash} (chunker=${chunkerStrategy}): ${err instanceof Error ? err.message : String(err)}`)
+            }
+          }
+
           try {
-            storeBlobRecord({ blobHash, size: content.length, path, content: text })
+            if (wholeEmbedding !== null) {
+              storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding: wholeEmbedding, fileType, content: text })
+            } else {
+              storeBlobRecord({ blobHash, size: content.length, path, content: text })
+            }
           } catch (err) {
             logger.error(`Failed to store blob record ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
             stats.failed++
             stats.otherFailed++
             onProgress?.({ ...stats, elapsed: Date.now() - start })
             return
+          }
+
+          // Update module centroid running mean when Level-1 embedding was produced.
+          if (wholeEmbedding !== null) {
+            try {
+              const dir = dirname(path)
+              const existing = getModuleEmbedding(dir)
+              if (existing === null) {
+                storeModuleEmbedding({ modulePath: dir, model: activeProvider.model, embedding: wholeEmbedding, blobCount: 1 })
+              } else {
+                const newCount = existing.blobCount + 1
+                const newVec = existing.vector.map((v, i) => (v * existing.blobCount + wholeEmbedding![i]) / newCount)
+                storeModuleEmbedding({ modulePath: dir, model: activeProvider.model, embedding: newVec, blobCount: newCount })
+              }
+              stats.moduleEmbeddings++
+            } catch (err) {
+              logger.debug?.(`Failed to update module embedding for ${path}: ${err instanceof Error ? err.message : String(err)}`)
+            }
           }
 
           for (const chunk of blobChunks) {
@@ -318,8 +356,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               continue
             }
 
+            let chunkId: number | undefined
             try {
-              storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
+              chunkId = storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
               stats.chunks++
             } catch (err) {
               logger.error(`Failed to store chunk for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err instanceof Error ? err.message : String(err)}`)
@@ -349,7 +388,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 storeSymbol({
                   blobHash, startLine: chunk.startLine, endLine: chunk.endLine,
                   symbolName: chunk.symbolName, symbolKind: chunk.symbolKind ?? 'function',
-                  language: lang, model: activeProvider.model, embedding: symbolEmbedding,
+                  language: lang, model: activeProvider.model, embedding: symbolEmbedding, chunkId,
                 })
                 stats.symbols++
               } catch (err) {
@@ -495,6 +534,26 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
             logger.error(`Failed to store blob ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
             stats.failed++
             stats.otherFailed++
+            onProgress?.({ ...stats, elapsed: Date.now() - start })
+            return
+          }
+
+          // Update module centroid running mean for whole-file mode.
+          if (computeModuleEmbedding) {
+            try {
+              const dir = dirname(path)
+              const existing = getModuleEmbedding(dir)
+              if (existing === null) {
+                storeModuleEmbedding({ modulePath: dir, model: activeProvider.model, embedding, blobCount: 1 })
+              } else {
+                const newCount = existing.blobCount + 1
+                const newVec = existing.vector.map((v, i) => (v * existing.blobCount + embedding[i]) / newCount)
+                storeModuleEmbedding({ modulePath: dir, model: activeProvider.model, embedding: newVec, blobCount: newCount })
+              }
+              stats.moduleEmbeddings++
+            } catch (err) {
+              logger.debug?.(`Failed to update module embedding for ${path}: ${err instanceof Error ? err.message : String(err)}`)
+            }
           }
         }
 

@@ -17,6 +17,7 @@ import { diffCommand } from './commands/diff.js'
 import { semanticDiffCommand } from './commands/semanticDiff.js'
 import { startMcpServer } from '../mcp/server.js'
 import { backfillFtsCommand } from './commands/backfillFts.js'
+import { updateModulesCommand } from './commands/updateModules.js'
 import { serveCommand } from './commands/serve.js'
 import { remoteIndexCommand } from './commands/remoteIndex.js'
 import { semanticBlameCommand } from './commands/semanticBlame.js'
@@ -88,6 +89,7 @@ const COMMAND_GROUPS: Record<string, string> = {
   serve:            'Setup & Infrastructure',
   'remote-index':   'Setup & Infrastructure',
   'backfill-fts':   'Setup & Infrastructure',
+  'update-modules': 'Setup & Infrastructure',
   mcp:              'Setup & Infrastructure',
   // Search & Discovery
   search:           'Search & Discovery',
@@ -349,6 +351,7 @@ program
   .option('--weight-path <n>', 'weight for path relevance in three-signal ranking (default 0.1)')
   .option('--group <mode>', 'group results by: file, module, or commit')
   .option('--chunks', 'include chunk-level embeddings in search results')
+  .option('--level <level>', 'search level: file, chunk, symbol, or module')
   .option('--hybrid', 'combine vector similarity with BM25 keyword matching (FTS5)')
   .option('--bm25-weight <n>', 'weight for the BM25 signal in hybrid search (0–1, default 0.3)')
   .option('--remote <url>', 'proxy search to a remote gitsema server (overrides GITSEMA_REMOTE)')
@@ -663,6 +666,14 @@ program
   .description('Populate FTS5 content for blobs indexed before Phase 11 (enables hybrid search and --include-content)')
   .action(async () => {
     await backfillFtsCommand()
+  })
+
+program
+  .command('update-modules')
+  .description('Recalculate module (directory) centroid embeddings from stored whole-file embeddings')
+  .option('--verbose', 'enable verbose output')
+  .action(async (opts) => {
+    await updateModulesCommand({ verbose: opts.verbose })
   })
 
 program

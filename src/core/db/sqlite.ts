@@ -35,8 +35,9 @@ export interface DbSession {
  *   6 — Added idx_commits_timestamp index for temporal cluster queries (Phase 22)
  *   7 — Added commit_embeddings table for commit message semantic search (Phase 30)
  *   8 — Added author_name, author_email to commits (Phase 31)
+ *   9 — Added module_embeddings table + chunk_id on symbols (Phase 33)
  */
-const CURRENT_SCHEMA_VERSION = 8
+const CURRENT_SCHEMA_VERSION = 9
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -176,6 +177,30 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 8
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('8')
   }
+
+  // v8 → v9: add module_embeddings table and chunk_id on symbols (Phase 33)
+  if (version < 9) {
+    // Guard the ALTER TABLE: column may already exist when the DB was created
+    // from scratch with the updated initTables (which already includes chunk_id).
+    const symbolCols = sqlite.prepare(`PRAGMA table_info(symbols)`).all() as Array<{ name: string }>
+    if (!symbolCols.some((c) => c.name === 'chunk_id')) {
+      sqlite.exec(`ALTER TABLE symbols ADD COLUMN chunk_id INTEGER`)
+    }
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS module_embeddings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module_path TEXT NOT NULL UNIQUE,
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        blob_count INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `)
+    version = 9
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('9')
+  }
 }
 
 /** The full CREATE TABLE block used for every new database file. */
@@ -267,7 +292,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       end_line INTEGER NOT NULL,
       symbol_name TEXT NOT NULL,
       symbol_kind TEXT NOT NULL,
-      language TEXT NOT NULL
+      language TEXT NOT NULL,
+      chunk_id INTEGER
     );
 
     -- Enriched embeddings for symbol-level semantic search (Phase 19)
@@ -303,6 +329,17 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 
     -- Index on commits.timestamp for fast temporal cluster filtering (Phase 22)
     CREATE INDEX IF NOT EXISTS idx_commits_timestamp ON commits (timestamp);
+
+    -- Module-level directory centroid embeddings (Phase 33)
+    CREATE TABLE IF NOT EXISTS module_embeddings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      module_path TEXT NOT NULL UNIQUE,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      vector BLOB NOT NULL,
+      blob_count INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `)
 }
 

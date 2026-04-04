@@ -28,4 +28,6 @@ export interface SearchResult {
   symbolKind?: string
   /** Detected programming language of the symbol — present for symbol-level results. */
   language?: string
+  /** When present, indicates this result is a module-level (directory) centroid match. */
+  modulePath?: string
 }

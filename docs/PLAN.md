@@ -51,6 +51,7 @@
 |   [Phase 30 — Commit message semantic indexing](#phase-30-—-commit-message-semantic-indexing) | — |
 |   [Phase 31 — Semantic concept authorship ranking](#phase-31-—-semantic-concept-authorship-ranking) | — |
 |   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | — |
+|   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | — |
 | [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
 |   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
 |   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
@@ -1804,6 +1805,62 @@ Predicts how the concept landscape will shift after merging the branch — i.e. 
 - Tests in `tests/branchDiff.test.ts` (5 tests), `tests/mergeAudit.test.ts` (12 tests), `tests/branchSummary.test.ts` (7 tests).
 
 **Deliverables:** `src/core/git/branchDiff.ts`, `src/core/search/mergeAudit.ts`, `src/core/search/branchSummary.ts`, three CLI command files, three MCP tools, 24 unit tests.
+
+---
+
+### Phase 33 — Multi-level hierarchical indexing
+
+**Version:** implemented in 0.32.0
+
+**Goals:** Fix a critical silent data-loss bug where `--chunker function` and `--chunker fixed` never populated the `embeddings` table, breaking `search`, `evolution`, `clusters`, `dead-concepts`, `impact`, and `semantic-diff` for anyone who indexed with a non-default chunker. Additionally, introduce Level-3 module (directory) centroid embeddings for coarse semantic search over entire modules.
+
+#### Root cause of Level-1 regression
+
+`indexer.ts` branched hard on `chunkerStrategy !== 'file'` and called `storeBlobRecord` (blob record, no embedding) in the chunking path, skipping the `embeddings` table entirely. All downstream features that query `embeddings` silently returned empty results.
+
+#### Three indexing levels
+
+| Level | Table | When populated |
+|---|---|---|
+| 1 — Whole-file | `embeddings` | Always (all chunker strategies) |
+| 2a — Fixed chunks | `chunk_embeddings` | `--chunker fixed` or `--chunker function` |
+| 2b — Symbol | `symbol_embeddings` | `--chunker function` |
+| 3 — Module centroid | `module_embeddings` | Always (inline running mean) |
+
+#### Level-1 fix (`src/core/indexing/indexer.ts`)
+
+The chunking branch now always computes a whole-file embedding first via `storeBlob` (writes blob + embedding + path + FTS5 in one call), then runs the chunk/symbol loop. Falls back to `storeBlobRecord` only if the whole-file embed fails (e.g. provider error or context overflow). The `chunkId` returned by `storeChunk` is now forwarded to `storeSymbol`, adding the `chunk_id` FK link.
+
+#### Level-3 module embeddings
+
+New `module_embeddings` table stores one directory-centroid vector per module path, computed as the running arithmetic mean of all Level-1 blob vectors in that directory. Updated inline during indexing via `storeModuleEmbedding()` / `getModuleEmbedding()` in `blobStore.ts`.
+
+The `computeModuleEmbedding` option on `IndexerOptions` (default `true`) controls whether inline updates are performed.
+
+#### Schema changes (v8 → v9)
+
+- `module_embeddings` table (directory centroid, `module_path UNIQUE`, `blob_count`)
+- Nullable `chunk_id` on `symbols` (FK → `chunks.id`, enforced at application level; guarded `ALTER TABLE` with `PRAGMA table_info` check for existing DBs)
+
+#### New CLI: `gitsema update-modules`
+
+Batch recalculates all module centroids from existing whole-file embeddings (equivalent to a Level-3 full rebuild). Useful after model changes or migrating pre-Phase-33 indexes.
+
+#### `--level` flag on `search`
+
+```
+gitsema search <query> --level <file|chunk|symbol|module>
+```
+
+Maps to `searchChunks`, `searchSymbols`, `searchModules` flags in `vectorSearch`. Module results carry `modulePath` on `SearchResult`. The existing `--chunks` flag is retained for backward compatibility.
+
+**Implementation notes:**
+- `computeModuleEmbedding` defaults to `true`; set to `false` to skip both the whole-file and module updates (useful when only chunk/symbol embeddings are needed).
+- Module centroid upsert uses `INSERT OR REPLACE` with a sub-select to preserve the row `id`.
+- `IndexStats.moduleEmbeddings` counts module centroid rows updated per indexing run.
+- 5 integration tests in `tests/moduleEmbeddings.test.ts`.
+
+**Deliverables:** `src/core/db/schema.ts` (schema v9), `src/core/db/sqlite.ts` (migration v8→v9), `src/core/indexing/blobStore.ts` (module embedding helpers), `src/core/indexing/indexer.ts` (Level-1 fix + module updates), `src/core/search/vectorSearch.ts` (`searchModules` option), `src/core/models/types.ts` (`modulePath` on `SearchResult`), `src/cli/commands/updateModules.ts`, `src/cli/commands/search.ts` (`--level` flag), 5 unit tests, `docs/plant.md`.
 
 ---
 

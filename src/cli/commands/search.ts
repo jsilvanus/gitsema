@@ -34,6 +34,8 @@ export interface SearchCommandOptions {
    * commits alongside blob results.
    */
   includeCommits?: boolean
+  /** Search granularity level: 'file' (default), 'chunk', 'symbol', or 'module'. */
+  level?: string
 }
 
 function buildProvider(providerType: string, model: string): EmbeddingProvider {
@@ -226,6 +228,22 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   // Embed the query with the text model (natural-language prose)
   const textEmbedding = await embedQuery(textProvider, textModel, query, noCache)
 
+  // Resolve --level flag to per-table search flags
+  let searchChunksFlag = options.chunks ?? false
+  let searchSymbolsFlag = false
+  let searchModulesFlag = false
+  if (options.level) {
+    switch (options.level) {
+      case 'file': break
+      case 'chunk': searchChunksFlag = true; break
+      case 'symbol': searchSymbolsFlag = true; break
+      case 'module': searchModulesFlag = true; break
+      default:
+        console.error('Error: --level must be one of: file, chunk, symbol, module')
+        process.exit(1)
+    }
+  }
+
   const searchOpts = {
     topK,
     recent: options.recent ?? false,
@@ -236,7 +254,9 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     weightRecency,
     weightPath,
     query,
-    searchChunks: options.chunks ?? false,
+    searchChunks: searchChunksFlag,
+    searchSymbols: searchSymbolsFlag,
+    searchModules: searchModulesFlag,
     branch: options.branch,
   }
 

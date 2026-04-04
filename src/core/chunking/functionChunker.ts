@@ -346,7 +346,7 @@ function extractDeclarationsWithTreeSitter(content: string, lang: Language): Dec
 // Regex fallback patterns (one per language group)
 // ---------------------------------------------------------------------------
 
-const PYTHON_SPLIT_RE = /^\s*(?:(?:async\s+)?def\s+\w|class\s+\w)/
+const PYTHON_SPLIT_RE = /^(?:(?:async\s+)?def\s+\w|class\s+\w)/
 const GO_SPLIT_RE = /^func\s+/
 const RUST_SPLIT_RE = /^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)?(?:fn\s+\w|impl(?:\s|\s*<))/
 const TS_SPLIT_RE = /^(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+\w|class\s+\w|\w+\s*=\s*(?:async\s+)?(?:function|\([^)]*\)\s*=>|\w+\s*=>)))/
