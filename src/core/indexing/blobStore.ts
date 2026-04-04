@@ -121,7 +121,7 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
 
   if (blobHashes.length === 0) {
     db.insert(commits)
-      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message })
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null })
       .onConflictDoNothing()
       .run()
     return 0
@@ -146,7 +146,7 @@ export function storeCommitWithBlobs(commit: CommitEntry, blobHashes: string[]):
 
   db.transaction((tx) => {
     tx.insert(commits)
-      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message })
+      .values({ commitHash: commit.commitHash, timestamp: commit.timestamp, message: commit.message, authorName: commit.authorName ?? null, authorEmail: commit.authorEmail ?? null })
       .onConflictDoNothing()
       .run()
 

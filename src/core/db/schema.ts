@@ -47,6 +47,8 @@ export const commits = sqliteTable('commits', {
   commitHash: text('commit_hash').primaryKey(),
   timestamp: integer('timestamp').notNull(),
   message: text('message').notNull(),
+  authorName: text('author_name'),
+  authorEmail: text('author_email'),
 })
 
 export const blobCommits = sqliteTable('blob_commits', {

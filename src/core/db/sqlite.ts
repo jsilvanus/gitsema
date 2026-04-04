@@ -34,8 +34,9 @@ export interface DbSession {
  *   5 — Added blob_clusters + cluster_assignments tables (Phase 21)
  *   6 — Added idx_commits_timestamp index for temporal cluster queries (Phase 22)
  *   7 — Added commit_embeddings table for commit message semantic search (Phase 30)
+ *   8 — Added author_name, author_email to commits (Phase 31)
  */
-const CURRENT_SCHEMA_VERSION = 7
+const CURRENT_SCHEMA_VERSION = 8
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -161,6 +162,20 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 7
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('7')
   }
+
+  // v7 → v8: add author_name and author_email columns to commits (Phase 31)
+  if (version < 8) {
+    // Guard against fresh DBs where initTables() already added these columns
+    const commitCols = sqlite.prepare('PRAGMA table_info(commits)').all() as Array<{ name: string }>
+    if (!commitCols.some((c) => c.name === 'author_name')) {
+      sqlite.exec(`ALTER TABLE commits ADD COLUMN author_name TEXT`)
+    }
+    if (!commitCols.some((c) => c.name === 'author_email')) {
+      sqlite.exec(`ALTER TABLE commits ADD COLUMN author_email TEXT`)
+    }
+    version = 8
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('8')
+  }
 }
 
 /** The full CREATE TABLE block used for every new database file. */
@@ -189,7 +204,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     CREATE TABLE IF NOT EXISTS commits (
       commit_hash TEXT PRIMARY KEY,
       timestamp INTEGER NOT NULL,
-      message TEXT NOT NULL
+      message TEXT NOT NULL,
+      author_name TEXT,
+      author_email TEXT
     );
 
     CREATE TABLE IF NOT EXISTS blob_commits (

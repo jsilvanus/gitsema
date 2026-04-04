@@ -28,6 +28,7 @@ import { clusterTimelineCommand } from './commands/clusterTimeline.js'
 import { changePointsCommand } from './commands/changePoints.js'
 import { fileChangePointsCommand } from './commands/fileChangePoints.js'
 import { clusterChangePointsCommand } from './commands/clusterChangePoints.js'
+import { authorCommand } from './commands/author.js'
 
 const program = new Command()
 
@@ -99,6 +100,7 @@ const COMMAND_GROUPS: Record<string, string> = {
   evolution:           'Concept History',   // primary name (was concept-evolution)
   'concept-evolution': 'Concept History',   // backward-compat alias
   diff:                'Concept History',   // semantic diff across refs
+  author:              'Concept History',
   // Cluster Analysis
   clusters:           'Cluster Analysis',
   'cluster-diff':     'Cluster Analysis',
@@ -613,6 +615,18 @@ program
   .action(async () => {
     await startMcpServer()
   })
+
+program
+  .command('author <query>')
+  .description('Rank authors by semantic contribution to a concept (see also: search, evolution)')
+  .option('-k, --top <n>', 'number of top authors to return (default 10)', '10')
+  .option('--since <date>', 'only consider contributions since this date (YYYY-MM-DD)')
+  .option('--detail', 'show the specific files and commits that contributed to each author\'s ranking')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .action(authorCommand)
 
 program.parse()
 
