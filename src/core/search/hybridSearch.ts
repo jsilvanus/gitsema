@@ -2,7 +2,7 @@ import { getActiveSession } from '../db/sqlite.js'
 import { paths } from '../db/schema.js'
 import { inArray } from 'drizzle-orm'
 import { vectorSearch, type VectorSearchOptions } from './vectorSearch.js'
-import type { SearchResult } from '../models/types.js'
+import type { SearchResult, Embedding } from '../models/types.js'
 
 export interface HybridSearchOptions extends VectorSearchOptions {
   /**
@@ -34,7 +34,7 @@ interface Bm25Row {
  */
 export function hybridSearch(
   query: string,
-  queryEmbedding: number[],
+  queryEmbedding: Embedding,
   options: HybridSearchOptions = {},
 ): SearchResult[] {
   const { bm25Weight = 0.3, topK = 10, ...vectorOptions } = options

@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
@@ -215,7 +216,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   const codeProvider = dualModel ? buildProviderOrExit(providerType, codeModel) : null
 
   // Embed the query with the text model (natural-language prose)
-  let textEmbedding: number[]
+  let textEmbedding: Embedding
   try {
     textEmbedding = await sharedEmbedQuery(textProvider, query, { noCache })
   } catch (err) {
@@ -342,7 +343,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
       results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
     } else if (dualModel && codeProvider) {
       // Dual-model search: embed with both models and merge results
-      let codeEmbedding: number[]
+      let codeEmbedding: Embedding
       try {
         codeEmbedding = await sharedEmbedQuery(codeProvider, query, { noCache })
       } catch (err) {

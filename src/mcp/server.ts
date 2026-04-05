@@ -23,7 +23,7 @@ import { runIndex } from '../core/indexing/indexer.js'
 import { getBlobContent } from '../core/indexing/blobStore.js'
 import { buildProvider, getTextProvider } from '../core/embedding/providerFactory.js'
 import { embedQuery } from '../core/embedding/embedQuery.js'
-import type { SearchResult } from '../core/models/types.js'
+import type { SearchResult, Embedding } from '../core/models/types.js'
 import { formatDate } from '../core/search/ranking.js'
 import { parseDateArg } from '../core/search/timeSearch.js'
 import { DEFAULT_MAX_SIZE } from '../core/git/showBlob.js'
@@ -80,7 +80,7 @@ export async function startMcpServer(): Promise<void> {
     },
     async ({ query, top_k, recent, alpha, before, after }) => {
       const provider = getTextProvider()
-      let queryEmbedding: number[]
+      let queryEmbedding: Embedding
       try {
         queryEmbedding = await embedQuery(provider, query)
       } catch (err) {
@@ -125,7 +125,7 @@ export async function startMcpServer(): Promise<void> {
     },
     async ({ query, top_k, before, after, sort_by_date }) => {
       const provider = getTextProvider()
-      let queryEmbedding: number[]
+      let queryEmbedding: Embedding
       try {
         queryEmbedding = await embedQuery(provider, query)
       } catch (err) {
@@ -174,7 +174,7 @@ export async function startMcpServer(): Promise<void> {
     },
     async ({ query, top_k }) => {
       const provider = getTextProvider()
-      let queryEmbedding: number[]
+      let queryEmbedding: Embedding
       try {
         queryEmbedding = await embedQuery(provider, query)
       } catch (err) {
@@ -295,7 +295,7 @@ export async function startMcpServer(): Promise<void> {
     },
     async ({ query, top_k, threshold, structured, include_content }) => {
       const provider = getTextProvider()
-      let queryEmbedding: number[]
+      let queryEmbedding: Embedding
       try {
         queryEmbedding = await embedQuery(provider, query)
       } catch (err) {

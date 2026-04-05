@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import type { SemanticDiffEntry, SemanticDiffResult } from '../../core/search/semanticDiff.js'
@@ -105,7 +106,7 @@ export async function semanticDiffCommand(
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, topic)
   } catch (err) {

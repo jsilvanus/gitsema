@@ -17,7 +17,11 @@ describe('meanVector', () => {
   })
 
   it('returns the single vector unchanged for a one-element array', () => {
-    expect(meanVector([[1, 2, 3]])).toEqual([1, 2, 3])
+    const result = meanVector([[1, 2, 3]])
+    expect(result).not.toBeNull()
+    expect(result![0]).toBeCloseTo(1)
+    expect(result![1]).toBeCloseTo(2)
+    expect(result![2]).toBeCloseTo(3)
   })
 
   it('computes the element-wise mean of two vectors', () => {

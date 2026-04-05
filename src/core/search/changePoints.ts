@@ -1,29 +1,30 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { computeEvolution } from './evolution.js'
+import type { Embedding } from '../models/types.js'
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function bufferToEmbedding(buf: Buffer): number[] {
+function bufferToEmbedding(buf: Buffer): Float32Array {
   const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
+  return f32
 }
 
-function cosineDistance(a: number[], b: number[]): number {
+function cosineDistance(a: any, b: any): number {
   return 1 - cosineSimilarity(a, b)
 }
 
 /**
  * Computes a weighted centroid of the given embeddings.
  * Weights are cosine similarity scores (higher = more representative).
- * Returns an empty array when embs is empty (callers must guard before use).
+ * Returns an empty Float32Array when embs is empty (callers must guard before use).
  */
-function weightedCentroid(embs: number[][], weights: number[]): number[] {
-  if (embs.length === 0) return []
+function weightedCentroid(embs: (number[] | Float32Array)[], weights: number[]): Float32Array {
+  if (embs.length === 0) return new Float32Array(0)
   const dim = embs[0].length
-  const centroid = new Array<number>(dim).fill(0)
+  const centroid = new Float32Array(dim)
   let totalWeight = 0
   for (let i = 0; i < embs.length; i++) {
     totalWeight += weights[i]
@@ -79,7 +80,7 @@ export interface ConceptChangePointReport {
  */
 export function computeConceptChangePoints(
   query: string,
-  queryEmbedding: number[],
+  queryEmbedding: Embedding,
   opts: {
     topK?: number
     threshold?: number
@@ -106,10 +107,11 @@ export function computeConceptChangePoints(
     return { type: 'concept-change-points', query, k: topK, threshold, range: { since: sinceLabel, until: untilLabel }, points: [] }
   }
 
-  // Apply branch filter
+  // Apply branch filter at SQL level when requested
   if (opts.branch) {
-    const branchSet = getBranchBlobHashSet(opts.branch)
-    embRows = embRows.filter((r) => branchSet.has(r.blob_hash))
+    const placeholders = '?'
+    // Use rawDb prepare with IN via a subquery on blob_branches
+    embRows = rawDb.prepare('SELECT blob_hash, vector FROM embeddings WHERE blob_hash IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ?)').all(opts.branch) as Array<{ blob_hash: string; vector: Buffer }>
     if (embRows.length === 0) {
       return { type: 'concept-change-points', query, k: topK, threshold, range: { since: sinceLabel, until: untilLabel }, points: [] }
     }
@@ -188,7 +190,7 @@ export function computeConceptChangePoints(
   // --- Process commits in chronological order ---
   let blobPtr = 0
   const visibleSet = new Set<string>()
-  let prevCentroid: number[] | null = null
+  let prevCentroid: Float32Array | null = null
   let prevCommit: { commit_hash: string; timestamp: number } | null = null
   let prevTopPaths: string[] = []
 

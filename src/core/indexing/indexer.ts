@@ -4,6 +4,7 @@ import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/c
 import { isIndexed } from './deduper.js'
 import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
+import type { Embedding } from '../models/types.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
 import { createChunker, type ChunkStrategy, type ChunkOptions } from '../chunking/chunker.js'
@@ -305,7 +306,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           // Level-1: attempt to embed the whole file. If successful, persist via
           // storeBlob (writes blob + embedding + path + FTS5 in one call). If the
           // embedding fails, fall back to storeBlobRecord (blob + path, no embedding).
-          let wholeEmbedding: number[] | null = null
+          let wholeEmbedding: Embedding | null = null
           if (computeModuleEmbedding) {
             try {
               wholeEmbedding = await activeProvider.embed(text)
@@ -347,7 +348,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           }
 
           for (const chunk of blobChunks) {
-            let chunkEmbedding: number[]
+            let chunkEmbedding: Embedding
             try {
               chunkEmbedding = await activeProvider.embed(chunk.content)
             } catch (err) {
@@ -378,7 +379,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 path, chunk.startLine, chunk.endLine,
                 chunk.symbolKind ?? 'function', chunk.symbolName, chunk.content,
               )
-              let symbolEmbedding: number[]
+              let symbolEmbedding: Embedding
               try {
                 symbolEmbedding = await activeProvider.embed(enriched)
               } catch (err) {
@@ -405,7 +406,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           if (allOk) stats.indexed++
         } else {
           // Whole-file indexing (default, backward-compatible)
-          let embedding: number[]
+          let embedding: Embedding
           try {
             embedding = await activeProvider.embed(text)
           } catch (err) {
@@ -436,7 +437,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               }
 
               for (const chunk of blobChunks) {
-                let chunkEmbedding: number[]
+                let chunkEmbedding: Embedding
                 try {
                   chunkEmbedding = await activeProvider.embed(chunk.content)
                 } catch (err3) {
@@ -457,7 +458,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                       let subAllOk = true
 
                       for (const sub of subChunks) {
-                        let subEmb: number[] | null = null
+                        let subEmb: Embedding | null = null
                         try {
                           subEmb = await activeProvider.embed(sub.content)
                         } catch (err5) {
@@ -474,7 +475,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                         try {
                           const absStart = chunk.startLine + sub.startLine - 1
                           const absEnd = chunk.startLine + sub.endLine - 1
-                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb, quantize })
+                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb!, quantize })
                           stats.chunks++
                         } catch (err6) {
                           logger.error(`Failed to store subchunk for blob ${blobHash} subchunk ${chunk.startLine + sub.startLine - 1}-${chunk.startLine + sub.endLine - 1}: ${err6 instanceof Error ? err6.message : String(err6)}`)

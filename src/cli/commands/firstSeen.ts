@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
@@ -90,7 +91,7 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
     throw err
   }
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, query)
   } catch (err) {

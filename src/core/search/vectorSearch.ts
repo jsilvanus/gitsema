@@ -1,6 +1,6 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
-import { inArray, eq } from 'drizzle-orm'
+import { inArray, eq, sql, and } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../embedding/quantize.js'
@@ -23,11 +23,36 @@ export function cosineSimilarity(a: Embedding, b: Embedding): number {
 }
 
 /**
+ * Computes the L2 norm (magnitude) of an embedding vector.
+ * Use with cosineSimilarityPrecomputed to avoid recomputing the query norm in a tight loop.
+ */
+export function vectorNorm(v: Embedding): number {
+  let sq = 0
+  for (let i = 0; i < v.length; i++) sq += v[i] * v[i]
+  return Math.sqrt(sq)
+}
+
+/**
+ * Cosine similarity where the L2 norm of `a` has been pre-computed.
+ * Use in hot loops where `a` is the same query embedding and `b` changes each iteration.
+ */
+export function cosineSimilarityPrecomputed(a: Embedding, aMag: number, b: Embedding): number {
+  let dot = 0
+  let magB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]
+    magB += b[i] * b[i]
+  }
+  const denom = aMag * Math.sqrt(magB)
+  return denom === 0 ? 0 : dot / denom
+}
+
+/**
  * Deserializes a Float32Array stored as a Buffer back to number[].
  */
-function bufferToEmbedding(buf: Buffer): Embedding {
+function bufferToEmbedding(buf: Buffer): Float32Array {
   const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
+  return f32
 }
 
 type CandidateRow = {
@@ -39,7 +64,7 @@ type CandidateRow = {
   modulePath?: string
 }
 
-function rowToEmbedding(row: CandidateRow): number[] {
+function rowToEmbedding(row: CandidateRow): Float32Array {
   if (row.quantized === 1 && row.quantMin != null && row.quantScale != null) {
     const q = deserializeQuantized(row.vector, row.quantMin, row.quantScale)
     return dequantizeVector(q)
@@ -123,7 +148,11 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     quantScale: embeddings.quantScale,
   }).from(embeddings)
 
-  const filteredQuery = model ? baseQuery.where(eq(embeddings.model, model)) : baseQuery
+  // Build SQL-level filters for model and branch to avoid loading all rows
+  const conditions: any[] = []
+  if (model) conditions.push(eq(embeddings.model, model))
+  if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+  const filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
   const allRows = filteredQuery.all()
 
   // Optionally include chunk embeddings
@@ -149,9 +178,10 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       .from(chunkEmbeddings)
       .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
 
-    const chunkRows = (model
-      ? chunkQuery.where(eq(chunkEmbeddings.model, model))
-      : chunkQuery).all()
+    const chunkConditions: any[] = []
+    if (model) chunkConditions.push(eq(chunkEmbeddings.model, model))
+    if (branch) chunkConditions.push(sql`${chunks.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+    const chunkRows = chunkConditions.length > 0 ? chunkQuery.where(and(...chunkConditions)).all() : chunkQuery.all()
 
     for (const row of chunkRows) {
       candidatePool.push({
@@ -185,9 +215,10 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       .from(symbolEmbeddings)
       .innerJoin(symbols, eq(symbolEmbeddings.symbolId, symbols.id))
 
-    const symRows = (model
-      ? symQuery.where(eq(symbolEmbeddings.model, model))
-      : symQuery).all()
+    const symConditions: any[] = []
+    if (model) symConditions.push(eq(symbolEmbeddings.model, model))
+    if (branch) symConditions.push(sql`${symbols.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+    const symRows = symConditions.length > 0 ? symQuery.where(and(...symConditions)).all() : symQuery.all()
 
     for (const row of symRows) {
       candidatePool.push({
@@ -226,15 +257,6 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     }
   }
 
-  // Apply branch filter when requested
-  if (branch) {
-    const branchRows = rawDb
-      .prepare('SELECT DISTINCT blob_hash FROM blob_branches WHERE branch_name = ?')
-      .all(branch) as Array<{ blob_hash: string }>
-    const branchHashSet = new Set(branchRows.map((r) => r.blob_hash))
-    candidatePool = candidatePool.filter((r) => branchHashSet.has(r.blobHash))
-  }
-
   // Apply time-range filter on the candidate set before scoring
   const allHashes = [...new Set(candidatePool.map((r) => r.blobHash))]
   const filteredHashes = (before !== undefined || after !== undefined)
@@ -247,11 +269,14 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   if (filteredPool.length === 0) return []
 
+  // Pre-compute query norm once (H8 optimization — avoids recomputing it for every candidate)
+  const queryNorm = vectorNorm(queryEmbedding)
+
   // Compute cosine similarity for each candidate
   type ScoredEntry = CandidateRow & { cosine: number }
   const scored: ScoredEntry[] = filteredPool.map((row) => ({
     ...row,
-    cosine: cosineSimilarity(queryEmbedding, rowToEmbedding(row)),
+    cosine: cosineSimilarityPrecomputed(queryEmbedding, queryNorm, rowToEmbedding(row)),
   }))
 
   // Compute recency scores when needed

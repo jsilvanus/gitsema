@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeEvolution, computeConceptEvolution } from '../../core/search/evolution.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
@@ -77,7 +78,7 @@ export function evolutionRouter(deps: EvolutionRouterDeps): Router {
 
     const { query, top, threshold, includeContent } = parsed.data
 
-    let queryEmbedding: number[]
+    let queryEmbedding: Embedding
     try {
       queryEmbedding = await textProvider.embed(query)
     } catch (err) {

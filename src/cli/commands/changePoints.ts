@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import {
   computeConceptChangePoints,
   type ConceptChangePointReport,
@@ -122,7 +123,7 @@ export async function changePointsCommand(
   const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, query.trim())
   } catch (err) {

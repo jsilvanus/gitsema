@@ -11,6 +11,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeClusters, getBlobHashesOnBranch } from '../../core/search/clustering.js'
 import { computeConceptChangePoints } from '../../core/search/changePoints.js'
 import { computeAuthorContributions } from '../../core/search/authorSearch.js'
@@ -82,7 +83,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
-    let queryEmbedding: number[]
+    let queryEmbedding: Embedding
     try {
       queryEmbedding = await textProvider.embed(opts.query)
     } catch (err) {
@@ -110,7 +111,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
-    let queryEmbedding: number[]
+    let queryEmbedding: Embedding
     try {
       queryEmbedding = await textProvider.embed(opts.query)
     } catch (err) {

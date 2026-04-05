@@ -1,6 +1,6 @@
 export type BlobHash = string   // SHA-1 hex
 export type CommitHash = string
-export type Embedding = number[]
+export type Embedding = number[] | Float32Array
 
 export interface BlobRecord {
   blobHash: BlobHash

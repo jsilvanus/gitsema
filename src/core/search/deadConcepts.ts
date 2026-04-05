@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
-import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
+import { inArray, eq, sql, and } from 'drizzle-orm'
+import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -42,10 +42,10 @@ export interface DeadConceptResult {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Deserializes a Float32Array stored as a Buffer back to number[]. */
-function bufferToEmbedding(buf: Buffer): number[] {
+/** Deserializes a Float32Array stored as a Buffer back to Float32Array. */
+function bufferToEmbedding(buf: Buffer): Float32Array {
   const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
+  return f32
 }
 
 /**
@@ -75,18 +75,19 @@ async function getHeadBlobHashes(repoPath: string): Promise<Set<string>> {
  * Computes the element-wise mean of an array of equal-length vectors.
  * Returns null when the input is empty.
  */
-export function meanVector(vectors: number[][]): number[] | null {
+export function meanVector(vectors: (number[] | Float32Array)[]): Float32Array | null {
   if (vectors.length === 0) return null
   const dim = vectors[0]?.length ?? 0
   if (dim === 0) return null
-  const sum = new Array<number>(dim).fill(0)
+  const sum = new Float32Array(dim)
   for (const vec of vectors) {
     for (let i = 0; i < dim; i++) {
       sum[i] += vec[i]
     }
   }
   const n = vectors.length
-  return sum.map((v) => v / n)
+  for (let i = 0; i < sum.length; i++) sum[i] /= n
+  return sum
 }
 
 // ---------------------------------------------------------------------------
@@ -126,23 +127,16 @@ export async function findDeadConcepts(opts: {
   const headHashes = await getHeadBlobHashes(repoPath)
 
   // 2. All indexed embeddings
-  let allEmbRows = db
-    .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
-    .from(embeddings)
-    .all()
+  const baseQuery = db.select({ blobHash: embeddings.blobHash, vector: embeddings.vector }).from(embeddings)
+  const conditions: any[] = []
+  if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+  let allEmbRows = (conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery).all()
 
   if (allEmbRows.length === 0) return []
 
-  // Apply branch filter: restrict to blobs seen on the specified branch
-  if (branch) {
-    const branchSet = getBranchBlobHashSet(branch)
-    allEmbRows = allEmbRows.filter((r) => branchSet.has(r.blobHash))
-    if (allEmbRows.length === 0) return []
-  }
-
   // Partition into HEAD-present vs. dead
-  const headVectors: number[][] = []
-  const deadEmbMap = new Map<string, number[]>()
+  const headVectors: Float32Array[] = []
+  const deadEmbMap = new Map<string, Float32Array>()
 
   for (const row of allEmbRows) {
     if (headHashes.has(row.blobHash)) {

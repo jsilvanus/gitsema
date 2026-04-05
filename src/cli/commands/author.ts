@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeAuthorContributions, type AuthorContribution } from '../../core/search/authorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
@@ -52,7 +53,7 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, textModel)
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, query)
   } catch (err) {

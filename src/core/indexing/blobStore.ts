@@ -21,7 +21,10 @@ function serializeEmbedding(embedding: Embedding, quantize?: boolean): {
     const q = quantizeVector(embedding)
     return { vector: serializeQuantized(q), quantized: 1, quantMin: q.min, quantScale: q.scale }
   }
-  return { vector: Buffer.from(new Float32Array(embedding).buffer), quantized: 0, quantMin: null, quantScale: null }
+  const vector = embedding instanceof Float32Array
+    ? Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength)
+    : Buffer.from(new Float32Array(embedding).buffer)
+  return { vector, quantized: 0, quantMin: null, quantScale: null }
 }
 
 export interface StoreBlobArgs {

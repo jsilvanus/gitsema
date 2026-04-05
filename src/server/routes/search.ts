@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
@@ -59,7 +60,7 @@ export function searchRouter(deps: SearchRouterDeps): Router {
       return
     }
 
-    let textEmbedding: number[]
+    let textEmbedding: Embedding
     try {
       textEmbedding = await textProvider.embed(opts.query)
     } catch (err) {
@@ -84,7 +85,7 @@ export function searchRouter(deps: SearchRouterDeps): Router {
     if (opts.hybrid) {
       results = hybridSearch(opts.query, textEmbedding, { ...searchOpts, bm25Weight: opts.bm25Weight })
     } else if (codeProvider) {
-      let codeEmbedding: number[]
+      let codeEmbedding: Embedding
       try {
         codeEmbedding = await codeProvider.embed(opts.query)
       } catch (err) {
@@ -118,7 +119,7 @@ export function searchRouter(deps: SearchRouterDeps): Router {
       return
     }
 
-    let queryEmbedding: number[]
+    let queryEmbedding: Embedding
     try {
       queryEmbedding = await textProvider.embed(parsed.data.query)
     } catch (err) {

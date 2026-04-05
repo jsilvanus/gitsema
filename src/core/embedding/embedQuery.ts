@@ -14,6 +14,7 @@
 
 import { getCachedQueryEmbedding, setCachedQueryEmbedding } from './queryCache.js'
 import type { EmbeddingProvider } from './provider.js'
+import type { Embedding } from '../models/types.js'
 
 export interface EmbedQueryOptions {
   /** When true, skip both cache reads and cache writes. Defaults to false. */
@@ -30,7 +31,7 @@ export async function embedQuery(
   provider: EmbeddingProvider,
   query: string,
   options: EmbedQueryOptions = {},
-): Promise<number[]> {
+): Promise<Embedding> {
   const noCache = options.noCache ?? false
 
   if (!noCache) {

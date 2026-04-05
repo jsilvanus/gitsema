@@ -48,10 +48,9 @@ export interface AuthorSearchOptions {
   candidateBlobs?: Array<{ blobHash: string; score: number }>
 }
 
-/** Deserializes a Float32Array stored as a Buffer back to number[]. */
-function bufferToEmbedding(buf: Buffer): number[] {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
+/** Deserializes a Float32Array stored as a Buffer. */
+function bufferToEmbedding(buf: Buffer): Float32Array {
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
 }
 
 /**

@@ -1,8 +1,8 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings } from '../db/schema.js'
-import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
+import { inArray, eq, sql, and } from 'drizzle-orm'
+import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
 // ---------------------------------------------------------------------------
@@ -71,10 +71,10 @@ export interface ImpactReport {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Deserializes a Float32Array stored as a Buffer back to number[]. */
-function bufferToEmbedding(buf: Buffer): number[] {
+/** Deserializes a Float32Array stored as a Buffer back to Float32Array. */
+function bufferToEmbedding(buf: Buffer): Float32Array {
   const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
+  return f32
 }
 
 /**
@@ -171,16 +171,29 @@ export async function computeImpact(
   // --- Find the target's blob hash in the index (best-effort) ---
   // We look for paths that end with the relative portion of filePath
   const normalised = filePath.replace(/\\/g, '/').replace(/^\.\//, '')
-  const pathRows = db
-    .select({ blobHash: paths.blobHash, path: paths.path })
+  let targetBlobHash: string | null = null
+  // Fast exact-match path (uses idx_paths_path index after migration)
+  const exactMatch = db
+    .select({ blobHash: paths.blobHash })
     .from(paths)
+    .where(eq(paths.path, normalised))
+    .limit(1)
     .all()
 
-  let targetBlobHash: string | null = null
-  for (const row of pathRows) {
-    if (row.path === normalised || row.path.endsWith(`/${normalised}`) || normalised.endsWith(`/${row.path}`)) {
-      targetBlobHash = row.blobHash
-      break
+  if (exactMatch.length > 0) {
+    targetBlobHash = exactMatch[0].blobHash
+  } else {
+    // Fallback: fuzzy partial-path matching for relative path edge cases
+    const pathRows = db
+      .select({ blobHash: paths.blobHash, path: paths.path })
+      .from(paths)
+      .all()
+
+    for (const row of pathRows) {
+      if (row.path.endsWith(`/${normalised}`) || normalised.endsWith(`/${row.path}`)) {
+        targetBlobHash = row.blobHash
+        break
+      }
     }
   }
 
@@ -197,16 +210,10 @@ export async function computeImpact(
     language?: string
   }
 
-  let allEmbRows: Array<{ blobHash: string; vector: unknown }> = db
-    .select({ blobHash: embeddings.blobHash, vector: embeddings.vector })
-    .from(embeddings)
-    .all()
-
-  // Apply branch filter
-  if (branch) {
-    const branchSet = getBranchBlobHashSet(branch)
-    allEmbRows = allEmbRows.filter((r) => branchSet.has(r.blobHash))
-  }
+  const baseQuery = db.select({ blobHash: embeddings.blobHash, vector: embeddings.vector }).from(embeddings)
+  const conditions: any[] = []
+  if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+  let allEmbRows: Array<{ blobHash: string; vector: unknown }> = (conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery).all()
 
   let candidates: CandidateRow[] = allEmbRows.map((r) => ({
     blobHash: r.blobHash,
@@ -277,10 +284,12 @@ export async function computeImpact(
   }
 
   // --- Score all candidates ---
+  // Pre-compute target norm once (H8 optimization)
+  const targetNorm = vectorNorm(targetEmbedding)
   type ScoredCandidate = CandidateRow & { score: number }
   const scored: ScoredCandidate[] = candidates.map((c) => ({
     ...c,
-    score: cosineSimilarity(targetEmbedding, bufferToEmbedding(c.vector)),
+    score: cosineSimilarityPrecomputed(targetEmbedding, targetNorm, bufferToEmbedding(c.vector)),
   }))
 
   // Sort descending, deduplicate by blobHash (keep best score per blob unless chunk/symbol-level)

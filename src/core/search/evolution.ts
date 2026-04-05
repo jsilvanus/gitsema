@@ -4,6 +4,7 @@ import { embeddings, paths, blobCommits, commits, symbols, symbolEmbeddings } fr
 import { eq, inArray } from 'drizzle-orm'
 import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
+import type { Embedding } from '../models/types.js'
 
 export interface EvolutionEntry {
   blobHash: string
@@ -14,17 +15,16 @@ export interface EvolutionEntry {
 }
 
 /**
- * Deserializes a Float32Array stored as a Buffer back to number[].
+ * Deserializes a Float32Array stored as a Buffer.
  */
-function bufferToEmbedding(buf: Buffer): number[] {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
+function bufferToEmbedding(buf: Buffer): Float32Array {
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
 }
 
 /**
  * Cosine *distance* in [0, 2]: 0 means identical, 2 means opposite.
  */
-function cosineDistance(a: number[], b: number[]): number {
+function cosineDistance(a: Embedding, b: Embedding): number {
   return 1 - cosineSimilarity(a, b)
 }
 
@@ -108,7 +108,7 @@ export function computeEvolution(filePath: string, originBlob?: string, opts: { 
 
   // Load embeddings for all relevant blobs
   const BATCH = 500
-  const embMap = new Map<string, number[]>()
+  const embMap = new Map<string, Embedding>()
 
   if (opts.useSymbolLevel) {
     // Symbol-level: compute centroid of per-symbol embeddings for each blob
@@ -122,7 +122,7 @@ export function computeEvolution(filePath: string, originBlob?: string, opts: { 
         .all()
 
       // Group by blobHash and compute centroid
-      const grouped = new Map<string, number[][]>()
+      const grouped = new Map<string, Float32Array[]>()
       for (const row of rows) {
         const vec = bufferToEmbedding(row.vector as Buffer)
         const list = grouped.get(row.blobHash) ?? []
@@ -131,7 +131,7 @@ export function computeEvolution(filePath: string, originBlob?: string, opts: { 
       }
       for (const [blobHash, vecs] of grouped) {
         const dim = vecs[0].length
-        const centroid = new Array<number>(dim).fill(0)
+        const centroid = new Float32Array(dim)
         for (const v of vecs) for (let d = 0; d < dim; d++) centroid[d] += v[d]
         for (let d = 0; d < dim; d++) centroid[d] /= vecs.length
         embMap.set(blobHash, centroid)
@@ -154,8 +154,8 @@ export function computeEvolution(filePath: string, originBlob?: string, opts: { 
 
   // Build evolution entries
   const result: EvolutionEntry[] = []
-  let originEmbedding: number[] | null = null
-  let prevEmbedding: number[] | null = null
+  let originEmbedding: Embedding | null = null
+  let prevEmbedding: Embedding | null = null
 
   for (const entry of history) {
     const emb = embMap.get(entry.blobHash)
@@ -347,7 +347,7 @@ export async function computeDiff(
     .where(inArray(embeddings.blobHash, [hash1, hash2]))
     .all()
 
-  const embByHash = new Map<string, number[]>()
+  const embByHash = new Map<string, Embedding>()
   for (const row of rows) {
     embByHash.set(row.blobHash, bufferToEmbedding(row.vector as Buffer))
   }
@@ -373,7 +373,7 @@ export async function computeDiff(
  */
 async function findNeighbors(
   excludeHash: string,
-  queryEmb: number[],
+  queryEmb: Embedding,
   k: number,
 ): Promise<Array<{ blobHash: string; paths: string[]; distance: number }>> {
   const allRows = db
@@ -439,7 +439,7 @@ export interface ConceptEvolutionEntry {
  * @returns Array of entries sorted oldest-first
  */
 export function computeConceptEvolution(
-  queryEmbedding: number[],
+  queryEmbedding: Embedding,
   topK = 50,
   branch?: string,
 ): ConceptEvolutionEntry[] {
@@ -473,7 +473,7 @@ export function computeConceptEvolution(
   if (scored.length === 0) return []
 
   const topHashes = scored.map((s) => s.blobHash)
-  const embByHash = new Map<string, { emb: number[]; score: number }>(scored.map((s) => [s.blobHash, { emb: s.emb, score: s.score }]))
+  const embByHash = new Map<string, { emb: Embedding; score: number }>(scored.map((s) => [s.blobHash, { emb: s.emb, score: s.score }]))
 
   // 2. Resolve earliest commit for each blob
   const firstSeenMap = getFirstSeenMap(topHashes)
