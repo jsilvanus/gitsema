@@ -126,7 +126,9 @@ Options:
                           Accepts a date (2024-01-01), tag (v1.0), or commit hash.
                           Use "all" to force a full re-index.
   --max-commits <n>       Stop after indexing this many commits.
-  --concurrency <n>       Number of blobs to embed concurrently (default: 4).
+  --concurrency <n>       Number of blobs to embed concurrently in parallel (default: 4).
+                          Increase on fast hardware / remote APIs; decrease if the embedding
+                          server is being throttled.
   --ext <extensions>      Only index files with these extensions, e.g. ".ts,.js,.py"
   --max-size <size>       Skip blobs larger than this size, e.g. "200kb", "1mb" (default: 200kb)
   --exclude <patterns>    Skip blobs whose path contains any of these patterns, e.g. "node_modules,dist"

@@ -467,7 +467,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (options.since) logger.info(`  Limiting to commits after: ${options.since}`)
   if (options.branch) logger.info(`  Branch filter: ${options.branch}`)
   if (maxCommits !== undefined) logger.info(`  Max commits per session: ${maxCommits}`)
-  if (concurrency !== 4) logger.info(`  Concurrency: ${concurrency}`)
+  logger.info(`  Concurrency: ${concurrency} (parallel embedding calls)`)
   if (ext && ext.length > 0) logger.info(`  Extensions: ${ext.join(', ')}`)
   if (exclude && exclude.length > 0) logger.info(`  Excluding: ${exclude.join(', ')}`)
 
