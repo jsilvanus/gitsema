@@ -554,9 +554,9 @@ export async function computeClusters(opts: {
     for (let i = 0; i < allAssignments.length; i += BATCH) {
       const batch = allAssignments.slice(i, i + BATCH)
       const placeholders = batch.map(() => '(?,?)').join(',')
-      const flatten: any[] = []
-      for (const row of batch) { flatten.push(row[0], row[1]) }
-      rawDb.prepare(`INSERT INTO cluster_assignments (blob_hash, cluster_id) VALUES ${placeholders}`).run(...flatten)
+      const batchParams: unknown[] = []
+      for (const row of batch) { batchParams.push(row[0], row[1]) }
+      rawDb.prepare(`INSERT INTO cluster_assignments (blob_hash, cluster_id) VALUES ${placeholders}`).run(...batchParams)
     }
 
     return assignedIds

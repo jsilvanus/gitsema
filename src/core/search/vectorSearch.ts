@@ -309,6 +309,17 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   // Single-pass scoring: compute cosine (and negative cosine if present) and final score per candidate
   type FinalEntry = CandidateRow & { cosine: number; score: number }
+  /** Build a FinalEntry by copying all fields from row plus cosine/score. */
+  function makeFinalEntry(row: CandidateRow, cosine: number, score: number): FinalEntry {
+    return {
+      blobHash: row.blobHash, vector: row.vector,
+      quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale,
+      chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine,
+      symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind,
+      language: row.language, modulePath: row.modulePath,
+      cosine, score,
+    }
+  }
   const finalScored: FinalEntry[] = []
   for (const row of filteredPool) {
     const emb = rowToEmbedding(row)
@@ -326,14 +337,11 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       const blobPaths = pathsByBlob?.get(row.blobHash) ?? []
       const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : 0
       score = (wv * cosine + wr * recency + wp * pathScore) / wTotal
-      finalScored.push({ blobHash: row.blobHash, vector: row.vector, quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale, chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine, symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind, language: row.language, modulePath: row.modulePath, cosine, score })
     } else if (recent) {
       const recency = recencyScores?.get(row.blobHash) ?? 0
       score = alpha * cosine + (1 - alpha) * recency
-      finalScored.push({ blobHash: row.blobHash, vector: row.vector, quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale, chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine, symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind, language: row.language, modulePath: row.modulePath, cosine, score })
-    } else {
-      finalScored.push({ blobHash: row.blobHash, vector: row.vector, quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale, chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine, symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind, language: row.language, modulePath: row.modulePath, cosine, score })
     }
+    finalScored.push(makeFinalEntry(row, cosine, score))
   }
 
   // Sort descending by score, deduplicate by blobHash (keep highest-scoring entry

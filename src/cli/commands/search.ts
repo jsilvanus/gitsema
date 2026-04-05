@@ -3,7 +3,7 @@ import { buildProvider, applyModelOverrides } from '../../core/embedding/provide
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding, SearchResult } from '../../core/models/types.js'
-import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
+import { vectorSearch, mergeSearchResults, type VectorSearchOptions } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
@@ -249,7 +249,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   // Prepare search options; negative/explain handled below
-  const searchOpts: any = {
+  const searchOpts: VectorSearchOptions = {
     topK,
     recent: options.recent ?? false,
     alpha,
