@@ -10,7 +10,7 @@
  * (i.e. the directory that contains `package.json`).
  */
 
-import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, type Stats } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { execSync } from 'node:child_process'
@@ -176,7 +176,7 @@ export function uninstallHooks(cwd: string = process.cwd()): HookInstallResult {
 }
 
 /** lstat that returns null instead of throwing when the path doesn't exist. */
-function lstatSync_safe(p: string): ReturnType<typeof lstatSync> | null {
+function lstatSync_safe(p: string): Stats | null {
   try {
     return lstatSync(p)
   } catch {

@@ -4,6 +4,7 @@ import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/c
 import { isIndexed } from './deduper.js'
 import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
+import type { Embedding } from '../models/types.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
 import { createChunker, type ChunkStrategy, type ChunkOptions } from '../chunking/chunker.js'
@@ -226,7 +227,16 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0,
   }
   const start = Date.now()
+  const SIZE_CAP = 50_000
   const seenHashes = new Set<string>()
+  let lastProgressTime = 0
+  function reportProgress() {
+    const now = Date.now()
+    if (now - lastProgressTime >= 100) {
+      lastProgressTime = now
+      onProgress?.({ ...stats, elapsed: now - start })
+    }
+  }
 
   const stream = revList(repoPath, { since, maxCommits, branch: branchFilter })
 
@@ -240,6 +250,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     if (seenHashes.has(blobHash)) continue
     seenHashes.add(blobHash)
     stats.seen++
+    // Prevent seenHashes from growing unbounded — clear periodically (within-run dedup is best-effort)
+    if (seenHashes.size > SIZE_CAP) seenHashes.clear()
 
     // Path-based filter (applied before any I/O)
     if (isFiltered(path, filter)) {
@@ -280,13 +292,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               logger.error(`Error reading blob ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
               stats.failed++
               stats.otherFailed++
-              onProgress?.({ ...stats, elapsed: Date.now() - start })
+              reportProgress()
               return
             }
 
         if (content === null) {
           stats.oversized++
-          onProgress?.({ ...stats, elapsed: Date.now() - start })
+          reportProgress()
           return
         }
 
@@ -305,7 +317,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           // Level-1: attempt to embed the whole file. If successful, persist via
           // storeBlob (writes blob + embedding + path + FTS5 in one call). If the
           // embedding fails, fall back to storeBlobRecord (blob + path, no embedding).
-          let wholeEmbedding: number[] | null = null
+          let wholeEmbedding: Embedding | null = null
           if (computeModuleEmbedding) {
             try {
               wholeEmbedding = await activeProvider.embed(text)
@@ -324,7 +336,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
             logger.error(`Failed to store blob record ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
             stats.failed++
             stats.otherFailed++
-            onProgress?.({ ...stats, elapsed: Date.now() - start })
+            reportProgress()
             return
           }
 
@@ -347,7 +359,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           }
 
           for (const chunk of blobChunks) {
-            let chunkEmbedding: number[]
+            let chunkEmbedding: Embedding
             try {
               chunkEmbedding = await activeProvider.embed(chunk.content)
             } catch (err) {
@@ -378,13 +390,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 path, chunk.startLine, chunk.endLine,
                 chunk.symbolKind ?? 'function', chunk.symbolName, chunk.content,
               )
-              let symbolEmbedding: number[]
+              let symbolEmbedding: Embedding
               try {
                 symbolEmbedding = await activeProvider.embed(enriched)
               } catch (err) {
                 logger.debug?.(`Symbol embedding failed for ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
                 // Symbol embedding failure is non-fatal — the chunk embedding succeeded
-                onProgress?.({ ...stats, elapsed: Date.now() - start })
+                reportProgress()
                 continue
               }
               try {
@@ -405,7 +417,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           if (allOk) stats.indexed++
         } else {
           // Whole-file indexing (default, backward-compatible)
-          let embedding: number[]
+          let embedding: Embedding
           try {
             embedding = await activeProvider.embed(text)
           } catch (err) {
@@ -431,12 +443,12 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 logger.error(`Failed to store blob record (fallback) ${blobHash}: ${err2 instanceof Error ? err2.message : String(err2)}`)
                 stats.failed++
                 stats.otherFailed++
-                onProgress?.({ ...stats, elapsed: Date.now() - start })
+                reportProgress()
                 return
               }
 
               for (const chunk of blobChunks) {
-                let chunkEmbedding: number[]
+                let chunkEmbedding: Embedding
                 try {
                   chunkEmbedding = await activeProvider.embed(chunk.content)
                 } catch (err3) {
@@ -457,7 +469,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                       let subAllOk = true
 
                       for (const sub of subChunks) {
-                        let subEmb: number[] | null = null
+                        let subEmb: Embedding | null = null
                         try {
                           subEmb = await activeProvider.embed(sub.content)
                         } catch (err5) {
@@ -474,7 +486,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                         try {
                           const absStart = chunk.startLine + sub.startLine - 1
                           const absEnd = chunk.startLine + sub.endLine - 1
-                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb, quantize })
+                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb!, quantize })
                           stats.chunks++
                         } catch (err6) {
                           logger.error(`Failed to store subchunk for blob ${blobHash} subchunk ${chunk.startLine + sub.startLine - 1}-${chunk.startLine + sub.endLine - 1}: ${err6 instanceof Error ? err6.message : String(err6)}`)

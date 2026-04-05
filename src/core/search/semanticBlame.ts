@@ -3,9 +3,10 @@ import { promisify } from 'node:util'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, symbols, symbolEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
+import type { Embedding } from '../models/types.js'
 import { FunctionChunker } from '../chunking/functionChunker.js'
 import { FixedChunker } from '../chunking/fixedChunker.js'
 import type { Chunk } from '../chunking/chunker.js'
@@ -148,9 +149,9 @@ export async function computeSemanticBlame(
   filePath: string,
   content: string,
   provider: EmbeddingProvider,
-  opts: { topK?: number; searchSymbols?: boolean; repoPath?: string } = {},
+  opts: { topK?: number; searchSymbols?: boolean; repoPath?: string; branch?: string } = {},
 ): Promise<SemanticBlameEntry[]> {
-  const { topK = 3, searchSymbols = false, repoPath = '.' } = opts
+  const { topK = 3, searchSymbols = false, repoPath = '.', branch } = opts
   const { db } = getActiveSession()
 
   // --- Chunk the file ---
@@ -201,6 +202,12 @@ export async function computeSemanticBlame(
     }))
   }
 
+  // Apply branch filter when requested
+  if (branch) {
+    const branchSet = getBranchBlobHashSet(branch)
+    storedVectors = storedVectors.filter((v) => branchSet.has(v.blobHash))
+  }
+
   // Early return: no indexed blobs yet
   if (storedVectors.length === 0) {
     return chunks.map((chunk) => ({
@@ -217,7 +224,7 @@ export async function computeSemanticBlame(
   const entries: SemanticBlameEntry[] = []
 
   for (const chunk of chunks) {
-    let queryVec: number[]
+    let queryVec: Embedding
     try {
       queryVec = await provider.embed(chunk.content)
     } catch {
@@ -233,7 +240,7 @@ export async function computeSemanticBlame(
 
     // Top-K by cosine similarity
     const scored = storedVectors
-      .map((s) => ({ blobHash: s.blobHash, similarity: cosineSimilarity(queryVec, s.vec) }))
+      .map((s) => ({ blobHash: s.blobHash, similarity: cosineSimilarity(queryVec, s.vec), symbolName: s.symbolName, symbolKind: s.symbolKind }))
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK)
 

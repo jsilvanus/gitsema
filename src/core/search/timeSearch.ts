@@ -75,9 +75,12 @@ export function computeRecencyScores(firstSeenMap: Map<string, FirstSeenInfo>): 
   const scores = new Map<string, number>()
   if (firstSeenMap.size === 0) return scores
 
-  const timestamps = Array.from(firstSeenMap.values()).map((v) => v.timestamp)
-  const minTs = Math.min(...timestamps)
-  const maxTs = Math.max(...timestamps)
+  let minTs = Infinity
+  let maxTs = -Infinity
+  for (const { timestamp } of firstSeenMap.values()) {
+    if (timestamp < minTs) minTs = timestamp
+    if (timestamp > maxTs) maxTs = timestamp
+  }
   const range = maxTs - minTs
 
   for (const [blobHash, info] of firstSeenMap) {

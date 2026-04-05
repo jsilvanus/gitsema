@@ -2,17 +2,23 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
+import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
 import type { SemanticDiffEntry, SemanticDiffResult } from '../../core/search/semanticDiff.js'
 
 export interface SemanticDiffCommandOptions {
   top?: string
   dump?: string | boolean
+  html?: string | boolean
   // CLI model overrides
   model?: string
   textModel?: string
   codeModel?: string
+  hybrid?: boolean
+  bm25Weight?: string
+  branch?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -105,7 +111,7 @@ export async function semanticDiffCommand(
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, topic)
   } catch (err) {
@@ -117,12 +123,26 @@ export async function semanticDiffCommand(
 
   let result: SemanticDiffResult
   try {
-    result = computeSemanticDiff(queryEmbedding, topic, ref1, ref2, topK)
+    result = computeSemanticDiff(queryEmbedding, topic, ref1, ref2, topK, options.branch)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: ${msg}`)
     process.exit(1)
     throw err
+  }
+
+  if (options.html !== undefined) {
+    const html = renderSemanticDiffHtml(result)
+    const outFile = typeof options.html === 'string' ? options.html : 'semantic-diff.html'
+    try {
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Semantic diff HTML written to: ${outFile}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error writing HTML file: ${msg}`)
+      process.exit(1)
+    }
+    return
   }
 
   if (options.dump !== undefined) {

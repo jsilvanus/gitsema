@@ -11,10 +11,18 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeClusters, getBlobHashesOnBranch } from '../../core/search/clustering.js'
 import { computeConceptChangePoints } from '../../core/search/changePoints.js'
 import { computeAuthorContributions } from '../../core/search/authorSearch.js'
 import { computeImpact } from '../../core/search/impact.js'
+import { parseDateArg } from '../../core/search/timeSearch.js'
+import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
+import { computeSemanticBlame } from '../../core/search/semanticBlame.js'
+import { findDeadConcepts } from '../../core/search/deadConcepts.js'
+import { computeSemanticCollisions, computeMergeImpact } from '../../core/search/mergeAudit.js'
+import { computeBranchSummary } from '../../core/search/branchSummary.js'
+import { getMergeBase, getBranchExclusiveBlobs } from '../../core/git/branchDiff.js'
 
 const ClustersBodySchema = z.object({
   k: z.number().int().positive().optional().default(8),
@@ -82,7 +90,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
-    let queryEmbedding: number[]
+    let queryEmbedding: Embedding
     try {
       queryEmbedding = await textProvider.embed(opts.query)
     } catch (err) {
@@ -110,7 +118,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
-    let queryEmbedding: number[]
+    let queryEmbedding: Embedding
     try {
       queryEmbedding = await textProvider.embed(opts.query)
     } catch (err) {
@@ -142,6 +150,157 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
         topK: opts.topK,
         branch: opts.branch,
       })
+      res.json(report)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/semantic-diff
+  const SemanticDiffBodySchema = z.object({
+    ref1: z.string().min(1),
+    ref2: z.string().min(1),
+    query: z.string().min(1),
+    topK: z.number().int().positive().optional().default(10),
+    branch: z.string().optional(),
+  })
+  router.post('/semantic-diff', async (req, res) => {
+    const parsed = SemanticDiffBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    let qEmb: Embedding
+    try {
+      qEmb = await textProvider.embed(opts.query)
+    } catch (err) {
+      res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+      return
+    }
+    try {
+      const result = computeSemanticDiff(qEmb, opts.query, opts.ref1, opts.ref2, opts.topK, opts.branch)
+      res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/semantic-blame
+  const SemanticBlameBodySchema = z.object({
+    filePath: z.string().min(1),
+    content: z.string().min(1),
+    topK: z.number().int().positive().optional().default(3),
+    searchSymbols: z.boolean().optional().default(false),
+    branch: z.string().optional(),
+  })
+  router.post('/semantic-blame', async (req, res) => {
+    const parsed = SemanticBlameBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    let qEmbProvider = textProvider
+    try {
+      const entries = await computeSemanticBlame(opts.filePath, opts.content, qEmbProvider, { topK: opts.topK, searchSymbols: opts.searchSymbols, branch: opts.branch })
+      res.json(entries)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/dead-concepts
+  const DeadConceptsBodySchema = z.object({
+    topK: z.number().int().positive().optional().default(10),
+    since: z.string().optional(),
+    branch: z.string().optional(),
+  })
+  router.post('/dead-concepts', async (req, res) => {
+    const parsed = DeadConceptsBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    let sinceTs: number | undefined
+    if (opts.since) {
+      try {
+        sinceTs = parseDateArg(opts.since)
+      } catch (err) {
+        res.status(400).json({ error: `Invalid since date: ${err instanceof Error ? err.message : String(err)}` })
+        return
+      }
+    }
+    try {
+      const results = await findDeadConcepts({ topK: opts.topK, since: sinceTs, branch: opts.branch })
+      res.json(results)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/merge-audit
+  const MergeAuditBodySchema = z.object({
+    branchA: z.string().min(1),
+    branchB: z.string().min(1),
+    threshold: z.number().min(0).max(1).optional().default(0.85),
+    topK: z.number().int().positive().optional().default(10),
+  })
+  router.post('/merge-audit', async (req, res) => {
+    const parsed = MergeAuditBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    try {
+      const mergeBase = getMergeBase(opts.branchA, opts.branchB)
+      const blobsA = getBranchExclusiveBlobs(opts.branchA, mergeBase)
+      const blobsB = getBranchExclusiveBlobs(opts.branchB, mergeBase)
+      const report = computeSemanticCollisions(blobsA, blobsB, opts.branchA, opts.branchB, mergeBase, { threshold: opts.threshold, topK: opts.topK })
+      res.json(report)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/merge-preview
+  const MergePreviewBodySchema = z.object({
+    branch: z.string().min(1),
+    into: z.string().optional().default('main'),
+    k: z.number().int().positive().optional().default(8),
+  })
+  router.post('/merge-preview', async (req, res) => {
+    const parsed = MergePreviewBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    try {
+      const report = await computeMergeImpact(opts.branch, opts.into, { k: opts.k })
+      res.json(report)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/branch-summary
+  const BranchSummaryBodySchema = z.object({
+    branch: z.string().min(1),
+    baseBranch: z.string().optional().default('main'),
+    topConcepts: z.number().int().positive().optional().default(5),
+  })
+  router.post('/branch-summary', async (req, res) => {
+    const parsed = BranchSummaryBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    try {
+      const report = await computeBranchSummary(opts.branch, opts.baseBranch, { topConcepts: opts.topConcepts })
       res.json(report)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })

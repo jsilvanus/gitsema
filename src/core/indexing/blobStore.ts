@@ -21,7 +21,10 @@ function serializeEmbedding(embedding: Embedding, quantize?: boolean): {
     const q = quantizeVector(embedding)
     return { vector: serializeQuantized(q), quantized: 1, quantMin: q.min, quantScale: q.scale }
   }
-  return { vector: Buffer.from(new Float32Array(embedding).buffer), quantized: 0, quantMin: null, quantScale: null }
+  const vector = embedding instanceof Float32Array
+    ? Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength)
+    : Buffer.from(new Float32Array(embedding).buffer)
+  return { vector, quantized: 0, quantMin: null, quantScale: null }
 }
 
 export interface StoreBlobArgs {
@@ -122,11 +125,16 @@ export function getBlobContent(blobHash: string): string | undefined {
 /**
  * Upserts blob content into the FTS5 `blob_fts` table.
  * Uses a DELETE + INSERT pattern because FTS5 does not support ON CONFLICT.
+ * Both statements run inside a single immediate transaction to halve the
+ * number of write transactions compared to two separate auto-commit statements.
  */
 export function storeFtsContent(blobHash: string, content: string): void {
   const { rawDb } = getActiveSession()
-  rawDb.prepare(`DELETE FROM blob_fts WHERE blob_hash = ?`).run(blobHash)
-  rawDb.prepare(`INSERT INTO blob_fts (blob_hash, content) VALUES (?, ?)`).run(blobHash, content)
+  const upsert = rawDb.transaction((hash: string, text: string) => {
+    rawDb.prepare(`DELETE FROM blob_fts WHERE blob_hash = ?`).run(hash)
+    rawDb.prepare(`INSERT INTO blob_fts (blob_hash, content) VALUES (?, ?)`).run(hash, text)
+  })
+  upsert(blobHash, content)
 }
 
 /**

@@ -17,14 +17,16 @@ const DEFAULT_MAX_ENTRIES = 10_000
 /**
  * Returns the cached embedding for (queryText, model), or null if not cached.
  */
-export function getCachedQueryEmbedding(queryText: string, model: string): number[] | null {
+export function getCachedQueryEmbedding(queryText: string, model: string): Float32Array | null {
   const { rawDb } = getActiveSession()
+  const ttlMs = DEFAULT_TTL_MS
+  const cutoff = Date.now() - ttlMs
   const row = rawDb
-    .prepare('SELECT vector FROM query_embeddings WHERE query_text = ? AND model = ?')
-    .get(queryText, model) as { vector: Buffer } | undefined
+    .prepare('SELECT vector, cached_at FROM query_embeddings WHERE query_text = ? AND model = ? AND cached_at >= ?')
+    .get(queryText, model, cutoff) as { vector: Buffer; cached_at: number } | undefined
   if (!row) return null
   const f32 = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4)
-  return Array.from(f32)
+  return f32
 }
 
 /**
@@ -34,10 +36,12 @@ export function getCachedQueryEmbedding(queryText: string, model: string): numbe
 export function setCachedQueryEmbedding(
   queryText: string,
   model: string,
-  embedding: number[],
+  embedding: Float32Array | number[],
 ): void {
   const { rawDb } = getActiveSession()
-  const vector = Buffer.from(new Float32Array(embedding).buffer)
+  const vector = embedding instanceof Float32Array
+    ? Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength)
+    : Buffer.from(new Float32Array(embedding).buffer)
   rawDb
     .prepare(
       `INSERT INTO query_embeddings (query_text, model, dimensions, vector, cached_at)

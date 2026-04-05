@@ -1,6 +1,6 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
-import { inArray, eq } from 'drizzle-orm'
+import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../embedding/quantize.js'
@@ -23,11 +23,36 @@ export function cosineSimilarity(a: Embedding, b: Embedding): number {
 }
 
 /**
+ * Computes the L2 norm (magnitude) of an embedding vector.
+ * Use with cosineSimilarityPrecomputed to avoid recomputing the query norm in a tight loop.
+ */
+export function vectorNorm(v: Embedding): number {
+  let sq = 0
+  for (let i = 0; i < v.length; i++) sq += v[i] * v[i]
+  return Math.sqrt(sq)
+}
+
+/**
+ * Cosine similarity where the L2 norm of `a` has been pre-computed.
+ * Use in hot loops where `a` is the same query embedding and `b` changes each iteration.
+ */
+export function cosineSimilarityPrecomputed(a: Embedding, aMag: number, b: Embedding): number {
+  let dot = 0
+  let magB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]
+    magB += b[i] * b[i]
+  }
+  const denom = aMag * Math.sqrt(magB)
+  return denom === 0 ? 0 : dot / denom
+}
+
+/**
  * Deserializes a Float32Array stored as a Buffer back to number[].
  */
-function bufferToEmbedding(buf: Buffer): Embedding {
+function bufferToEmbedding(buf: Buffer): Float32Array {
   const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
+  return f32
 }
 
 type CandidateRow = {
@@ -39,7 +64,7 @@ type CandidateRow = {
   modulePath?: string
 }
 
-function rowToEmbedding(row: CandidateRow): number[] {
+function rowToEmbedding(row: CandidateRow): Float32Array {
   if (row.quantized === 1 && row.quantMin != null && row.quantScale != null) {
     const q = deserializeQuantized(row.vector, row.quantMin, row.quantScale)
     return dequantizeVector(q)
@@ -90,6 +115,12 @@ export interface VectorSearchOptions {
   searchModules?: boolean
   /** When set, restrict results to blobs that appear on this branch (short name, e.g. "main"). */
   branch?: string
+  /** Negative example embedding to subtract from score (P3-2). */
+  negativeQueryEmbedding?: Embedding
+  /** Weight for negative example subtraction (default 0.5) */
+  negativeLambda?: number
+  /** When true, populate `signals` on returned SearchResult objects with per-signal values. */
+  explain?: boolean
 }
 
 /**
@@ -103,6 +134,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',
     searchChunks = false, searchSymbols = false, searchModules = false, branch,
+    negativeQueryEmbedding, negativeLambda, explain,
   } = options
 
   // Determine if three-signal ranking is active
@@ -123,7 +155,11 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     quantScale: embeddings.quantScale,
   }).from(embeddings)
 
-  const filteredQuery = model ? baseQuery.where(eq(embeddings.model, model)) : baseQuery
+  // Build SQL-level filters for model and branch to avoid loading all rows
+  const conditions: SQL[] = []
+  if (model) conditions.push(eq(embeddings.model, model))
+  if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+  const filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
   const allRows = filteredQuery.all()
 
   // Optionally include chunk embeddings
@@ -149,9 +185,10 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       .from(chunkEmbeddings)
       .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
 
-    const chunkRows = (model
-      ? chunkQuery.where(eq(chunkEmbeddings.model, model))
-      : chunkQuery).all()
+    const chunkConditions: SQL[] = []
+    if (model) chunkConditions.push(eq(chunkEmbeddings.model, model))
+    if (branch) chunkConditions.push(sql`${chunks.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+    const chunkRows = chunkConditions.length > 0 ? chunkQuery.where(and(...chunkConditions)).all() : chunkQuery.all()
 
     for (const row of chunkRows) {
       candidatePool.push({
@@ -185,9 +222,10 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       .from(symbolEmbeddings)
       .innerJoin(symbols, eq(symbolEmbeddings.symbolId, symbols.id))
 
-    const symRows = (model
-      ? symQuery.where(eq(symbolEmbeddings.model, model))
-      : symQuery).all()
+    const symConditions: SQL[] = []
+    if (model) symConditions.push(eq(symbolEmbeddings.model, model))
+    if (branch) symConditions.push(sql`${symbols.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+    const symRows = symConditions.length > 0 ? symQuery.where(and(...symConditions)).all() : symQuery.all()
 
     for (const row of symRows) {
       candidatePool.push({
@@ -226,15 +264,6 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     }
   }
 
-  // Apply branch filter when requested
-  if (branch) {
-    const branchRows = rawDb
-      .prepare('SELECT DISTINCT blob_hash FROM blob_branches WHERE branch_name = ?')
-      .all(branch) as Array<{ blob_hash: string }>
-    const branchHashSet = new Set(branchRows.map((r) => r.blob_hash))
-    candidatePool = candidatePool.filter((r) => branchHashSet.has(r.blobHash))
-  }
-
   // Apply time-range filter on the candidate set before scoring
   const allHashes = [...new Set(candidatePool.map((r) => r.blobHash))]
   const filteredHashes = (before !== undefined || after !== undefined)
@@ -247,18 +276,17 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   if (filteredPool.length === 0) return []
 
-  // Compute cosine similarity for each candidate
-  type ScoredEntry = CandidateRow & { cosine: number }
-  const scored: ScoredEntry[] = filteredPool.map((row) => ({
-    ...row,
-    cosine: cosineSimilarity(queryEmbedding, rowToEmbedding(row)),
-  }))
+  // Pre-compute query norm once (H8 optimization — avoids recomputing it for every candidate)
+  const queryNorm = vectorNorm(queryEmbedding)
+  const negEmbedding = options.negativeQueryEmbedding ?? null
+  const negLambda = options.negativeLambda ?? 0.5
+  const negNorm = negEmbedding ? vectorNorm(negEmbedding) : 0
 
-  // Compute recency scores when needed
+  // Compute recency scores when needed (use filteredPool directly)
   const needRecency = recent || useThreeSignal
   let recencyScores: Map<string, number> | null = null
   if (needRecency) {
-    const candidateHashes = [...new Set(scored.map((s) => s.blobHash))]
+    const candidateHashes = [...new Set(filteredPool.map((r) => r.blobHash))]
     const firstSeenMap = getFirstSeenMap(candidateHashes)
     recencyScores = computeRecencyScores(firstSeenMap)
   }
@@ -266,7 +294,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   // Resolve paths for path-relevance scoring (only when using three-signal ranking)
   let pathsByBlob: Map<string, string[]> | null = null
   if (useThreeSignal) {
-    const hashes = [...new Set(scored.map((s) => s.blobHash))]
+    const hashes = [...new Set(filteredPool.map((r) => r.blobHash))]
     const pathRows = db.select({ blobHash: paths.blobHash, path: paths.path })
       .from(paths)
       .where(inArray(paths.blobHash, hashes))
@@ -279,27 +307,42 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     }
   }
 
-  // Apply ranking formula
-  type FinalEntry = ScoredEntry & { score: number }
-  const finalScored: FinalEntry[] = scored.map((s) => {
-    let score: number
-
-    if (useThreeSignal) {
-      const recency = recencyScores?.get(s.blobHash) ?? 0
-      const blobPaths = pathsByBlob?.get(s.blobHash) ?? []
-      const pathScore = blobPaths.length > 0
-        ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p)))
-        : 0
-      score = (wv * s.cosine + wr * recency + wp * pathScore) / wTotal
-    } else if (recent) {
-      const recency = recencyScores?.get(s.blobHash) ?? 0
-      score = alpha * s.cosine + (1 - alpha) * recency
-    } else {
-      score = s.cosine
+  // Single-pass scoring: compute cosine (and negative cosine if present) and final score per candidate
+  type FinalEntry = CandidateRow & { cosine: number; score: number }
+  /** Build a FinalEntry by copying all fields from row plus cosine/score. */
+  function makeFinalEntry(row: CandidateRow, cosine: number, score: number): FinalEntry {
+    return {
+      blobHash: row.blobHash, vector: row.vector,
+      quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale,
+      chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine,
+      symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind,
+      language: row.language, modulePath: row.modulePath,
+      cosine, score,
+    }
+  }
+  const finalScored: FinalEntry[] = []
+  for (const row of filteredPool) {
+    const emb = rowToEmbedding(row)
+    const cosine = cosineSimilarityPrecomputed(queryEmbedding, queryNorm, emb)
+    let score = cosine
+    let negCos = 0
+    if (negEmbedding) {
+      negCos = cosineSimilarityPrecomputed(negEmbedding, negNorm, emb)
+      score = cosine - (negLambda * negCos)
     }
 
-    return { ...s, score }
-  })
+    // Blend with recency/path signals if requested
+    if (useThreeSignal) {
+      const recency = recencyScores?.get(row.blobHash) ?? 0
+      const blobPaths = pathsByBlob?.get(row.blobHash) ?? []
+      const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : 0
+      score = (wv * cosine + wr * recency + wp * pathScore) / wTotal
+    } else if (recent) {
+      const recency = recencyScores?.get(row.blobHash) ?? 0
+      score = alpha * cosine + (1 - alpha) * recency
+    }
+    finalScored.push(makeFinalEntry(row, cosine, score))
+  }
 
   // Sort descending by score, deduplicate by blobHash (keep highest-scoring entry
   // per blob), then take top-k. This prevents the same file appearing multiple
@@ -343,15 +386,19 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     // entries in the paths table. Map them to modulePath and expose a single
     // path equal to the modulePath for display purposes.
     if (b.modulePath !== undefined) {
-      return {
+      const base: any = {
         blobHash: b.blobHash,
         paths: [b.modulePath],
         score: b.score,
         modulePath: b.modulePath,
       }
+      if (options.explain) {
+        base.signals = { cosine: b.cosine }
+      }
+      return base
     }
 
-    return {
+    const base: any = {
       blobHash: b.blobHash,
       paths: pathsByBlob!.get(b.blobHash) ?? [],
       score: b.score,
@@ -365,6 +412,15 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       symbolKind: b.symbolKind,
       language: b.language,
     }
+
+    if (options.explain) {
+      const recency = recencyScores?.get(b.blobHash)
+      const blobPaths = pathsByBlob?.get(b.blobHash) ?? []
+      const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : undefined
+      base.signals = { cosine: b.cosine, recency: recency ?? undefined, pathScore }
+    }
+
+    return base
   })
 }
 
@@ -379,11 +435,13 @@ export function mergeSearchResults(
   topK: number,
 ): SearchResult[] {
   const best = new Map<string, SearchResult>()
-  for (const r of [...a, ...b]) {
+  for (const r of a) {
     const existing = best.get(r.blobHash)
-    if (!existing || r.score > existing.score) {
-      best.set(r.blobHash, r)
-    }
+    if (!existing || r.score > existing.score) best.set(r.blobHash, r)
+  }
+  for (const r of b) {
+    const existing = best.get(r.blobHash)
+    if (!existing || r.score > existing.score) best.set(r.blobHash, r)
   }
   return Array.from(best.values())
     .sort((x, y) => y.score - x.score)

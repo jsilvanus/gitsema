@@ -2,7 +2,9 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeConceptEvolution } from '../../core/search/evolution.js'
+import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { ConceptEvolutionEntry } from '../../core/search/evolution.js'
@@ -21,6 +23,8 @@ export interface ConceptEvolutionCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  hybrid?: boolean
+  bm25Weight?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -175,7 +179,7 @@ export async function conceptEvolutionCommand(
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, query.trim())
   } catch (err) {
@@ -185,7 +189,14 @@ export async function conceptEvolutionCommand(
     throw err
   }
 
-  const entries = computeConceptEvolution(queryEmbedding, topK, options.branch)
+  let candidateHashes: string[] | undefined
+  if (options.hybrid) {
+    const bw = options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : 0.3
+    const hybridResults = hybridSearch(query.trim(), queryEmbedding, { topK: topK, bm25Weight: bw, branch: options.branch })
+    candidateHashes = hybridResults.map((r) => r.blobHash)
+  }
+
+  const entries = computeConceptEvolution(queryEmbedding, topK, options.branch, candidateHashes)
 
   // --dump: emit structured JSON to a file or stdout
   if (options.dump !== undefined) {

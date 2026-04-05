@@ -1,6 +1,6 @@
 export type BlobHash = string   // SHA-1 hex
 export type CommitHash = string
-export type Embedding = number[]
+export type Embedding = number[] | Float32Array
 
 export interface BlobRecord {
   blobHash: BlobHash
@@ -32,4 +32,6 @@ export interface SearchResult {
   modulePath?: string
   /** Cluster label from `cluster_assignments` — populated by `--annotate-clusters` on the search command. */
   clusterLabel?: string
+  /** When explain=true, breakdown of score components. */
+  signals?: { cosine: number; recency?: number; pathScore?: number; bm25?: number }
 }

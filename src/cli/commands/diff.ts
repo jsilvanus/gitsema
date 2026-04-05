@@ -1,8 +1,10 @@
 import { computeDiff } from '../../core/search/evolution.js'
 import { shortHash } from '../../core/search/ranking.js'
+import { writeFileSync } from 'node:fs'
 
 export interface DiffCommandOptions {
   neighbors?: string
+  dump?: string | boolean
 }
 
 /**
@@ -81,5 +83,23 @@ export async function diffCommand(
   }
 
   const result = await computeDiff(ref1, ref2, filePath.trim(), { neighbors })
+
+  if (options.dump !== undefined) {
+    const json = JSON.stringify(result, null, 2)
+    if (typeof options.dump === 'string') {
+      try {
+        writeFileSync(options.dump, json, 'utf8')
+        console.log(`Diff JSON written to: ${options.dump}`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`Error writing dump file: ${msg}`)
+        process.exit(1)
+      }
+    } else {
+      process.stdout.write(json + '\n')
+      return
+    }
+  }
+
   console.log(renderDiff(result, filePath.trim()))
 }

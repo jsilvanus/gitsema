@@ -1,7 +1,8 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import {
   computeConceptChangePoints,
   type ConceptChangePointReport,
@@ -9,6 +10,7 @@ import {
 } from '../../core/search/changePoints.js'
 import { resolveRefToTimestamp } from '../../core/search/clustering.js'
 import { renderConceptChangePointsHtml } from '../../core/viz/htmlRenderer.js'
+import { hybridSearch } from '../../core/search/hybridSearch.js'
 
 export interface ChangePointsCommandOptions {
   top?: string
@@ -20,6 +22,11 @@ export interface ChangePointsCommandOptions {
   html?: string | boolean
   includeContent?: boolean
   branch?: string
+  model?: string
+  textModel?: string
+  codeModel?: string
+  hybrid?: boolean
+  bm25Weight?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -118,11 +125,14 @@ export async function changePointsCommand(
     }
   }
 
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, query.trim())
   } catch (err) {
@@ -130,6 +140,14 @@ export async function changePointsCommand(
     console.error(`Error: could not embed query — ${msg}`)
     process.exit(1)
     throw err
+  }
+
+  // When --hybrid is set, use hybrid search to get candidate blobs
+  let candidateHashes: string[] | undefined
+  if (options.hybrid) {
+    const bw = options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : 0.3
+    const hybridResults = hybridSearch(query.trim(), queryEmbedding, { topK: topK, bm25Weight: bw, branch: options.branch })
+    candidateHashes = hybridResults.map((r) => r.blobHash)
   }
 
   try {
@@ -140,6 +158,7 @@ export async function changePointsCommand(
       since,
       until,
       branch: options.branch,
+      candidateHashes,
     })
 
     if (options.dump !== undefined) {

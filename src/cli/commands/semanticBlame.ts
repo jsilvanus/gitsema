@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import {
   computeSemanticBlame,
@@ -18,6 +18,10 @@ export interface SemanticBlameCommandOptions {
    * file path; if a boolean `true`, print JSON to stdout.
    */
   dump?: string | boolean
+  model?: string
+  textModel?: string
+  codeModel?: string
+  branch?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -107,13 +111,16 @@ export async function semanticBlameCommand(
     process.exit(1)
   }
 
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
 
   let entries: SemanticBlameEntry[]
   try {
-    entries = await computeSemanticBlame(filePath.trim(), content, provider, { topK, searchSymbols: options.level === 'symbol' })
+    entries = await computeSemanticBlame(filePath.trim(), content, provider, { topK, searchSymbols: options.level === 'symbol', branch: options.branch })
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

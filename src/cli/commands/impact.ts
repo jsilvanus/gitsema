@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { existsSync, writeFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import {
   computeImpact,
@@ -24,6 +24,10 @@ export interface ImpactCommandOptions {
   dump?: string | boolean
   /** When set, restrict results to blobs seen on this branch. */
   branch?: string
+  model?: string
+  textModel?: string
+  codeModel?: string
+  html?: string | boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -109,6 +113,9 @@ export async function impactCommand(
     process.exit(1)
   }
 
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
@@ -134,6 +141,16 @@ export async function impactCommand(
     } else {
       console.log(json)
     }
+    return
+  }
+
+  // --html
+  if (options.html !== undefined) {
+    const { renderImpactHtml } = await import('../../core/viz/htmlRenderer.js')
+    const outFile = typeof options.html === 'string' ? options.html : 'impact.html'
+    const html = renderImpactHtml(report, filePath)
+    writeFileSync(outFile, html, 'utf8')
+    console.log(`Impact HTML written to: ${outFile}`)
     return
   }
 

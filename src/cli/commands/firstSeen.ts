@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
@@ -24,6 +25,8 @@ export interface FirstSeenCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  vss?: boolean
+  html?: string | boolean
 }
 
 function renderCommitResults(results: CommitSearchResult[]): string {
@@ -90,7 +93,7 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
     throw err
   }
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, query)
   } catch (err) {
@@ -124,6 +127,21 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
       process.stdout.write(json + '\n')
     }
     return
+  }
+
+  // --html support
+  if (options.html !== undefined) {
+    const { renderFirstSeenHtml } = await import('../../core/viz/htmlRenderer.js')
+    const html = renderFirstSeenHtml(results, query)
+    const outFile = typeof options.html === 'string' ? options.html : 'first-seen.html'
+    writeFileSync(outFile, html, 'utf8')
+    console.log(`First-seen HTML written to: ${outFile}`)
+    return
+  }
+
+  // --vss note
+  if (options.vss) {
+    console.warn('Note: --vss option is not implemented for first-seen; falling back to linear scan')
   }
 
   console.log(renderFirstSeenResults(results))

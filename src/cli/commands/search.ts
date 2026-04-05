@@ -2,9 +2,11 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
-import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
+import type { Embedding, SearchResult } from '../../core/models/types.js'
+import { vectorSearch, mergeSearchResults, type VectorSearchOptions } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
+import { parseBooleanQuery, mergeOr, mergeAnd } from '../../core/search/booleanSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
@@ -52,6 +54,18 @@ export interface SearchCommandOptions {
   textModel?: string
   codeModel?: string
   vss?: boolean
+  /** Negative example: a query whose similarity should be subtracted from the score */
+  notLike?: string
+  /** Weight for negative example (default 0.5) */
+  lambda?: string
+  /** When true, print signal breakdown for each result */
+  explain?: boolean
+  /** Output interactive HTML (writes to <file> if supplied, otherwise search.html) */
+  html?: string | boolean
+  /** Combine results with another query via OR (union, max score) */
+  or?: string
+  /** Combine results with another query via AND (intersection, harmonic mean) */
+  and?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -215,7 +229,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   const codeProvider = dualModel ? buildProviderOrExit(providerType, codeModel) : null
 
   // Embed the query with the text model (natural-language prose)
-  let textEmbedding: number[]
+  let textEmbedding: Embedding
   try {
     textEmbedding = await sharedEmbedQuery(textProvider, query, { noCache })
   } catch (err) {
@@ -241,7 +255,8 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
   }
 
-  const searchOpts = {
+  // Prepare search options; negative/explain handled below
+  const searchOpts: VectorSearchOptions = {
     topK,
     recent: options.recent ?? false,
     alpha,
@@ -257,7 +272,24 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     branch: options.branch,
   }
 
-  let results
+  // Handle negative example embedding when provided
+  let negativeEmbedding: Embedding | undefined
+  const negativeLambda = options.lambda !== undefined ? parseFloat(options.lambda) : 0.5
+  if (options.notLike) {
+    try {
+      negativeEmbedding = await sharedEmbedQuery(textProvider, options.notLike, { noCache })
+      searchOpts.negativeQueryEmbedding = negativeEmbedding
+      searchOpts.negativeLambda = negativeLambda
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error: could not embed negative example — ${msg}`)
+      process.exit(1)
+    }
+  }
+
+  if (options.explain) searchOpts.explain = true
+
+  let results: SearchResult[] | undefined
   if (options.vss) {
     // Attempt ANN search via usearch if available and index file exists
     try {
@@ -303,15 +335,15 @@ export async function searchCommand(query: string, options: SearchCommandOptions
             const distances: number[] = (res as any).distances ?? (res as any).dists ?? []
 
             // If index seems stale, warn but continue (we can still return top results)
-            if (idToHash.length < (await import('../../core/db/sqlite.js')).getRawDb().prepare('SELECT COUNT(*) as c FROM embeddings WHERE model = ?').get(modelToUse).c) {
+            if (idToHash.length < (((await import('../../core/db/sqlite.js')) as any).getRawDb().prepare('SELECT COUNT(*) as c FROM embeddings WHERE model = ?').get(modelToUse).c)) {
               console.warn('VSS index appears stale (fewer entries than DB). Consider rebuilding with `gitsema build-vss`.')
             }
 
             // Map results to SearchResult format and fetch paths
             const selectedHashes = keys.map((k) => idToHash[k])
-            const dbRows = (await import('../../core/db/sqlite.js')).getRawDb().prepare(
+            const dbRows = (((await import('../../core/db/sqlite.js')) as any).getRawDb().prepare(
               `SELECT blob_hash, path FROM paths WHERE blob_hash IN (${selectedHashes.map(() => '?').join(',')})`
-            ).all(...selectedHashes) as Array<{ blob_hash: string; path: string }>
+            ).all(...selectedHashes) as Array<{ blob_hash: string; path: string }>)
 
             const pathsByHash = new Map<string, string[]>()
             for (const r of dbRows) {
@@ -342,7 +374,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
       results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
     } else if (dualModel && codeProvider) {
       // Dual-model search: embed with both models and merge results
-      let codeEmbedding: number[]
+      let codeEmbedding: Embedding
       try {
         codeEmbedding = await sharedEmbedQuery(codeProvider, query, { noCache })
       } catch (err) {
@@ -358,6 +390,42 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     } else {
       // Single-model search (backward-compatible)
       results = vectorSearch(textEmbedding, searchOpts)
+    }
+  }
+
+  // Support boolean/composite queries: detect "A AND B" or "A OR B" in the main query
+  const parsedBool = parseBooleanQuery(query)
+  if (parsedBool) {
+    try {
+      const partA = parsedBool.parts[0]
+      const partB = parsedBool.parts[1]
+      const embA = textEmbedding
+      const embB = await sharedEmbedQuery(textProvider, partB, { noCache })
+      const resA = vectorSearch(embA, { ...searchOpts, topK })
+      const resB = vectorSearch(embB, { ...searchOpts, topK })
+      results = parsedBool.op === 'OR' ? mergeOr(resA, resB, topK) : mergeAnd(resA, resB, topK)
+    } catch (err) {
+      // On failure fall back to the precomputed results
+    }
+  }
+
+  // CLI flags: --or / --and to combine with an additional query
+  if (options.or) {
+    try {
+      const orEmb = await sharedEmbedQuery(textProvider, options.or, { noCache })
+      const orResults = vectorSearch(orEmb, { ...searchOpts, topK })
+      results = mergeOr(results, orResults, topK)
+    } catch (err) {
+      // ignore
+    }
+  }
+  if (options.and) {
+    try {
+      const andEmb = await sharedEmbedQuery(textProvider, options.and, { noCache })
+      const andResults = vectorSearch(andEmb, { ...searchOpts, topK })
+      results = mergeAnd(results, andResults, topK)
+    } catch (err) {
+      // ignore
     }
   }
 
@@ -401,6 +469,16 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     } else {
       process.stdout.write(json + '\n')
     }
+    return
+  }
+
+  // --html: output interactive HTML visualization
+  if (options.html !== undefined) {
+    const { renderSearchHtml } = await import('../../core/viz/htmlRenderer.js')
+    const html = renderSearchHtml(results, query)
+    const outFile = typeof options.html === 'string' ? options.html : 'search.html'
+    writeFileSync(outFile, html, 'utf8')
+    console.log(`Search HTML written to: ${outFile}`)
     return
   }
 

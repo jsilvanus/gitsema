@@ -38,8 +38,9 @@ export interface DbSession {
  *   9 — Added module_embeddings table + chunk_id on symbols (Phase 33)
  *  10 — Reworked embedding tables to support multi-model embeddings per blob/chunk/symbol/commit/module
  *  11 — Added quantization columns to embedding tables (Phase 36)
- */
-const CURRENT_SCHEMA_VERSION = 11
+*  12 — Added missing performance indexes on paths, symbols, chunks, blob_commits and blob_branches (performance fix)
+*/
+const CURRENT_SCHEMA_VERSION = 12
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -306,7 +307,20 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 11
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('11')
   }
+
+  // v11 → v12: add missing performance indexes
+  if (version < 12) {
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_paths_blob_hash ON paths(blob_hash)`)
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_paths_path ON paths(path)`)
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_symbols_blob_hash ON symbols(blob_hash)`)
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_blob_hash ON chunks(blob_hash)`)
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_blob_commits_blob_hash ON blob_commits(blob_hash)`)
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_blob_branches_branch_name ON blob_branches(branch_name)`)
+    version = 12
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('12')
+  }
 }
+
 
 /** The full CREATE TABLE block used for every new database file. */
 function initTables(sqlite: InstanceType<typeof Database>): void {

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { RoutingProvider } from '../../core/embedding/router.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { createChunker } from '../../core/chunking/chunker.js'
@@ -78,7 +79,7 @@ async function embedAndStore(
   let chunkCount = 0
 
   for (const chunk of blobChunks) {
-    let chunkEmbedding: number[]
+    let chunkEmbedding: Embedding
     try {
       chunkEmbedding = await activeProvider.embed(chunk.content)
     } catch (err) {

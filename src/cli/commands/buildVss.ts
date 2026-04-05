@@ -62,12 +62,11 @@ export async function buildVssCommand(options: BuildVssOptions = {}): Promise<vo
 
   // Decode first vector to determine dimensions
   const firstRow = rows[0]
-  let firstVec: number[]
+  let firstVec: Float32Array
   if (firstRow.quantized === 1 && firstRow.quant_min != null && firstRow.quant_scale != null) {
     firstVec = dequantizeVector(deserializeQuantized(firstRow.vector, firstRow.quant_min, firstRow.quant_scale))
   } else {
-    const f32 = new Float32Array(firstRow.vector.buffer, firstRow.vector.byteOffset, firstRow.vector.byteLength / 4)
-    firstVec = Array.from(f32)
+    firstVec = new Float32Array(firstRow.vector.buffer, firstRow.vector.byteOffset, firstRow.vector.byteLength / 4)
   }
   const dimensions = firstVec.length
 
@@ -85,15 +84,14 @@ export async function buildVssCommand(options: BuildVssOptions = {}): Promise<vo
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
-    let vec: number[]
+    let vec: Float32Array
     if (row.quantized === 1 && row.quant_min != null && row.quant_scale != null) {
       vec = dequantizeVector(deserializeQuantized(row.vector, row.quant_min, row.quant_scale))
     } else {
-      const f32 = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4)
-      vec = Array.from(f32)
+      vec = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4)
     }
     // Optionally re-quantize to float32 before adding (usearch supports float32)
-    index.add(i, new Float32Array(vec))
+    index.add(i, vec)
     idToHash.push(row.blob_hash)
   }
 

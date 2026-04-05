@@ -1,11 +1,13 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeAuthorContributions, type AuthorContribution } from '../../core/search/authorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { logger } from '../../utils/logger.js'
+import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 
 export interface AuthorCommandOptions {
   top?: string
@@ -15,6 +17,14 @@ export interface AuthorCommandOptions {
   branch?: string
   hybrid?: boolean
   bm25Weight?: string
+  model?: string
+  textModel?: string
+  codeModel?: string
+  includeCommits?: boolean
+  chunks?: boolean
+  level?: string
+  vss?: boolean
+  html?: string | boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -48,11 +58,14 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     }
   }
 
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, textModel)
 
-  let queryEmbedding: number[]
+  let queryEmbedding: Embedding
   try {
     queryEmbedding = await embedQuery(provider, query)
   } catch (err) {
@@ -82,8 +95,17 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     candidateBlobs,
   })
 
+  // Optionally include commit search results
+  let commitResults: CommitSearchResult[] | undefined
+  if (options.includeCommits) {
+    const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+    commitResults = searchCommits(queryEmbedding, { topK: 50, model: textModel })
+  }
+
   if (options.dump !== undefined) {
-    const json = JSON.stringify(results, null, 2)
+    const out: any = { authors: results }
+    if (commitResults) out.commits = commitResults
+    const json = JSON.stringify(out, null, 2)
     if (typeof options.dump === 'string' && options.dump !== '') {
       writeFileSync(options.dump, json, 'utf8')
       console.log(`Author attribution written to ${options.dump}`)
@@ -93,9 +115,24 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     return
   }
 
-  if (results.length === 0) {
+  // --html output
+  if (options.html !== undefined) {
+    const { renderAuthorHtml } = await import('../../core/viz/htmlRenderer.js')
+    const html = renderAuthorHtml(results, query)
+    const outFile = typeof options.html === 'string' ? options.html : 'author.html'
+    writeFileSync(outFile, html, 'utf8')
+    console.log(`Author HTML written to: ${outFile}`)
+    return
+  }
+
+  if (results.length === 0 && !commitResults) {
     console.log(`No author contributions found for: "${query}"`)
     return
+  }
+
+  // vss flag note
+  if (options.vss) {
+    console.warn('Note: --vss flag is not applicable to author attribution and will be ignored.')
   }
 
   console.log(`\nAuthor contributions for: "${query}"\n`)

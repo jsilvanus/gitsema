@@ -10,6 +10,7 @@ import {
 import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
+import { codeSearchCommand } from './commands/codeSearch.js'
 import { firstSeenCommand } from './commands/firstSeen.js'
 import { evolutionCommand } from './commands/evolution.js'
 import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
@@ -18,6 +19,7 @@ import { semanticDiffCommand } from './commands/semanticDiff.js'
 import { startMcpServer } from '../mcp/server.js'
 import { backfillFtsCommand } from './commands/backfillFts.js'
 import { updateModulesCommand } from './commands/updateModules.js'
+import { runGarbageCollection } from '../core/indexing/gc.js'
 import { serveCommand } from './commands/serve.js'
 import { remoteIndexCommand } from './commands/remoteIndex.js'
 import { semanticBlameCommand } from './commands/semanticBlame.js'
@@ -35,6 +37,10 @@ import { mergeAuditCommand } from './commands/mergeAudit.js'
 import { branchSummaryCommand } from './commands/branchSummary.js'
 import { mergePreviewCommand } from './commands/mergePreview.js'
 import { authorCommand } from './commands/author.js'
+import { semanticBisectCommand } from './commands/semanticBisect.js'
+import { refactorCandidatesCommand } from './commands/refactorCandidates.js'
+import { ciDiffCommand } from './commands/ciDiff.js'
+import { conceptLifecycleCommand } from './commands/conceptLifecycle.js'
 
 const program = new Command()
 
@@ -372,7 +378,15 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--not-like <query>', 'negative example query whose similarity is subtracted from the score')
+  .option('--lambda <n>', 'weight for the negative example subtraction (default 0.5)')
+  .option('--explain', 'show score component breakdown for each result')
+  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html')
+  .option('--or <query>', 'combine results with OR (union, max score)')
+  .option('--and <query>', 'combine results with AND (intersection, harmonic mean)')
   .action(searchCommand)
+
+program.addCommand(codeSearchCommand())
 
 program
   .command('first-seen <query>')
@@ -387,6 +401,8 @@ program
   .option('--code-model <model>', 'override code embedding model')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
+  .option('--vss', 'use the usearch HNSW ANN index for approximate search (requires prior `gitsema build-vss`; falls back to linear scan)')
+  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise first-seen.html')
   .action(firstSeenCommand)
 
 program
@@ -448,6 +464,52 @@ program
   .action(conceptEvolutionCommand)
 
 program
+  .command('bisect <good> <bad> <query>')
+  .description('Semantic git bisect — binary search over commit history to find where a concept diverged from a "good" baseline')
+  .option('-k, --top <n>', 'top-K blobs to use for centroid at each step', '20')
+  .option('--max-steps <n>', 'maximum bisect steps (default 10)', '10')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(semanticBisectCommand)
+
+program
+  .command('refactor-candidates')
+  .description('Find pairs of symbols/chunks/files that are semantically similar enough to be refactoring candidates')
+  .option('--threshold <n>', 'similarity threshold (default 0.88)', '0.88')
+  .option('-k, --top <n>', 'max pairs to return (default 50)', '50')
+  .option('--level <level>', 'search granularity: symbol (default), chunk, file', 'symbol')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(refactorCandidatesCommand)
+
+program
+  .command('ci-diff')
+  .description('CI/CD semantic diff — compare semantic content between two Git refs and exit non-zero when concepts changed')
+  .option('--base <ref>', 'base ref to compare from (default HEAD~1)', 'HEAD~1')
+  .option('--head <ref>', 'head ref to compare to (default HEAD)', 'HEAD')
+  .option('--query <query>', 'semantic topic to focus on (default "semantic changes")', 'semantic changes')
+  .option('-k, --top <n>', 'max blobs per diff group (default 20)', '20')
+  .option('--format <fmt>', 'output format: text (default), html, json', 'text')
+  .option('--threshold <n>', 'score threshold for significant changes (default 0.3)', '0.3')
+  .option('--out <file>', 'output file path')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .action(ciDiffCommand)
+
+program
+  .command('lifecycle <query>')
+  .description('Analyze the lifecycle stages (born → growing → mature → declining → dead) of a semantic concept across Git history')
+  .option('--steps <n>', 'number of time windows to sample (default 10)', '10')
+  .option('--threshold <n>', 'cosine similarity threshold for "match" (default 0.7)', '0.7')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .action(conceptLifecycleCommand)
+
+program
   .command('file-diff <ref1> <ref2> <path>')
   .description('Compute semantic diff between two versions of a file (see also: file-evolution, cluster-diff, diff)')
   .option(
@@ -463,9 +525,16 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--branch <name>', 'restrict blobs to those seen on this branch')
+  .option('--hybrid', 'blend vector similarity with BM25 keyword matching')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise semantic-diff.html',
   )
   .action(semanticDiffCommand)
 
@@ -512,6 +581,10 @@ program
   .description('Show semantic origin of each logical block in a file — nearest-neighbor blame (see also: file-evolution, impact)')
   .option('-k, --top <n>', 'number of nearest-neighbor blobs to show per block (default 3)', '3')
   .option('--level <level>', 'search level: file (default) or symbol — symbol uses function-level embeddings')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .option('--branch <name>', 'restrict neighbor search to blobs seen on this branch')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -547,7 +620,11 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .option('--branch <name>', 'restrict results to blobs seen on this branch')
+  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise impact.html')
   .action(impactCommand)
 
 program
@@ -625,6 +702,11 @@ program
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .option('--hybrid', 'blend vector similarity with BM25 keyword matching')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .option('--branch <name>', 'restrict concept state to blobs seen on this branch')
   .option(
     '--dump [file]',
@@ -642,6 +724,7 @@ program
   .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
   .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
+  .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option(
@@ -756,6 +839,22 @@ program
   })
 
 program
+  .command('gc')
+  .description('Garbage collect unreachable blob records from the DB')
+  .option('--dry-run', 'only report what would be removed')
+  .option('--verbose', 'print verbose output')
+  .action(async (opts: { dryRun?: boolean; verbose?: boolean }) => {
+    try {
+      const stats = await runGarbageCollection({ dryRun: !!opts.dryRun })
+      console.log(`Total blobs: ${stats.total}; unreachable: ${stats.removed}`)
+      if (!opts.dryRun) console.log(`Removed ${stats.removed} unreachable blobs`)
+    } catch (err) {
+      console.error(`GC failed: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+  })
+
+program
   .command('clear-model <model>')
   .description('Delete all stored embeddings and cache entries for a specific model')
   .option('-y, --yes', 'skip confirmation prompt')
@@ -795,8 +894,16 @@ program
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .option('--branch <name>', 'restrict concept attribution to blobs seen on this branch')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .option('--include-commits', 'also search commit messages for author attribution')
+  .option('--chunks', 'include chunk-level embeddings for finer-grained attribution')
+  .option('--level <level>', 'search level: file (default), chunk, or symbol')
   .option('--hybrid', 'use hybrid (vector + BM25) search to find initial candidate blobs')
   .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
+  .option('--vss', 'use the usearch HNSW ANN index for approximate candidate selection')
+  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise author.html')
   .action(authorCommand)
 
 program.parse()
