@@ -23,6 +23,8 @@ export interface AuthorCommandOptions {
   includeCommits?: boolean
   chunks?: boolean
   level?: string
+  vss?: boolean
+  html?: string | boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -113,9 +115,24 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     return
   }
 
+  // --html output
+  if (options.html !== undefined) {
+    const { renderAuthorHtml } = await import('../../core/viz/htmlRenderer.js')
+    const html = renderAuthorHtml(results, query)
+    const outFile = typeof options.html === 'string' ? options.html : 'author.html'
+    writeFileSync(outFile, html, 'utf8')
+    console.log(`Author HTML written to: ${outFile}`)
+    return
+  }
+
   if (results.length === 0 && !commitResults) {
     console.log(`No author contributions found for: "${query}"`)
     return
+  }
+
+  // vss flag note
+  if (options.vss) {
+    console.warn('Note: --vss flag is not applicable to author attribution and will be ignored.')
   }
 
   console.log(`\nAuthor contributions for: "${query}"\n`)

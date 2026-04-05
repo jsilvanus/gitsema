@@ -27,6 +27,7 @@ export interface ImpactCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  html?: string | boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -140,6 +141,16 @@ export async function impactCommand(
     } else {
       console.log(json)
     }
+    return
+  }
+
+  // --html
+  if (options.html !== undefined) {
+    const { renderImpactHtml } = await import('../../core/viz/htmlRenderer.js')
+    const outFile = typeof options.html === 'string' ? options.html : 'impact.html'
+    const html = renderImpactHtml(report, filePath)
+    writeFileSync(outFile, html, 'utf8')
+    console.log(`Impact HTML written to: ${outFile}`)
     return
   }
 
