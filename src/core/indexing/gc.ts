@@ -1,7 +1,14 @@
 import { execSync } from 'node:child_process'
-import { getActiveSession, getRawDb } from '../db/sqlite.js'
+import { getActiveSession } from '../db/sqlite.js'
 
 export interface GcStats { total: number; removed: number; dryRun: boolean; elapsed: number }
+
+// Tables whose blob_hash column must be cleaned up during GC.
+// Update this list when new tables with a blob_hash FK are added.
+const GC_TABLES = [
+  'embeddings', 'chunks', 'chunk_embeddings', 'paths', 'blob_commits',
+  'blob_branches', 'blob_fts', 'symbols', 'symbol_embeddings', 'cluster_assignments',
+] as const
 
 export async function runGarbageCollection(opts: { dryRun?: boolean; repoPath?: string } = {}): Promise<GcStats> {
   const { dryRun = false, repoPath = '.' } = opts
@@ -31,12 +38,6 @@ export async function runGarbageCollection(opts: { dryRun?: boolean; repoPath?: 
   if (!dryRun && unreachable.length > 0) {
     const tx = rawDb.transaction((hashes: string[]) => {
       const placeholders = hashes.map(() => '?').join(',')
-// Tables whose blob_hash column must be cleaned up during GC.
-// Update this list when new tables with a blob_hash FK are added.
-const GC_TABLES = [
-  'embeddings', 'chunks', 'chunk_embeddings', 'paths', 'blob_commits',
-  'blob_branches', 'blob_fts', 'symbols', 'symbol_embeddings', 'cluster_assignments',
-] as const
       for (const t of GC_TABLES) {
         rawDb.prepare(`DELETE FROM ${t} WHERE blob_hash IN (${placeholders})`).run(...hashes)
       }

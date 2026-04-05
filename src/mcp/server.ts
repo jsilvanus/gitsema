@@ -137,7 +137,7 @@ export async function startMcpServer(): Promise<void> {
         searchChunks: level === 'chunk' || level === 'symbol',
         searchSymbols: level === 'symbol',
         branch,
-        model: (provider as any).model,
+        model: provider.model,
       })
 
       return { content: [{ type: 'text', text: serializeSearchResults(results) }] }
