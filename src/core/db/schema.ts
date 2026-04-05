@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, blob, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, blob, real, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 /**
  * Sub-file fragments produced by a chunker (function / fixed strategy).
@@ -20,6 +20,9 @@ export const chunkEmbeddings = sqliteTable('chunk_embeddings', {
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
+  quantized: integer('quantized').default(0),
+  quantMin: real('quant_min'),
+  quantScale: real('quant_scale'),
 }, (table) => ({
   pk: primaryKey({ columns: [table.chunkId, table.model] }),
 }))
@@ -35,6 +38,9 @@ export const embeddings = sqliteTable('embeddings', {
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
+  quantized: integer('quantized').default(0),
+  quantMin: real('quant_min'),
+  quantScale: real('quant_scale'),
   /** File category used when selecting the embedding model: 'code' | 'text' | 'other'. */
   fileType: text('file_type'),
 }, (table) => ({
@@ -150,6 +156,9 @@ export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
+  quantized: integer('quantized').default(0),
+  quantMin: real('quant_min'),
+  quantScale: real('quant_scale'),
 }, (table) => ({
   pk: primaryKey({ columns: [table.symbolId, table.model] }),
 }))
@@ -166,6 +175,9 @@ export const commitEmbeddings = sqliteTable('commit_embeddings', {
   model: text('model').notNull(),
   dimensions: integer('dimensions').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
+  quantized: integer('quantized').default(0),
+  quantMin: real('quant_min'),
+  quantScale: real('quant_scale'),
 }, (table) => ({
   pk: primaryKey({ columns: [table.commitHash, table.model] }),
 }))

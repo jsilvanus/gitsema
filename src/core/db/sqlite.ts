@@ -37,8 +37,9 @@ export interface DbSession {
  *   8 — Added author_name, author_email to commits (Phase 31)
  *   9 — Added module_embeddings table + chunk_id on symbols (Phase 33)
  *  10 — Reworked embedding tables to support multi-model embeddings per blob/chunk/symbol/commit/module
+ *  11 — Added quantization columns to embedding tables (Phase 36)
  */
-const CURRENT_SCHEMA_VERSION = 10
+const CURRENT_SCHEMA_VERSION = 11
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -270,6 +271,41 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 10
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('10')
   }
+
+  // v10 → v11: add quantization columns to embedding tables (Phase 36)
+  if (version < 11) {
+    // Use PRAGMA table_info guards to ensure idempotency on fresh DBs
+    const embCols = sqlite.prepare('PRAGMA table_info(embeddings)').all() as Array<{ name: string }>
+    if (!embCols.some((c) => c.name === 'quantized')) {
+      sqlite.exec(`ALTER TABLE embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
+      sqlite.exec(`ALTER TABLE embeddings ADD COLUMN quant_min REAL`)
+      sqlite.exec(`ALTER TABLE embeddings ADD COLUMN quant_scale REAL`)
+    }
+
+    const chunkCols = sqlite.prepare('PRAGMA table_info(chunk_embeddings)').all() as Array<{ name: string }>
+    if (!chunkCols.some((c) => c.name === 'quantized')) {
+      sqlite.exec(`ALTER TABLE chunk_embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
+      sqlite.exec(`ALTER TABLE chunk_embeddings ADD COLUMN quant_min REAL`)
+      sqlite.exec(`ALTER TABLE chunk_embeddings ADD COLUMN quant_scale REAL`)
+    }
+
+    const symCols = sqlite.prepare('PRAGMA table_info(symbol_embeddings)').all() as Array<{ name: string }>
+    if (!symCols.some((c) => c.name === 'quantized')) {
+      sqlite.exec(`ALTER TABLE symbol_embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
+      sqlite.exec(`ALTER TABLE symbol_embeddings ADD COLUMN quant_min REAL`)
+      sqlite.exec(`ALTER TABLE symbol_embeddings ADD COLUMN quant_scale REAL`)
+    }
+
+    const commitEmbCols = sqlite.prepare('PRAGMA table_info(commit_embeddings)').all() as Array<{ name: string }>
+    if (!commitEmbCols.some((c) => c.name === 'quantized')) {
+      sqlite.exec(`ALTER TABLE commit_embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
+      sqlite.exec(`ALTER TABLE commit_embeddings ADD COLUMN quant_min REAL`)
+      sqlite.exec(`ALTER TABLE commit_embeddings ADD COLUMN quant_scale REAL`)
+    }
+
+    version = 11
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('11')
+  }
 }
 
 /** The full CREATE TABLE block used for every new database file. */
@@ -286,6 +322,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL,
+      quantized INTEGER DEFAULT 0,
+      quant_min REAL,
+      quant_scale REAL,
       file_type TEXT,
       PRIMARY KEY (blob_hash, model)
     );
@@ -327,6 +366,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL,
+      quantized INTEGER DEFAULT 0,
+      quant_min REAL,
+      quant_scale REAL,
       PRIMARY KEY (chunk_id, model)
     );
 
@@ -373,6 +415,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL,
+      quantized INTEGER DEFAULT 0,
+      quant_min REAL,
+      quant_scale REAL,
       PRIMARY KEY (symbol_id, model)
     );
 
@@ -397,6 +442,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       model TEXT NOT NULL,
       dimensions INTEGER NOT NULL,
       vector BLOB NOT NULL,
+      quantized INTEGER DEFAULT 0,
+      quant_min REAL,
+      quant_scale REAL,
       PRIMARY KEY (commit_hash, model)
     );
 

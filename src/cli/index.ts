@@ -25,6 +25,7 @@ import { deadConceptsCommand } from './commands/deadConcepts.js'
 import { impactCommand } from './commands/impact.js'
 import { clustersCommand } from './commands/clusters.js'
 import { clearModelCommand } from './commands/clearModel.js'
+import { buildVssCommand } from './commands/buildVss.js'
 import { clusterDiffCommand } from './commands/clusterDiff.js'
 import { clusterTimelineCommand } from './commands/clusterTimeline.js'
 import { changePointsCommand } from './commands/changePoints.js'
@@ -92,6 +93,7 @@ const COMMAND_GROUPS: Record<string, string> = {
   'backfill-fts':   'Setup & Infrastructure',
   'update-modules': 'Setup & Infrastructure',
   mcp:              'Setup & Infrastructure',
+  'build-vss':      'Setup & Infrastructure',
   // Search & Discovery
   search:           'Search & Discovery',
   'first-seen':     'Search & Discovery',
@@ -340,6 +342,8 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--quantize', 'store embeddings as int8-quantized vectors (4× smaller, ~1% recall loss)')
+  .option('--build-vss', 'build a usearch HNSW ANN index after indexing completes (requires usearch package)')
   .action(indexCommand)
 
 program
@@ -363,6 +367,7 @@ program
   .option('--no-cache', 'skip the query embedding cache (bypass both reads and writes; for deterministic runs)')
   .option('--include-commits', 'also search commit message embeddings and display matching commits')
   .option('--annotate-clusters', 'annotate each result with its cluster label from a prior `gitsema clusters` run')
+  .option('--vss', 'use the usearch HNSW ANN index for approximate search (requires prior `gitsema build-vss`; falls back to linear scan if unavailable)')
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
@@ -756,6 +761,20 @@ program
   .option('-y, --yes', 'skip confirmation prompt')
   .action(async (model, opts) => {
     await clearModelCommand(model, { yes: opts.yes })
+  })
+
+program
+  .command('build-vss')
+  .description('Build a usearch HNSW ANN index from stored embeddings for fast approximate search (requires usearch package)')
+  .option('--model <model>', 'build index for this model (default: configured text model)')
+  .option('--ef-construction <n>', 'HNSW ef_construction parameter — higher = better recall, slower build (default 200)')
+  .option('--M <n>', 'HNSW M parameter — number of connections per layer (default 16)')
+  .action(async (opts) => {
+    await buildVssCommand({
+      model: opts.model,
+      efConstruction: opts.efConstruction,
+      M: opts.m,
+    })
   })
 
 program

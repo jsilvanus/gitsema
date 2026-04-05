@@ -77,6 +77,7 @@ export interface IndexerOptions {
   branchFilter?: string
   /** When true, update module (directory) centroid embeddings inline while indexing (Phase 33). Default: true. */
   computeModuleEmbedding?: boolean
+  quantize?: boolean
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -190,6 +191,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     computeModuleEmbedding = true,
     onProgress,
   } = options
+  const { quantize = false } = options
 
   // Resolve --since: use provided value, or fall back to the last indexed commit
   // for automatic incremental indexing. The special value 'all' forces a full re-index.
@@ -314,7 +316,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
           try {
             if (wholeEmbedding !== null) {
-              storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding: wholeEmbedding, fileType, content: text })
+              storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding: wholeEmbedding, fileType, content: text, quantize })
             } else {
               storeBlobRecord({ blobHash, size: content.length, path, content: text })
             }
@@ -359,7 +361,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
             let chunkId: number | undefined
             try {
-              chunkId = storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
+              chunkId = storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding, quantize })
               stats.chunks++
             } catch (err) {
               logger.error(`Failed to store chunk for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err instanceof Error ? err.message : String(err)}`)
@@ -390,6 +392,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                   blobHash, startLine: chunk.startLine, endLine: chunk.endLine,
                   symbolName: chunk.symbolName, symbolKind: chunk.symbolKind ?? 'function',
                   language: lang, model: activeProvider.model, embedding: symbolEmbedding, chunkId,
+                  quantize,
                 })
                 stats.symbols++
               } catch (err) {
@@ -471,7 +474,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                         try {
                           const absStart = chunk.startLine + sub.startLine - 1
                           const absEnd = chunk.startLine + sub.endLine - 1
-                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb })
+                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb, quantize })
                           stats.chunks++
                         } catch (err6) {
                           logger.error(`Failed to store subchunk for blob ${blobHash} subchunk ${chunk.startLine + sub.startLine - 1}-${chunk.startLine + sub.endLine - 1}: ${err6 instanceof Error ? err6.message : String(err6)}`)
@@ -503,7 +506,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 }
 
                 try {
-                  storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding })
+                  storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding, quantize })
                   stats.chunks++
                 } catch (err4) {
                   logger.error(`Failed to store chunk (fallback) for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err4 instanceof Error ? err4.message : String(err4)}`)
@@ -529,7 +532,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
           // Persist blob + embedding + path in one transaction
           try {
-            storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType, content: text })
+            storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType, content: text, quantize })
             stats.indexed++
           } catch (err) {
             logger.error(`Failed to store blob ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
@@ -591,6 +594,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           commitHash: pendingCommit.commitHash,
           model: provider.model,
           embedding: msgEmbedding,
+          quantize,
         })
         stats.commitEmbeddings++
       } catch (err) {

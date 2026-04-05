@@ -54,6 +54,7 @@
 |   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | — |
 |   [Phase 34 — Feature adoption & cross-cutting improvements](#phase-34-—-feature-adoption--cross-cutting-improvements) | — |
 |   [Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search](#phase-35-—-multi-model-db-per-command-model-flags-clear-model-multi-model-search) | — |
+|   [Phase 36 — Vector Index (VSS), Int8 Quantization, ANN Search](#phase-36-—-vector-index-vss-int8-quantization-ann-search) | — |
 | [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
 |   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
 |   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
@@ -1905,6 +1906,80 @@ A comprehensive cross-cutting feature-adoption pass based on a systematic review
 ---
 
 ### Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search
+
+**Version:** 0.34.0
+
+**Goal:** The DB schema now supports multiple embeddings per blob (one per model), model selection is available as per-command CLI flags, and search automatically leverages both models when text and code models differ.
+
+**Schema change (v10):** Rebuilt 5 embedding tables with composite primary/unique keys on `(hash, model)`:
+- `embeddings`: PK `(blob_hash, model)` — was `blob_hash` only
+- `chunk_embeddings`: PK `(chunk_id, model)` — was `chunk_id` only
+- `symbol_embeddings`: PK `(symbol_id, model)` — was `symbol_id` only
+- `commit_embeddings`: PK `(commit_hash, model)` — was `commit_hash` only
+- `module_embeddings`: UNIQUE `(module_path, model)` — was `module_path` only
+
+Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies existing data. Fully backward-compatible.
+
+**Deduplication change:** `isIndexed(blobHash, model)` checks `(blob_hash, model)` in `embeddings`. A blob indexed with model A is NOT skipped when indexing with model B. `filterNewBlobs(hashes, model)` similarly filters by model.
+
+**New modules:**
+- `src/core/embedding/providerFactory.ts` — `applyModelOverrides(opts)` helper that applies `--model` / `--text-model` / `--code-model` CLI flag values to `process.env` before provider construction.
+- `src/cli/commands/clearModel.ts` — `gitsema clear-model <model> [--yes]` command.
+
+**CLI changes:**
+- `--model`, `--text-model`, `--code-model` flags added to: `index`, `search`, `first-seen`, `evolution`, `concept-evolution`, `diff`, `clusters`.
+- `gitsema clear-model <model>` registered in the Setup & Infrastructure group.
+
+**Multi-model search:** When `GITSEMA_TEXT_MODEL ≠ GITSEMA_CODE_MODEL` (or overridden via flags), the `search` command embeds the query with both providers, runs two independent `vectorSearch()` calls (each filtered to its model), and merges results via `mergeSearchResults()` (highest score wins per blob).
+
+**Status warning:** `gitsema status` now queries `SELECT DISTINCT model FROM embeddings` and warns when the configured text/code model(s) are absent from the DB, with a suggestion to re-index or run `gitsema clear-model <old-model>`.
+
+**Documentation:**
+- `docs/model-stores.md` fully updated with Phase 35 coverage.
+- `docs/plan_vss.md` created: Phase 36 plan for int8 quantization + ANN index (sqlite-vss/usearch).
+- `docs/index.md` updated.
+
+**Deliverables:** `src/core/db/schema.ts`, `src/core/db/sqlite.ts` (migration v10), `src/core/indexing/deduper.ts`, `src/core/indexing/blobStore.ts`, `src/core/indexing/indexer.ts`, `src/core/embedding/providerFactory.ts`, `src/cli/commands/clearModel.ts`, `src/cli/commands/status.ts`, `src/cli/commands/search.ts`, 6 other CLI commands, `src/cli/index.ts`, `docs/model-stores.md`, `docs/plan_vss.md`, `docs/index.md`.
+
+---
+
+### Phase 36 — Vector Index (VSS), Int8 Quantization, ANN Search
+
+**Version:** 0.35.0
+
+**Goal:** Add optional per-vector int8 scalar quantization to reduce storage size and enable fast approximate nearest-neighbour (ANN) search via HNSW (usearch VSS). Provide tooling to build and query a usearch index from stored embeddings; keep full backward compatibility with existing float32 vectors.
+
+**Schema change (v11):** Add quantization metadata to embedding tables:
+- `quantized INTEGER DEFAULT 0` — 1 when vector BLOB stores Int8 quantized bytes, 0 otherwise
+- `quant_min REAL` — minimum value used for per-vector scaling
+- `quant_scale REAL` — scale factor mapping [0..255] → original range
+
+Migration adds these columns idempotently to: `embeddings`, `chunk_embeddings`, `symbol_embeddings`, `commit_embeddings`.
+
+**New module:** `src/core/embedding/quantize.ts` — implements Int8 scalar quantization, dequantization, and serialization helpers.
+
+**Indexer changes:**
+- New `quantize?: boolean` `IndexerOptions` field and CLI flag passthrough.
+- When enabled, indexer stores quantized vectors (Int8 BLOB) in the DB and sets quantization metadata. Otherwise stores legacy Float32Array blobs.
+
+**Blob store changes:** `storeBlob`, `storeChunk`, `storeSymbol`, `storeCommitEmbedding` accept `quantize?: boolean` and write quantization columns when appropriate.
+
+**Search changes:** `vectorSearch` transparently detects quantized rows and dequantizes them in-memory before scoring, preserving backward compatibility.
+
+**CLI additions:**
+- `gitsema build-vss` — builds a usearch HNSW index from stored embeddings and writes `.gitsema/vectors-<model>.usearch` and `.gitsema/vectors-<model>.map.json`.
+- `gitsema search --vss` (optional) attempts ANN search via a local usearch index; falls back to linear scan when the index is absent or `usearch` is not installed.
+- `gitsema index --quantize` (optional) instructs the indexer to quantize vectors when storing them. `gitsema index --build-vss` optionally invokes `build-vss` after indexing completes.
+
+**Optional dependency:** `usearch` added as an optional dependency so users without the package can still run the core tool; `build-vss` and `search --vss` will prompt/errors gracefully if missing.
+
+**Docs & tests:**
+- `tests/quantize.test.ts` — unit tests for quantize/dequantize/serialize round-trips and quality assertions.
+- `docs/PLAN.md` updated (this entry).
+
+**Deliverables:** `src/core/embedding/quantize.ts`, `src/core/db/schema.ts` (new columns), `src/core/db/sqlite.ts` (v11 migration + initTables update), `src/core/indexing/blobStore.ts`, `src/core/indexing/indexer.ts`, `src/core/search/vectorSearch.ts`, `src/cli/commands/buildVss.ts`, `src/cli/commands/search.ts` (vss option), `src/cli/commands/index.ts` (quantize/buildVss flags), `package.json` optionalDependencies update, `tests/quantize.test.ts`.
+
+---
 
 **Version:** 0.34.0
 

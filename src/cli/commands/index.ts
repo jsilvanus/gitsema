@@ -12,6 +12,7 @@ import { logger } from '../../utils/logger.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { execSync } from 'node:child_process'
 import { resolve as pathResolve, relative as pathRelative } from 'node:path'
+import { buildVssCommand } from './buildVss.js'
 
 function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -275,6 +276,8 @@ export interface IndexCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  quantize?: boolean
+  buildVss?: boolean
 }
 
 export async function indexCommand(options: IndexCommandOptions): Promise<void> {
@@ -456,6 +459,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
       lastLine = renderProgress(s)
       process.stdout.write(lastLine)
     },
+    quantize: options.quantize,
   })
 
   // Clear progress line
@@ -478,5 +482,11 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   console.log(`  Commit embeddings:   ${stats.commitEmbeddings}`)
   if (stats.commitEmbedFailed > 0) {
     console.log(`  Commit embed failed: ${stats.commitEmbedFailed}`)
+  }
+
+  // Optionally build VSS index after indexing
+  if (options.buildVss) {
+    const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+    await buildVssCommand({ model: textModel })
   }
 }

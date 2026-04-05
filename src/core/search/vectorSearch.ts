@@ -3,6 +3,7 @@ import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, 
 import { inArray, eq } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
+import { dequantizeVector, deserializeQuantized } from '../embedding/quantize.js'
 
 /**
  * Computes the cosine similarity between two vectors.
@@ -27,6 +28,23 @@ export function cosineSimilarity(a: Embedding, b: Embedding): number {
 function bufferToEmbedding(buf: Buffer): Embedding {
   const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
   return Array.from(f32)
+}
+
+type CandidateRow = {
+  blobHash: string; vector: Buffer
+  quantized?: number | null; quantMin?: number | null; quantScale?: number | null
+  chunkId?: number; startLine?: number; endLine?: number
+  symbolId?: number; symbolName?: string; symbolKind?: string; language?: string
+  /** Set for module-level results — the directory path. */
+  modulePath?: string
+}
+
+function rowToEmbedding(row: CandidateRow): number[] {
+  if (row.quantized === 1 && row.quantMin != null && row.quantScale != null) {
+    const q = deserializeQuantized(row.vector, row.quantMin, row.quantScale)
+    return dequantizeVector(q)
+  }
+  return bufferToEmbedding(row.vector)
 }
 
 /**
@@ -100,22 +118,21 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const baseQuery = db.select({
     blobHash: embeddings.blobHash,
     vector: embeddings.vector,
+    quantized: embeddings.quantized,
+    quantMin: embeddings.quantMin,
+    quantScale: embeddings.quantScale,
   }).from(embeddings)
 
   const filteredQuery = model ? baseQuery.where(eq(embeddings.model, model)) : baseQuery
   const allRows = filteredQuery.all()
 
   // Optionally include chunk embeddings
-  type CandidateRow = {
-    blobHash: string; vector: Buffer
-    chunkId?: number; startLine?: number; endLine?: number
-    symbolId?: number; symbolName?: string; symbolKind?: string; language?: string
-    /** Set for module-level results — the directory path. */
-    modulePath?: string
-  }
   let candidatePool: CandidateRow[] = allRows.map((r) => ({
     blobHash: r.blobHash,
     vector: r.vector as Buffer,
+    quantized: (r as any).quantized ?? null,
+    quantMin: (r as any).quantMin ?? null,
+    quantScale: (r as any).quantScale ?? null,
   }))
 
   if (searchChunks) {
@@ -125,6 +142,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       startLine: chunks.startLine,
       endLine: chunks.endLine,
       vector: chunkEmbeddings.vector,
+      quantized: chunkEmbeddings.quantized,
+      quantMin: chunkEmbeddings.quantMin,
+      quantScale: chunkEmbeddings.quantScale,
     })
       .from(chunkEmbeddings)
       .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
@@ -137,6 +157,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       candidatePool.push({
         blobHash: row.blobHash,
         vector: row.vector as Buffer,
+        quantized: (row as any).quantized ?? null,
+        quantMin: (row as any).quantMin ?? null,
+        quantScale: (row as any).quantScale ?? null,
         chunkId: row.chunkId,
         startLine: row.startLine,
         endLine: row.endLine,
@@ -155,6 +178,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       symbolKind: symbols.symbolKind,
       language: symbols.language,
       vector: symbolEmbeddings.vector,
+      quantized: symbolEmbeddings.quantized,
+      quantMin: symbolEmbeddings.quantMin,
+      quantScale: symbolEmbeddings.quantScale,
     })
       .from(symbolEmbeddings)
       .innerJoin(symbols, eq(symbolEmbeddings.symbolId, symbols.id))
@@ -167,6 +193,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       candidatePool.push({
         blobHash: row.blobHash,
         vector: row.vector as Buffer,
+        quantized: (row as any).quantized ?? null,
+        quantMin: (row as any).quantMin ?? null,
+        quantScale: (row as any).quantScale ?? null,
         startLine: row.startLine,
         endLine: row.endLine,
         symbolId: row.symbolId,
@@ -222,7 +251,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   type ScoredEntry = CandidateRow & { cosine: number }
   const scored: ScoredEntry[] = filteredPool.map((row) => ({
     ...row,
-    cosine: cosineSimilarity(queryEmbedding, bufferToEmbedding(row.vector)),
+    cosine: cosineSimilarity(queryEmbedding, rowToEmbedding(row)),
   }))
 
   // Compute recency scores when needed
