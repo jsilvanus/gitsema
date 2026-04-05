@@ -5,6 +5,24 @@ import { eq } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
 import type { FileCategory } from '../embedding/fileType.js'
 import type { CommitEntry } from '../git/commitMap.js'
+import { quantizeVector, serializeQuantized } from '../embedding/quantize.js'
+
+/**
+ * Serializes a float32 embedding to a SQLite-ready Buffer, optionally quantizing to Int8.
+ * Returns the vector buffer along with quantization metadata for the DB columns.
+ */
+function serializeEmbedding(embedding: Embedding, quantize?: boolean): {
+  vector: Buffer
+  quantized: number
+  quantMin: number | null
+  quantScale: number | null
+} {
+  if (quantize) {
+    const q = quantizeVector(embedding)
+    return { vector: serializeQuantized(q), quantized: 1, quantMin: q.min, quantScale: q.scale }
+  }
+  return { vector: Buffer.from(new Float32Array(embedding).buffer), quantized: 0, quantMin: null, quantScale: null }
+}
 
 export interface StoreBlobArgs {
   blobHash: BlobHash
@@ -15,6 +33,7 @@ export interface StoreBlobArgs {
   fileType?: FileCategory
   /** Raw text content for FTS5 hybrid search indexing. */
   content?: string
+  quantize?: boolean
 }
 
 /**
@@ -28,8 +47,7 @@ export function storeBlob(args: StoreBlobArgs): void {
   const { blobHash, size, path, model, embedding, fileType, content } = args
   const { db, rawDb } = getActiveSession()
 
-  // Serialize float32 embedding to a Buffer
-  const vector = Buffer.from(new Float32Array(embedding).buffer)
+  const { vector, quantized: qFlag, quantMin: qMin, quantScale: qScale } = serializeEmbedding(embedding, args.quantize)
 
   db.transaction((tx) => {
     tx.insert(blobs)
@@ -38,7 +56,7 @@ export function storeBlob(args: StoreBlobArgs): void {
       .run()
 
     tx.insert(embeddings)
-      .values({ blobHash, model, dimensions: embedding.length, vector, fileType: fileType ?? null })
+      .values({ blobHash, model, dimensions: embedding.length, vector, fileType: fileType ?? null, quantized: qFlag, quantMin: qMin, quantScale: qScale })
       .onConflictDoNothing()
       .run()
 
@@ -195,6 +213,7 @@ export interface StoreChunkArgs {
   endLine: number
   model: string
   embedding: Embedding
+  quantize?: boolean
 }
 
 /**
@@ -204,7 +223,7 @@ export interface StoreChunkArgs {
 export function storeChunk(args: StoreChunkArgs): number {
   const { blobHash, startLine, endLine, model, embedding } = args
   const { db, rawDb } = getActiveSession()
-  const vector = Buffer.from(new Float32Array(embedding).buffer)
+  const { vector, quantized: qFlag, quantMin: qMin, quantScale: qScale } = serializeEmbedding(embedding, args.quantize)
 
   // Avoid creating duplicate chunks for the same blob/start/end by checking
   // for an existing row first. If a chunk exists but lacks an embedding row,
@@ -226,7 +245,7 @@ export function storeChunk(args: StoreChunkArgs): number {
 
     // Insert missing embedding for existing chunk
     db.insert(chunkEmbeddings)
-      .values({ chunkId: existingRow.id, model, dimensions: embedding.length, vector })
+      .values({ chunkId: existingRow.id, model, dimensions: embedding.length, vector, quantized: qFlag, quantMin: qMin, quantScale: qScale })
       .run()
 
     return existingRow.id
@@ -240,7 +259,7 @@ export function storeChunk(args: StoreChunkArgs): number {
       .get()
 
     tx.insert(chunkEmbeddings)
-      .values({ chunkId: chunkRow.id, model, dimensions: embedding.length, vector })
+      .values({ chunkId: chunkRow.id, model, dimensions: embedding.length, vector, quantized: qFlag, quantMin: qMin, quantScale: qScale })
       .run()
 
     return chunkRow.id
@@ -276,6 +295,7 @@ export interface StoreSymbolArgs {
   embedding: Embedding
   /** Optional FK linking this symbol to its source chunk row (Phase 33). */
   chunkId?: number
+  quantize?: boolean
 }
 
 /**
@@ -296,7 +316,7 @@ export interface StoreSymbolArgs {
 export function storeSymbol(args: StoreSymbolArgs): number {
   const { blobHash, startLine, endLine, symbolName, symbolKind, language, model, embedding, chunkId } = args
   const { db, rawDb } = getActiveSession()
-  const vector = Buffer.from(new Float32Array(embedding).buffer)
+  const { vector, quantized: qFlag, quantMin: qMin, quantScale: qScale } = serializeEmbedding(embedding, args.quantize)
 
   const existing = rawDb
     .prepare(
@@ -307,7 +327,7 @@ export function storeSymbol(args: StoreSymbolArgs): number {
   if (existing) {
     // Upsert the embedding in case it was missing (e.g. previous partial run)
     db.insert(symbolEmbeddings)
-      .values({ symbolId: existing.id, model, dimensions: embedding.length, vector })
+      .values({ symbolId: existing.id, model, dimensions: embedding.length, vector, quantized: qFlag, quantMin: qMin, quantScale: qScale })
       .onConflictDoNothing()
       .run()
     return existing.id
@@ -321,7 +341,7 @@ export function storeSymbol(args: StoreSymbolArgs): number {
       .get()
 
     tx.insert(symbolEmbeddings)
-      .values({ symbolId: symbolRow.id, model, dimensions: embedding.length, vector })
+      .values({ symbolId: symbolRow.id, model, dimensions: embedding.length, vector, quantized: qFlag, quantMin: qMin, quantScale: qScale })
       .run()
 
     return symbolRow.id
@@ -332,6 +352,7 @@ export interface StoreCommitEmbeddingArgs {
   commitHash: string
   model: string
   embedding: Embedding
+  quantize?: boolean
 }
 
 /**
@@ -347,10 +368,10 @@ export interface StoreCommitEmbeddingArgs {
 export function storeCommitEmbedding(args: StoreCommitEmbeddingArgs): void {
   const { commitHash, model, embedding } = args
   const { db } = getActiveSession()
-  const vector = Buffer.from(new Float32Array(embedding).buffer)
+  const { vector, quantized: qFlag, quantMin: qMin, quantScale: qScale } = serializeEmbedding(embedding, args.quantize)
 
   db.insert(commitEmbeddings)
-    .values({ commitHash, model, dimensions: embedding.length, vector })
+    .values({ commitHash, model, dimensions: embedding.length, vector, quantized: qFlag, quantMin: qMin, quantScale: qScale })
     .onConflictDoNothing()
     .run()
 }

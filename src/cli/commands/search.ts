@@ -51,6 +51,7 @@ export interface SearchCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  vss?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -257,27 +258,107 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   let results
-  if (options.hybrid) {
-    // Hybrid search: BM25 (FTS5) + vector similarity
-    results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
-  } else if (dualModel && codeProvider) {
-    // Dual-model search: embed with both models and merge results
-    let codeEmbedding: number[]
+  if (options.vss) {
+    // Attempt ANN search via usearch if available and index file exists
     try {
-      codeEmbedding = await sharedEmbedQuery(codeProvider, query, { noCache })
+      const usearch = await import('usearch')
+      const providerModel = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+      const modelToUse = options.model ?? providerModel
+      const safeName = modelToUse.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const indexPath = `.gitsema/vectors-${safeName}.usearch`
+      const mapPath = `.gitsema/vectors-${safeName}.map.json`
+      const fs = await import('node:fs')
+      if (!fs.existsSync(indexPath) || !fs.existsSync(mapPath)) {
+        console.warn('VSS index not found; falling back to linear scan')
+        // fall back to regular logic below
+      } else {
+        const mapJson = fs.readFileSync(mapPath, 'utf8')
+        const idToHash: string[] = JSON.parse(mapJson)
+
+        const Index = (usearch as any).Index ?? (usearch as any).default?.Index
+        if (!Index) {
+          console.warn('usearch package does not export Index; falling back to linear scan')
+        } else {
+          // Try to load index
+          let index: any = null
+          try {
+            if (typeof (Index as any).load === 'function') {
+              index = (Index as any).load(indexPath)
+            } else {
+              index = new Index()
+              if (typeof index.load === 'function') {
+                index.load(indexPath)
+              } else {
+                index = null
+              }
+            }
+          } catch {
+            index = null
+          }
+
+          if (index) {
+            const queryVec = new Float32Array(textEmbedding)
+            const res = index.search(queryVec, topK)
+            const keys: number[] = (res as any).keys ?? (res as any).ids ?? []
+            const distances: number[] = (res as any).distances ?? (res as any).dists ?? []
+
+            // If index seems stale, warn but continue (we can still return top results)
+            if (idToHash.length < (await import('../../core/db/sqlite.js')).getRawDb().prepare('SELECT COUNT(*) as c FROM embeddings WHERE model = ?').get(modelToUse).c) {
+              console.warn('VSS index appears stale (fewer entries than DB). Consider rebuilding with `gitsema build-vss`.')
+            }
+
+            // Map results to SearchResult format and fetch paths
+            const selectedHashes = keys.map((k) => idToHash[k])
+            const dbRows = (await import('../../core/db/sqlite.js')).getRawDb().prepare(
+              `SELECT blob_hash, path FROM paths WHERE blob_hash IN (${selectedHashes.map(() => '?').join(',')})`
+            ).all(...selectedHashes) as Array<{ blob_hash: string; path: string }>
+
+            const pathsByHash = new Map<string, string[]>()
+            for (const r of dbRows) {
+              const list = pathsByHash.get(r.blob_hash) ?? []
+              list.push(r.path)
+              pathsByHash.set(r.blob_hash, list)
+            }
+
+            results = keys.map((k, i) => {
+              const h = idToHash[k]
+              return {
+                blobHash: h,
+                paths: pathsByHash.get(h) ?? [],
+                score: distances[i] ?? 0,
+              }
+            })
+          }
+        }
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`Error: could not embed query — ${msg}`)
-      process.exit(1)
-      throw err
+      console.warn('VSS search failed; falling back to linear scan')
     }
-    const topKExtended = topK * 2
-    const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel, topK: topKExtended })
-    const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel, topK: topKExtended })
-    results = mergeSearchResults(textResults, codeResults, topK)
-  } else {
-    // Single-model search (backward-compatible)
-    results = vectorSearch(textEmbedding, searchOpts)
+  }
+
+  if (!results) {
+    if (options.hybrid) {
+      // Hybrid search: BM25 (FTS5) + vector similarity
+      results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
+    } else if (dualModel && codeProvider) {
+      // Dual-model search: embed with both models and merge results
+      let codeEmbedding: number[]
+      try {
+        codeEmbedding = await sharedEmbedQuery(codeProvider, query, { noCache })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`Error: could not embed query — ${msg}`)
+        process.exit(1)
+        throw err
+      }
+      const topKExtended = topK * 2
+      const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel, topK: topKExtended })
+      const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel, topK: topKExtended })
+      results = mergeSearchResults(textResults, codeResults, topK)
+    } else {
+      // Single-model search (backward-compatible)
+      results = vectorSearch(textEmbedding, searchOpts)
+    }
   }
 
   if (groupMode) {
