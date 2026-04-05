@@ -477,6 +477,10 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option(
+    '--html [file]',
+    'output an interactive HTML visualization; writes to <file> if given, otherwise semantic-diff.html',
+  )
   .action(semanticDiffCommand)
 
 program

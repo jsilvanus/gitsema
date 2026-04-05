@@ -5,11 +5,13 @@ import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
+import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
 import type { SemanticDiffEntry, SemanticDiffResult } from '../../core/search/semanticDiff.js'
 
 export interface SemanticDiffCommandOptions {
   top?: string
   dump?: string | boolean
+  html?: string | boolean
   // CLI model overrides
   model?: string
   textModel?: string
@@ -127,6 +129,20 @@ export async function semanticDiffCommand(
     console.error(`Error: ${msg}`)
     process.exit(1)
     throw err
+  }
+
+  if (options.html !== undefined) {
+    const html = renderSemanticDiffHtml(result)
+    const outFile = typeof options.html === 'string' ? options.html : 'semantic-diff.html'
+    try {
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`Semantic diff HTML written to: ${outFile}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error writing HTML file: ${msg}`)
+      process.exit(1)
+    }
+    return
   }
 
   if (options.dump !== undefined) {
