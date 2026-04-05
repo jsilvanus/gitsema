@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { computeConceptEvolution } from '../../core/search/evolution.js'
@@ -17,6 +17,10 @@ export interface ConceptEvolutionCommandOptions {
   includeContent?: boolean
   remote?: string
   branch?: string
+  // CLI model overrides
+  model?: string
+  textModel?: string
+  codeModel?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -108,6 +112,9 @@ export async function conceptEvolutionCommand(
     console.error('Error: query string is required')
     process.exit(1)
   }
+
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
 
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
   if (remoteUrl) {

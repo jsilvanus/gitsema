@@ -99,7 +99,7 @@ describe('module embeddings — integration', () => {
     await withDbSession(session, async () => {
       // Use a unique path that won't conflict with indexer-produced entries
       storeModuleEmbedding({ modulePath: 'roundtrip-test', model: 'mock-model', embedding: v, blobCount: 2 })
-      const got = getModuleEmbedding('roundtrip-test')
+      const got = getModuleEmbedding('roundtrip-test', 'mock-model')
       expect(got).not.toBeNull()
       expect(got!.blobCount).toBe(2)
       expect(got!.vector.length).toBe(v.length)

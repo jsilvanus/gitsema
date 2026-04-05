@@ -371,26 +371,26 @@ export function storeModuleEmbedding(args: StoreModuleEmbeddingArgs): void {
   const { rawDb } = getActiveSession()
   const vector = Buffer.from(new Float32Array(embedding).buffer)
 
-  // INSERT OR REPLACE upserts the module centroid row keyed on module_path (UNIQUE).
+  // INSERT OR REPLACE upserts the module centroid row keyed on (module_path, model) UNIQUE.
   // The sub-select preserves the existing id so REPLACE doesn't increment the PK.
   rawDb.prepare(`
     INSERT OR REPLACE INTO module_embeddings
       (id, module_path, model, dimensions, vector, blob_count, updated_at)
     VALUES (
-      (SELECT id FROM module_embeddings WHERE module_path = ?),
+      (SELECT id FROM module_embeddings WHERE module_path = ? AND model = ?),
       ?, ?, ?, ?, ?, ?
     )
-  `).run(modulePath, modulePath, model, embedding.length, vector, blobCount, Date.now())
+  `).run(modulePath, model, modulePath, model, embedding.length, vector, blobCount, Date.now())
 }
 
 /**
  * Returns the stored module embedding for the given directory path, or null.
  */
-export function getModuleEmbedding(modulePath: string): { vector: number[]; blobCount: number } | null {
+export function getModuleEmbedding(modulePath: string, model: string): { vector: number[]; blobCount: number } | null {
   const { rawDb } = getActiveSession()
   const row = rawDb
-    .prepare('SELECT vector, blob_count FROM module_embeddings WHERE module_path = ?')
-    .get(modulePath) as { vector: Buffer; blob_count: number } | undefined
+    .prepare('SELECT vector, blob_count FROM module_embeddings WHERE module_path = ? AND model = ?')
+    .get(modulePath, model) as { vector: Buffer; blob_count: number } | undefined
   if (!row) return null
   const f32 = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4)
   return { vector: Array.from(f32), blobCount: row.blob_count }

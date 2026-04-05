@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
@@ -20,6 +20,10 @@ export interface FirstSeenCommandOptions {
    * boolean `true` means print JSON to stdout.
    */
   dump?: string | boolean
+  // CLI model overrides
+  model?: string
+  textModel?: string
+  codeModel?: string
 }
 
 function renderCommitResults(results: CommitSearchResult[]): string {
@@ -70,6 +74,9 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
 
   const useHybrid = options.hybrid ?? false
   const bm25Weight = options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : 0.3
+
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'

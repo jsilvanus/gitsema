@@ -59,3 +59,26 @@ export function getCodeProvider(): EmbeddingProvider {
     'nomic-embed-text'
   return buildProvider(type, model)
 }
+
+/**
+ * Applies CLI model option overrides to process.env so that downstream
+ * provider factory functions (getTextProvider / getCodeProvider) pick them up.
+ * Only overrides vars that are not already set by the user's shell environment
+ * (i.e., vars that were set by applyConfigToEnv from a config file are overridden).
+ *
+ * --model sets both GITSEMA_TEXT_MODEL and GITSEMA_CODE_MODEL unless
+ *   --text-model or --code-model are also given.
+ */
+export function applyModelOverrides(opts: {
+  model?: string
+  textModel?: string
+  codeModel?: string
+}): void {
+  if (opts.model) {
+    process.env.GITSEMA_MODEL = opts.model
+    if (!opts.textModel) process.env.GITSEMA_TEXT_MODEL = opts.model
+    if (!opts.codeModel) process.env.GITSEMA_CODE_MODEL = opts.model
+  }
+  if (opts.textModel) process.env.GITSEMA_TEXT_MODEL = opts.textModel
+  if (opts.codeModel) process.env.GITSEMA_CODE_MODEL = opts.codeModel
+}

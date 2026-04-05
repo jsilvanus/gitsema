@@ -246,8 +246,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       continue
     }
 
-    // Skip blobs already in the database
-    if (isIndexed(blobHash)) {
+    // Skip blobs already indexed with the model that would be used for this path
+    const wouldUseModel = router ? router.providerForFile(path).model : provider.model
+    if (isIndexed(blobHash, wouldUseModel)) {
       stats.skipped++
       onProgress?.({ ...stats, elapsed: Date.now() - start })
       continue
@@ -329,7 +330,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           if (wholeEmbedding !== null) {
             try {
               const dir = dirname(path)
-              const existing = getModuleEmbedding(dir)
+              const existing = getModuleEmbedding(dir, activeProvider.model)
               if (existing === null) {
                 storeModuleEmbedding({ modulePath: dir, model: activeProvider.model, embedding: wholeEmbedding, blobCount: 1 })
               } else {
@@ -542,7 +543,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           if (computeModuleEmbedding) {
             try {
               const dir = dirname(path)
-              const existing = getModuleEmbedding(dir)
+              const existing = getModuleEmbedding(dir, activeProvider.model)
               if (existing === null) {
                 storeModuleEmbedding({ modulePath: dir, model: activeProvider.model, embedding, blobCount: 1 })
               } else {
