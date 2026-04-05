@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding } from '../../core/models/types.js'
@@ -7,6 +7,7 @@ import { computeAuthorContributions, type AuthorContribution } from '../../core/
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { logger } from '../../utils/logger.js'
+import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 
 export interface AuthorCommandOptions {
   top?: string
@@ -16,6 +17,12 @@ export interface AuthorCommandOptions {
   branch?: string
   hybrid?: boolean
   bm25Weight?: string
+  model?: string
+  textModel?: string
+  codeModel?: string
+  includeCommits?: boolean
+  chunks?: boolean
+  level?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -48,6 +55,9 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
       process.exit(1)
     }
   }
+
+  // Apply CLI model overrides
+  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
@@ -83,8 +93,17 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     candidateBlobs,
   })
 
+  // Optionally include commit search results
+  let commitResults: CommitSearchResult[] | undefined
+  if (options.includeCommits) {
+    const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+    commitResults = searchCommits(queryEmbedding, { topK: 50, model: textModel })
+  }
+
   if (options.dump !== undefined) {
-    const json = JSON.stringify(results, null, 2)
+    const out: any = { authors: results }
+    if (commitResults) out.commits = commitResults
+    const json = JSON.stringify(out, null, 2)
     if (typeof options.dump === 'string' && options.dump !== '') {
       writeFileSync(options.dump, json, 'utf8')
       console.log(`Author attribution written to ${options.dump}`)
@@ -94,7 +113,7 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     return
   }
 
-  if (results.length === 0) {
+  if (results.length === 0 && !commitResults) {
     console.log(`No author contributions found for: "${query}"`)
     return
   }

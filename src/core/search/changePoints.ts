@@ -88,6 +88,7 @@ export function computeConceptChangePoints(
     since?: number
     until?: number
     branch?: string
+    candidateHashes?: string[]
   } = {},
 ): ConceptChangePointReport {
   const topK = opts.topK ?? 50
@@ -111,6 +112,15 @@ export function computeConceptChangePoints(
   if (opts.branch) {
     // Use rawDb prepare with IN via a subquery on blob_branches
     embRows = rawDb.prepare('SELECT blob_hash, vector FROM embeddings WHERE blob_hash IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ?)').all(opts.branch) as Array<{ blob_hash: string; vector: Buffer }>
+    if (embRows.length === 0) {
+      return { type: 'concept-change-points', query, k: topK, threshold, range: { since: sinceLabel, until: untilLabel }, points: [] }
+    }
+  }
+
+  // If candidateHashes provided (e.g., from hybrid search), filter to those blobs
+  if (opts.candidateHashes && opts.candidateHashes.length > 0) {
+    const candSet = new Set(opts.candidateHashes)
+    embRows = embRows.filter((r) => candSet.has(r.blob_hash))
     if (embRows.length === 0) {
       return { type: 'concept-change-points', query, k: topK, threshold, range: { since: sinceLabel, until: untilLabel }, points: [] }
     }
@@ -302,6 +312,7 @@ export function computeFileChangePoints(
     since?: number
     until?: number
     useSymbolLevel?: boolean
+    branch?: string
   } = {},
 ): FileChangePointReport {
   const threshold = opts.threshold ?? 0.3
@@ -309,7 +320,13 @@ export function computeFileChangePoints(
   const sinceLabel = opts.since ? new Date(opts.since * 1000).toISOString().slice(0, 10) : null
   const untilLabel = opts.until ? new Date(opts.until * 1000).toISOString().slice(0, 10) : null
 
-  const entries = computeEvolution(filePath, undefined, { useSymbolLevel: opts.useSymbolLevel })
+  let entries = computeEvolution(filePath, undefined, { useSymbolLevel: opts.useSymbolLevel })
+
+  // If branch filter provided, restrict entries to blobs present on that branch
+  if (opts.branch) {
+    const branchSet = getBranchBlobHashSet(opts.branch)
+    entries = entries.filter((e) => branchSet.has(e.blobHash))
+  }
 
   const allChangePoints: FileChangePoint[] = []
 

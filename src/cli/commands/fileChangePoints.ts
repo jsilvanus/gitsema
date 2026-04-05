@@ -16,6 +16,7 @@ export interface FileChangePointsCommandOptions {
   html?: string | boolean
   level?: string
   includeContent?: boolean
+  branch?: string
 }
 
 function renderFileChangePoint(point: FileChangePoint, rank: number): string {

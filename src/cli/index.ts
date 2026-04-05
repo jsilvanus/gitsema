@@ -470,6 +470,9 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--branch <name>', 'restrict blobs to those seen on this branch')
+  .option('--hybrid', 'blend vector similarity with BM25 keyword matching')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -519,6 +522,10 @@ program
   .description('Show semantic origin of each logical block in a file — nearest-neighbor blame (see also: file-evolution, impact)')
   .option('-k, --top <n>', 'number of nearest-neighbor blobs to show per block (default 3)', '3')
   .option('--level <level>', 'search level: file (default) or symbol — symbol uses function-level embeddings')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .option('--branch <name>', 'restrict neighbor search to blobs seen on this branch')
   .option(
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
@@ -554,6 +561,9 @@ program
     '--dump [file]',
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
   .option('--branch <name>', 'restrict results to blobs seen on this branch')
   .action(impactCommand)
 
@@ -632,6 +642,11 @@ program
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .option('--hybrid', 'blend vector similarity with BM25 keyword matching')
+  .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .option('--branch <name>', 'restrict concept state to blobs seen on this branch')
   .option(
     '--dump [file]',
@@ -649,6 +664,7 @@ program
   .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
   .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
   .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
+  .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
   .option(
@@ -818,6 +834,12 @@ program
     'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
   )
   .option('--branch <name>', 'restrict concept attribution to blobs seen on this branch')
+  .option('--model <model>', 'override embedding model')
+  .option('--text-model <model>', 'override text embedding model')
+  .option('--code-model <model>', 'override code embedding model')
+  .option('--include-commits', 'also search commit messages for author attribution')
+  .option('--chunks', 'include chunk-level embeddings for finer-grained attribution')
+  .option('--level <level>', 'search level: file (default), chunk, or symbol')
   .option('--hybrid', 'use hybrid (vector + BM25) search to find initial candidate blobs')
   .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .action(authorCommand)

@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { computeEvolution, getCommitAuthor, getRemoteUrl, buildCommitUrl } from '../../core/search/evolution.js'
 import { applyModelOverrides } from '../../core/embedding/providerFactory.js'
+import { getBranchBlobHashSet } from '../../core/search/vectorSearch.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
@@ -15,6 +16,7 @@ export interface EvolutionCommandOptions {
   includeContent?: boolean
   origin?: string
   remote?: string
+  branch?: string
   /** Top-N largest-jump alerts. Pass `true` for default 5, or a numeric string for a custom count. */
   alerts?: string | boolean
   // CLI model overrides
@@ -251,7 +253,13 @@ export async function evolutionCommand(
 
   const includeContent = options.includeContent ?? false
   const origin = options.origin
-  const entries = computeEvolution(filePath.trim(), origin, { useSymbolLevel: options.level === 'symbol' })
+  let entries = computeEvolution(filePath.trim(), origin, { useSymbolLevel: options.level === 'symbol' })
+
+  // If branch option specified, filter entries to blobs present on that branch
+  if (options.branch) {
+    const branchSet = getBranchBlobHashSet(options.branch)
+    entries = entries.filter((e) => branchSet.has(e.blobHash))
+  }
 
   // Build and enrich alerts when --alerts is set.
   let enrichedAlerts: EvolutionAlert[] | undefined

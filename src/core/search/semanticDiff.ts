@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { resolveRefToTimestamp, getBlobHashesUpTo } from './clustering.js'
 import type { Embedding } from '../models/types.js'
 
@@ -146,12 +146,20 @@ export function computeSemanticDiff(
   ref1: string,
   ref2: string,
   topK = 10,
+  branch?: string,
 ): SemanticDiffResult {
   const ts1 = resolveRefToTimestamp(ref1)
   const ts2 = resolveRefToTimestamp(ref2)
 
-  const set1 = new Set(getBlobHashesUpTo(ts1))
-  const set2 = new Set(getBlobHashesUpTo(ts2))
+  let set1 = new Set(getBlobHashesUpTo(ts1))
+  let set2 = new Set(getBlobHashesUpTo(ts2))
+
+  // If a branch is provided, intersect both sets with the branch's blob set
+  if (branch) {
+    const branchSet = getBranchBlobHashSet(branch)
+    set1 = new Set([...set1].filter((h) => branchSet.has(h)))
+    set2 = new Set([...set2].filter((h) => branchSet.has(h)))
+  }
 
   const gainedHashes = [...set2].filter((h) => !set1.has(h))
   const lostHashes = [...set1].filter((h) => !set2.has(h))

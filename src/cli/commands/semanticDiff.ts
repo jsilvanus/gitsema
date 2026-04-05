@@ -14,6 +14,9 @@ export interface SemanticDiffCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  hybrid?: boolean
+  bm25Weight?: string
+  branch?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -118,7 +121,7 @@ export async function semanticDiffCommand(
 
   let result: SemanticDiffResult
   try {
-    result = computeSemanticDiff(queryEmbedding, topic, ref1, ref2, topK)
+    result = computeSemanticDiff(queryEmbedding, topic, ref1, ref2, topK, options.branch)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: ${msg}`)

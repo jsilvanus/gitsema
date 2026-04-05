@@ -19,22 +19,26 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { vectorSearch } from '../core/search/vectorSearch.js'
 import { computeEvolution, computeConceptEvolution } from '../core/search/evolution.js'
+import { computeSemanticDiff } from '../core/search/semanticDiff.js'
+import { computeSemanticBlame } from '../core/search/semanticBlame.js'
 import { runIndex } from '../core/indexing/indexer.js'
 import { getBlobContent } from '../core/indexing/blobStore.js'
 import { buildProvider, getTextProvider, getCodeProvider } from '../core/embedding/providerFactory.js'
 import { embedQuery } from '../core/embedding/embedQuery.js'
 import type { SearchResult, Embedding } from '../core/models/types.js'
-import { formatDate } from '../core/search/ranking.js'
+import { formatDate, groupResults, renderResults, renderFirstSeenResults } from '../core/search/ranking.js'
 import { parseDateArg } from '../core/search/timeSearch.js'
 import { DEFAULT_MAX_SIZE } from '../core/git/showBlob.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../core/git/branchDiff.js'
 import { computeSemanticCollisions, computeMergeImpact } from '../core/search/mergeAudit.js'
 import { computeBranchSummary } from '../core/search/branchSummary.js'
-import { computeClusters } from '../core/search/clustering.js'
-import { computeConceptChangePoints } from '../core/search/changePoints.js'
+import { computeClusters, computeClusterSnapshot, compareClusterSnapshots, computeClusterTimeline, resolveRefToTimestamp, getBlobHashesUpTo } from '../core/search/clustering.js'
+import { computeConceptChangePoints, computeFileChangePoints } from '../core/search/changePoints.js'
 import { computeAuthorContributions } from '../core/search/authorSearch.js'
 import { computeImpact } from '../core/search/impact.js'
 import { findDeadConcepts } from '../core/search/deadConcepts.js'
+import { hybridSearch } from '../core/search/hybridSearch.js'
+import { searchCommits } from '../core/search/commitSearch.js'
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -77,8 +81,15 @@ export async function startMcpServer(): Promise<void> {
       alpha: z.number().min(0).max(1).optional().default(0.8).describe('Weight for cosine similarity in blended score (0–1)'),
       before: z.string().optional().describe('Only include blobs first seen before this date (YYYY-MM-DD)'),
       after: z.string().optional().describe('Only include blobs first seen after this date (YYYY-MM-DD)'),
+      hybrid: z.boolean().optional().default(false).describe('Blend vector similarity with BM25 keyword matching'),
+      bm25_weight: z.number().min(0).max(1).optional().default(0.3).describe('BM25 weight in hybrid score'),
+      branch: z.string().optional().describe('Restrict results to blobs seen on this branch'),
+      level: z.enum(['file', 'chunk', 'symbol']).optional().default('file').describe('Search granularity level'),
+      chunks: z.boolean().optional().default(false).describe('Include chunk-level embeddings'),
+      include_commits: z.boolean().optional().default(false).describe('Also search commit messages'),
+      group: z.enum(['file', 'module', 'commit']).optional().describe('Group results by mode'),
     },
-    async ({ query, top_k, recent, alpha, before, after }) => {
+    async ({ query, top_k, recent, alpha, before, after, hybrid, bm25_weight, branch, level, chunks, include_commits, group }) => {
       const provider = getTextProvider()
       let queryEmbedding: Embedding
       try {
@@ -98,15 +109,46 @@ export async function startMcpServer(): Promise<void> {
         return { content: [{ type: 'text', text: `Error parsing date: ${msg}` }] }
       }
 
-      const results = vectorSearch(queryEmbedding, {
-        topK: top_k,
-        recent,
-        alpha,
-        before: beforeTs,
-        after: afterTs,
-      })
+      // If hybrid requested, use hybridSearch to obtain candidate set and scores
+      let results: SearchResult[] = []
+      if (hybrid) {
+        const hybridResults = hybridSearch(query, queryEmbedding, { topK: top_k, bm25Weight: bm25_weight, branch })
+        // hybridResults shape is similar to SearchResult but may be limited; map to SearchResult-compatible objects
+        results = hybridResults
+      } else {
+        // Use vector search
+        results = vectorSearch(queryEmbedding, {
+          topK: top_k,
+          recent,
+          alpha,
+          before: beforeTs,
+          after: afterTs,
+          searchChunks: level === 'chunk' || chunks,
+          searchSymbols: level === 'symbol',
+          branch,
+          model: provider.model,
+        })
+      }
 
-      return { content: [{ type: 'text', text: serializeSearchResults(results) }] }
+      // Optionally include commit search results
+      let commitText = ''
+      if (include_commits) {
+        try {
+          const commitResults = searchCommits(queryEmbedding, { topK: 10, model: provider.model })
+          if (commitResults.length > 0) {
+            commitText = '\n\nMatching commits:\n' + commitResults.map((c) => `${c.score.toFixed(3)}  ${c.paths[0] ?? '(unknown)'}  [${c.commitHash.slice(0, 7)}]  ${c.message}`).join('\n')
+          }
+        } catch (err) {
+          // Non-fatal — proceed without commit results
+        }
+      }
+
+      // Apply grouping if requested
+      if (group) {
+        results = groupResults(results, group, top_k)
+      }
+
+      return { content: [{ type: 'text', text: renderResults(results) + commitText }] }
     },
   )
 
@@ -156,8 +198,9 @@ export async function startMcpServer(): Promise<void> {
       before: z.string().optional().describe('Only include blobs first seen before this date (YYYY-MM-DD)'),
       after: z.string().optional().describe('Only include blobs first seen after this date (YYYY-MM-DD)'),
       sort_by_date: z.boolean().optional().default(false).describe('Sort results by first-seen date (ascending) instead of score'),
+      branch: z.string().optional().describe('Restrict results to blobs seen on this branch'),
     },
-    async ({ query, top_k, before, after, sort_by_date }) => {
+    async ({ query, top_k, before, after, sort_by_date, branch }) => {
       const provider = getTextProvider()
       let queryEmbedding: Embedding
       try {
@@ -181,6 +224,7 @@ export async function startMcpServer(): Promise<void> {
         topK: top_k,
         before: beforeTs,
         after: afterTs,
+        branch,
       })
 
       if (sort_by_date) {
@@ -205,8 +249,14 @@ export async function startMcpServer(): Promise<void> {
     {
       query: z.string().describe('Natural-language query describing the concept to search for'),
       top_k: z.number().int().positive().optional().default(10).describe('Maximum number of results to return'),
+      hybrid: z.boolean().optional().default(false).describe('blend vector similarity with BM25 keyword matching'),
+      bm25_weight: z.number().min(0).max(1).optional().default(0.3).describe('BM25 weight in hybrid score'),
+      branch: z.string().optional().describe('Restrict results to blobs seen on this branch'),
+      level: z.enum(['file', 'chunk', 'symbol']).optional().default('file').describe('Search granularity level'),
+      chunks: z.boolean().optional().default(false).describe('Include chunk-level embeddings'),
+      include_commits: z.boolean().optional().default(false).describe('Also search commit messages and show chronological commit results'),
     },
-    async ({ query, top_k }) => {
+    async ({ query, top_k, hybrid, bm25_weight, branch, level, chunks, include_commits }) => {
       const provider = getTextProvider()
       let queryEmbedding: Embedding
       try {
@@ -216,7 +266,13 @@ export async function startMcpServer(): Promise<void> {
         return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
       }
 
-      const results = vectorSearch(queryEmbedding, { topK: top_k })
+      let results: SearchResult[]
+      if (hybrid) {
+        const hybridResults = hybridSearch(query, queryEmbedding, { topK: top_k, bm25Weight: bm25_weight, branch })
+        results = hybridResults
+      } else {
+        results = vectorSearch(queryEmbedding, { topK: top_k, searchChunks: level === 'chunk' || chunks, searchSymbols: level === 'symbol', branch })
+      }
 
       const sorted = [...results].sort((a, b) => {
         if (a.firstSeen === undefined && b.firstSeen === undefined) return 0
@@ -235,7 +291,20 @@ export async function startMcpServer(): Promise<void> {
         return `${date}  ${path.padEnd(50)}  [${hash}]  (score: ${score})`
       })
 
-      return { content: [{ type: 'text', text: lines.join('\n') }] }
+      // Optionally include commit search results
+      let commitText = ''
+      if (include_commits) {
+        try {
+          const commitResults = searchCommits(queryEmbedding, { topK: 10, model: provider.model })
+          if (commitResults.length > 0) {
+            commitText = '\n\nMatching commits:\n' + commitResults.map((c) => `${c.score.toFixed(3)}  ${c.paths[0] ?? '(unknown)'}  [${c.commitHash.slice(0, 7)}]  ${c.message}`).join('\n')
+          }
+        } catch (err) {
+          // Non-fatal
+        }
+      }
+
+      return { content: [{ type: 'text', text: lines.join('\n') + commitText }] }
     },
   )
 
@@ -713,6 +782,180 @@ export async function startMcpServer(): Promise<void> {
           lines.push(`    ${path}`)
         }
         return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: semantic_search
+  // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Tool: semantic_diff
+  // -------------------------------------------------------------------------
+  server.tool(
+    'semantic_diff',
+    'Compute a conceptual/semantic diff of a topic across two git refs — shows gained, lost, and stable concepts.',
+    {
+      ref1: z.string().describe('Earlier git ref (branch, tag, commit hash, or date)'),
+      ref2: z.string().describe('Later git ref'),
+      query: z.string().describe('Topic query to embed and compare'),
+      top_k: z.number().int().positive().optional().default(10),
+      branch: z.string().optional().describe('Restrict to blobs seen on this branch'),
+    },
+    async ({ ref1, ref2, query, top_k, branch }) => {
+      try {
+        const provider = getTextProvider()
+        const qEmb = await embedQuery(provider, query)
+        const result = computeSemanticDiff(qEmb, query, ref1, ref2, top_k, branch)
+        const lines: string[] = []
+        lines.push(`Semantic diff: "${result.topic}"`)
+        lines.push(`ref1: ${result.ref1}  (${result.timestamp1 ? formatDate(result.timestamp1) : 'unknown'})`)
+        lines.push(`ref2: ${result.ref2}  (${result.timestamp2 ? formatDate(result.timestamp2) : 'unknown'})`)
+        lines.push('')
+        const render = (label: string, list: any[]) => {
+          lines.push(`${label}:`)
+          if (list.length === 0) lines.push('  (none)')
+          for (const e of list) {
+            const p = e.paths[0] ?? '(unknown)'
+            lines.push(`  ${formatDate(e.firstSeen)}  ${p}  [${e.blobHash.slice(0,7)}]  score=${e.score.toFixed(3)}`)
+          }
+          lines.push('')
+        }
+        render('Gained', result.gained)
+        render('Lost', result.lost)
+        render('Stable', result.stable)
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: semantic_blame
+  // -------------------------------------------------------------------------
+  server.tool(
+    'semantic_blame',
+    'Show semantic origin of each logical block in a file — finds nearest-neighbor blobs in the index.',
+    {
+      file_path: z.string().describe('Path to the file to blame'),
+      top_k: z.number().int().positive().optional().default(3),
+      level: z.enum(['file', 'symbol']).optional().default('file'),
+      branch: z.string().optional(),
+    },
+    async ({ file_path, top_k, level, branch }) => {
+      try {
+        const provider = getTextProvider()
+        // Attempt to read blob content from the store
+        const content = getBlobContent(file_path) ?? ''
+        if (!content) return { content: [{ type: 'text', text: `File not found in blob store: ${file_path}` }] }
+        const entries = await computeSemanticBlame(file_path, content, provider, { topK: top_k, searchSymbols: level === 'symbol', branch })
+        if (entries.length === 0) return { content: [{ type: 'text', text: '(no entries)' }] }
+        const lines: string[] = [`Semantic blame: ${file_path}`, '']
+        for (const entry of entries) {
+          lines.push(`─ ${entry.label} (lines ${entry.startLine}–${entry.endLine})`)
+          if (entry.neighbors.length === 0) {
+            lines.push('  (no indexed blobs)')
+            lines.push('')
+            continue
+          }
+          for (const n of entry.neighbors) {
+            lines.push(`  ${n.similarity.toFixed(3)}  ${n.paths[0] ?? '(unknown)'}  [${n.blobHash.slice(0,7)}]`)
+            if (n.commitHash) lines.push(`    commit: ${n.commitHash.slice(0,7)}  (${n.timestamp ? formatDate(n.timestamp) : 'unknown'})`)
+            if (n.author) lines.push(`    author: ${n.author}`)
+            if (n.message) lines.push(`    message: ${n.message.split('\n')[0]}`)
+          }
+          lines.push('')
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: file_change_points
+  // -------------------------------------------------------------------------
+  server.tool(
+    'file_change_points',
+    "Detect semantic change points in a file's Git history.",
+    {
+      path: z.string().describe('File path to analyze'),
+      threshold: z.number().min(0).max(2).optional().default(0.3).describe('Cosine distance threshold to emit a change point'),
+      top_points: z.number().int().positive().optional().default(5).describe('Number of change points to return'),
+      branch: z.string().optional(),
+    },
+    async ({ path, threshold, top_points, branch }) => {
+      try {
+        const report = computeFileChangePoints(path, { threshold, topPoints: top_points, branch })
+        if (report.points.length === 0) return { content: [{ type: 'text', text: '(no change points found)' }] }
+        const lines = [`File change points for: ${path}`, '']
+        for (const p of report.points) {
+          lines.push(`  ${p.before.date} → ${p.after.date}  dist=${p.distance.toFixed(3)}  ${p.before.blobHash.slice(0,7)} → ${p.after.blobHash.slice(0,7)}`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: cluster_diff
+  // -------------------------------------------------------------------------
+  server.tool(
+    'cluster_diff',
+    'Compare semantic clusters between two points in history.',
+    {
+      ref1: z.string(),
+      ref2: z.string(),
+      k: z.number().int().positive().optional().default(8),
+    },
+    async ({ ref1, ref2, k }) => {
+      try {
+        const ts1 = resolveRefToTimestamp(ref1)
+        const ts2 = resolveRefToTimestamp(ref2)
+        const hashes1 = getBlobHashesUpTo(ts1)
+        const hashes2 = getBlobHashesUpTo(ts2)
+        const snapshot1 = await computeClusterSnapshot({ k, blobHashFilter: hashes1 })
+        const snapshot2 = await computeClusterSnapshot({ k, blobHashFilter: hashes2 })
+        const report = compareClusterSnapshots(snapshot1, snapshot2, ref1, ref2)
+        return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: cluster_timeline
+  // -------------------------------------------------------------------------
+  server.tool(
+    'cluster_timeline',
+    'Track how semantic clusters evolve through commit history.',
+    {
+      since: z.string().optional(),
+      until: z.string().optional(),
+      k: z.number().int().positive().optional().default(8),
+      branch: z.string().optional(),
+    },
+    async ({ since, until, k, branch }) => {
+      try {
+        const opts: { k: number; since?: number; until?: number; branch?: string } = { k }
+        if (since) opts.since = parseDateArg(since)
+        if (until) opts.until = parseDateArg(until)
+        if (branch) opts.branch = branch
+        const report = await computeClusterTimeline(opts)
+        return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error: ${msg}` }] }

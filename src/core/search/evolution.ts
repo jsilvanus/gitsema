@@ -442,6 +442,7 @@ export function computeConceptEvolution(
   queryEmbedding: Embedding,
   topK = 50,
   branch?: string,
+  candidateHashes?: string[],
 ): ConceptEvolutionEntry[] {
   // 1. Load all stored embeddings and score against the query
   let allRows = db
@@ -455,6 +456,13 @@ export function computeConceptEvolution(
   if (branch) {
     const branchSet = getBranchBlobHashSet(branch)
     allRows = allRows.filter((r) => branchSet.has(r.blobHash))
+    if (allRows.length === 0) return []
+  }
+
+  // If candidateHashes is provided, filter to those hashes before scoring
+  if (candidateHashes && candidateHashes.length > 0) {
+    const candSet = new Set(candidateHashes)
+    allRows = allRows.filter((r) => candSet.has(r.blobHash))
     if (allRows.length === 0) return []
   }
 

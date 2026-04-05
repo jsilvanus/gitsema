@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, symbols, symbolEmbeddings } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { FunctionChunker } from '../chunking/functionChunker.js'
@@ -148,9 +148,9 @@ export async function computeSemanticBlame(
   filePath: string,
   content: string,
   provider: EmbeddingProvider,
-  opts: { topK?: number; searchSymbols?: boolean; repoPath?: string } = {},
+  opts: { topK?: number; searchSymbols?: boolean; repoPath?: string; branch?: string } = {},
 ): Promise<SemanticBlameEntry[]> {
-  const { topK = 3, searchSymbols = false, repoPath = '.' } = opts
+  const { topK = 3, searchSymbols = false, repoPath = '.', branch } = opts
   const { db } = getActiveSession()
 
   // --- Chunk the file ---
@@ -199,6 +199,12 @@ export async function computeSemanticBlame(
       blobHash: row.blobHash,
       vec: bufferToEmbedding(row.vector as Buffer),
     }))
+  }
+
+  // Apply branch filter when requested
+  if (branch) {
+    const branchSet = getBranchBlobHashSet(branch)
+    storedVectors = storedVectors.filter((v) => branchSet.has(v.blobHash))
   }
 
   // Early return: no indexed blobs yet
