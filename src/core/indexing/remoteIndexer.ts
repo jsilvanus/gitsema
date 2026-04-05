@@ -74,6 +74,7 @@ export async function runRemoteIndex(options: RemoteIndexerOptions): Promise<Ind
     failed: 0, embedFailed: 0, otherFailed: 0,
     fbFunction: 0, fbFixed: 0,
     queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0,
+    symbols: 0, moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0,
   }
   const start = Date.now()
   const seenHashes = new Set<string>()

@@ -6,6 +6,7 @@ import { inArray, eq } from 'drizzle-orm'
 import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
+import type { Embedding } from '../models/types.js'
 import { FunctionChunker } from '../chunking/functionChunker.js'
 import { FixedChunker } from '../chunking/fixedChunker.js'
 import type { Chunk } from '../chunking/chunker.js'
@@ -223,7 +224,7 @@ export async function computeSemanticBlame(
   const entries: SemanticBlameEntry[] = []
 
   for (const chunk of chunks) {
-    let queryVec: number[]
+    let queryVec: Embedding
     try {
       queryVec = await provider.embed(chunk.content)
     } catch {
@@ -239,7 +240,7 @@ export async function computeSemanticBlame(
 
     // Top-K by cosine similarity
     const scored = storedVectors
-      .map((s) => ({ blobHash: s.blobHash, similarity: cosineSimilarity(queryVec, s.vec) }))
+      .map((s) => ({ blobHash: s.blobHash, similarity: cosineSimilarity(queryVec, s.vec), symbolName: s.symbolName, symbolKind: s.symbolKind }))
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK)
 
