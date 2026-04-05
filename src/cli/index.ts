@@ -10,6 +10,7 @@ import {
 import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
+import { codeSearchCommand } from './commands/codeSearch.js'
 import { firstSeenCommand } from './commands/firstSeen.js'
 import { evolutionCommand } from './commands/evolution.js'
 import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
@@ -18,6 +19,7 @@ import { semanticDiffCommand } from './commands/semanticDiff.js'
 import { startMcpServer } from '../mcp/server.js'
 import { backfillFtsCommand } from './commands/backfillFts.js'
 import { updateModulesCommand } from './commands/updateModules.js'
+import { runGarbageCollection } from '../core/indexing/gc.js'
 import { serveCommand } from './commands/serve.js'
 import { remoteIndexCommand } from './commands/remoteIndex.js'
 import { semanticBlameCommand } from './commands/semanticBlame.js'
@@ -372,7 +374,12 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--not-like <query>', 'negative example query whose similarity is subtracted from the score')
+  .option('--lambda <n>', 'weight for the negative example subtraction (default 0.5)')
+  .option('--explain', 'show score component breakdown for each result')
   .action(searchCommand)
+
+program.addCommand(codeSearchCommand())
 
 program
   .command('first-seen <query>')
@@ -753,6 +760,22 @@ program
   .option('--verbose', 'enable verbose output')
   .action(async (opts) => {
     await updateModulesCommand({ verbose: opts.verbose })
+  })
+
+program
+  .command('gc')
+  .description('Garbage collect unreachable blob records from the DB')
+  .option('--dry-run', 'only report what would be removed')
+  .option('--verbose', 'print verbose output')
+  .action(async (opts: { dryRun?: boolean; verbose?: boolean }) => {
+    try {
+      const stats = await runGarbageCollection({ dryRun: !!opts.dryRun })
+      console.log(`Total blobs: ${stats.total}; unreachable: ${stats.removed}`)
+      if (!opts.dryRun) console.log(`Removed ${stats.removed} unreachable blobs`)
+    } catch (err) {
+      console.error(`GC failed: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
   })
 
 program

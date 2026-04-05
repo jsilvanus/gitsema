@@ -196,10 +196,13 @@ export function kMeansInit(vectors: number[][], k: number): number[][] {
     }
 
     if (total === 0) {
-      // all vectors equal to centroids — pick random remaining
+      // all vectors equal to centroids — pick random remaining indices quickly
+      const chosenIndices = new Set<number>([firstIdx])
       for (let i = 0; i < n && centroids.length < k; i++) {
-        const v = vectors[i]
-        if (!centroids.some((c) => c.every((x, idx) => x === v[idx]))) centroids.push(v.slice())
+        if (!chosenIndices.has(i)) {
+          chosenIndices.add(i)
+          centroids.push(vectors[i].slice())
+        }
       }
       break
     }
@@ -219,15 +222,16 @@ export function kMeansInit(vectors: number[][], k: number): number[][] {
 }
 
 export function assignClusters(vectors: number[][], centroids: number[][]): number[] {
-  const assignments: number[] = []
-  for (const v of vectors) {
+  const assignments = new Array<number>(vectors.length)
+  for (let vi = 0; vi < vectors.length; vi++) {
+    const v = vectors[vi]
     let best = 0
     let bestD = Infinity
     for (let i = 0; i < centroids.length; i++) {
       const d = squaredEuclidean(v, centroids[i])
       if (d < bestD) { bestD = d; best = i }
     }
-    assignments.push(best)
+    assignments[vi] = best
   }
   return assignments
 }
@@ -429,13 +433,14 @@ function buildClusterPartials(
       for (const h of partial.blobHashes) {
         for (const p of pathsByHash.get(h) ?? []) partial.allPaths.push(p)
       }
-      // FTS5 content + keywords
-      const ftsContent = partial.blobHashes
+      // FTS5 content + keywords — cap to avoid huge strings for large clusters
+      const MAX_FTS_CHARS = 200_000
+      const rawContent = partial.blobHashes
         .map((h) => ftsByHash.get(h) ?? '')
         .filter(Boolean)
         .join(' ')
-      partial.rawFtsContent = ftsContent
-      partial.topKeywords = extractKeywords(ftsContent, topKeywordsN)
+      partial.rawFtsContent = rawContent.length > MAX_FTS_CHARS ? rawContent.slice(0, MAX_FTS_CHARS) : rawContent
+      partial.topKeywords = extractKeywords(partial.rawFtsContent, topKeywordsN)
       // label
       const pathPrefix = buildPathPrefix(partial.representativePaths)
       const topWords = partial.topKeywords.slice(0, 3).join(' ')
@@ -536,11 +541,22 @@ export async function computeClusters(opts: {
       assignedIds.push(Number(res.lastInsertRowid))
     }
 
+    // Batch-insert cluster assignments (improves write performance)
+    const allAssignments: Array<[string, number]> = []
     for (let ci = 0; ci < partials.length; ci++) {
       const clusterId = assignedIds[ci]
       for (const h of partials[ci].blobHashes) {
-        insertAssignmentStmt.run(h, clusterId)
+        allAssignments.push([h, clusterId])
       }
+    }
+
+    const BATCH = 500
+    for (let i = 0; i < allAssignments.length; i += BATCH) {
+      const batch = allAssignments.slice(i, i + BATCH)
+      const placeholders = batch.map(() => '(?,?)').join(',')
+      const flatten: any[] = []
+      for (const row of batch) { flatten.push(row[0], row[1]) }
+      rawDb.prepare(`INSERT INTO cluster_assignments (blob_hash, cluster_id) VALUES ${placeholders}`).run(...flatten)
     }
 
     return assignedIds

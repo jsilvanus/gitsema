@@ -21,7 +21,7 @@ import { vectorSearch } from '../core/search/vectorSearch.js'
 import { computeEvolution, computeConceptEvolution } from '../core/search/evolution.js'
 import { runIndex } from '../core/indexing/indexer.js'
 import { getBlobContent } from '../core/indexing/blobStore.js'
-import { buildProvider, getTextProvider } from '../core/embedding/providerFactory.js'
+import { buildProvider, getTextProvider, getCodeProvider } from '../core/embedding/providerFactory.js'
 import { embedQuery } from '../core/embedding/embedQuery.js'
 import type { SearchResult, Embedding } from '../core/models/types.js'
 import { formatDate } from '../core/search/ranking.js'
@@ -104,6 +104,40 @@ export async function startMcpServer(): Promise<void> {
         alpha,
         before: beforeTs,
         after: afterTs,
+      })
+
+      return { content: [{ type: 'text', text: serializeSearchResults(results) }] }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: code_search (P3-1)
+  // -------------------------------------------------------------------------
+  server.tool(
+    'code_search',
+    'Search code using the code embedding model and return symbol/chunk level matches (default: symbol level)',
+    {
+      snippet: z.string().describe('Code snippet to embed and search for'),
+      top_k: z.number().int().positive().optional().default(10).describe('Maximum number of results to return'),
+      level: z.enum(['file', 'chunk', 'symbol']).optional().default('symbol').describe('Search granularity level'),
+      branch: z.string().optional().describe('Restrict to blobs on this branch'),
+    },
+    async ({ snippet, top_k, level, branch }) => {
+      const provider = getCodeProvider()
+      let embedding: Embedding
+      try {
+        embedding = await embedQuery(provider, snippet)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error embedding snippet: ${msg}` }] }
+      }
+
+      const results = vectorSearch(embedding, {
+        topK: top_k,
+        searchChunks: level === 'chunk' || level === 'symbol',
+        searchSymbols: level === 'symbol',
+        branch,
+        model: (provider as any).model,
       })
 
       return { content: [{ type: 'text', text: serializeSearchResults(results) }] }

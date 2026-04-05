@@ -94,11 +94,14 @@ export function renderResults(results: SearchResult[]): string {
       ? `:${result.startLine}-${result.endLine}`
       : ''
     const clusterSuffix = result.clusterLabel ? `  [cluster: ${result.clusterLabel}]` : ''
+    const signalSuffix = result.signals
+      ? `  [cos=${result.signals.cosine.toFixed(3)}${result.signals.recency !== undefined ? ` rec=${result.signals.recency.toFixed(3)}` : ''}${result.signals.pathScore !== undefined ? ` path=${result.signals.pathScore.toFixed(3)}` : ''}${result.signals.bm25 !== undefined ? ` bm25=${result.signals.bm25.toFixed(3)}` : ''}]`
+      : ''
     if (result.paths.length === 0) {
-      lines.push(`${score}  (unknown path)  [${hash}]${dateSuffix}${clusterSuffix}`)
+      lines.push(`${score}  (unknown path)  [${hash}]${dateSuffix}${clusterSuffix}${signalSuffix}`)
     } else {
       const pathStr = result.paths[0] + lineSuffix
-      lines.push(`${score}  ${pathStr.padEnd(50)}  [${hash}]${dateSuffix}${clusterSuffix}`)
+      lines.push(`${score}  ${pathStr.padEnd(50)}  [${hash}]${dateSuffix}${clusterSuffix}${signalSuffix}`)
       for (let i = 1; i < result.paths.length; i++) {
         lines.push(`       ${result.paths[i].padEnd(50)}`)
       }

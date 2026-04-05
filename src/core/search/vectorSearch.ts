@@ -115,6 +115,12 @@ export interface VectorSearchOptions {
   searchModules?: boolean
   /** When set, restrict results to blobs that appear on this branch (short name, e.g. "main"). */
   branch?: string
+  /** Negative example embedding to subtract from score (P3-2). */
+  negativeQueryEmbedding?: Embedding
+  /** Weight for negative example subtraction (default 0.5) */
+  negativeLambda?: number
+  /** When true, populate `signals` on returned SearchResult objects with per-signal values. */
+  explain?: boolean
 }
 
 /**
@@ -128,6 +134,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',
     searchChunks = false, searchSymbols = false, searchModules = false, branch,
+    negativeQueryEmbedding, negativeLambda, explain,
   } = options
 
   // Determine if three-signal ranking is active
@@ -271,19 +278,15 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   // Pre-compute query norm once (H8 optimization — avoids recomputing it for every candidate)
   const queryNorm = vectorNorm(queryEmbedding)
+  const negEmbedding = options.negativeQueryEmbedding ?? null
+  const negLambda = options.negativeLambda ?? 0.5
+  const negNorm = negEmbedding ? vectorNorm(negEmbedding) : 0
 
-  // Compute cosine similarity for each candidate
-  type ScoredEntry = CandidateRow & { cosine: number }
-  const scored: ScoredEntry[] = filteredPool.map((row) => ({
-    ...row,
-    cosine: cosineSimilarityPrecomputed(queryEmbedding, queryNorm, rowToEmbedding(row)),
-  }))
-
-  // Compute recency scores when needed
+  // Compute recency scores when needed (use filteredPool directly)
   const needRecency = recent || useThreeSignal
   let recencyScores: Map<string, number> | null = null
   if (needRecency) {
-    const candidateHashes = [...new Set(scored.map((s) => s.blobHash))]
+    const candidateHashes = [...new Set(filteredPool.map((r) => r.blobHash))]
     const firstSeenMap = getFirstSeenMap(candidateHashes)
     recencyScores = computeRecencyScores(firstSeenMap)
   }
@@ -291,7 +294,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   // Resolve paths for path-relevance scoring (only when using three-signal ranking)
   let pathsByBlob: Map<string, string[]> | null = null
   if (useThreeSignal) {
-    const hashes = [...new Set(scored.map((s) => s.blobHash))]
+    const hashes = [...new Set(filteredPool.map((r) => r.blobHash))]
     const pathRows = db.select({ blobHash: paths.blobHash, path: paths.path })
       .from(paths)
       .where(inArray(paths.blobHash, hashes))
@@ -304,27 +307,34 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     }
   }
 
-  // Apply ranking formula
-  type FinalEntry = ScoredEntry & { score: number }
-  const finalScored: FinalEntry[] = scored.map((s) => {
-    let score: number
-
-    if (useThreeSignal) {
-      const recency = recencyScores?.get(s.blobHash) ?? 0
-      const blobPaths = pathsByBlob?.get(s.blobHash) ?? []
-      const pathScore = blobPaths.length > 0
-        ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p)))
-        : 0
-      score = (wv * s.cosine + wr * recency + wp * pathScore) / wTotal
-    } else if (recent) {
-      const recency = recencyScores?.get(s.blobHash) ?? 0
-      score = alpha * s.cosine + (1 - alpha) * recency
-    } else {
-      score = s.cosine
+  // Single-pass scoring: compute cosine (and negative cosine if present) and final score per candidate
+  type FinalEntry = CandidateRow & { cosine: number; score: number }
+  const finalScored: FinalEntry[] = []
+  for (const row of filteredPool) {
+    const emb = rowToEmbedding(row)
+    const cosine = cosineSimilarityPrecomputed(queryEmbedding, queryNorm, emb)
+    let score = cosine
+    let negCos = 0
+    if (negEmbedding) {
+      negCos = cosineSimilarityPrecomputed(negEmbedding, negNorm, emb)
+      score = cosine - (negLambda * negCos)
     }
 
-    return { ...s, score }
-  })
+    // Blend with recency/path signals if requested
+    if (useThreeSignal) {
+      const recency = recencyScores?.get(row.blobHash) ?? 0
+      const blobPaths = pathsByBlob?.get(row.blobHash) ?? []
+      const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : 0
+      score = (wv * cosine + wr * recency + wp * pathScore) / wTotal
+      finalScored.push({ blobHash: row.blobHash, vector: row.vector, quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale, chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine, symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind, language: row.language, modulePath: row.modulePath, cosine, score })
+    } else if (recent) {
+      const recency = recencyScores?.get(row.blobHash) ?? 0
+      score = alpha * cosine + (1 - alpha) * recency
+      finalScored.push({ blobHash: row.blobHash, vector: row.vector, quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale, chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine, symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind, language: row.language, modulePath: row.modulePath, cosine, score })
+    } else {
+      finalScored.push({ blobHash: row.blobHash, vector: row.vector, quantized: row.quantized, quantMin: row.quantMin, quantScale: row.quantScale, chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine, symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind, language: row.language, modulePath: row.modulePath, cosine, score })
+    }
+  }
 
   // Sort descending by score, deduplicate by blobHash (keep highest-scoring entry
   // per blob), then take top-k. This prevents the same file appearing multiple
@@ -368,15 +378,19 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     // entries in the paths table. Map them to modulePath and expose a single
     // path equal to the modulePath for display purposes.
     if (b.modulePath !== undefined) {
-      return {
+      const base: any = {
         blobHash: b.blobHash,
         paths: [b.modulePath],
         score: b.score,
         modulePath: b.modulePath,
       }
+      if (options.explain) {
+        base.signals = { cosine: b.cosine }
+      }
+      return base
     }
 
-    return {
+    const base: any = {
       blobHash: b.blobHash,
       paths: pathsByBlob!.get(b.blobHash) ?? [],
       score: b.score,
@@ -390,6 +404,15 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       symbolKind: b.symbolKind,
       language: b.language,
     }
+
+    if (options.explain) {
+      const recency = recencyScores?.get(b.blobHash)
+      const blobPaths = pathsByBlob?.get(b.blobHash) ?? []
+      const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : undefined
+      base.signals = { cosine: b.cosine, recency: recency ?? undefined, pathScore }
+    }
+
+    return base
   })
 }
 
@@ -404,11 +427,13 @@ export function mergeSearchResults(
   topK: number,
 ): SearchResult[] {
   const best = new Map<string, SearchResult>()
-  for (const r of [...a, ...b]) {
+  for (const r of a) {
     const existing = best.get(r.blobHash)
-    if (!existing || r.score > existing.score) {
-      best.set(r.blobHash, r)
-    }
+    if (!existing || r.score > existing.score) best.set(r.blobHash, r)
+  }
+  for (const r of b) {
+    const existing = best.get(r.blobHash)
+    if (!existing || r.score > existing.score) best.set(r.blobHash, r)
   }
   return Array.from(best.values())
     .sort((x, y) => y.score - x.score)

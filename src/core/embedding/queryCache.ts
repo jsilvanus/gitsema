@@ -19,9 +19,11 @@ const DEFAULT_MAX_ENTRIES = 10_000
  */
 export function getCachedQueryEmbedding(queryText: string, model: string): Float32Array | null {
   const { rawDb } = getActiveSession()
+  const ttlMs = DEFAULT_TTL_MS
+  const cutoff = Date.now() - ttlMs
   const row = rawDb
-    .prepare('SELECT vector FROM query_embeddings WHERE query_text = ? AND model = ?')
-    .get(queryText, model) as { vector: Buffer } | undefined
+    .prepare('SELECT vector, cached_at FROM query_embeddings WHERE query_text = ? AND model = ? AND cached_at >= ?')
+    .get(queryText, model, cutoff) as { vector: Buffer; cached_at: number } | undefined
   if (!row) return null
   const f32 = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4)
   return f32

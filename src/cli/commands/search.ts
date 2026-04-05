@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
-import type { Embedding } from '../../core/models/types.js'
+import type { Embedding, SearchResult } from '../../core/models/types.js'
 import { vectorSearch, mergeSearchResults } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
@@ -53,6 +53,12 @@ export interface SearchCommandOptions {
   textModel?: string
   codeModel?: string
   vss?: boolean
+  /** Negative example: a query whose similarity should be subtracted from the score */
+  notLike?: string
+  /** Weight for negative example (default 0.5) */
+  lambda?: string
+  /** When true, print signal breakdown for each result */
+  explain?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -242,7 +248,8 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
   }
 
-  const searchOpts = {
+  // Prepare search options; negative/explain handled below
+  const searchOpts: any = {
     topK,
     recent: options.recent ?? false,
     alpha,
@@ -258,7 +265,24 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     branch: options.branch,
   }
 
-  let results
+  // Handle negative example embedding when provided
+  let negativeEmbedding: Embedding | undefined
+  const negativeLambda = options.lambda !== undefined ? parseFloat(options.lambda) : 0.5
+  if (options.notLike) {
+    try {
+      negativeEmbedding = await sharedEmbedQuery(textProvider, options.notLike, { noCache })
+      searchOpts.negativeQueryEmbedding = negativeEmbedding
+      searchOpts.negativeLambda = negativeLambda
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error: could not embed negative example — ${msg}`)
+      process.exit(1)
+    }
+  }
+
+  if (options.explain) searchOpts.explain = true
+
+  let results: SearchResult[] | undefined
   if (options.vss) {
     // Attempt ANN search via usearch if available and index file exists
     try {

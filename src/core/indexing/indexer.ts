@@ -227,7 +227,16 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0,
   }
   const start = Date.now()
+  const SIZE_CAP = 50_000
   const seenHashes = new Set<string>()
+  let lastProgressTime = 0
+  function reportProgress() {
+    const now = Date.now()
+    if (now - lastProgressTime >= 100) {
+      lastProgressTime = now
+      onProgress?.({ ...stats, elapsed: now - start })
+    }
+  }
 
   const stream = revList(repoPath, { since, maxCommits, branch: branchFilter })
 
@@ -241,6 +250,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     if (seenHashes.has(blobHash)) continue
     seenHashes.add(blobHash)
     stats.seen++
+    // Prevent seenHashes from growing unbounded — clear periodically (within-run dedup is best-effort)
+    if (seenHashes.size > SIZE_CAP) seenHashes.clear()
 
     // Path-based filter (applied before any I/O)
     if (isFiltered(path, filter)) {
@@ -281,13 +292,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               logger.error(`Error reading blob ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
               stats.failed++
               stats.otherFailed++
-              onProgress?.({ ...stats, elapsed: Date.now() - start })
+              reportProgress()
               return
             }
 
         if (content === null) {
           stats.oversized++
-          onProgress?.({ ...stats, elapsed: Date.now() - start })
+          reportProgress()
           return
         }
 
@@ -325,7 +336,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
             logger.error(`Failed to store blob record ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
             stats.failed++
             stats.otherFailed++
-            onProgress?.({ ...stats, elapsed: Date.now() - start })
+            reportProgress()
             return
           }
 
@@ -385,7 +396,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               } catch (err) {
                 logger.debug?.(`Symbol embedding failed for ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
                 // Symbol embedding failure is non-fatal — the chunk embedding succeeded
-                onProgress?.({ ...stats, elapsed: Date.now() - start })
+                reportProgress()
                 continue
               }
               try {
@@ -432,7 +443,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 logger.error(`Failed to store blob record (fallback) ${blobHash}: ${err2 instanceof Error ? err2.message : String(err2)}`)
                 stats.failed++
                 stats.otherFailed++
-                onProgress?.({ ...stats, elapsed: Date.now() - start })
+                reportProgress()
                 return
               }
 
