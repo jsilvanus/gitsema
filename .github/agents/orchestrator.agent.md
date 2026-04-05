@@ -9,8 +9,7 @@ author: GitHub Copilot
 model: GPT-5 mini (copilot)
 applyTo:
   - "*.md"
-  - "docs/**"
-  - "packages/**"
+  - "**"
   - ".github/**"
 useSkills:
   - ".github/skills/director-orchestrator/SKILL.md"
@@ -125,7 +124,7 @@ whenToUse: |
   - When a task requires multiple specialized skills (tests, infra, docs, security).
   - When you want a step-by-step plan with delegated subtasks and checkpoints.
   - When you need a consolidated patch or PR assembled from smaller patches.
-tools: [execute, read, agent, todo]
+tools: [execute, read, agent, 'codebase-semantics-mcp/*', 'gitsema-mcp/*', todo]
 constraints: |
   - Break tasks into clear subtasks, assign an agent to each, and specify deliverables and deadlines.
   - Do not try to find files or search codebases yourself; delegate that to the Senior Engineer
