@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
-import { inArray, eq, sql, and } from 'drizzle-orm'
+import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
 
 const execFileAsync = promisify(execFile)
@@ -128,7 +128,7 @@ export async function findDeadConcepts(opts: {
 
   // 2. All indexed embeddings
   const baseQuery = db.select({ blobHash: embeddings.blobHash, vector: embeddings.vector }).from(embeddings)
-  const conditions: any[] = []
+  const conditions: SQL[] = []
   if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
   let allEmbRows = (conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery).all()
 

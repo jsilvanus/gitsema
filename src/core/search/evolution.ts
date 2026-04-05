@@ -515,7 +515,7 @@ export function computeConceptEvolution(
 
   // 5. Compute distFromPrev between consecutive timeline entries
   const result: ConceptEvolutionEntry[] = []
-  let prevEmb: number[] | null = null
+  let prevEmb: Embedding | null = null
 
   for (const entry of timeline) {
     const distFromPrev = prevEmb !== null ? cosineDistance(prevEmb, entry.emb) : 0

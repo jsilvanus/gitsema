@@ -12,7 +12,7 @@ function bufferToEmbedding(buf: Buffer): Float32Array {
   return f32
 }
 
-function cosineDistance(a: any, b: any): number {
+function cosineDistance(a: Embedding, b: Embedding): number {
   return 1 - cosineSimilarity(a, b)
 }
 
@@ -109,7 +109,6 @@ export function computeConceptChangePoints(
 
   // Apply branch filter at SQL level when requested
   if (opts.branch) {
-    const placeholders = '?'
     // Use rawDb prepare with IN via a subquery on blob_branches
     embRows = rawDb.prepare('SELECT blob_hash, vector FROM embeddings WHERE blob_hash IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ?)').all(opts.branch) as Array<{ blob_hash: string; vector: Buffer }>
     if (embRows.length === 0) {

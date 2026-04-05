@@ -1,6 +1,6 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
-import { inArray, eq, sql, and } from 'drizzle-orm'
+import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../embedding/quantize.js'
@@ -149,7 +149,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   }).from(embeddings)
 
   // Build SQL-level filters for model and branch to avoid loading all rows
-  const conditions: any[] = []
+  const conditions: SQL[] = []
   if (model) conditions.push(eq(embeddings.model, model))
   if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
   const filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
@@ -178,7 +178,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       .from(chunkEmbeddings)
       .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
 
-    const chunkConditions: any[] = []
+    const chunkConditions: SQL[] = []
     if (model) chunkConditions.push(eq(chunkEmbeddings.model, model))
     if (branch) chunkConditions.push(sql`${chunks.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
     const chunkRows = chunkConditions.length > 0 ? chunkQuery.where(and(...chunkConditions)).all() : chunkQuery.all()
@@ -215,7 +215,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       .from(symbolEmbeddings)
       .innerJoin(symbols, eq(symbolEmbeddings.symbolId, symbols.id))
 
-    const symConditions: any[] = []
+    const symConditions: SQL[] = []
     if (model) symConditions.push(eq(symbolEmbeddings.model, model))
     if (branch) symConditions.push(sql`${symbols.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
     const symRows = symConditions.length > 0 ? symQuery.where(and(...symConditions)).all() : symQuery.all()

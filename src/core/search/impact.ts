@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings } from '../db/schema.js'
-import { inArray, eq, sql, and } from 'drizzle-orm'
+import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
@@ -211,7 +211,7 @@ export async function computeImpact(
   }
 
   const baseQuery = db.select({ blobHash: embeddings.blobHash, vector: embeddings.vector }).from(embeddings)
-  const conditions: any[] = []
+  const conditions: SQL[] = []
   if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
   let allEmbRows: Array<{ blobHash: string; vector: unknown }> = (conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery).all()
 

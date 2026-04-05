@@ -49,7 +49,7 @@ export function setCachedQueryEmbedding(
          dimensions = excluded.dimensions,
          cached_at = excluded.cached_at`,
     )
-    .run(queryText, model, (embedding as any).length, vector, Date.now())
+    .run(queryText, model, embedding.length, vector, Date.now())
 }
 
 /**
