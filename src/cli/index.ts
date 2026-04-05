@@ -773,7 +773,7 @@ program
     await buildVssCommand({
       model: opts.model,
       efConstruction: opts.efConstruction,
-      M: opts.m,
+      M: opts.M,
     })
   })
 

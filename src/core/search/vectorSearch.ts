@@ -130,9 +130,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   let candidatePool: CandidateRow[] = allRows.map((r) => ({
     blobHash: r.blobHash,
     vector: r.vector as Buffer,
-    quantized: (r as any).quantized ?? null,
-    quantMin: (r as any).quantMin ?? null,
-    quantScale: (r as any).quantScale ?? null,
+    quantized: r.quantized ?? null,
+    quantMin: r.quantMin ?? null,
+    quantScale: r.quantScale ?? null,
   }))
 
   if (searchChunks) {
@@ -157,9 +157,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       candidatePool.push({
         blobHash: row.blobHash,
         vector: row.vector as Buffer,
-        quantized: (row as any).quantized ?? null,
-        quantMin: (row as any).quantMin ?? null,
-        quantScale: (row as any).quantScale ?? null,
+        quantized: row.quantized ?? null,
+        quantMin: row.quantMin ?? null,
+        quantScale: row.quantScale ?? null,
         chunkId: row.chunkId,
         startLine: row.startLine,
         endLine: row.endLine,
@@ -193,9 +193,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       candidatePool.push({
         blobHash: row.blobHash,
         vector: row.vector as Buffer,
-        quantized: (row as any).quantized ?? null,
-        quantMin: (row as any).quantMin ?? null,
-        quantScale: (row as any).quantScale ?? null,
+        quantized: row.quantized ?? null,
+        quantMin: row.quantMin ?? null,
+        quantScale: row.quantScale ?? null,
         startLine: row.startLine,
         endLine: row.endLine,
         symbolId: row.symbolId,
