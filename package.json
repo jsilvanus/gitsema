@@ -65,7 +65,8 @@
       "tree-sitter-javascript",
       "tree-sitter-python",
       "tree-sitter-rust",
-      "tree-sitter-typescript"
+      "tree-sitter-typescript",
+      "usearch"
     ]
   }
 }
