@@ -417,7 +417,8 @@ function buildClusterPartials(
     const ftsByHash = new Map<string, string>(ftsRows.map((r) => [r.blob_hash, r.content]))
 
     // Populate each partial cluster using in-memory maps
-    for (const partial of partials) {
+    for (let pi = 0; pi < partials.length; pi++) {
+      const partial = partials[pi]
       const topHashes = partial._topBlobHashes ?? []
       // representative paths for top blobs
       for (const h of topHashes) {
@@ -445,7 +446,7 @@ function buildClusterPartials(
       } else if (pathPrefix) {
         partial.label = pathPrefix
       } else {
-        partial.label = `cluster-${partials.indexOf(partial) + 1}`
+        partial.label = `cluster-${pi + 1}`
       }
     }
   }

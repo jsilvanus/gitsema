@@ -69,6 +69,7 @@ export async function showBlob(
         done = true
         const content = Buffer.concat(chunks).slice(0, expectedSize)
         proc.stdin.end()
+        proc.kill()
         resolve(content)
       }
     })
@@ -85,7 +86,7 @@ export async function showBlob(
     })
 
     proc.on('error', (err) => {
-      if (!done) { done = true; reject(err) }
+      if (!done) { done = true; proc.kill(); reject(err) }
     })
 
     proc.stderr.on('data', () => { /* swallow */ })
