@@ -41,6 +41,9 @@ import { semanticBisectCommand } from './commands/semanticBisect.js'
 import { refactorCandidatesCommand } from './commands/refactorCandidates.js'
 import { ciDiffCommand } from './commands/ciDiff.js'
 import { conceptLifecycleCommand } from './commands/conceptLifecycle.js'
+import { doctorCommand } from './commands/doctor.js'
+import { vacuumCommand } from './commands/vacuum.js'
+import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
 
 const program = new Command()
 
@@ -350,7 +353,30 @@ program
   .option('--code-model <model>', 'override code embedding model')
   .option('--quantize', 'store embeddings as int8-quantized vectors (4× smaller, ~1% recall loss)')
   .option('--build-vss', 'build a usearch HNSW ANN index after indexing completes (requires usearch package)')
+  .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
   .action(indexCommand)
+
+program
+  .command('doctor')
+  .description('Run integrity checks, schema version/provenance checks, and report index health')
+  .action(async () => {
+    await doctorCommand()
+  })
+
+program
+  .command('vacuum')
+  .description('VACUUM and ANALYZE the SQLite index database to reduce size and improve performance')
+  .action(async () => {
+    await vacuumCommand()
+  })
+
+program
+  .command('rebuild-fts')
+  .description('Rebuild the FTS5 full-text search index from stored data')
+  .option('-y, --yes', 'skip confirmation prompt')
+  .action(async (opts: { yes?: boolean }) => {
+    await rebuildFtsCliCommand({ yes: opts.yes })
+  })
 
 program
   .command('search <query>')

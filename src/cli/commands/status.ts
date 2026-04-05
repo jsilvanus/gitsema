@@ -111,6 +111,25 @@ export async function statusCommand(filePath: string | undefined, options: Statu
     }
   }
 
+  // Show stored embed configs (provenance)
+  try {
+    const { loadEmbedConfigs } = await import('../../core/indexing/provenance.js')
+    const configs = loadEmbedConfigs(getRawDb())
+    if (configs.length > 0) {
+      console.log('\nEmbed configs (' + configs.length + '):')
+      for (const c of configs) {
+        const hash = c.configHash.slice(0, 8)
+        const date = new Date(c.createdAt * 1000).toISOString().slice(0, 10)
+        let desc = `[${hash}] ${c.provider} / ${c.model}`
+        if (c.codeModel && c.codeModel !== c.model) desc += ` (code: ${c.codeModel})`
+        desc += ` / ${c.dimensions} dims / ${c.chunker} chunker  (${date})`
+        console.log(`  ${desc}`)
+      }
+    }
+  } catch {
+    // ignore if provenance table is missing
+  }
+
   const branchCount = (getRawDb()
     .prepare('SELECT COUNT(DISTINCT branch_name) AS c FROM blob_branches')
     .get() as { c: number } | undefined)?.c ?? 0

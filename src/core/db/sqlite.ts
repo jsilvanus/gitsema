@@ -38,9 +38,10 @@ export interface DbSession {
  *   9 — Added module_embeddings table + chunk_id on symbols (Phase 33)
  *  10 — Reworked embedding tables to support multi-model embeddings per blob/chunk/symbol/commit/module
  *  11 — Added quantization columns to embedding tables (Phase 36)
-*  12 — Added missing performance indexes on paths, symbols, chunks, blob_commits and blob_branches (performance fix)
-*/
-const CURRENT_SCHEMA_VERSION = 12
+ * 12 — Added missing performance indexes on paths, symbols, chunks, blob_commits and blob_branches (performance fix)
+ * 13 — Added embed_config provenance table and indexing_checkpoints table
+ */
+export const CURRENT_SCHEMA_VERSION = 13
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -318,6 +319,33 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_blob_branches_branch_name ON blob_branches(branch_name)`)
     version = 12
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('12')
+  }
+
+  // v12 → v13: add embed_config provenance table and indexing_checkpoints table
+  if (version < 13) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS embed_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        config_hash TEXT NOT NULL UNIQUE,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        code_model TEXT,
+        dimensions INTEGER NOT NULL,
+        chunker TEXT NOT NULL,
+        window_size INTEGER,
+        overlap INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS indexing_checkpoints (
+        blob_hash TEXT PRIMARY KEY,
+        commit_hash TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_attempt_at INTEGER NOT NULL
+      );
+    `)
+    version = 13
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('13')
   }
 }
 

@@ -13,6 +13,8 @@ import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { execSync } from 'node:child_process'
 import { resolve as pathResolve, relative as pathRelative } from 'node:path'
 import { buildVssCommand } from './buildVss.js'
+import { computeConfigHash, saveEmbedConfig, checkConfigCompatibility, type EmbedConfig } from '../../core/indexing/provenance.js'
+import { getRawDb } from '../../core/db/sqlite.js'
 
 function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -278,6 +280,7 @@ export interface IndexCommandOptions {
   codeModel?: string
   quantize?: boolean
   buildVss?: boolean
+  allowMixed?: boolean
 }
 
 export async function indexCommand(options: IndexCommandOptions): Promise<void> {
@@ -419,6 +422,40 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     }
   }
 
+  // Provenance / compatibility check: build an embed config and check for existing incompatible configs
+  try {
+    const rawDb = getRawDb()
+    const embedConfigPartial: EmbedConfig = {
+      provider: providerType,
+      model: textModel,
+      codeModel: codeModel !== textModel ? codeModel : undefined,
+      dimensions: textProvider.dimensions || 0,
+      chunker: chunkerStrategy,
+      windowSize: windowSize,
+      overlap: overlap,
+    }
+
+    // Probe provider to discover dimensions if unset
+    if (!embedConfigPartial.dimensions) {
+      try {
+        await textProvider.embed('ping')
+        embedConfigPartial.dimensions = textProvider.dimensions
+      } catch {
+        // ignore probe failures — will be caught during actual indexing
+      }
+    }
+
+    const compat = checkConfigCompatibility(rawDb, embedConfigPartial)
+    if (!compat.compatible && !options.allowMixed) {
+      console.error('Embedding configuration is incompatible with existing index:')
+      console.error(compat.reason)
+      process.exit(1)
+    }
+  } catch (err) {
+    // Do not fail the whole command on provenance check errors — log and continue
+    logger.debug?.(`Provenance check failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
   if (codeProvider) {
     console.log(`Indexing with ${providerType} — text: ${textModel}, code: ${codeModel}`)
   } else {
@@ -466,6 +503,30 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (lastLine) process.stdout.write('\r' + ' '.repeat(lastLine.length) + '\r')
 
   console.log(`Done in ${formatMs(stats.elapsed)}`)
+
+  // Persist embed config provenance (record actual dimensions when available)
+  try {
+    const rawDb = getRawDb()
+    let dims = textProvider.dimensions || 0
+    if (!dims) {
+      const row = rawDb.prepare('SELECT dimensions FROM embeddings WHERE model = ? LIMIT 1').get(textModel) as { dimensions?: number } | undefined
+      if (row && row.dimensions) dims = row.dimensions
+    }
+    if (dims) {
+      const embedConfigToSave: EmbedConfig = {
+        provider: providerType,
+        model: textModel,
+        codeModel: codeModel !== textModel ? codeModel : undefined,
+        dimensions: dims,
+        chunker: chunkerStrategy,
+        windowSize: windowSize,
+        overlap: overlap,
+      }
+      saveEmbedConfig(getRawDb(), embedConfigToSave)
+    }
+  } catch (err) {
+    logger.debug?.(`Failed to save embed config provenance: ${err instanceof Error ? err.message : String(err)}`)
+  }
   console.log(`  Blobs seen:          ${stats.seen}`)
   console.log(`  Newly indexed:       ${stats.indexed}`)
   console.log(`  Already in DB:       ${stats.skipped}`)
