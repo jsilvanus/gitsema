@@ -89,8 +89,15 @@ export function loadEmbedConfigs(rawDb: InstanceType<typeof Database>): StoredEm
 
 /**
  * Check if the current embed config is compatible with existing index entries.
- * Incompatibility is declared when any existing config uses a different embedding
- * dimension (mixing dimensions makes cosine similarity meaningless).
+ *
+ * Because gitsema supports multi-model DBs (each model's embeddings are stored
+ * under a composite (blob_hash, model) primary key), different models with
+ * different dimensions can coexist and are expected.
+ *
+ * Incompatibility is only declared when the **same model name** appears in the
+ * stored configs with a different embedding dimension — which would mean the
+ * model was somehow re-embedded with a different output size, corrupting cosine
+ * comparisons within that model's result set.
  */
 export function checkConfigCompatibility(
   rawDb: InstanceType<typeof Database>,
@@ -99,11 +106,15 @@ export function checkConfigCompatibility(
   const existing = loadEmbedConfigs(rawDb)
   if (existing.length === 0) return { compatible: true, existingConfigs: [] }
 
-  const differentDim = existing.find((c) => c.dimensions !== currentConfig.dimensions)
-  if (differentDim) {
+  // Only check configs that used the same model name(s) as the current run
+  const modelsInUse = [currentConfig.model, ...(currentConfig.codeModel ? [currentConfig.codeModel] : [])]
+  const conflicting = existing.find(
+    (c) => modelsInUse.includes(c.model) && c.dimensions !== currentConfig.dimensions,
+  )
+  if (conflicting) {
     return {
       compatible: false,
-      reason: `Existing index has embeddings with ${differentDim.dimensions} dimensions (model: ${differentDim.model}), but current config uses ${currentConfig.dimensions} dimensions (model: ${currentConfig.model}). Mixing dimensions corrupts search results. Use --allow-mixed to override, or run: gitsema clear-model ${differentDim.model}`,
+      reason: `Model "${conflicting.model}" was previously indexed with ${conflicting.dimensions} dimensions, but the current run produces ${currentConfig.dimensions} dimensions. This would corrupt cosine comparisons for that model. Use --allow-mixed to override, or run: gitsema clear-model ${conflicting.model}`,
       existingConfigs: existing,
     }
   }

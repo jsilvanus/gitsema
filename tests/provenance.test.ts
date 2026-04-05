@@ -82,13 +82,26 @@ describe('checkConfigCompatibility', () => {
     expect(result.compatible).toBe(true)
   })
 
-  it('is incompatible when dimensions differ', () => {
+  it('is compatible when different models have different dimensions (multi-model scenario)', () => {
     const db = makeTestDb()
-    const existing: EmbedConfig = { provider: 'ollama', model: 'nomic', dimensions: 768, chunker: 'file' }
+    const existing: EmbedConfig = { provider: 'ollama', model: 'nomic-embed-text', dimensions: 768, chunker: 'file' }
     saveEmbedConfig(db, existing)
+    // Adding a second model with different dimensions is allowed
     const incoming: EmbedConfig = { provider: 'http', model: 'text-embedding-3-small', dimensions: 1536, chunker: 'file' }
     const result = checkConfigCompatibility(db, incoming)
+    expect(result.compatible).toBe(true)
+  })
+
+  it('is incompatible when the same model name reappears with different dimensions', () => {
+    const db = makeTestDb()
+    const existing: EmbedConfig = { provider: 'ollama', model: 'nomic-embed-text', dimensions: 768, chunker: 'file' }
+    saveEmbedConfig(db, existing)
+    // Same model name but different dimensions — indicates a corrupt re-index attempt
+    const incoming: EmbedConfig = { provider: 'ollama', model: 'nomic-embed-text', dimensions: 1536, chunker: 'file' }
+    const result = checkConfigCompatibility(db, incoming)
     expect(result.compatible).toBe(false)
+    expect(result.reason).toContain('nomic-embed-text')
+    expect(result.reason).toContain('768')
     expect(result.reason).toContain('1536')
   })
 })
