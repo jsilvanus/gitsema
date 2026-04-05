@@ -93,6 +93,7 @@ Commands are organised into six groups:
 | Group | Commands |
 |---|---|
 | **Setup & Infrastructure** | `status`, `index`, `serve`, `remote-index`, `backfill-fts`, `mcp` |
+| **DB Maintenance** | `doctor`, `vacuum`, `rebuild-fts` |
 | **Search & Discovery** | `search`, `first-seen`, `dead-concepts` |
 | **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
 | **Concept History** | `evolution`, `diff` |
@@ -107,7 +108,7 @@ Commands are organised into six groups:
 
 #### `gitsema status`
 
-Show index statistics and database path.
+Show index statistics and database path. Also displays embed config provenance (provider, model, dimensions, chunker) recorded from previous index runs.
 
 ```
 gitsema status
@@ -125,7 +126,9 @@ Options:
                           Accepts a date (2024-01-01), tag (v1.0), or commit hash.
                           Use "all" to force a full re-index.
   --max-commits <n>       Stop after indexing this many commits.
-  --concurrency <n>       Number of blobs to embed concurrently (default: 4).
+  --concurrency <n>       Number of blobs to embed concurrently in parallel (default: 4).
+                          Increase on fast hardware / remote APIs; decrease if the embedding
+                          server is being throttled.
   --ext <extensions>      Only index files with these extensions, e.g. ".ts,.js,.py"
   --max-size <size>       Skip blobs larger than this size, e.g. "200kb", "1mb" (default: 200kb)
   --exclude <patterns>    Skip blobs whose path contains any of these patterns, e.g. "node_modules,dist"
@@ -133,6 +136,8 @@ Options:
   --window-size <n>       Chunk size in characters for the fixed chunker (default: 1500)
   --overlap <n>           Overlap between adjacent fixed chunks (default: 200)
   --file <paths...>       Index specific file(s) from HEAD (can supply multiple paths)
+  --allow-mixed           Skip embed-config compatibility check (allow mixing different
+                          embedding dimensions/configs in the same index)
 ```
 
 Examples:
@@ -176,6 +181,47 @@ Ask a remote `gitsema serve` instance to clone and index a Git repository.
 #### `gitsema backfill-fts`
 
 Populate FTS5 content for blobs indexed before Phase 11. Required to use `--hybrid` search on older index entries.
+
+---
+
+#### `gitsema doctor`
+
+Run integrity checks and report the health of the index database.
+
+```bash
+gitsema doctor
+```
+
+Checks performed:
+- Schema version vs expected version
+- Blob / embedding / FTS row counts
+- Missing FTS rows (suggests `backfill-fts`)
+- Orphan embeddings (suggests `gc`)
+- SQLite integrity check (`PRAGMA integrity_check`)
+- Stored embed config provenance (provider, model, dimensions, chunker)
+
+Exits with code 1 if critical issues (integrity failures or schema mismatch) are detected.
+
+---
+
+#### `gitsema vacuum`
+
+Run `VACUUM` and `ANALYZE` on the SQLite index database. Compacts the file and refreshes query planner statistics. Safe to run at any time.
+
+```bash
+gitsema vacuum
+```
+
+---
+
+#### `gitsema rebuild-fts`
+
+Rebuild the FTS5 full-text search index from stored data. Use after bulk deletions or if hybrid search returns stale results.
+
+```bash
+gitsema rebuild-fts        # prompts for confirmation
+gitsema rebuild-fts --yes  # skip confirmation
+```
 
 ---
 

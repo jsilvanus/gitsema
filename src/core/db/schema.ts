@@ -226,3 +226,24 @@ export const moduleEmbeddings = sqliteTable('module_embeddings', {
 }, (table) => ({
   uniq: uniqueIndex('idx_module_embeddings_path_model').on(table.modulePath, table.model),
 }))
+
+export const embedConfig = sqliteTable('embed_config', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  configHash: text('config_hash').notNull().unique(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  codeModel: text('code_model'),
+  dimensions: integer('dimensions').notNull(),
+  chunker: text('chunker').notNull(),
+  windowSize: integer('window_size'),
+  overlap: integer('overlap'),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const indexingCheckpoints = sqliteTable('indexing_checkpoints', {
+  blobHash: text('blob_hash').primaryKey(),
+  commitHash: text('commit_hash').notNull(),
+  status: text('status').notNull(), // 'pending' | 'done' | 'failed'
+  attempts: integer('attempts').notNull().default(0),
+  lastAttemptAt: integer('last_attempt_at').notNull(),
+})
