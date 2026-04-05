@@ -71,9 +71,13 @@ export function hybridSearch(
   // We negate them so higher = better, then normalise to [0, 1].
   const bm25Map = new Map<string, number>()
   if (bm25Rows.length > 0) {
-    const rawScores = bm25Rows.map((r) => -r.bm25_score)  // now positive, higher = better
-    const minScore = Math.min(...rawScores)
-    const maxScore = Math.max(...rawScores)
+    let minScore = Infinity
+    let maxScore = -Infinity
+    for (const row of bm25Rows) {
+      const s = -row.bm25_score
+      if (s < minScore) minScore = s
+      if (s > maxScore) maxScore = s
+    }
     const range = maxScore - minScore
 
     for (const row of bm25Rows) {
@@ -83,9 +87,12 @@ export function hybridSearch(
   }
 
   // --- Stage 4: Normalise vector scores into [0, 1] ---
-  const vectorScores = vectorResults.map((r) => r.score)
-  const minVec = Math.min(...vectorScores)
-  const maxVec = Math.max(...vectorScores)
+  let minVec = Infinity
+  let maxVec = -Infinity
+  for (const r of vectorResults) {
+    if (r.score < minVec) minVec = r.score
+    if (r.score > maxVec) maxVec = r.score
+  }
   const vecRange = maxVec - minVec
 
   const vectorMap = new Map<string, { result: SearchResult; normScore: number }>()

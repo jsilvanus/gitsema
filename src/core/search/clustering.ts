@@ -48,6 +48,8 @@ export interface ClusterSnapshot {
   report: ClusterReport
   /** Maps blob_hash → cluster id in this snapshot */
   assignments: Map<string, number>
+  /** Final k-means centroids; used for warm-starting the next timeline step (H7). */
+  centroids?: number[][]
 }
 
 /**
@@ -305,6 +307,8 @@ interface PartialCluster {
   rawFtsContent: string
   /** All paths resolved for assigned blobs — used by the label enhancer. */
   allPaths: string[]
+  /** Temporary: top blob hashes for representative path resolution (cleared after bulk lookup). */
+  _topBlobHashes?: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -331,10 +335,13 @@ function buildClusterPartials(
   topPaths: number,
   topKeywordsN: number,
   rawDb: InstanceType<typeof Database>,
-): { partials: PartialCluster[]; assignments: number[] } {
+  initialCentroids?: number[][],
+): { partials: PartialCluster[]; assignments: number[]; centroids: number[][] } {
   const actualK = Math.min(k, inputVectors.length)
 
-  let centroids = kMeansInit(inputVectors, actualK)
+  let centroids = initialCentroids && initialCentroids.length === actualK
+    ? initialCentroids.map((c) => c.slice())  // warm-start: copy to avoid mutation
+    : kMeansInit(inputVectors, actualK)
   let assignments = assignClusters(inputVectors, centroids)
 
   for (let iter = 0; iter < maxIterations; iter++) {
@@ -345,6 +352,9 @@ function buildClusterPartials(
     assignments = newAssignments
     if (same) break
   }
+
+  // Build O(1) hash→index lookup to avoid O(n) indexOf calls in the hot loop below
+  const hashIndex = new Map<string, number>(inputHashes.map((h, i) => [h, i]))
 
   // group blobs per cluster
   const clustersMap = new Map<number, string[]>()
@@ -363,78 +373,84 @@ function buildClusterPartials(
 
     // find representative blob hashes sorted by distance to centroid
     const distances = assigned.map((h) => {
-      const idx = inputHashes.indexOf(h)
+      const idx = hashIndex.get(h)!
       const vec = inputVectors[idx]
       return { hash: h, d: squaredEuclidean(vec, centroids[ci]) }
     }).sort((a, b) => a.d - b.d)
 
     const topBlobHashes = distances.slice(0, topPaths).map((x) => x.hash)
 
-    // resolve paths for the top blobs (representative) and all blobs (for enhancer)
-    let repPaths: string[] = []
-    let allPathsForCluster: string[] = []
-    if (assigned.length > 0) {
-      // All paths for the cluster (used by label enhancer)
-      const allPlaceholders = assigned.map(() => '?').join(',')
-      const allPathRows = (rawDb.prepare(
-        `SELECT path FROM paths WHERE blob_hash IN (${allPlaceholders})`
-      ).all(...assigned) as Array<{ path: string }>)
-      allPathsForCluster = allPathRows.map((r) => r.path)
-    }
-    if (topBlobHashes.length > 0) {
-      const placeholders = topBlobHashes.map(() => '?').join(',')
-      const stmt = rawDb.prepare(`SELECT blob_hash, path FROM paths WHERE blob_hash IN (${placeholders})`)
-      const pathRows = stmt.all(...topBlobHashes) as Array<{ blob_hash: string; path: string }>
-      const pathByHash = new Map<string, string[]>()
-      for (const r of pathRows) {
-        const list = pathByHash.get(r.blob_hash) ?? []
-        list.push(r.path)
-        pathByHash.set(r.blob_hash, list)
-      }
-      for (const h of topBlobHashes) {
-        const p = pathByHash.get(h) ?? []
-        if (p.length > 0) repPaths.push(p[0])
-      }
-    }
-
-    // extract keywords from FTS5 content
-    let keywords: string[] = []
-    let rawFtsContent = ''
-    if (assigned.length > 0) {
-      const placeholders = assigned.map(() => '?').join(',')
-      const stmt = rawDb.prepare(`SELECT content FROM blob_fts WHERE blob_hash IN (${placeholders})`)
-      const ftsRows = stmt.all(...assigned) as Array<{ content: string }>
-      rawFtsContent = ftsRows.map((r) => r.content).join(' ')
-      keywords = extractKeywords(rawFtsContent, topKeywordsN)
-    }
-
-    // label: semantic keywords combined with the most common directory prefix
-    const pathPrefix = buildPathPrefix(repPaths)
-    const topWords = keywords.slice(0, 3).join(' ')
-    let label = ''
-    if (topWords && pathPrefix) {
-      label = `${topWords} (${pathPrefix})`
-    } else if (topWords) {
-      label = topWords
-    } else if (pathPrefix) {
-      label = pathPrefix
-    } else {
-      label = `cluster-${ci + 1}`
-    }
-
     partials.push({
-      label,
+      label: '',  // filled in below after bulk DB lookups
       centroid: centroids[ci],
       size,
-      representativePaths: repPaths,
-      topKeywords: keywords,
+      representativePaths: [],
+      topKeywords: [],
       blobHashes: assigned,
-      rawFtsContent,
-      allPaths: allPathsForCluster,
+      rawFtsContent: '',
+      allPaths: [],
+      _topBlobHashes: topBlobHashes,
     })
   }
 
-  return { partials, assignments }
+  // --- Bulk DB lookups for all clusters in a single pass (H3 optimization) ---
+  // Collect all unique hashes across all clusters
+  const allAssigned = inputHashes  // all blobs; same as union of all cluster hashes
+  if (allAssigned.length > 0) {
+    const placeholders = allAssigned.map(() => '?').join(',')
+
+    // Single path query for all blobs
+    const allPathRows = (rawDb.prepare(
+      `SELECT blob_hash, path FROM paths WHERE blob_hash IN (${placeholders})`
+    ).all(...allAssigned) as Array<{ blob_hash: string; path: string }>)
+    const pathsByHash = new Map<string, string[]>()
+    for (const r of allPathRows) {
+      const list = pathsByHash.get(r.blob_hash) ?? []
+      list.push(r.path)
+      pathsByHash.set(r.blob_hash, list)
+    }
+
+    // Single FTS5 content query for all blobs
+    const ftsRows = (rawDb.prepare(
+      `SELECT blob_hash, content FROM blob_fts WHERE blob_hash IN (${placeholders})`
+    ).all(...allAssigned) as Array<{ blob_hash: string; content: string }>)
+    const ftsByHash = new Map<string, string>(ftsRows.map((r) => [r.blob_hash, r.content]))
+
+    // Populate each partial cluster using in-memory maps
+    for (const partial of partials) {
+      const topHashes = partial._topBlobHashes ?? []
+      // representative paths for top blobs
+      for (const h of topHashes) {
+        const p = pathsByHash.get(h) ?? []
+        if (p.length > 0) partial.representativePaths.push(p[0])
+      }
+      // all paths (for label enhancer)
+      for (const h of partial.blobHashes) {
+        for (const p of pathsByHash.get(h) ?? []) partial.allPaths.push(p)
+      }
+      // FTS5 content + keywords
+      const ftsContent = partial.blobHashes
+        .map((h) => ftsByHash.get(h) ?? '')
+        .filter(Boolean)
+        .join(' ')
+      partial.rawFtsContent = ftsContent
+      partial.topKeywords = extractKeywords(ftsContent, topKeywordsN)
+      // label
+      const pathPrefix = buildPathPrefix(partial.representativePaths)
+      const topWords = partial.topKeywords.slice(0, 3).join(' ')
+      if (topWords && pathPrefix) {
+        partial.label = `${topWords} (${pathPrefix})`
+      } else if (topWords) {
+        partial.label = topWords
+      } else if (pathPrefix) {
+        partial.label = pathPrefix
+      } else {
+        partial.label = `cluster-${partials.indexOf(partial) + 1}`
+      }
+    }
+  }
+
+  return { partials, assignments, centroids }
 }
 
 /** Build the `ConceptEdge` list from a set of clusters. */
@@ -648,6 +664,8 @@ export async function computeClusterSnapshot(opts: {
   useEnhancedLabels?: boolean
   /** Number of enhanced keywords to compute per cluster (default: 5) */
   enhancedKeywordsN?: number
+  /** Warm-start centroids from a previous snapshot step (H7 optimization). */
+  initialCentroids?: number[][]
 } = {}): Promise<ClusterSnapshot> {
   const kOpt = opts.k ?? 8
   const maxIterations = opts.maxIterations ?? 20
@@ -691,8 +709,9 @@ export async function computeClusterSnapshot(opts: {
   const vectors: number[][] = rows.map((r) => bufferToEmbedding(r.vector as Buffer))
   const blobHashes: string[] = rows.map((r) => r.blobHash)
 
-  const { partials, assignments: rawAssignments } = buildClusterPartials(
+  const { partials, assignments: rawAssignments, centroids: finalCentroids } = buildClusterPartials(
     vectors, blobHashes, kOpt, maxIterations, topPaths, topKeywordsN, rawDb,
+    opts.initialCentroids,
   )
   const actualK = partials.length
 
@@ -726,7 +745,7 @@ export async function computeClusterSnapshot(opts: {
     assignmentMap.set(blobHashes[i], clusters[clusterIdx].id)
   }
 
-  return { report, assignments: assignmentMap }
+  return { report, assignments: assignmentMap, centroids: finalCentroids }
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,14 +1028,20 @@ export async function computeClusterTimeline(opts: {
     return row.ts ?? ts
   })
 
-  // Compute snapshots for each checkpoint
+  // Compute snapshots for each checkpoint — warm-starting each step with previous centroids (H7)
   const snapshots: ClusterSnapshot[] = []
   const effectiveTimestamps: number[] = []
+  let prevCentroids: number[][] | undefined
 
   for (const ts of snapTimestamps) {
     let blobHashes = getBlobHashesUpTo(ts)
     if (branchHashSet) blobHashes = blobHashes.filter((h) => branchHashSet.has(h))
-    const snapshot = await computeClusterSnapshot({ ...snapshotOpts, blobHashFilter: blobHashes })
+    const snapshot = await computeClusterSnapshot({
+      ...snapshotOpts,
+      blobHashFilter: blobHashes,
+      initialCentroids: prevCentroids,
+    })
+    prevCentroids = snapshot.centroids
     snapshots.push(snapshot)
     effectiveTimestamps.push(ts)
   }
@@ -1207,6 +1232,7 @@ export async function computeClusterChangePoints(opts: {
   // getBlobHashesUpTo returns a monotonically growing set as timestamps increase,
   // so equal counts imply equal sets — O(1) check instead of building a sorted string.
   let prevBlobCount = -1
+  let prevSnapshotCentroids: number[][] | undefined
 
   const allChangePoints: ClusterChangePoint[] = []
 
@@ -1220,7 +1246,12 @@ export async function computeClusterChangePoints(opts: {
     }
     prevBlobCount = blobHashes.length
 
-    const snapshot = await computeClusterSnapshot({ ...snapshotOpts, blobHashFilter: blobHashes })
+    const snapshot = await computeClusterSnapshot({
+      ...snapshotOpts,
+      blobHashFilter: blobHashes,
+      initialCentroids: prevSnapshotCentroids,
+    })
+    prevSnapshotCentroids = snapshot.centroids
 
     if (prevSnapshot !== null && prevTs !== null && snapshot.report.clusters.length > 0 && prevSnapshot.report.clusters.length > 0) {
       const prevClusters = prevSnapshot.report.clusters

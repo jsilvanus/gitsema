@@ -12,14 +12,19 @@ export interface QuantizedVector {
  * Quantizes a Float32 embedding to Int8 using per-vector min/max scaling.
  */
 export function quantizeVector(vector: Float32Array | number[]): QuantizedVector {
-  const arr = vector instanceof Float32Array ? Array.from(vector) : vector
-  const min = Math.min(...arr)
-  const max = Math.max(...arr)
+  if (vector.length === 0) return { data: new Int8Array(0), min: 0, scale: 1 }
+  let min = vector[0]
+  let max = vector[0]
+  for (let i = 1; i < vector.length; i++) {
+    const v = vector[i]
+    if (v < min) min = v
+    if (v > max) max = v
+  }
   const range = max - min || 1
   const scale = range / 255
-  const data = new Int8Array(arr.length)
-  for (let i = 0; i < arr.length; i++) {
-    data[i] = Math.round((arr[i] - min) / scale) - 128
+  const data = new Int8Array(vector.length)
+  for (let i = 0; i < vector.length; i++) {
+    data[i] = Math.round((vector[i] - min) / scale) - 128
   }
   return { data, min, scale }
 }
