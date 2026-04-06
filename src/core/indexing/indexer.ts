@@ -11,6 +11,7 @@ import { createChunker, type ChunkStrategy, type ChunkOptions } from '../chunkin
 import { logger } from '../../utils/logger.js'
 import { createLimiter } from '../../utils/concurrency.js'
 import { extname, dirname } from 'node:path'
+import { minimatch } from 'minimatch'
 
 export interface FilterOptions {
   /**
@@ -25,6 +26,8 @@ export interface FilterOptions {
    * When empty or omitted, no paths are excluded.
    */
   exclude?: string[]
+  /** When provided, only include blobs whose path matches at least one of the supplied glob patterns (minimatch). */
+  includeGlob?: string[]
 }
 
 export interface IndexerOptions {
@@ -127,6 +130,21 @@ function isFiltered(path: string, filter: FilterOptions): boolean {
     for (const pattern of filter.exclude) {
       if (path.includes(pattern)) return true
     }
+  }
+  // includeGlob: when present, only include paths that match at least one glob pattern
+  if (filter.includeGlob && filter.includeGlob.length > 0) {
+    let matched = false
+    for (const pat of filter.includeGlob) {
+      try {
+        if (minimatch(path, pat, { dot: true })) {
+          matched = true
+          break
+        }
+      } catch (e) {
+        // ignore invalid patterns
+      }
+    }
+    if (!matched) return true
   }
   return false
 }

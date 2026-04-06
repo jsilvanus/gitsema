@@ -1,6 +1,6 @@
 {
   "name": "gitsema",
-  "version": "0.37.0",
+  "version": "0.41.0",
   "description": "A content-addressed semantic index synchronized with Git's object model.",
   "type": "module",
   "main": "dist/cli/index.js",
@@ -36,7 +36,8 @@
     "drizzle-orm": "^0.31.4",
     "express": "^5.2.1",
     "p-limit": "^7.3.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "minimatch": "^9.0.0"
   },
   "optionalDependencies": {
     "tree-sitter": "^0.25.0",

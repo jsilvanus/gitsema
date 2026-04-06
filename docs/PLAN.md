@@ -9,61 +9,66 @@
 | Section | Line |
 |---|---:|
 | [Table of Contents](#table-of-contents) | 7 |
-| [Vision](#vision) | 51 |
-| [Guiding principles](#guiding-principles) | 57 |
-| [Architecture overview](#architecture-overview) | 67 |
-| [Project structure](#project-structure) | 87 |
-| [Section I - Phases](#section-i-phases) | 139 |
-|   [Phase 1 — Foundation](#phase-1-—-foundation) | 141 |
-|   [Phase 2 — Git walking](#phase-2-—-git-walking) | 181 |
-|   [Phase 3 — Embedding system](#phase-3-—-embedding-system) | 203 |
-|   [Phase 4 — Indexing](#phase-4-—-indexing) | 239 |
-|   [Phase 5 — Search  ·  *MVP deliverable*](#phase-5-—-search-·-mvp-deliverable) | 263 |
-|   [Phase 6 — Commit mapping](#phase-6-—-commit-mapping) | 294 |
-|   [Phase 7 — Time-aware queries  ·  *Phase 2 deliverable*](#phase-7-—-time-aware-queries-·-phase-2-deliverable) | 329 |
-|   [Phase 8 — File-type-aware embedding models](#phase-8-—-file-type-aware-embedding-models) | 360 |
-|   [Phase 9 — Performance](#phase-9-—-performance) | 396 |
-|   [Phase 10 — Smarter semantics](#phase-10-—-smarter-semantics) | 432 |
-|   [Phase 11 — Advanced features + MCP](#phase-11-—-advanced-features-mcp) | 475 |
-|   [Phase 11b — Content access and semantic concept tracking](#phase-11b-—-content-access-and-semantic-concept-tracking) | 544 |
-| [Key technical decisions](#key-technical-decisions) | 659 |
-| [Risk register](#risk-register) | 671 |
-|   [Phase 12 — CLI consolidation & robust per-file indexing](#phase-12-—-cli-consolidation-robust-per-file-indexing) | 683 |
-|   [Recent progress (snapshot: 2026-04-01)](#recent-progress-snapshot-2026-04-01) | 711 |
-|   [Phase 13 — Standalone model server for embeddings](#phase-13-—-standalone-model-server-for-embeddings) | 727 |
-|   [Phase 14 — Infrastructure, tooling, and maintenance](#phase-14-—-infrastructure-tooling-and-maintenance) | 808 |
-|   [Phase 14b — Search result deduplication](#phase-14b-—-search-result-deduplication) | 863 |
-|   [Phase 15 — Branch awareness](#phase-15-—-branch-awareness) | 895 |
-|   [Phase 16 — Remote-repository indexing (server-managed clone, RAM-backed working tree, persistent DB)](#phase-16-—-remote-repository-indexing-server-managed-clone-ram-backed-working-tree-persistent-db) | 965 |
-|   [Phase 17 — Remote-indexing hardening and SSH support](#phase-17-—-remote-indexing-hardening-and-ssh-support) | 1221 |
-|   [Phase 18 — Reliability, tests, and query caching](#phase-18-—-reliability-tests-and-query-caching) | 1290 |
-|   [Phase 19 — Smarter chunking & semantic blame](#phase-19-—-smarter-chunking-semantic-blame) | 1302 |
-|   [Phase 20 — Dead-concept detection & refactor impact analysis](#phase-20-—-dead-concept-detection-refactor-impact-analysis) | 1313 |
-|   [Phase 21 — Semantic clustering & concept graph](#phase-21-—-semantic-clustering-concept-graph) | 1324 |
-|   [Phase 22 — Temporal cluster diff](#phase-22-—-temporal-cluster-diff) | — |
-|   [Phase 23 — Cluster timeline](#phase-23-—-cluster-timeline) | — |
-|   [Phase 24 — Enhanced cluster labeling](#phase-24-—-enhanced-cluster-labeling) | — |
-|   [Phase 25 — Interactive HTML visualizations](#phase-25-—-interactive-html-visualizations) | — |
-|   [Phase 26 — CLI naming consolidation & conceptual diff](#phase-26-—-cli-naming-consolidation-conceptual-diff) | — |
-|   [Phase 27 — Semantic change-point detection](#phase-27-—-semantic-change-point-detection) | — |
-|   [Phase 28 — Persistent configuration management](#phase-28-—-persistent-configuration-management) | — |
-|   [Phase 29 — Automated indexing via Git hooks](#phase-29-—-automated-indexing-via-git-hooks) | — |
-|   [Phase 30 — Commit message semantic indexing](#phase-30-—-commit-message-semantic-indexing) | — |
-|   [Phase 31 — Semantic concept authorship ranking](#phase-31-—-semantic-concept-authorship-ranking) | — |
-|   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | — |
-|   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | — |
-|   [Phase 34 — Feature adoption & cross-cutting improvements](#phase-34-—-feature-adoption--cross-cutting-improvements) | — |
-|   [Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search](#phase-35-—-multi-model-db-per-command-model-flags-clear-model-multi-model-search) | — |
-|   [Phase 36 — Vector Index (VSS), Int8 Quantization, ANN Search](#phase-36-—-vector-index-vss-int8-quantization-ann-search) | — |
-| [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 1335 |
-|   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 1337 |
-|   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 1341 |
-|   [3. The evolution/drift features have no UX story](#3-the-evolutiondrift-features-have-no-ux-story) | 1345 |
-|   [4. No test suite](#4-no-test-suite) | 1349 |
-|   [5. Remote job registry leaks memory](#5-remote-job-registry-leaks-memory) | 1353 |
-| [Section III - What you could do with these embeddings](#section-iii-what-you-could-do-with-these-embeddings) | 1359 |
-|   [High value, tractable](#high-value-tractable) | 1363 |
-|   [Higher effort but differentiated](#higher-effort-but-differentiated) | 1385 |
+| [Vision](#vision) | 70 |
+| [Guiding principles](#guiding-principles) | 76 |
+| [Architecture overview](#architecture-overview) | 86 |
+| [Project structure](#project-structure) | 106 |
+| [Section I - Phases](#section-i-phases) | 158 |
+|   [Phase 1 — Foundation](#phase-1-—-foundation) | 160 |
+|   [Phase 2 — Git walking](#phase-2-—-git-walking) | 202 |
+|   [Phase 3 — Embedding system](#phase-3-—-embedding-system) | 226 |
+|   [Phase 4 — Indexing](#phase-4-—-indexing) | 264 |
+|   [Phase 5 — Search  ·  *MVP deliverable*](#phase-5-—-search-·-mvp-deliverable) | 290 |
+|   [Phase 6 — Commit mapping](#phase-6-—-commit-mapping) | 323 |
+|   [Phase 7 — Time-aware queries  ·  *Phase 2 deliverable*](#phase-7-—-time-aware-queries-·-phase-2-deliverable) | 360 |
+|   [Phase 8 — File-type-aware embedding models](#phase-8-—-file-type-aware-embedding-models) | 393 |
+|   [Phase 9 — Performance](#phase-9-—-performance) | 431 |
+|   [Phase 10 — Smarter semantics](#phase-10-—-smarter-semantics) | 469 |
+|   [Phase 11 — Advanced features + MCP](#phase-11-—-advanced-features-mcp) | 514 |
+|   [Phase 11b — Content access and semantic concept tracking](#phase-11b-—-content-access-and-semantic-concept-tracking) | 585 |
+| [Key technical decisions](#key-technical-decisions) | 702 |
+| [Risk register](#risk-register) | 714 |
+|   [Phase 12 — CLI consolidation & robust per-file indexing](#phase-12-—-cli-consolidation-robust-per-file-indexing) | 726 |
+|   [Recent progress (snapshot: 2026-04-01)](#recent-progress-snapshot-2026-04-01) | 756 |
+|   [Phase 13 — Standalone model server for embeddings](#phase-13-—-standalone-model-server-for-embeddings) | 772 |
+|   [Phase 14 — Infrastructure, tooling, and maintenance](#phase-14-—-infrastructure-tooling-and-maintenance) | 855 |
+|   [Phase 14b — Search result deduplication](#phase-14b-—-search-result-deduplication) | 912 |
+|   [Phase 15 — Branch awareness](#phase-15-—-branch-awareness) | 946 |
+|   [Phase 16 — Remote-repository indexing (server-managed clone, RAM-backed working tree, persistent DB)](#phase-16-—-remote-repository-indexing-server-managed-clone-ram-backed-working-tree-persistent-db) | 1018 |
+|   [Phase 17 — Remote-indexing hardening and SSH support](#phase-17-—-remote-indexing-hardening-and-ssh-support) | 1276 |
+|   [Phase 18 — Reliability, tests, and query caching](#phase-18-—-reliability-tests-and-query-caching) | 1347 |
+|   [Phase 19 — Smarter chunking, semantic blame & symbol-level embeddings](#phase-19-—-smarter-chunking-semantic-blame-symbol-level-embeddings) | 1361 |
+|   [Phase 20 — Dead-concept detection & refactor impact analysis](#phase-20-—-dead-concept-detection-refactor-impact-analysis) | 1426 |
+|   [Phase 21 — Semantic clustering & concept graph](#phase-21-—-semantic-clustering-concept-graph) | 1439 |
+|   [Phase 22 — Temporal cluster diff](#phase-22-—-temporal-cluster-diff) | 1452 |
+|   [Phase 23 — Cluster timeline](#phase-23-—-cluster-timeline) | 1465 |
+|   [Phase 24 — Enhanced cluster labeling](#phase-24-—-enhanced-cluster-labeling) | 1479 |
+|   [Phase 25 — Interactive HTML visualizations](#phase-25-—-interactive-html-visualizations) | 1493 |
+|   [Phase 26 — CLI naming consolidation & conceptual diff](#phase-26-—-cli-naming-consolidation-conceptual-diff) | 1508 |
+|   [Phase 27 — Semantic change-point detection](#phase-27-—-semantic-change-point-detection) | 1549 |
+|   [Phase 28 — Persistent configuration management](#phase-28-—-persistent-configuration-management) | 1609 |
+|   [Phase 29 — Automated indexing via Git hooks](#phase-29-—-automated-indexing-via-git-hooks) | 1636 |
+|   [Phase 30 — Commit message semantic indexing](#phase-30-—-commit-message-semantic-indexing) | 1652 |
+|   [Phase 31 — Semantic concept authorship ranking](#phase-31-—-semantic-concept-authorship-ranking) | 1703 |
+|   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | 1753 |
+|   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | 1814 |
+|   [Phase 34 — Feature adoption & cross-cutting improvements](#phase-34-—-feature-adoption-cross-cutting-improvements) | 1870 |
+|   [Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search](#phase-35-—-multi-model-db-per-command-model-flags-clear-model-multi-model-search) | 1908 |
+|   [Phase 36 — Vector Index (VSS), Int8 Quantization, ANN Search](#phase-36-—-vector-index-vss-int8-quantization-ann-search) | 1946 |
+|   [Phase 37 — Quick Wins: Selective Indexing, Code-to-Code Search, Negative Examples, Result Explanation](#phase-37-—-quick-wins-selective-indexing-code-to-code-search-negative-examples-result-explanation) | 2020 |
+|   [Phase 38 — Medium Effort: Documentation Gap Analysis, Semantic Bisect, GC, Boolean Queries](#phase-38-—-medium-effort-documentation-gap-analysis-semantic-bisect-gc-boolean-queries) | 2045 |
+|   [Phase 39 — Analysis Features: Contributor Profiles, Refactoring, Lifecycle, CI Diff](#phase-39-—-analysis-features-contributor-profiles-refactoring-lifecycle-ci-diff) | 2070 |
+|   [Phase 40 — Visualization & Scale: Codebase Map, Temporal Heatmap, Remote Index, Cherry-Pick](#phase-40-—-visualization-scale-codebase-map-temporal-heatmap-remote-index-cherry-pick) | 2095 |
+|   [Phase 41+ — Large Investments (Stubs & Roadmap)](#phase-41-—-large-investments-stubs-roadmap) | 2126 |
+| [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 2149 |
+|   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 2151 |
+|   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 2155 |
+|   [3. The evolution/drift features have no UX story](#3-the-evolutiondrift-features-have-no-ux-story) | 2159 |
+|   [4. No test suite](#4-no-test-suite) | 2163 |
+|   [5. Remote job registry leaks memory](#5-remote-job-registry-leaks-memory) | 2167 |
+| [Section III - What you could do with these embeddings](#section-iii-what-you-could-do-with-these-embeddings) | 2173 |
+|   [High value, tractable](#high-value-tractable) | 2177 |
+|   [Higher effort but differentiated](#higher-effort-but-differentiated) | 2199 |
 
 ---
 
@@ -2016,6 +2021,137 @@ Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies e
 **Deliverables:** `src/core/db/schema.ts`, `src/core/db/sqlite.ts` (migration v10), `src/core/indexing/deduper.ts`, `src/core/indexing/blobStore.ts`, `src/core/indexing/indexer.ts`, `src/core/embedding/providerFactory.ts` (`applyModelOverrides`), `src/cli/commands/clearModel.ts` (new), `src/cli/commands/status.ts`, `src/cli/commands/search.ts` (multi-model), 6 other CLI commands, `src/cli/index.ts`, `docs/model-stores.md`, `docs/plan_vss.md`, `docs/index.md`.
 
 ---
+
+### Phase 37 — Quick Wins: Selective Indexing, Code-to-Code Search, Negative Examples, Result Explanation
+
+**Version:** 0.38.0
+
+**Goal:** Four high-value, low-complexity features that improve the day-to-day indexing and search experience.
+
+**Features implemented:**
+
+**Partial/Selective Indexing (Globs):** Added `--include-glob <patterns>` flag to `gitsema index`. Accepts comma-separated minimatch-style patterns (e.g., `"src/**/*.ts,tests/**"`). Only blobs whose path matches at least one pattern are indexed. Composable with existing `--ext` and `--exclude` filters.
+
+- `src/core/indexing/indexer.ts` — added `includeGlob?: string[]` to `FilterOptions`; applies minimatch per-blob in `isFiltered()`
+- `src/cli/commands/index.ts` — parses `--include-glob` option and threads it into filter for both local and remote index paths
+- `src/cli/index.ts` — exposes `--include-glob` flag on the index command
+- `package.json` — adds `minimatch ^9.0.0` dependency
+
+**Code-to-Code Search:** (`gitsema code-search <path>`) — already implemented in prior phases via `src/cli/commands/codeSearch.ts`.
+
+**Negative Examples Search:** (`--not-like <query>` on `gitsema search`) — already implemented in prior phases.
+
+**Result Explanation:** (`--explain` on `gitsema search`) — already implemented in prior phases.
+
+**Deliverables:** `src/core/indexing/indexer.ts`, `src/cli/commands/index.ts`, `src/cli/index.ts`, `package.json`.
+
+---
+
+### Phase 38 — Medium Effort: Documentation Gap Analysis, Semantic Bisect, GC, Boolean Queries
+
+**Version:** 0.39.0
+
+**Goal:** Four medium-effort, high-impact features improving the analysis and maintenance capabilities.
+
+**Features implemented:**
+
+**Documentation Gap Analysis:** New `gitsema doc-gap` command. For each indexed code blob, computes its maximum cosine similarity to any indexed documentation blob (`.md`, `.txt`, `.rst`, etc.). Returns results sorted ascending by similarity — the lowest-scored files are the least documented. Flags: `--top <n>`, `--threshold <n>`, `--branch <name>`, `--dump [file]`.
+
+- `src/core/search/docGap.ts` — `computeDocGap()` core implementation: classifies blobs by `getFileCategory()`, loads doc embeddings, computes per-code-blob max similarity, sorts ascending
+- `src/cli/commands/docGap.ts` — CLI wrapper
+- `src/cli/index.ts` — registers `doc-gap` command
+- `tests/docGap.test.ts` — unit test verifying ranking order
+
+**Semantic Git Bisect:** (`gitsema bisect <good> <bad> <query>`) — already implemented in prior phases via `src/cli/commands/semanticBisect.ts`.
+
+**Garbage Collection:** (`gitsema gc` / `gitsema vacuum`) — already implemented in prior phases via `src/core/indexing/gc.ts`.
+
+**Boolean/Composite Queries:** (`--and`/`--or` on `gitsema search`) — already implemented in prior phases via `src/core/search/booleanSearch.ts`.
+
+**Deliverables:** `src/core/search/docGap.ts`, `src/cli/commands/docGap.ts`, `src/cli/index.ts`, `tests/docGap.test.ts`.
+
+---
+
+### Phase 39 — Analysis Features: Contributor Profiles, Refactoring, Lifecycle, CI Diff
+
+**Version:** 0.40.0
+
+**Goal:** Deeper codebase analysis commands for understanding contributor specialization, refactoring opportunities, concept lifecycle, and CI semantic diffs.
+
+**Features implemented:**
+
+**Contributor Semantic Profiles:** New `gitsema contributor-profile <author>` command. Finds all commits by the given author (substring match against `author_name` / `author_email`), collects the blobs touched by those commits, computes the centroid embedding, and returns top-N most similar blobs representing the contributor's semantic specialization. Flags: `--top <n>`, `--branch <name>`, `--dump [file]`.
+
+- `src/core/search/contributorProfile.ts` — `computeContributorProfile()` core logic: author lookup, blob collection, centroid computation, vector search
+- `src/cli/commands/contributorProfile.ts` — CLI wrapper
+- `src/cli/index.ts` — registers `contributor-profile` command
+- `tests/contributorProfile.test.ts` — unit test verifying centroid and result
+
+**Refactoring Suggestions:** (`gitsema refactor-candidates`) — already implemented in prior phases via `src/cli/commands/refactorCandidates.ts`.
+
+**Concept Lifecycle Analysis:** (`gitsema lifecycle <query>`) — already implemented in prior phases via `src/cli/commands/conceptLifecycle.ts`.
+
+**CI/CD Semantic Diff in PRs:** (`gitsema ci-diff`) — already implemented in prior phases via `src/cli/commands/ciDiff.ts`.
+
+**Deliverables:** `src/core/search/contributorProfile.ts`, `src/cli/commands/contributorProfile.ts`, `src/cli/index.ts`, `tests/contributorProfile.test.ts`.
+
+---
+
+### Phase 40 — Visualization & Scale: Codebase Map, Temporal Heatmap, Remote Index, Cherry-Pick
+
+**Version:** 0.41.0
+
+**Goal:** Visualization-oriented and scale-focused features providing an overview of the codebase's semantic structure, temporal activity, and commit reuse opportunities.
+
+**Features implemented:**
+
+**Semantic Codebase Map:** New `gitsema map` command. Outputs a JSON representation of semantic clusters and their blob assignments using the existing `blob_clusters` / `cluster_assignments` tables (no heavy UMAP/t-SNE dependency required). Intended as a machine-readable codebase map for downstream tooling.
+
+- `src/cli/commands/map.ts` — `mapCommand()`
+- `src/cli/index.ts` — registers `map` command
+
+**Temporal Heatmap:** New `gitsema heatmap [--period week|month]` command. Counts the number of distinct blob-level changes (unique blob hashes introduced) per time period by querying `blob_commits ⋈ commits`. Useful for identifying periods of high semantic activity.
+
+- `src/cli/commands/heatmap.ts` — `heatmapCommand()` with `--period` and `--dump` flags
+- `src/cli/index.ts` — registers `heatmap` command
+
+**Semantic Cherry-Pick Suggestions:** New `gitsema cherry-pick-suggest <query>` command. Embeds the query using the configured text model and searches `commit_embeddings` to return the top-N commits most semantically similar to the query — candidates for cherry-picking into another branch. Flags: `--top <n>`, `--model <model>`, `--dump [file]`.
+
+- `src/core/search/cherryPick.ts` — `suggestCherryPicks()` delegating to `searchCommits()`
+- `src/cli/commands/cherryPickSuggest.ts` — CLI wrapper
+- `src/cli/index.ts` — registers `cherry-pick-suggest` command
+- `tests/cherryPick.test.ts` — unit test
+
+**Remote Index Sharing:** (`gitsema serve` + `gitsema remote-index`) — already implemented in prior phases.
+
+**Deliverables:** `src/cli/commands/map.ts`, `src/cli/commands/heatmap.ts`, `src/core/search/cherryPick.ts`, `src/cli/commands/cherryPickSuggest.ts`, `src/cli/index.ts`, `tests/cherryPick.test.ts`.
+
+---
+
+### Phase 41+ — Large Investments (Stubs & Roadmap)
+
+**Goal:** These phases represent substantial engineering investments (4+ weeks each). Stub interfaces and TODO annotations have been added in `src/core/phase41plus.ts` to scaffold future implementation without introducing runtime behavior or breaking changes.
+
+**Multi-Repo Unified Index**
+Combine multiple repository embeddings into a single unified index with cross-repo canonicalization (same concept in two repos → same or linked embedding) and provenance tracking (which repo, which blob). Requires significant schema work and a new indexer entry point.
+
+**IDE / LSP Integration**
+Expose gitsema's semantic index as an LSP server so IDEs can offer inline semantic search, related-code navigation, and concept-history pop-ups. Requires: LSP wire protocol implementation, daemon mode, incremental re-indexing on file save.
+
+**Security Pattern Detection**
+Combine static analysis with semantic similarity to detect vulnerability patterns (SQL injection, path traversal, insecure deserialization, etc.) by finding code blobs semantically similar to known-vulnerable patterns. Requires a curated vulnerability embedding corpus.
+
+**Codebase Health Timeline**
+Time-series of composite health metrics (semantic churn, coverage proxy, complexity proxy, dead-concept ratio) surfaced as a dashboard or structured JSON export. Requires defining and computing each metric per commit snapshot.
+
+**Technical Debt Scoring**
+Score each blob by how semantically "isolated" it is (low similarity to any other blob), how old it is, and how infrequently it changes. High scores indicate candidates for refactoring or removal. Requires a weighted multi-signal scorer and a calibrated threshold.
+
+**Deliverables (stub only):** `src/core/phase41plus.ts`.
+
+---
+
+## Section II - What's weak or underexplored
 
 ### 1. Function chunker is a regex heuristic
 

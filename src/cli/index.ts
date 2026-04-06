@@ -41,6 +41,11 @@ import { semanticBisectCommand } from './commands/semanticBisect.js'
 import { refactorCandidatesCommand } from './commands/refactorCandidates.js'
 import { ciDiffCommand } from './commands/ciDiff.js'
 import { conceptLifecycleCommand } from './commands/conceptLifecycle.js'
+import { docGapCommand } from './commands/docGap.js'
+import { contributorProfileCommand } from './commands/contributorProfile.js'
+import { cherryPickSuggestCommand } from './commands/cherryPickSuggest.js'
+import { mapCommand } from './commands/map.js'
+import { heatmapCommand } from './commands/heatmap.js'
 import { doctorCommand } from './commands/doctor.js'
 import { vacuumCommand } from './commands/vacuum.js'
 import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
@@ -325,6 +330,10 @@ program
     'skip blobs whose path contains any of these comma-separated patterns, e.g. "node_modules,dist,vendor"',
   )
   .option(
+    '--include-glob <patterns>',
+    'only index files matching these comma-separated glob patterns, e.g. "src/**/*.ts,tests/**"',
+  )
+  .option(
     '--chunker <strategy>',
     'chunking strategy: file (default, whole-file), function (function/class boundaries), fixed (fixed-size windows)',
   )
@@ -534,6 +543,43 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .action(conceptLifecycleCommand)
+
+program
+  .command('doc-gap')
+  .description('Find undocumented code by comparing code blobs against prose/documentation embeddings')
+  .option('-k, --top <n>', 'number of results to return', '20')
+  .option('--threshold <n>', 'only include code files whose max similarity to docs is below this threshold (0–1)')
+  .option('--branch <name>', 'restrict to blobs seen on this branch')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(docGapCommand)
+
+program
+  .command('contributor-profile <author>')
+  .description('Compute a contributor semantic profile and show top-N blobs they specialize in')
+  .option('-k, --top <n>', 'number of top results to return', '10')
+  .option('--branch <name>', 'restrict to blobs seen on this branch')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(contributorProfileCommand)
+
+program
+  .command('cherry-pick-suggest <query>')
+  .description('Suggest commits to cherry-pick based on semantic similarity to a query')
+  .option('-k, --top <n>', 'number of results to return', '10')
+  .option('--model <model>', 'embedding model to use')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(cherryPickSuggestCommand)
+
+program
+  .command('map')
+  .description('Output a JSON representation of semantic clusters and blob assignments (semantic codebase map)')
+  .action(async () => { await mapCommand() })
+
+program
+  .command('heatmap')
+  .description('Show semantic activity heatmap — count of distinct blob changes by time period (week or month)')
+  .option('--period <p>', 'aggregation period: week (default) or month', 'week')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(async (opts: { period?: string; dump?: string | boolean }) => { await heatmapCommand({ period: opts.period, dump: opts.dump }) })
 
 program
   .command('file-diff <ref1> <ref2> <path>')
