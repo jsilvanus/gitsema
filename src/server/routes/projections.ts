@@ -31,6 +31,7 @@ export function projectionsRouter(): Router {
       const pathMap: Record<string, string[]> = {}
       for (let i = 0; i < hashes.length; i += chunkSize) {
         const chunk = hashes.slice(i, i + chunkSize)
+        if (chunk.length === 0) continue
         const placeholders = chunk.map(() => '?').join(',')
         const pathRows = session.rawDb.prepare(
           `SELECT blob_hash, path FROM paths WHERE blob_hash IN (${placeholders})`,

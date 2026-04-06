@@ -24,6 +24,17 @@ export async function narrateEvolution(
     return '(LLM narration unavailable — set GITSEMA_LLM_URL to enable)'
   }
 
+  // Validate URL to prevent SSRF from misconfigured GITSEMA_LLM_URL
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(llmUrl)
+  } catch {
+    return `(LLM narration unavailable — GITSEMA_LLM_URL is not a valid URL: ${llmUrl})`
+  }
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    return `(LLM narration unavailable — GITSEMA_LLM_URL must use http or https protocol)`
+  }
+
   const model = process.env.GITSEMA_LLM_MODEL ?? 'gpt-4o-mini'
   const apiKey = process.env.GITSEMA_API_KEY ?? ''
 
@@ -47,7 +58,8 @@ Total versions: ${entries.length}
 Provide a concise narrative summary:`
 
   try {
-    const response = await fetch(`${llmUrl.replace(/\/$/, '')}/v1/chat/completions`, {
+    const endpoint = new URL('/v1/chat/completions', parsedUrl).toString()
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

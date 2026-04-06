@@ -20,6 +20,7 @@ interface ProjectionRow {
 
 /**
  * Deterministic pseudo-random number generator seeded with a value.
+ * Uses a Linear Congruential Generator (Numerical Recipes parameters).
  * Returns values in [-1, 1].
  */
 function seededRand(seed: number): () => number {

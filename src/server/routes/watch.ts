@@ -46,7 +46,7 @@ export function watchRouter(deps: WatchRouterDeps): Router {
       let embBuf: Buffer | null = null
       try {
         const emb = await embedQuery(textProvider, query)
-        embBuf = embeddingToBuffer(emb as number[])
+        embBuf = embeddingToBuffer(Array.isArray(emb) ? emb : Array.from(emb))
       } catch {
         // non-fatal
       }
@@ -87,7 +87,8 @@ export function watchRouter(deps: WatchRouterDeps): Router {
           emb = bufferToEmbedding(row.query_embedding)
         } else {
           try {
-            emb = await embedQuery(textProvider, row.query_text) as number[]
+            const raw = await embedQuery(textProvider, row.query_text)
+            emb = Array.isArray(raw) ? raw : Array.from(raw)
           } catch {
             output.push({ name: row.name, newMatches: 0, results: [] })
             continue

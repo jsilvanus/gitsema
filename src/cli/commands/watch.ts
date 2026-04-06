@@ -31,7 +31,7 @@ export function watchCommand(): Command {
       let embBuf: Buffer | null = null
       try {
         const emb = await embedQuery(provider, query)
-        embBuf = embeddingToBuffer(emb as number[])
+        embBuf = embeddingToBuffer(Array.isArray(emb) ? emb : Array.from(emb))
       } catch {
         // Store query without embedding — will re-embed on run
       }
@@ -101,7 +101,8 @@ export function watchCommand(): Command {
           emb = bufferToEmbedding(row.query_embedding)
         } else {
           try {
-            emb = await embedQuery(provider, row.query_text) as number[]
+            const raw = await embedQuery(provider, row.query_text)
+            emb = Array.isArray(raw) ? raw : Array.from(raw)
           } catch (e) {
             console.error(`  Error embedding query: ${e instanceof Error ? e.message : String(e)}`)
             continue
@@ -135,6 +136,11 @@ export function watchCommand(): Command {
             const body = JSON.stringify({ query: row.name, results })
             const { default: https } = await import('node:https')
             const url = new URL(row.webhook_url)
+            // Only allow HTTPS webhooks to prevent downgrade attacks
+            if (url.protocol !== 'https:') {
+              console.error(`  Skipping webhook (only https:// is allowed): ${row.webhook_url}`)
+              continue
+            }
             const req = https.request({
               hostname: url.hostname,
               port: url.port || 443,

@@ -90,6 +90,10 @@ runs:
         GITSEMA_API_KEY: ${{ inputs.api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
+        EXTRA_FLAGS=""
+        if [ -n "$GITHUB_TOKEN" ]; then
+          EXTRA_FLAGS="--github-token $GITHUB_TOKEN"
+        fi
         gitsema ci-diff \
           --base "${{ inputs.base }}" \
           --head "${{ inputs.head }}" \
@@ -97,4 +101,4 @@ runs:
           --top "${{ inputs.top }}" \
           --format "${{ inputs.format }}" \
           --threshold "${{ inputs.threshold }}" \
-          ${{ inputs.github_token && '--github-token $GITHUB_TOKEN' || '' }}
+          $EXTRA_FLAGS
