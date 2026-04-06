@@ -10,6 +10,7 @@ export interface ServeCommandOptions {
   key?: string
   chunker?: string
   concurrency?: string
+  ui?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -59,7 +60,7 @@ export async function serveCommand(options: ServeCommandOptions): Promise<void> 
   const textProvider = buildProviderOrExit(providerType, textModel)
   const codeProvider = codeModel !== textModel ? buildProviderOrExit(providerType, codeModel) : undefined
 
-  const app = createApp({ textProvider, codeProvider, chunkerStrategy, concurrency })
+  const app = createApp({ textProvider, codeProvider, chunkerStrategy, concurrency, ui: options.ui })
   const server = createServer(app)
 
   await new Promise<void>((resolve, reject) => {
@@ -77,6 +78,9 @@ export async function serveCommand(options: ServeCommandOptions): Promise<void> 
       console.log(`  Chunker: ${chunkerStrategy}`)
       console.log(`  Concurrency: ${concurrency}`)
       console.log(`  Auth: ${authEnabled ? 'enabled (GITSEMA_SERVE_KEY)' : 'disabled'}`)
+      if (options.ui) {
+        console.log(`  Web UI: http://localhost:${port}/ui`)
+      }
       logger.info('API base: /api/v1')
       resolve()
     })

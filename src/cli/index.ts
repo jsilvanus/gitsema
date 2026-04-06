@@ -56,6 +56,7 @@ import { vacuumCommand } from './commands/vacuum.js'
 import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
 import { watchCommand } from './commands/watch.js'
 import { exportIndex, importIndex } from './commands/bundleIndex.js'
+import { projectCommand } from './commands/project.js'
 
 const program = new Command()
 
@@ -669,6 +670,7 @@ program
     'chunking strategy for incoming blobs: file (default), function, fixed',
   )
   .option('--concurrency <n>', 'max concurrent embedding calls (default 4)')
+  .option('--ui', 'serve the embedding space explorer web UI at /ui (requires prior `gitsema project` run)')
   .action(serveCommand)
 
 program
@@ -1026,6 +1028,15 @@ program
   .option('--vss', 'use the usearch HNSW ANN index for approximate candidate selection')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise author.html')
   .action(authorCommand)
+
+program
+  .command('project')
+  .description('Compute 2D random projections of all embeddings for the web UI (requires prior `gitsema index`)')
+  .option('--model <model>', 'embedding model to project (default: GITSEMA_MODEL)')
+  .option('--limit <n>', 'max number of embeddings to project (default: 10000)')
+  .action(async (opts: { model?: string; limit?: string }) => {
+    await projectCommand(opts)
+  })
 
 program.parse()
 

@@ -41,7 +41,7 @@ export interface DbSession {
  * 12 — Added missing performance indexes on paths, symbols, chunks, blob_commits and blob_branches (performance fix)
  * 13 — Added embed_config provenance table and indexing_checkpoints table
  */
-export const CURRENT_SCHEMA_VERSION = 16
+export const CURRENT_SCHEMA_VERSION = 17
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -384,6 +384,23 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     `)
     version = 16
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('16')
+  }
+
+  // v16 → v17: add projections table (Phase 55 — embedding space explorer)
+  if (version < 17) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS projections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+        model TEXT NOT NULL,
+        x REAL NOT NULL,
+        y REAL NOT NULL,
+        projected_at INTEGER NOT NULL,
+        UNIQUE (blob_hash, model)
+      );
+    `)
+    version = 17
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('17')
   }
 }
 

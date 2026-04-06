@@ -51,6 +51,17 @@ export const savedQueries = sqliteTable('saved_queries', {
   createdAt: integer('created_at').notNull(),
 })
 
+export const projections = sqliteTable('projections', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
+  model: text('model').notNull(),
+  x: real('x').notNull(),
+  y: real('y').notNull(),
+  projectedAt: integer('projected_at').notNull(),
+}, (table) => ({
+  uniq: uniqueIndex('idx_projections_blob_model').on(table.blobHash, table.model),
+}))
+
 export const embeddings = sqliteTable('embeddings', {
   blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
   model: text('model').notNull(),
