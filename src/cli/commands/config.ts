@@ -22,6 +22,12 @@ import {
   type ConfigScope,
 } from '../../core/config/configManager.js'
 import { installHooks, uninstallHooks } from '../../core/config/hookManager.js'
+import {
+  installVSCodeMcp,
+  uninstallVSCodeMcp,
+  installVSCodeLsp,
+  uninstallVSCodeLsp,
+} from '../../core/config/vscodeManager.js'
 
 // ---------------------------------------------------------------------------
 // Subcommand: set
@@ -67,6 +73,42 @@ export async function configSetCommand(
       for (const err of result.errors) {
         console.error(`  ✖  ${err}`)
       }
+      if (result.errors.length > 0) process.exitCode = 1
+    }
+  }
+
+  // Special handling: vscode.mcp toggles MCP server entry in VS Code mcp.json
+  if (key === 'vscode.mcp') {
+    const scope = options.global ? 'global' : 'local'
+    if (value === true) {
+      const result = installVSCodeMcp(scope)
+      for (const f of result.installed) console.log(`  ✔  Installed MCP server entry: ${f}`)
+      for (const f of result.skipped)   console.log(`  ⚠  Already present, skipped: ${f}`)
+      for (const e of result.errors)    console.error(`  ✖  ${e}`)
+      if (result.errors.length > 0) process.exitCode = 1
+    } else {
+      const result = uninstallVSCodeMcp(scope)
+      for (const f of result.removed) console.log(`  ✔  Removed MCP server entry: ${f}`)
+      for (const f of result.skipped)  console.log(`  ⚠  Not found, skipped: ${f}`)
+      for (const e of result.errors)   console.error(`  ✖  ${e}`)
+      if (result.errors.length > 0) process.exitCode = 1
+    }
+  }
+
+  // Special handling: vscode.lsp toggles LSP config keys in VS Code settings.json
+  if (key === 'vscode.lsp') {
+    const scope = options.global ? 'global' : 'local'
+    if (value === true) {
+      const result = installVSCodeLsp(scope)
+      for (const f of result.installed) console.log(`  ✔  Installed LSP config: ${f}`)
+      for (const f of result.skipped)   console.log(`  ⚠  Already present, skipped: ${f}`)
+      for (const e of result.errors)    console.error(`  ✖  ${e}`)
+      if (result.errors.length > 0) process.exitCode = 1
+    } else {
+      const result = uninstallVSCodeLsp(scope)
+      for (const f of result.removed) console.log(`  ✔  Removed LSP config: ${f}`)
+      for (const f of result.skipped)  console.log(`  ⚠  Not found, skipped: ${f}`)
+      for (const e of result.errors)   console.error(`  ✖  ${e}`)
       if (result.errors.length > 0) process.exitCode = 1
     }
   }

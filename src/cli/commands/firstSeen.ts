@@ -29,6 +29,7 @@ export interface FirstSeenCommandOptions {
   html?: string | boolean
   /** Comma-separated repo IDs to search across (multi-repo) */
   repos?: string
+  noHeadings?: boolean
 }
 
 function renderCommitResults(results: CommitSearchResult[]): string {
@@ -63,7 +64,7 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
     const top = options.top !== undefined ? parseInt(options.top, 10) : 10
     try {
       const results = await remoteFirstSeen(query, top)
-      console.log(renderFirstSeenResults(results))
+      console.log(renderFirstSeenResults(results, !options.noHeadings))
     } catch (err) {
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)

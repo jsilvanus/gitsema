@@ -38,6 +38,7 @@ const FirstSeenBodySchema = z.object({
   branch: z.string().optional(),
   includeCommits: z.boolean().optional().default(false),
   rendered: z.boolean().optional().default(false),
+  noHeadings: z.boolean().optional().default(false),
 })
 
 export interface SearchRouterDeps {
@@ -162,7 +163,7 @@ export function searchRouter(deps: SearchRouterDeps): Router {
     if (opts.includeCommits) {
       const commitResults = searchCommits(queryEmbedding, { topK: opts.top, model: textProvider.model })
       if (opts.rendered) {
-        const blobText = renderFirstSeenResults(sorted)
+        const blobText = renderFirstSeenResults(sorted, !opts.noHeadings)
         const commitLines = commitResults.map((c) => `${c.score.toFixed(3)}  [commit ${c.commitHash.slice(0, 7)}]  ${c.paths[0] ?? ''}  ${c.message}`).join('\n')
         res.type('text/plain').send(blobText + (commitLines ? '\n\nCommit matches:\n' + commitLines : ''))
         return
@@ -172,7 +173,7 @@ export function searchRouter(deps: SearchRouterDeps): Router {
     }
 
     if (opts.rendered) {
-      res.type('text/plain').send(renderFirstSeenResults(sorted))
+      res.type('text/plain').send(renderFirstSeenResults(sorted, !opts.noHeadings))
     } else {
       res.json(sorted)
     }

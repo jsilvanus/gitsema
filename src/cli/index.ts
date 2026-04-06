@@ -284,6 +284,9 @@ Supported keys (dot-notation for command defaults):
   search.top, search.hybrid, search.bm25Weight, search.recent
   search.weightVector, search.weightRecency, search.weightPath
   evolution.threshold, clusters.k
+  hooks.enabled        (true/false — installs/removes Git post-commit/post-merge hooks)
+  vscode.mcp           (true/false — installs/removes gitsema MCP server entry in mcp.json)
+  vscode.lsp           (true/false — installs/removes gitsema LSP config in settings.json)
 
 Examples:
   gitsema config set search.hybrid true
@@ -344,9 +347,10 @@ program
 
 program
   .command('index')
-  .description(
-    'Walk Git history and embed all blobs into the semantic index.\n\n' +
-    'Default mode is INCREMENTAL: automatically resumes from the last indexed commit.\n' +
+  .description('Walk Git history and embed all blobs into the semantic index')
+  .addHelpText(
+    'after',
+    '\nDefault mode is INCREMENTAL: automatically resumes from the last indexed commit.\n' +
     'Use --since all to force a full re-index from scratch.\n\n' +
     'Progress output shows: stage (collecting/embedding/commit-mapping), % complete,\n' +
     'throughput (blobs/s), embedding latency (avg + p95), and ETA.\n' +
@@ -540,6 +544,7 @@ program
   .description('Find when a concept first appeared in the codebase, sorted by date (see also: search, concept-evolution)')
   .option('-k, --top <n>', 'number of results to return', '10')
   .option('--branch <name>', 'restrict results to blobs seen on this branch')
+  .option('--no-headings', "don't print header row")
   .option('--hybrid', 'blend vector similarity with BM25 keyword matching (requires prior backfill-fts)')
   .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .option('--include-commits', 'also search commit messages and show chronological commit results')
@@ -1062,7 +1067,7 @@ program
   })
 
 program
-  .command('build-vss')
+  .command('build-vss', { hidden: true })
   .description('Build a usearch HNSW ANN index from stored embeddings for fast approximate search (requires usearch package)')
   .option('--model <model>', 'build index for this model (default: configured text model)')
   .option('--ef-construction <n>', 'HNSW ef_construction parameter — higher = better recall, slower build (default 200)')

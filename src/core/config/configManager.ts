@@ -103,6 +103,9 @@ export const ALL_KEYS: ReadonlyArray<string> = [
   'clusters.k',
   // hooks
   'hooks.enabled',
+  // VS Code integration
+  'vscode.mcp',
+  'vscode.lsp',
 ]
 
 // ---------------------------------------------------------------------------

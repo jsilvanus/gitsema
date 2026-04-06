@@ -118,7 +118,7 @@ export function renderResults(results: SearchResult[]): string {
  *   2021-03-15  src/auth/oauth.ts          [a3f9c2d]  (score: 0.921)
  *   2021-08-22  src/auth/session.ts        [b19e4a1]  (score: 0.887)
  */
-export function renderFirstSeenResults(results: SearchResult[]): string {
+export function renderFirstSeenResults(results: SearchResult[], showHeadings = true): string {
   if (results.length === 0) return '  (no results)'
 
   // Sort by firstSeen ascending (earliest first); blobs without history go last
@@ -130,19 +130,32 @@ export function renderFirstSeenResults(results: SearchResult[]): string {
   })
 
   const lines: string[] = []
+
+  // Header row for clarity: Date | Commit | Path | Blob | Score
+  const headerDate = 'Date'
+  const headerCommit = 'Commit'
+  const headerPath = 'Path'
+  const headerHash = 'Blob'
+  const headerScore = 'Score'
+  const pathColWidth = 50
+  const dateColWidth = 10
+  const commitColWidth = 8
+  if (showHeadings) {
+    const headerLine = `${headerDate.padEnd(dateColWidth)}  ${headerCommit.padEnd(commitColWidth)}  ${headerPath.padEnd(pathColWidth)}  ${headerHash.padEnd(8)}  ${headerScore}`
+    lines.push(headerLine)
+  }
   for (const result of sorted) {
     const hash = shortHash(result.blobHash)
     const score = formatScore(result.score)
     const date = result.firstSeen !== undefined ? formatDate(result.firstSeen) : '(unknown)'
-    const dateWithCommit = result.firstSeen !== undefined && result.firstCommit
-      ? `${date}  [${shortHash(result.firstCommit)}]`
-      : date
+    const commit = result.firstCommit ? shortHash(result.firstCommit) : ''
     if (result.paths.length === 0) {
-      lines.push(`${dateWithCommit}  (unknown path)  [${hash}]  (score: ${score})`)
+      const pathStr = '(unknown path)'
+      lines.push(`${date.padEnd(dateColWidth)}  ${commit.padEnd(commitColWidth)}  ${pathStr.padEnd(pathColWidth)}  [${hash}]  ${`(${score})`}`)
     } else {
-      lines.push(`${dateWithCommit}  ${result.paths[0].padEnd(50)}  [${hash}]  (score: ${score})`)
+      lines.push(`${date.padEnd(dateColWidth)}  ${commit.padEnd(commitColWidth)}  ${result.paths[0].padEnd(pathColWidth)}  [${hash}]  ${`(${score})`}`)
       for (let i = 1; i < result.paths.length; i++) {
-        lines.push(`          ${result.paths[i].padEnd(50)}`)
+        lines.push(`          ${result.paths[i].padEnd(pathColWidth)}`)
       }
     }
   }
