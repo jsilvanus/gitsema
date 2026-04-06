@@ -2232,7 +2232,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 49 — Auto-VSS Default Path ✅ Implemented
+### Phase 49 — Auto-VSS Default Path ✅ Implemented (v0.51.0)
 
 **Goal:** Surface ANN search without requiring `--vss` explicitly.
 
@@ -2244,7 +2244,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 50 — Real Multi-Repo Search ✅ Implemented
+### Phase 50 — Real Multi-Repo Search ✅ Implemented (v0.52.0)
 
 **Goal:** Deliver on the Phase 41 promise: query across multiple repos in one command.
 
@@ -2256,7 +2256,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 51 — LSP Completion of the Protocol ✅ Implemented
+### Phase 51 — LSP Completion of the Protocol ✅ Implemented (v0.53.0)
 
 **Goal:** Make `gitsema lsp` useful in real IDEs (VS Code, Neovim LSP, Helix).
 
@@ -2269,7 +2269,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 52 — Query Expansion ✅ Implemented
+### Phase 52 — Query Expansion ✅ Implemented (v0.54.0)
 
 **Goal:** Improve recall by expanding natural-language queries with repo-specific vocabulary before embedding.
 
@@ -2281,7 +2281,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 53 — Saved Searches and Watch Mode ✅ Implemented
+### Phase 53 — Saved Searches and Watch Mode ✅ Implemented (v0.55.0)
 
 **Goal:** Notify when new indexed content matches a saved query.
 
@@ -2293,7 +2293,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 54 — Index Bundle Export / Import ✅ Implemented
+### Phase 54 — Index Bundle Export / Import ✅ Implemented (v0.56.0)
 
 **Goal:** Share a pre-built index as a compressed artifact — useful for team settings where one machine builds the index and others query it.
 
@@ -2304,7 +2304,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 55 — Embedding Space Explorer (Web UI) ✅ Implemented
+### Phase 55 — Embedding Space Explorer (Web UI) ✅ Implemented (v0.57.0)
 
 **Goal:** Interactive 2D visualization of the embedding space.
 
@@ -2315,7 +2315,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 56 — LLM-Powered Evolution Narration ✅ Implemented
+### Phase 56 — LLM-Powered Evolution Narration ✅ Implemented (v0.58.0)
 
 **Goal:** Convert the raw cosine-distance timelines from `gitsema evolution` into human-readable semantic summaries.
 
@@ -2326,7 +2326,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 57 — GitHub Actions Integration for CI Diff ✅ Implemented
+### Phase 57 — GitHub Actions Integration for CI Diff ✅ Implemented (v0.59.0)
 
 **Goal:** Make `gitsema ci-diff` usable as a GitHub Actions step that posts a semantic diff comment on PRs.
 
@@ -2337,7 +2337,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 58 — Structured Security Scan (Static + Semantic) ✅ Implemented
+### Phase 58 — Structured Security Scan (Static + Semantic) ✅ Implemented (v0.60.0)
 
 **Goal:** Elevate `security-scan` from "semantic similarity" to a credible triage tool.
 
