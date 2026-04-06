@@ -41,7 +41,7 @@ export interface DbSession {
  * 12 — Added missing performance indexes on paths, symbols, chunks, blob_commits and blob_branches (performance fix)
  * 13 — Added embed_config provenance table and indexing_checkpoints table
  */
-export const CURRENT_SCHEMA_VERSION = 13
+export const CURRENT_SCHEMA_VERSION = 14
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -346,6 +346,20 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     `)
     version = 13
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('13')
+  }
+
+  // v13 → v14: add repos table to track indexed repositories
+  if (version < 14) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS repos (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        url TEXT,
+        added_at INTEGER NOT NULL
+      );
+    `)
+    version = 14
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('14')
   }
 }
 

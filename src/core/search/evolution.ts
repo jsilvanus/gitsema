@@ -541,3 +541,15 @@ export function computeConceptEvolution(
   return result
 }
 
+export function extractAlerts(timeline: EvolutionEntry[], threshold: number, top: number) {
+  type AlertEntry = { rank: number; date: string; blobHash: string; commitHash?: string; distFromPrev: number; distFromOrigin: number; author?: string }
+  const candidates = timeline.filter((t) => t.distFromPrev >= threshold)
+  candidates.sort((a, b) => b.distFromPrev - a.distFromPrev || b.distFromOrigin - a.distFromOrigin)
+  const selected = candidates.slice(0, top)
+  const alerts: AlertEntry[] = []
+  let rank = 1
+  for (const s of selected) {
+    alerts.push({ rank: rank++, date: new Date(s.timestamp * 1000).toISOString(), blobHash: s.blobHash, commitHash: s.commitHash, distFromPrev: s.distFromPrev, distFromOrigin: s.distFromOrigin })
+  }
+  return alerts
+}

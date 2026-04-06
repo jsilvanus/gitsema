@@ -33,6 +33,13 @@ export const blobs = sqliteTable('blobs', {
   indexedAt: integer('indexed_at').notNull(),
 })
 
+export const repos = sqliteTable('repos', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  url: text('url'),
+  addedAt: integer('added_at').notNull(),
+})
+
 export const embeddings = sqliteTable('embeddings', {
   blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
   model: text('model').notNull(),
