@@ -152,13 +152,30 @@ export async function scoreDebt(
 
   if (blobStats.length === 0) return []
 
-  // Pre-compute all paths in one query and build a lookup map.
-  const allPaths = rawDb.prepare('SELECT blob_hash, path FROM paths').all() as Array<{ blob_hash: string; path: string }>
+  // Pre-compute paths for candidate blobs only (avoid loading the entire paths table).
+  // We defer this until after blobStats so we can scope the IN clause to actual candidates.
+  const candidateHashes = blobStats.map((r) => r.blob_hash)
   const pathMap = new Map<string, string[]>()
-  for (const { blob_hash, path } of allPaths) {
-    const arr = pathMap.get(blob_hash) ?? []
-    arr.push(path)
-    pathMap.set(blob_hash, arr)
+  if (candidateHashes.length > 0) {
+    // SQLite IN clause is safe up to SQLITE_MAX_VARIABLE_NUMBER (~999); chunk if needed.
+    const CHUNK = 900
+    // Cache prepared statements by placeholder count to avoid re-preparing for same-size slices.
+    const stmtCache = new Map<number, ReturnType<typeof rawDb.prepare>>()
+    for (let i = 0; i < candidateHashes.length; i += CHUNK) {
+      const slice = candidateHashes.slice(i, i + CHUNK)
+      let stmt = stmtCache.get(slice.length)
+      if (!stmt) {
+        const placeholders = slice.map(() => '?').join(',')
+        stmt = rawDb.prepare(`SELECT blob_hash, path FROM paths WHERE blob_hash IN (${placeholders})`)
+        stmtCache.set(slice.length, stmt)
+      }
+      const rows = stmt.all(...slice) as Array<{ blob_hash: string; path: string }>
+      for (const { blob_hash, path } of rows) {
+        const arr = pathMap.get(blob_hash) ?? []
+        arr.push(path)
+        pathMap.set(blob_hash, arr)
+      }
+    }
   }
 
   // ------------------------------------------------------------------

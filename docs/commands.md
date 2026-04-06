@@ -1,28 +1,115 @@
-# gitsema Command Reference & Grouping Analysis
+# gitsema Command Reference
 
 ## Current command inventory
 
-gitsema has 18 commands. As of the analysis below they fall into five implicit groups. There is no explicit grouping in the CLI help output today — commands are listed in registration order.
+gitsema has 47 commands as of v0.49.0. They fall into six groups.
 
-| Command | Input type | What it does |
+### Index & Database
+| Command | Input | What it does |
 |---|---|---|
-| `status` | — | Show index statistics and database path |
+| `config` | action key value | Get, set, list, or unset configuration keys |
+| `status [file]` | — | Show index statistics and database path |
 | `index` | — | Walk Git history and embed all blobs |
+| `doctor` | — | Diagnose common issues with the index and provider |
+| `vacuum` | — | Run SQLite VACUUM to reclaim disk space |
+| `rebuild-fts` | — | Rebuild FTS5 full-text search index |
 | `backfill-fts` | — | Populate FTS5 content for older index entries |
-| `serve` | — | Start HTTP embedding/storage server |
-| `remote-index` | repo URL | Ask a remote server to clone and index a repo |
-| `search` | query | Vector similarity search |
-| `first-seen` | query | Find when a concept first appeared (sorted oldest-first) |
-| `dead-concepts` | — | Find deleted blobs still similar to HEAD |
-| `impact` | file path | Cross-module coupling via vector similarity |
-| `evolution` | file path | Semantic drift of one file across its Git history |
-| `diff` | ref1 ref2 path | Cosine distance between two versions of a file |
-| `semantic-blame` | file path | Per-block nearest-neighbor attribution |
-| `concept-evolution` | query | How a semantic concept evolved across all commits |
+| `update-modules` | — | Recompute directory centroid embeddings |
+| `gc` | — | Garbage-collect unreferenced blobs from the index |
+| `clear-model <model>` | model name | Remove all embeddings for a specific model |
+| `build-vss` | — | Build HNSW ANN vector index (usearch) for fast search |
+| `repos` | subcommand | Manage multi-repo registry (add, list, remove) |
+
+### Search & Discovery
+| Command | Input | What it does |
+|---|---|---|
+| `search <query>` | query | Vector similarity search (supports `--hybrid`, `--vss`, `--level`, `--branch`, `--recent`, `--explain`) |
+| `first-seen <query>` | query | Find when a concept first appeared (sorted oldest-first) |
+| `dead-concepts` | — | Find deleted blobs still semantically similar to HEAD |
+| `impact <path>` | file path | Cross-module coupling via vector similarity |
+| `blame <file>` | file path | Per-block nearest-neighbor attribution (`semantic-blame`) |
+| `code-search <snippet>` | code snippet | Symbol-level semantic code search |
+| `author <query>` | query | Find which authors contributed most to a semantic concept |
+| `bisect <good> <bad> <query>` | refs + query | Binary-search commits for semantic change |
+| `lifecycle <query>` | query | Concept lifecycle (emergence, growth, decline) across history |
+
+### Evolution & History
+| Command | Input | What it does |
+|---|---|---|
+| `file-evolution <path>` | file path | Semantic drift of one file across its Git history |
+| `evolution <query>` | query | How a semantic concept evolved across all commits |
+| `file-diff <ref1> <ref2> <path>` | refs + path | Cosine distance between two versions of a file |
+| `diff <ref1> <ref2> <query>` | refs + query | Semantic diff between two repo states |
+| `change-points <query>` | query | Detect commits where a concept changed significantly |
+| `file-change-points <path>` | file path | Semantic change points for a single file |
+| `cherry-pick-suggest <query>` | query | Suggest commits to cherry-pick based on semantic similarity |
+| `ci-diff` | — | Semantic comparison between the last two CI runs |
+| `refactor-candidates` | — | Identify blobs most likely to benefit from refactoring |
+
+### Clustering & Topology
+| Command | Input | What it does |
+|---|---|---|
 | `clusters` | — | K-means clustering of all blob embeddings |
-| `cluster-diff` | ref1 ref2 | Compare cluster snapshots at two points in time |
-| `cluster-timeline` | — | Multi-step cluster drift over the full commit history |
-| `mcp` | — | Start MCP stdio server |
+| `cluster-diff <ref1> <ref2>` | refs | Compare cluster snapshots at two points in time |
+| `cluster-timeline` | — | Multi-step cluster drift over full commit history |
+| `cluster-change-points` | — | Detect commits where cluster structure changed |
+| `map` | — | Render a semantic similarity map of the codebase |
+| `heatmap` | — | Render a semantic density heatmap by directory |
+
+### Branch & Collaboration
+| Command | Input | What it does |
+|---|---|---|
+| `branch-summary <branch>` | branch name | Semantic summary of changes on a branch vs main |
+| `merge-audit <branch-a> <branch-b>` | branch names | Detect semantic collisions before merging |
+| `merge-preview <branch>` | branch name | Preview semantic impact of merging a branch |
+| `contributor-profile <author>` | author name/email | Semantic profile of a contributor's expertise |
+
+### Quality & Security
+| Command | Input | What it does |
+|---|---|---|
+| `security-scan` | — | Semantic scan for common vulnerability patterns (`--top`, `--dump`) |
+| `health` | — | Codebase health timeline (churn rate, dead-concept ratio) |
+| `debt` | — | Technical debt scoring by isolation, age, and change frequency |
+| `doc-gap` | — | Find code blobs with no semantically similar documentation |
+
+### Infrastructure
+| Command | Input | What it does |
+|---|---|---|
+| `serve` | — | Start HTTP embedding/storage server (`--port`, `--key`) |
+| `remote-index <repoUrl>` | repo URL | Ask a remote server to clone and index a repo |
+| `lsp` | — | Start LSP hover server over stdio |
+| `mcp` | — | Start MCP stdio server (23 tools) |
+
+---
+
+## MCP Tools (23 total, as of v0.49.0)
+
+| Tool | Description |
+|---|---|
+| `semantic_search` | Vector similarity search with all filters |
+| `search_history` | Search with date filtering + chronological sort |
+| `first_seen` | Find concept origin (sorted oldest-first) |
+| `code_search` | Symbol-level semantic code search |
+| `evolution` | File semantic drift timeline |
+| `concept_evolution` | Cross-codebase concept drift timeline |
+| `semantic_diff` | Semantic diff between two refs |
+| `semantic_blame` | Per-block nearest-neighbor attribution |
+| `index` | Trigger incremental re-indexing |
+| `clusters` | K-means cluster snapshot |
+| `cluster_diff` | Compare cluster snapshots |
+| `cluster_timeline` | Multi-step cluster drift |
+| `change_points` | Detect semantic change-point commits |
+| `file_change_points` | Change points for a single file |
+| `merge_audit` | Semantic collision detection before merge |
+| `merge_preview` | Preview merge semantic impact |
+| `branch_summary` | Branch semantic summary vs main |
+| `author` | Author attribution for a concept |
+| `impact` | Cross-module coupling analysis |
+| `dead_concepts` | Find deleted semantic blobs |
+| `security_scan` | Semantic vulnerability pattern scan |
+| `health_timeline` | Codebase health metrics by time bucket |
+| `debt_score` | Technical debt scoring by blob |
+
 
 ---
 

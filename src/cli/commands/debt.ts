@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
+import { parsePositiveInt } from '../../utils/parse.js'
 
 export function debtCommand(): Command {
   return new Command('debt')
@@ -13,8 +14,14 @@ export function debtCommand(): Command {
     .option('--branch <name>', 'restrict to blobs on this branch')
     .option('--dump [file]', 'output JSON to file or stdout')
     .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean }) => {
+      let top: number
+      try {
+        top = parsePositiveInt(opts.top ?? '20', '--top')
+      } catch (err) {
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+        process.exit(1)
+      }
       const session = getActiveSession()
-      const top = parseInt(opts.top ?? '20', 10)
       const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
       const model = opts.model ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
       const provider = buildProvider(providerType, model)

@@ -227,12 +227,12 @@ gitsema index
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
 
-**Schema overview:**
+**Schema overview (20 tables as of v0.49.0 / schema v14):**
 
 | Table | Purpose |
 |---|---|
 | `blobs` | Blob registry (hash, size, indexed_at) |
-| `embeddings` | Whole-file embedding per blob (Float32 bytes, model name) |
+| `embeddings` | Whole-file embedding per blob (Float32 bytes, model name, optional quantization columns) |
 | `chunks` | Sub-file fragments (start/end line, blob FK) |
 | `chunk_embeddings` | Per-chunk embedding |
 | `paths` | blob_hash → file path (one blob can map to many paths) |
@@ -240,13 +240,27 @@ gitsema index
 | `blob_commits` | Many-to-many blob ↔ commit join |
 | `indexed_commits` | Tracks which commits have been fully processed (incremental resume) |
 | `blob_fts` | FTS5 virtual table for BM25 hybrid search |
-| `blob_branches` | Maps blobs to branch names (added in Phase 15) |
+| `blob_branches` | Maps blobs to branch names |
+| `repos` | Multi-repo registry (Phase 41) |
+| `query_embeddings` | Query embedding cache (avoids re-embedding identical queries) |
+| `symbols` | Symbol-level index entries (function/class boundaries) |
+| `symbol_embeddings` | Per-symbol embedding |
+| `commit_embeddings` | Per-commit summary embedding |
+| `blob_clusters` | K-means cluster assignments |
+| `cluster_assignments` | Cluster snapshot entries per ref |
+| `module_embeddings` | Directory centroid running-mean embeddings (Phase 33) |
+| `embed_config` | Recorded embedding provenance (model, dimensions, chunker) |
+| `indexing_checkpoints` | Resume markers for interrupted indexing runs |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
 **Schema migrations:** `sqlite.ts` runs versioned migrations on startup (idempotent):
 - v0 → v1: Added `file_type` column to `embeddings` (Phase 8)
 - v1 → v2: Added `blob_branches` table (Phase 15)
+- v2 → v3: Added `query_embeddings` cache table (Phase 18)
+- … (v3–v13: symbols, commit embeddings, clustering, module embeddings, provenance, HNSW quantization columns)
+- v13 → v14: Added `repos` table for multi-repo registry (Phase 41)
+- **Current version: 14**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 
@@ -265,16 +279,33 @@ node dist/cli/index.js mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools:**
+**Exposed tools (23 total):**
 
 | Tool | Description |
 |---|---|
 | `semantic_search` | Vector similarity search |
 | `search_history` | Vector search with date filtering + optional chronological sort |
 | `first_seen` | Find concept origin (sorted oldest-first) |
+| `code_search` | Symbol-level semantic code search |
 | `evolution` | File semantic drift timeline (human-readable or structured JSON) |
 | `concept_evolution` | Cross-codebase concept drift timeline |
+| `semantic_diff` | Semantic diff between two refs |
+| `semantic_blame` | Per-block nearest-neighbor attribution |
 | `index` | Trigger incremental re-indexing |
+| `clusters` | K-means cluster snapshot |
+| `cluster_diff` | Compare cluster snapshots at two refs |
+| `cluster_timeline` | Multi-step cluster drift |
+| `change_points` | Detect semantic change-point commits |
+| `file_change_points` | Change points for a single file |
+| `merge_audit` | Semantic collision detection before merge |
+| `merge_preview` | Preview merge semantic impact |
+| `branch_summary` | Branch semantic summary vs main |
+| `author` | Author attribution for a concept |
+| `impact` | Cross-module coupling analysis |
+| `dead_concepts` | Find deleted semantic blobs |
+| `security_scan` | Semantic vulnerability pattern scan (results are similarity scores, not confirmed CVEs) |
+| `health_timeline` | Codebase health metrics by time bucket |
+| `debt_score` | Technical debt scoring by isolation, age, and change frequency |
 
 ---
 
@@ -311,6 +342,6 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 
 | Gap | Notes |
 |---|---|
-| **Test suite (partial)** | Phase 18 added unit tests (chunking, ranking, vectorSearch, queryCache) and integration tests (index + search end-to-end). Coverage of server routes and MCP layer is still a gap. |
+| **Test suite (partial)** | Unit and integration tests cover core modules. `tests/serverRoutes.test.ts` and `tests/mcpTools.test.ts` provide baseline coverage for server routes and MCP handlers. Full end-to-end coverage of all 47 CLI commands is still a gap. |
 | **Phase 13: Python model server** | `modelserver/` is scaffolded (FastAPI + sentence-transformers) but blocked on Windows — `tokenizers` requires a Rust toolchain. A Docker image would solve this. |
-| **Cosine at scale** | Pure-JS cosine works to ~500K blobs. `sqlite-vss` or DuckDB migration path is in the risk register but not designed. |
+| **Cosine at scale** | Pure-JS cosine works to ~500K blobs. `sqlite-vss` or DuckDB migration path is in the risk register but not designed. Build the HNSW index with `gitsema build-vss` for large repos. |

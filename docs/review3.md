@@ -291,11 +291,12 @@ do not implement `embedBatch`.
 the for-loop. The fix hoists all three `prepare()` calls above the loop and uses
 parameterised binding, reducing object allocation from 3×buckets to 3 per call.
 
-#### N2 — Debt Scoring: Full Paths Table Load
+#### N2 — Debt Scoring: Full Paths Table Load ✅ Fixed
 
-`src/core/search/debtScoring.ts:156` loads the entire `paths` table regardless of
-the requested `--top` count. For a large repo this is megabytes of wasted I/O. Use
-a `JOIN` or a scoped `IN (...)` query keyed to the candidate blob hashes.
+`debtScoring.ts` now scopes the paths query to candidate blob hashes via an
+`IN (...)` clause (chunked in slices of 900 to stay within SQLite's variable
+limit). This eliminates loading megabytes of path data when only a small `--top`
+subset is needed.
 
 #### N3 — Debt Scoring: O(N²) Cosine Scan Default
 
@@ -305,12 +306,12 @@ similarity. At 50K blobs × 384 dims, that is ~1.8 billion float operations.
 Document this prominently and recommend `gitsema build-vss` before `gitsema debt`
 in both the `--help` text and the README.
 
-#### N4 — Security Scan: Sequential Per-Pattern Embedding + Search
+#### N4 — Security Scan: Sequential Per-Pattern Embedding + Search ✅ Fixed
 
-`scanForVulnerabilities()` embeds and searches six patterns sequentially
-(`src/core/search/securityScan.ts:27-44`). Each pattern issues a full embedding
-call and a full vector scan. These are independent and could run concurrently via
-`Promise.all`.
+`scanForVulnerabilities()` now embeds all 6 patterns concurrently via
+`Promise.allSettled()` and processes the results in a single pass. Patterns that
+fail to embed are skipped without crashing. Wall-clock time drops from ~6×
+per-pattern latency to ~1× (bounded by the slowest pattern).
 
 ---
 
@@ -574,31 +575,31 @@ entry with a guard that exits with a clear message.
 
 ### Medium (quality and maintainability)
 
-| # | Gap | Fix |
-|---|-----|-----|
-| **M1** | `rawDb.prepare()` inside health-timeline loop | Move prepare() calls above loop |
-| **M2** | Full paths table load in `debtScoring.ts` | Scope to candidate blob hashes |
-| **M3** | Zero server route tests | Add supertest suite for top-5 routes |
-| **M4** | Zero MCP handler tests | Add programmatic MCP tool test |
-| **M5** | `htmlRenderer.ts` 1,700 lines | Split into per-renderer files |
-| **M6** | LSP hover response not valid `MarkupContent` | Return `{ kind: 'plaintext', value: ... }` |
-| **M7** | Missing NaN guard on integer options | Add `parsePositiveInt()` helper |
-| **M8** | No auto-enable of VSS when index exists | Auto-detect `.gitsema/vss.index` at startup |
-| **M9** | `docs/commands.md` stale | Regenerate from CLI `--help` output |
-| **M10** | CLAUDE.md MCP and schema sections stale | Update to 20 tools and 14-table schema |
+| # | Gap | Fix | Status |
+|---|-----|-----|--------|
+| **M1** | `rawDb.prepare()` inside health-timeline loop | Move prepare() calls above loop | ✅ Fixed |
+| **M2** | Full paths table load in `debtScoring.ts` | Scope to candidate blob hashes | ✅ Fixed: IN-clause scoped to candidates |
+| **M3** | Zero server route tests | Add supertest suite for top-5 routes | ✅ Fixed: `tests/serverRoutes.test.ts` |
+| **M4** | Zero MCP handler tests | Add programmatic MCP tool test | ✅ Fixed: `tests/mcpTools.test.ts` |
+| **M5** | `htmlRenderer.ts` 1,700 lines | Split into per-renderer files | Deferred (large refactor, no behaviour change) |
+| **M6** | LSP hover response not valid `MarkupContent` | Return `{ kind: 'plaintext', value: ... }` | ✅ Fixed |
+| **M7** | Missing NaN guard on integer options | Add `parsePositiveInt()` helper | ✅ Fixed: `src/utils/parse.ts` + guards on `health`, `debt`, `security-scan` |
+| **M8** | No auto-enable of VSS when index exists | Auto-detect `.gitsema/vss.index` at startup | ✅ Fixed: auto-detects in `search` command |
+| **M9** | `docs/commands.md` stale | Regenerate from CLI `--help` output | ✅ Fixed: 47-command inventory with MCP tools table |
+| **M10** | CLAUDE.md MCP and schema sections stale | Update to 23 tools and 20-table schema | ✅ Fixed |
 
 ### Low / Nice-to-Have
 
-| # | Gap |
-|---|-----|
-| **L1** | `--html` on `debt`, `health`, `security-scan` |
-| **L2** | `--not-like/--lambda` on `author`, `code-search` |
-| **L3** | MCP tools for `security-scan`, `health`, `debt` |
-| **L4** | OpenAPI spec / capabilities endpoint for HTTP server |
-| **L5** | Consistent `--format table|json|tsv` across analysis commands |
-| **L6** | Concurrent pattern search in `security-scan` (`Promise.all`) |
-| **L7** | `indexer.ts` inner loop extraction into sub-functions |
-| **L8** | Migration regression tests |
+| # | Gap | Status |
+|---|-----|--------|
+| **L1** | `--html` on `debt`, `health`, `security-scan` | Open |
+| **L2** | `--not-like/--lambda` on `author`, `code-search` | Open |
+| **L3** | MCP tools for `security-scan`, `health`, `debt` | ✅ Fixed: `security_scan`, `health_timeline`, `debt_score` added |
+| **L4** | OpenAPI spec / capabilities endpoint for HTTP server | Open |
+| **L5** | Consistent `--format table\|json\|tsv` across analysis commands | Open |
+| **L6** | Concurrent pattern search in `security-scan` (`Promise.all`) | ✅ Fixed: `Promise.allSettled` in `securityScan.ts` |
+| **L7** | `indexer.ts` inner loop extraction into sub-functions | Open |
+| **L8** | Migration regression tests | Open |
 
 ---
 

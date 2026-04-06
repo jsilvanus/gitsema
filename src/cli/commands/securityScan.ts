@@ -3,6 +3,7 @@ import { Command } from 'commander'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { scanForVulnerabilities } from '../../core/search/securityScan.js'
+import { parsePositiveInt } from '../../utils/parse.js'
 
 export function securityScanCommand(): Command {
   return new Command('security-scan')
@@ -11,8 +12,14 @@ export function securityScanCommand(): Command {
     .option('--model <model>', 'embedding model to use')
     .option('--dump [file]', 'output JSON to file or stdout')
     .action(async (opts: { top?: string; model?: string; dump?: string | boolean }) => {
+      let top: number
+      try {
+        top = parsePositiveInt(opts.top ?? '10', '--top')
+      } catch (err) {
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+        process.exit(1)
+      }
       const session = getActiveSession()
-      const top = parseInt(opts.top ?? '10', 10)
       const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
       const model = opts.model ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
       const provider = buildProvider(providerType, model)

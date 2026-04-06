@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, existsSync } from 'node:fs'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
@@ -288,6 +288,20 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   if (options.explain) searchOpts.explain = true
+
+  // M8: Auto-detect VSS index — if --vss is not explicitly supplied but a
+  // .gitsema/*.usearch file exists for the current model, use it automatically.
+  if (!options.vss) {
+    const safeName = textModel.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const autoIndexPath = `.gitsema/vectors-${safeName}.usearch`
+    const autoMapPath = `.gitsema/vectors-${safeName}.map.json`
+    if (existsSync(autoIndexPath) && existsSync(autoMapPath)) {
+      options.vss = true
+      if (process.env.GITSEMA_VERBOSE) {
+        console.error('Info: HNSW index found — using ANN search automatically (build-vss to update).')
+      }
+    }
+  }
 
   let results: SearchResult[] | undefined
   if (options.vss) {

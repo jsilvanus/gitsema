@@ -39,6 +39,10 @@ import { computeImpact } from '../core/search/impact.js'
 import { findDeadConcepts } from '../core/search/deadConcepts.js'
 import { hybridSearch } from '../core/search/hybridSearch.js'
 import { searchCommits } from '../core/search/commitSearch.js'
+import { scanForVulnerabilities } from '../core/search/securityScan.js'
+import { computeHealthTimeline } from '../core/search/healthTimeline.js'
+import { scoreDebt } from '../core/search/debtScoring.js'
+import { getActiveSession } from '../core/db/sqlite.js'
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -1048,6 +1052,99 @@ export async function startMcpServer(): Promise<void> {
           const date = r.lastSeenDate !== null ? formatDate(r.lastSeenDate) : 'unknown date'
           lines.push(`  ${r.score.toFixed(3)}  ${path}  last seen: ${date}`)
           if (r.lastSeenMessage) lines.push(`    commit: ${r.lastSeenMessage}`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: security_scan
+  // -------------------------------------------------------------------------
+  server.tool(
+    'security_scan',
+    'Scan the codebase for blobs semantically similar to common vulnerability patterns.\n⚠️ Results are similarity scores, NOT confirmed vulnerabilities. Manual review required.',
+    {
+      top: z.number().int().positive().optional().default(10).describe('Number of results per pattern'),
+    },
+    async ({ top }) => {
+      try {
+        const provider = getTextProvider()
+        const session = getActiveSession()
+        const findings = await scanForVulnerabilities(session, provider, { top })
+        if (findings.length === 0) {
+          return { content: [{ type: 'text', text: '⚠️ Semantic similarity scan only — not confirmed vulnerabilities.\nNo high-similarity blobs found for any vulnerability pattern.' }] }
+        }
+        const lines = ['⚠️ Results are semantic similarity scores, NOT confirmed vulnerabilities. Manual review required.\n']
+        for (const f of findings) {
+          const path = f.paths[0] ?? '(unknown path)'
+          lines.push(`[${f.patternName}]  score=${f.score.toFixed(3)}  ${path}  [${f.blobHash.slice(0, 7)}]`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: health_timeline
+  // -------------------------------------------------------------------------
+  server.tool(
+    'health_timeline',
+    'Show time-bucketed codebase health metrics: active blob count, semantic churn rate, and dead-concept ratio per period.',
+    {
+      buckets: z.number().int().positive().optional().default(12).describe('Number of time buckets'),
+      branch: z.string().optional().describe('Restrict to commits on this branch'),
+    },
+    ({ buckets, branch }) => {
+      try {
+        const session = getActiveSession()
+        const snaps = computeHealthTimeline(session, { buckets, branch })
+        if (snaps.length === 0) {
+          return { content: [{ type: 'text', text: 'No commits found in the index.' }] }
+        }
+        const lines = [`Health timeline (${snaps.length} buckets):\n`]
+        for (const s of snaps) {
+          const start = new Date(s.periodStart * 1000).toISOString().slice(0, 10)
+          const end = new Date(s.periodEnd * 1000).toISOString().slice(0, 10)
+          lines.push(`  ${start}–${end}  active=${s.activeBlobCount}  churn=${s.semanticChurnRate.toFixed(3)}  dead=${s.deadConceptRatio.toFixed(3)}`)
+        }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: debt_score
+  // -------------------------------------------------------------------------
+  server.tool(
+    'debt_score',
+    'Score blobs by technical debt: isolation (semantic distance from neighbours), age, and low change frequency.',
+    {
+      top: z.number().int().positive().optional().default(20).describe('Number of top-debt blobs to return'),
+      branch: z.string().optional().describe('Restrict to blobs on this branch'),
+    },
+    async ({ top, branch }) => {
+      try {
+        const provider = getTextProvider()
+        const session = getActiveSession()
+        const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+        const results = await scoreDebt(session, provider, { top, branch, model })
+        if (results.length === 0) {
+          return { content: [{ type: 'text', text: 'No blobs found.' }] }
+        }
+        const lines = [`Top-${results.length} debt blobs:\n`]
+        for (const r of results) {
+          const path = r.paths[0] ?? '(unknown path)'
+          lines.push(`  ${r.debtScore.toFixed(3)}  ${path.padEnd(50)}  isolation=${r.isolationScore.toFixed(3)}  age=${r.ageScore.toFixed(3)}  chg=${r.changeFrequency}`)
         }
         return { content: [{ type: 'text', text: lines.join('\n') }] }
       } catch (err) {
