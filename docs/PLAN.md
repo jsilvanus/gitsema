@@ -2174,7 +2174,9 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
   - Unit tests: `tests/healthTimeline.test.ts`.
 
 - Phase 45 — Technical Debt Scoring
-  - `src/core/search/debtScoring.ts` exposes `scoreDebt` which computes a composite debt score over blobs.
+  - `src/core/search/debtScoring.ts` exposes `scoreDebt` (async) which computes a composite debt score over blobs using three signals: age, inverse change-frequency, and isolation.
+  - Isolation score uses real computation: HNSW VSS path (O(log N), via usearch index built by `gitsema build-vss`) preferred; cosine scan fallback (O(N²), compares each blob's vector against all others) when no index file exists; falls back to 0.5 only for blobs with no stored embedding.
+  - `computeIsolationCosineScan` is exported and unit-tested (identical vectors → 0, orthogonal → 1, single blob → 0.5).
   - CLI integration: `src/cli/commands/debt.ts` and registration in `src/cli/index.ts`.
   - Unit tests: `tests/debtScoring.test.ts`.
 
