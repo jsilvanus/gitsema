@@ -11,6 +11,7 @@ import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
 import { codeSearchCommand } from './commands/codeSearch.js'
+import { reposCommand } from './commands/repos.js'
 import { firstSeenCommand } from './commands/firstSeen.js'
 import { evolutionCommand } from './commands/evolution.js'
 import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
@@ -422,6 +423,7 @@ program
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())
+program.addCommand(reposCommand())
 
 program
   .command('first-seen <query>')
