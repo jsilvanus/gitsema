@@ -2128,7 +2128,7 @@ Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies e
 
 ---
 
-### Phase 41 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging
+### Phase 47 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging
 
 **Goal:** Make `gitsema index` output far more informative and actionable. Users running long indexing jobs had no visibility into which pipeline stage was running, how fast embeddings were processing, or whether they were in incremental or full-rebuild mode.
 
@@ -2152,7 +2152,7 @@ Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies e
 
 **Tests:** `tests/indexProgress.test.ts` — 4 unit tests for `formatElapsed` covering all formatting tiers.
 
-**Version:** 0.42.0
+**Version:** 0.49.0
 
 **Deliverables:** `src/cli/commands/index.ts`, `src/cli/index.ts`, `src/core/indexing/indexer.ts`, `tests/indexProgress.test.ts`.
 
@@ -2178,6 +2178,42 @@ Time-series of composite health metrics (semantic churn, coverage proxy, complex
 Score each blob by how semantically "isolated" it is (low similarity to any other blob), how old it is, and how infrequently it changes. High scores indicate candidates for refactoring or removal. Requires a weighted multi-signal scorer and a calibrated threshold.
 
 **Deliverables (stub only):** `src/core/phase41plus.ts`.
+
+**Status (Phases 41–46 implemented):**
+
+- Phase 41 — Multi-Repo Unified Index (schema v14)
+  - Added `repos` table (id, name, url, addedAt) to the SQLite schema (v14) and migration.
+  - Implemented a small repo registry: `src/core/indexing/repoRegistry.ts` with add/list/get helpers.
+  - CLI integration: `src/cli/commands/repos.ts` and registered in `src/cli/index.ts`.
+  - Unit tests: `tests/multiRepo.test.ts`.
+
+- Phase 42 — IDE / LSP Integration
+  - Minimal JSON-RPC LSP server (stdio framing) implemented in `src/core/lsp/server.ts`.
+  - CLI command `src/cli/commands/lsp.ts` to start the server and registration in `src/cli/index.ts`.
+  - Helpers for parsing/serializing LSP messages and a handler for `initialize` and `textDocument/hover`.
+  - Unit tests: `tests/lsp.test.ts` (framing and initialize handler).
+
+- Phase 43 — Security Pattern Detection
+  - `src/core/search/securityScan.ts` implements `scanForVulnerabilities` using a small curated pattern list and vector search.
+  - CLI integration: `src/cli/commands/securityScan.ts` and registration in `src/cli/index.ts`.
+  - Unit tests: `tests/securityScan.test.ts`.
+
+- Phase 44 — Codebase Health Timeline
+  - `src/core/search/healthTimeline.ts` provides `computeHealthTimeline` producing time-bucketed health snapshots.
+  - CLI integration: `src/cli/commands/health.ts` and registration in `src/cli/index.ts`.
+  - Unit tests: `tests/healthTimeline.test.ts`.
+
+- Phase 45 — Technical Debt Scoring
+  - `src/core/search/debtScoring.ts` exposes `scoreDebt` (async) which computes a composite debt score over blobs using three signals: age, inverse change-frequency, and isolation.
+  - Isolation score uses real computation: HNSW VSS path (O(log N), via usearch index built by `gitsema build-vss`) preferred; cosine scan fallback (O(N²), compares each blob's vector against all others) when no index file exists; falls back to 0.5 only for blobs with no stored embedding.
+  - `computeIsolationCosineScan` is exported and unit-tested (identical vectors → 0, orthogonal → 1, single blob → 0.5).
+  - CLI integration: `src/cli/commands/debt.ts` and registration in `src/cli/index.ts`.
+  - Unit tests: `tests/debtScoring.test.ts`.
+
+- Phase 46 — Evolution Alerts and Commit URL Construction
+  - `src/core/search/evolution.ts` extended with `buildCommitUrl` (GitHub/GitLab/Bitbucket support) and `extractAlerts` for salient timeline jumps.
+  - CLI evolution commands now accept `--alerts` and support commit URL resolution (via `git remote get-url origin`) in the CLI flow.
+  - Unit tests: `tests/evolutionAlerts.test.ts` (commit URL building and alert extraction).
 
 ---
 
