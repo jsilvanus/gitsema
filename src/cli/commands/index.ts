@@ -5,7 +5,7 @@ import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { DEFAULT_MAX_SIZE, showBlob } from '../../core/git/showBlob.js'
 import { resolveBlobAtRef } from '../../core/search/evolution.js'
 import { getFileCategory } from '../../core/embedding/fileType.js'
-import { storeBlob, storeBlobRecord, storeChunk } from '../../core/indexing/blobStore.js'
+import { storeBlob, storeBlobRecord, storeChunk, getLastIndexedCommit } from '../../core/indexing/blobStore.js'
 import { createChunker } from '../../core/chunking/chunker.js'
 import { createLimiter } from '../../utils/concurrency.js'
 import { logger } from '../../utils/logger.js'
@@ -16,9 +16,29 @@ import { buildVssCommand } from './buildVss.js'
 import { computeConfigHash, saveEmbedConfig, checkConfigCompatibility, type EmbedConfig } from '../../core/indexing/provenance.js'
 import { getRawDb } from '../../core/db/sqlite.js'
 
+/**
+ * Format a duration in milliseconds as a human-friendly string.
+ * Examples:
+ *   234     → "234ms"
+ *   12300   → "12.3s"
+ *   125000  → "2m 05s"
+ *   3662000 → "1h 01m 02s"
+ */
+export function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const totalSecs = Math.floor(ms / 1000)
+  if (totalSecs < 60) return `${(ms / 1000).toFixed(1)}s`
+  const h = Math.floor(totalSecs / 3600)
+  const m = Math.floor((totalSecs % 3600) / 60)
+  const s = totalSecs % 60
+  const mm = String(m).padStart(2, '0')
+  const ss = String(s).padStart(2, '0')
+  if (h > 0) return `${h}h ${mm}m ${ss}s`
+  return `${m}m ${ss}s`
+}
+
 function formatMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  return formatElapsed(ms)
 }
 
 export async function indexFileCommand(filePath: string, options: { chunker?: string } = {}): Promise<void> {
@@ -201,40 +221,38 @@ export async function indexFileCommand(filePath: string, options: { chunker?: st
 }
 
 function renderProgress(stats: IndexStats): string {
-  const processed = stats.indexed + stats.oversized + stats.failed
+  const elapsed = stats.elapsed
+  const elapsedStr = formatElapsed(elapsed)
+  const stage = stats.currentStage ?? 'collecting'
 
-  if (stats.queued === 0) {
-    // Either still in the collection phase, or collection finished with nothing new to embed.
-    // Use commits > 0 to distinguish Phase B (commit mapping) from Phase A (collecting).
-    if (stats.commits > 0) {
-      return `\r  Mapping commits... commits=${stats.commits} links=${stats.blobCommits}  `
-    }
-    return (
-      `\r  Collecting... seen=${stats.seen} skip=${stats.skipped} filt=${stats.filtered}  `
-    )
+  if (stage === 'collecting' || (stats.queued === 0 && stats.commits === 0)) {
+    return `\r  [collecting] seen=${stats.seen} skip=${stats.skipped} filt=${stats.filtered}  elapsed=${elapsedStr}  `
   }
 
-  // queued > 0 here, so division is safe.
-  if (processed >= stats.queued) {
-    // Phase B: commit metadata mapping
-    return `\r  Mapping commits... commits=${stats.commits} links=${stats.blobCommits}  `
+  if (stage === 'commit-mapping' || (stats.queued > 0 && (stats.indexed + stats.oversized + stats.failed) >= stats.queued)) {
+    return `\r  [commit-mapping] commits=${stats.commits} links=${stats.blobCommits}  elapsed=${elapsedStr}  `
   }
 
   // Embedding phase: render a progress bar.
-  const pct = processed / stats.queued
-  const barWidth = 20
+  const processed = stats.indexed + stats.oversized + stats.failed
+  const pct = stats.queued > 0 ? processed / stats.queued : 0
+  const barWidth = 16
   const filled = Math.round(pct * barWidth)
   const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled)
   const pctStr = (pct * 100).toFixed(0).padStart(3)
-  const rate = stats.elapsed > 0 ? ((stats.indexed / stats.elapsed) * 1000).toFixed(1) : '0'
+  const rate = elapsed > 0 ? ((stats.indexed / elapsed) * 1000).toFixed(1) : '0.0'
   const remaining = stats.queued - processed
   const eta =
-    stats.indexed > 0 && stats.elapsed > 0
-      ? formatMs((stats.elapsed / stats.indexed) * remaining)
+    stats.indexed > 0 && elapsed > 0
+      ? formatElapsed((elapsed / stats.indexed) * remaining)
       : '?'
+  const latencyPart =
+    stats.embedLatencyAvgMs > 0
+      ? ` avg=${stats.embedLatencyAvgMs}ms p95=${stats.embedLatencyP95Ms}ms`
+      : ''
   return (
-    `\r  [${bar}] ${pctStr}%` +
-    ` ${rate}/s eta=${eta}  `
+    `\r  [embedding] [${bar}] ${pctStr}% ${processed}/${stats.queued}` +
+    `  rate=${rate}/s${latencyPart} eta=${eta}  elapsed=${elapsedStr}  `
   )
 }
 
@@ -466,12 +484,26 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (codeProvider) {
     console.log(`Indexing with ${providerType} — text: ${textModel}, code: ${codeModel}`)
   } else {
-    logger.info(`Indexing with ${providerType}/${textModel}...`)
+    console.log(`Indexing with ${providerType}/${textModel}`)
   }
   if (chunkerStrategy !== 'file') {
     console.log(`  Chunker: ${chunkerStrategy}${windowSize !== undefined ? ` (window=${windowSize})` : ''}${overlap !== undefined ? ` (overlap=${overlap})` : ''}`)
   }
-  if (options.since) logger.info(`  Limiting to commits after: ${options.since}`)
+
+  // Determine and print the indexing mode (incremental vs full)
+  if (options.since === 'all') {
+    console.log('  Mode: full re-index (--since all)')
+  } else if (options.since) {
+    console.log(`  Mode: incremental from ${options.since}`)
+  } else {
+    const lastCommit = getLastIndexedCommit()
+    if (lastCommit) {
+      console.log(`  Mode: incremental (resuming from ${lastCommit.substring(0, 8)})`)
+    } else {
+      console.log('  Mode: full (no prior index found — indexing from scratch)')
+    }
+  }
+
   if (options.branch) logger.info(`  Branch filter: ${options.branch}`)
   if (maxCommits !== undefined) logger.info(`  Max commits per session: ${maxCommits}`)
   logger.info(`  Concurrency: ${concurrency} (parallel embedding calls)`)
@@ -509,7 +541,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   // Clear progress line
   if (lastLine) process.stdout.write('\r' + ' '.repeat(lastLine.length) + '\r')
 
-  console.log(`Done in ${formatMs(stats.elapsed)}`)
+  console.log(`Done in ${formatElapsed(stats.elapsed)}`)
 
   // Persist embed config provenance (record actual dimensions when available)
   try {
@@ -550,6 +582,18 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   console.log(`  Commit embeddings:   ${stats.commitEmbeddings}`)
   if (stats.commitEmbedFailed > 0) {
     console.log(`  Commit embed failed: ${stats.commitEmbedFailed}`)
+  }
+  // Stage timings breakdown
+  if (stats.stageTimings) {
+    console.log('  Stage timings:')
+    console.log(`    Collection:      ${formatElapsed(stats.stageTimings.collection)}  (${stats.seen} blobs seen)`)
+    console.log(`    Embedding:       ${formatElapsed(stats.stageTimings.embedding)}  (${stats.indexed} indexed, ${stats.skipped} skipped)`)
+    console.log(`    Commit mapping:  ${formatElapsed(stats.stageTimings.commitMapping)}  (${stats.commits} commits)`)
+  }
+  // Embedding latency report
+  if (stats.embedLatencyAvgMs > 0) {
+    console.log('  Embedding latency:')
+    console.log(`    Avg: ${stats.embedLatencyAvgMs}ms   P95: ${stats.embedLatencyP95Ms}ms`)
   }
 
   // Optionally build VSS index after indexing
