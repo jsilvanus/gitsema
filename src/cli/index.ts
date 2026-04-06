@@ -105,6 +105,10 @@ const GROUPS = [
   'Concept History',
   'Cluster Analysis',
   'Change Detection',
+  'Code Quality',
+  'Workflow & CI',
+  'Visualization',
+  'Maintenance',
 ] as const
 
 const COMMAND_GROUPS: Record<string, string> = {
@@ -117,10 +121,8 @@ const COMMAND_GROUPS: Record<string, string> = {
   'update-modules': 'Setup & Infrastructure',
   'build-vss':      'Setup & Infrastructure',
   // Protocol Servers (new group — preferred entry point is `gitsema tools`)
+  // serve/mcp/lsp are hidden from top-level help; use `gitsema tools` instead
   tools:            'Protocol Servers',
-  serve:            'Protocol Servers',
-  mcp:              'Protocol Servers',
-  lsp:              'Protocol Servers',
   // Search & Discovery
   search:           'Search & Discovery',
   'first-seen':     'Search & Discovery',
@@ -147,6 +149,31 @@ const COMMAND_GROUPS: Record<string, string> = {
   'change-points':         'Change Detection',
   'file-change-points':    'Change Detection',
   'cluster-change-points': 'Change Detection',
+  // Code Quality
+  'code-search':         'Code Quality',
+  'security-scan':       'Code Quality',
+  health:                'Code Quality',
+  debt:                  'Code Quality',
+  'doc-gap':             'Code Quality',
+  'refactor-candidates': 'Code Quality',
+  lifecycle:             'Code Quality',
+  // Workflow & CI
+  bisect:                  'Workflow & CI',
+  'ci-diff':               'Workflow & CI',
+  'contributor-profile':   'Workflow & CI',
+  'cherry-pick-suggest':   'Workflow & CI',
+  repos:                   'Workflow & CI',
+  watch:                   'Workflow & CI',
+  // Visualization
+  map:     'Visualization',
+  heatmap: 'Visualization',
+  project: 'Visualization',
+  // Maintenance
+  doctor:        'Maintenance',
+  vacuum:        'Maintenance',
+  'rebuild-fts': 'Maintenance',
+  gc:            'Maintenance',
+  'clear-model': 'Maintenance',
 }
 
 program.configureHelp({
@@ -501,7 +528,7 @@ program
 program.addCommand(codeSearchCommand())
 program.addCommand(reposCommand())
 // Keep top-level lsp as hidden alias; preferred form is `gitsema tools lsp`
-program.addCommand(lspCommand())
+program.addCommand(lspCommand(), { hidden: true })
 program.addCommand(watchCommand())
 program.addCommand(securityScanCommand())
 program.addCommand(healthCommand())
@@ -702,7 +729,7 @@ program
   .action(semanticDiffCommand)
 
 program
-  .command('serve')
+  .command('serve', { hidden: true })
   .description('Start the gitsema HTTP API server [deprecated: use `gitsema tools serve`]')
   .option('--port <n>', 'port to listen on (default 4242, overrides GITSEMA_SERVE_PORT)')
   .option('--key <token>', 'require this Bearer token for all requests (overrides GITSEMA_SERVE_KEY)')
@@ -1049,7 +1076,7 @@ program
   })
 
 program
-  .command('mcp')
+  .command('mcp', { hidden: true })
   .description('Start the gitsema MCP server (stdio transport) [deprecated: use `gitsema tools mcp`]')
   .action(async () => {
     console.warn('Deprecation notice: `gitsema mcp` is deprecated — use `gitsema tools mcp` instead.')

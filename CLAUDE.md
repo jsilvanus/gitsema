@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # gitsema — CLAUDE.md
 
 ## Project overview
@@ -6,7 +10,7 @@
 
 **Core capabilities:**
 - Semantic search over all of Git history (not just HEAD)
-- Temporal analysis: `first-seen`, `evolution`, `concept-evolution`
+- Temporal analysis: `first-seen`, `file-evolution`, `evolution` (concept-level)
 - Hybrid search (vector similarity + BM25 keyword matching)
 - Multiple chunking strategies (whole-file, function boundaries, fixed windows)
 - Multi-model routing (separate models for code vs. prose)
@@ -39,6 +43,33 @@ node dist/cli/index.js <command> [options]
 ```bash
 gitsema -V   # reads version from package.json at runtime
 ```
+
+---
+
+## Testing
+
+```bash
+pnpm test                   # run full test suite (vitest run)
+pnpm test -- <file>         # run a specific test file (e.g. pnpm test -- chunking.test.ts)
+pnpm test -- --watch        # watch mode during development
+```
+
+**Structure:**
+- `tests/*.test.ts` — unit tests (mocked dependencies)
+- `tests/integration/` — end-to-end tests (real Git repos, real SQLite, mock embedding provider)
+- `tests/serverRoutes.test.ts` — HTTP routes via `supertest`
+
+**Patterns:**
+- Mock modules with `vi.mock()`, spy with `vi.fn()`, clean up with `vi.restoreAllMocks()` in `afterEach`
+- Integration tests use `mkdtempSync()` + `rmSync()` for isolated temp Git repos
+- `withDbSession()` helper creates isolated temp SQLite DBs per test
+
+---
+
+## CI/CD
+
+- **ci.yml** — triggers on push to `main` and on PRs: `pnpm install --frozen-lockfile` → `pnpm build` → `pnpm test` (Node 20 / pnpm 9)
+- **release.yml** — triggers on `v*` tags: same pipeline + auto-creates a GitHub Release
 
 ---
 
@@ -88,7 +119,7 @@ The indexer applies a multi-level fallback chain: whole-file → function chunke
 ### `gitsema first-seen <query> [-k n]`
 Find when a concept first appeared — same as `search` but sorted chronologically (earliest first).
 
-### `gitsema evolution <path> [options]`
+### `gitsema file-evolution <path> [options]`
 Track semantic drift of a single file across its Git history.
 
 | Flag | Default | Description |
@@ -98,8 +129,8 @@ Track semantic drift of a single file across its Git history.
 | `--include-content` | off | Add stored file text per version in JSON (requires `--dump`) |
 | `--branch <name>` | — | Restrict evolution to blobs seen on this branch |
 
-### `gitsema concept-evolution <query> [options]`
-Trace how a semantic concept evolved across the entire codebase history.
+### `gitsema evolution <query> [options]`
+Trace how a semantic concept evolved across the entire codebase history. (`concept-evolution` is a backward-compat alias.)
 
 | Flag | Default | Description |
 |---|---|---|
@@ -111,19 +142,24 @@ Trace how a semantic concept evolved across the entire codebase history.
 ### `gitsema diff <ref1> <ref2> <path>`
 Compute cosine distance between two versions of a file. `--neighbors <n>` shows nearest-neighbor blobs for each version.
 
-### `gitsema serve [options]`
-Start an HTTP API server that exposes embedding and storage over the network. Allows remote machines to delegate indexing to a central server.
+### `gitsema tools <server>`
+Preferred entry point for all long-running protocol servers. Subcommands:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--port <n>` | `4242` | Port to listen on (also `GITSEMA_SERVE_PORT`) |
-| `--key <token>` | — | Require Bearer token on all requests (also `GITSEMA_SERVE_KEY`) |
+| Subcommand | Description |
+|---|---|
+| `gitsema tools mcp` | Start the MCP stdio server (AI tool interface) |
+| `gitsema tools lsp [--tcp <port>]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
+
+The old top-level `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work as hidden backward-compat aliases.
+
+### `gitsema config <action> [key] [value]`
+Manage persistent configuration (set/get/list/unset). Stored in `.gitsema/config.json` (repo-level, default) or `~/.config/gitsema/config.json` (global, `--global`). Env vars override config file values.
+
+Supported dot-notation keys for command defaults: `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `index.concurrency`, `index.chunker`, `index.ext`, `search.hybrid`, `search.top`, `evolution.threshold`, `clusters.k`, and more. Use `gitsema config list` to see all active values and their sources.
 
 ### `gitsema backfill-fts`
 Populate FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added). Required to use `--hybrid` search on older index entries.
-
-### `gitsema mcp`
-Start the MCP server over stdio. Exposes: `semantic_search`, `search_history`, `first_seen`, `evolution`, `concept_evolution`, `index`.
 
 ---
 
@@ -270,12 +306,12 @@ Schema changes require updating both `src/core/db/schema.ts` and the migration l
 
 Start the server:
 ```bash
-gitsema mcp
+gitsema tools mcp
 # or in dev:
-node dist/cli/index.js mcp
+node dist/cli/index.js tools mcp
 ```
 
-**VS Code registration:** Developer Commands → `MCP: Add Server` → Command → `node /absolute/path/to/gitsema/dist/cli/index.js mcp`
+**VS Code registration:** Developer Commands → `MCP: Add Server` → Command → `node /absolute/path/to/gitsema/dist/cli/index.js tools mcp`
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
@@ -287,8 +323,8 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `search_history` | Vector search with date filtering + optional chronological sort |
 | `first_seen` | Find concept origin (sorted oldest-first) |
 | `code_search` | Symbol-level semantic code search |
-| `evolution` | File semantic drift timeline (human-readable or structured JSON) |
-| `concept_evolution` | Cross-codebase concept drift timeline |
+| `evolution` | Concept drift timeline across the codebase (formerly `concept_evolution`) |
+| `file_evolution` | Single-file semantic drift timeline |
 | `semantic_diff` | Semantic diff between two refs |
 | `semantic_blame` | Per-block nearest-neighbor attribution |
 | `index` | Trigger incremental re-indexing |
@@ -328,7 +364,7 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 
 ## Development conventions
 
-- **ESM only.** `"type": "module"` in `package.json`. All imports must use `.js` extensions (even for `.ts` source files). No CommonJS.
+- **ESM only.** `"type": "module"` in `package.json`. All imports must use `.js` extensions (even for `.ts` source files). No CommonJS. This is enforced by `module: Node16` in `tsconfig.json` (ESM-strict import resolution); Vitest resolves `.js` specifiers back to `.ts` files automatically.
 - **Strict TypeScript.** `strict: true` in `tsconfig.json`. No `any` casts without explicit reason.
 - **No barrel exports.** Import directly from the file that defines the function/class.
 - **Test suite:** Vitest is used for tests (`pnpm test`). Tests live in `tests/` (unit) and `tests/integration/` (end-to-end). Add tests for any new core logic.
