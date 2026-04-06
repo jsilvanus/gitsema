@@ -2128,6 +2128,36 @@ Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies e
 
 ---
 
+### Phase 41 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging
+
+**Goal:** Make `gitsema index` output far more informative and actionable. Users running long indexing jobs had no visibility into which pipeline stage was running, how fast embeddings were processing, or whether they were in incremental or full-rebuild mode.
+
+**Progress counter improvements:**
+- `formatElapsed(ms)` — human-friendly duration formatter exported from `src/cli/commands/index.ts`: `234ms` → `12.3s` → `2m 05s` → `1h 02m 03s`
+- `renderProgress()` rewritten to show current stage label (`[collecting]`, `[embedding]`, `[commit-mapping]`), progress bar with count and percentage, throughput (blobs/s), embedding latency avg + p95, and ETA
+- Final summary extended with per-stage wall-clock timings (collection / embedding / commit-mapping) and embedding latency stats
+
+**Indexer instrumentation (`src/core/indexing/indexer.ts`):**
+- New `IndexStats` fields: `currentStage`, `stageTimings`, `embedLatencyAvgMs`, `embedLatencyP95Ms`
+- Stage transitions recorded with timestamps throughout `runIndex()`
+- Embedding calls wrapped in `timedEmbed()` helper; latency collected in a rolling 200-sample window
+- avg/p95 computed lazily on progress ticks (not per-embed call) via dirty-flag pattern to avoid O(n log n) sort overhead in the hot path
+
+**Incremental mode messaging:**
+- CLI prints the active mode at run start: `Mode: incremental (resuming from <hash>)`, `Mode: full (no prior index found)`, `Mode: incremental from <ref>`, or `Mode: full re-index (--since all)`
+
+**CLI help text improvements (`src/cli/index.ts`):**
+- `gitsema index --help` description updated with incremental-default explanation, progress metric glossary, and performance tuning tips
+- Option descriptions improved for `--since`, `--concurrency`, `--chunker`, `--window-size`, and model override flags
+
+**Tests:** `tests/indexProgress.test.ts` — 4 unit tests for `formatElapsed` covering all formatting tiers.
+
+**Version:** 0.42.0
+
+**Deliverables:** `src/cli/commands/index.ts`, `src/cli/index.ts`, `src/core/indexing/indexer.ts`, `tests/indexProgress.test.ts`.
+
+---
+
 ### Phase 41+ — Large Investments (Stubs & Roadmap)
 
 **Goal:** These phases represent substantial engineering investments (4+ weeks each). Stub interfaces and TODO annotations have been added in `src/core/phase41plus.ts` to scaffold future implementation without introducing runtime behavior or breaking changes.
