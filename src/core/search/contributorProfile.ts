@@ -1,8 +1,11 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { commits, blobCommits, embeddings, paths } from '../db/schema.js'
 import { inArray } from 'drizzle-orm'
-import { cosineSimilarity } from './vectorSearch.js'
-import { vectorSearch } from './vectorSearch.js'
+import { cosineSimilarity, vectorSearch } from './vectorSearch.js'
+
+function bufToFloat32(buf: Buffer): Float32Array {
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
+}
 
 export interface ContributorProfileOptions {
   topK?: number
@@ -55,7 +58,7 @@ export async function computeContributorProfile(author: string, opts: Contributo
       .where(inArray(embeddings.blobHash, batch))
       .all()
     for (const r of rows) {
-      if (r.vector) vectors.push(new Float32Array((r.vector as Buffer).buffer, (r.vector as Buffer).byteOffset, (r.vector as Buffer).byteLength / 4))
+      if (r.vector) vectors.push(bufToFloat32(r.vector as Buffer))
     }
   }
 

@@ -4,6 +4,10 @@ import { inArray } from 'drizzle-orm'
 import { cosineSimilarity } from './vectorSearch.js'
 import { getFileCategory } from '../embedding/fileType.js'
 
+function bufToFloat32(buf: Buffer): Float32Array {
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
+}
+
 export interface DocGapOptions {
   topK?: number
   threshold?: number // include only code blobs with max-similarity < threshold
@@ -64,7 +68,7 @@ export async function computeDocGap(opts: DocGapOptions = {}): Promise<DocGapRes
       .where(inArray(embeddings.blobHash, batch))
       .all()
     for (const row of rows) {
-      if (row.vector) docEmbeddings.push(new Float32Array((row.vector as Buffer).buffer, (row.vector as Buffer).byteOffset, (row.vector as Buffer).byteLength / 4))
+      if (row.vector) docEmbeddings.push(bufToFloat32(row.vector as Buffer))
     }
   }
 
@@ -82,7 +86,7 @@ export async function computeDocGap(opts: DocGapOptions = {}): Promise<DocGapRes
       .all()
 
     for (const row of rows) {
-      const emb = new Float32Array((row.vector as Buffer).buffer, (row.vector as Buffer).byteOffset, (row.vector as Buffer).byteLength / 4)
+      const emb = bufToFloat32(row.vector as Buffer)
       let maxSim = 0
       for (const d of docEmbeddings) {
         const sim = cosineSimilarity(emb, d)

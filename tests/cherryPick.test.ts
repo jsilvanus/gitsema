@@ -11,7 +11,7 @@ function bufFromArray(arr: number[]) {
 
 describe('suggestCherryPicks', () => {
   it('finds commits similar to query embedding', async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'gitsema-cp-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'gitsema-cherrypick-'))
     const dbPath = join(tmpDir, 'test.db')
     const session = openDatabaseAt(dbPath)
 
