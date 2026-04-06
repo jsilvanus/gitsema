@@ -297,9 +297,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     const autoMapPath = `.gitsema/vectors-${safeName}.map.json`
     if (existsSync(autoIndexPath) && existsSync(autoMapPath)) {
       options.vss = true
-      if (process.env.GITSEMA_VERBOSE) {
-        console.error('Info: HNSW index found — using ANN search automatically (build-vss to update).')
-      }
+      console.error('Info: Using ANN index (build-vss to update).')
     }
   }
 

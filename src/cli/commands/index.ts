@@ -300,6 +300,7 @@ export interface IndexCommandOptions {
   codeModel?: string
   quantize?: boolean
   buildVss?: boolean
+  autoBuildVss?: string
   allowMixed?: boolean
 }
 
@@ -611,5 +612,21 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (options.buildVss) {
     const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
     await buildVssCommand({ model: textModel })
+  }
+
+  // Auto-build VSS if blob count exceeds the configured threshold
+  if (options.autoBuildVss !== undefined) {
+    const threshold = options.autoBuildVss === '' || options.autoBuildVss === 'true'
+      ? 10000
+      : parseInt(options.autoBuildVss, 10)
+    const rawDb = getRawDb()
+    const countRow = rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c: number }
+    if (countRow.c >= threshold) {
+      const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+      console.log(`Auto-building VSS index (${countRow.c} blobs ≥ threshold ${threshold})…`)
+      await buildVssCommand({ model: textModel })
+    } else {
+      console.log(`Auto-VSS skipped: ${countRow.c} blobs < threshold ${threshold}`)
+    }
   }
 }

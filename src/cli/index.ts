@@ -384,6 +384,7 @@ program
   .option('--code-model <model>', 'override source-code embedding model (defaults to text model)')
   .option('--quantize', 'store embeddings as int8-quantized vectors (4× smaller, ~1% recall loss)')
   .option('--build-vss', 'build a usearch HNSW ANN index after indexing completes (requires usearch package)')
+  .option('--auto-build-vss [threshold]', 'automatically build VSS index after indexing when blob count exceeds threshold (default: 10000)')
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
   .action(indexCommand)
 
