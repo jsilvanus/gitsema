@@ -1,0 +1,100 @@
+name: 'gitsema Semantic CI Diff'
+description: 'Run a semantic diff between two Git refs and optionally post results as a PR comment'
+author: 'jsilvanus'
+
+inputs:
+  base:
+    description: 'Base Git ref to compare from (default: HEAD~1)'
+    required: false
+    default: 'HEAD~1'
+  head:
+    description: 'Head Git ref to compare to (default: HEAD)'
+    required: false
+    default: 'HEAD'
+  query:
+    description: 'Semantic topic to focus the diff on'
+    required: false
+    default: 'semantic changes'
+  top:
+    description: 'Max blobs per diff group'
+    required: false
+    default: '20'
+  threshold:
+    description: 'Score threshold for significant changes'
+    required: false
+    default: '0.3'
+  format:
+    description: 'Output format: text (default), html, json'
+    required: false
+    default: 'text'
+  provider:
+    description: 'Embedding provider: ollama (default) or http'
+    required: false
+    default: 'ollama'
+  model:
+    description: 'Embedding model name'
+    required: false
+    default: 'nomic-embed-text'
+  http_url:
+    description: 'Base URL for HTTP embedding provider (required if provider=http)'
+    required: false
+  api_key:
+    description: 'Bearer token for HTTP embedding provider'
+    required: false
+  github_token:
+    description: 'GitHub token for posting a PR comment (use secrets.GITHUB_TOKEN)'
+    required: false
+  gitsema_version:
+    description: 'gitsema version to install (default: latest)'
+    required: false
+    default: 'latest'
+
+outputs:
+  result:
+    description: 'The text output of gitsema ci-diff'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install gitsema
+      shell: bash
+      run: npm install -g gitsema@${{ inputs.gitsema_version }}
+
+    - name: Run gitsema index (changed files only)
+      shell: bash
+      env:
+        GITSEMA_PROVIDER: ${{ inputs.provider }}
+        GITSEMA_MODEL: ${{ inputs.model }}
+        GITSEMA_HTTP_URL: ${{ inputs.http_url }}
+        GITSEMA_API_KEY: ${{ inputs.api_key }}
+      run: |
+        CHANGED=$(git diff --name-only ${{ inputs.base }} ${{ inputs.head }} | head -100)
+        if [ -z "$CHANGED" ]; then
+          echo "No changed files detected."
+          exit 0
+        fi
+        echo "$CHANGED" | xargs gitsema index --file
+
+    - name: Run gitsema ci-diff
+      id: ci-diff
+      shell: bash
+      env:
+        GITSEMA_PROVIDER: ${{ inputs.provider }}
+        GITSEMA_MODEL: ${{ inputs.model }}
+        GITSEMA_HTTP_URL: ${{ inputs.http_url }}
+        GITSEMA_API_KEY: ${{ inputs.api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        gitsema ci-diff \
+          --base "${{ inputs.base }}" \
+          --head "${{ inputs.head }}" \
+          --query "${{ inputs.query }}" \
+          --top "${{ inputs.top }}" \
+          --format "${{ inputs.format }}" \
+          --threshold "${{ inputs.threshold }}" \
+          ${{ inputs.github_token && '--github-token $GITHUB_TOKEN' || '' }}

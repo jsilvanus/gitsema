@@ -18,6 +18,8 @@ export interface CiDiffCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  /** GitHub token for posting PR review comments (overrides GITHUB_TOKEN env var) */
+  githubToken?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -117,8 +119,56 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
     console.log(text)
   }
 
+  // Post as GitHub PR review comment if token is provided
+  const githubToken = options.githubToken ?? process.env.GITHUB_TOKEN
+  if (githubToken) {
+    await postGithubPrComment(text, githubToken)
+  }
+
   // Exit with non-zero if there are significant changes (for CI gate use case)
   if (result.gained.length > 0 || result.lost.length > 0) {
     process.exitCode = 1
+  }
+}
+
+/**
+ * Post a CI diff comment to the current GitHub PR via the GitHub REST API.
+ * Reads PR number and repo from standard GitHub Actions environment variables.
+ */
+async function postGithubPrComment(body: string, token: string): Promise<void> {
+  const repo = process.env.GITHUB_REPOSITORY // e.g. "owner/repo"
+  const prNumber = process.env.GITHUB_REF?.match(/refs\/pull\/(\d+)\//)?.[1]
+    ?? process.env.GITHUB_PR_NUMBER
+
+  if (!repo || !prNumber) {
+    console.error(
+      'Warning: --github-token was provided but GITHUB_REPOSITORY and GITHUB_REF (or GITHUB_PR_NUMBER) are not set. ' +
+      'Cannot post PR comment. Set these in a GitHub Actions environment.',
+    )
+    return
+  }
+
+  const url = `https://api.github.com/repos/${repo}/issues/${prNumber}/comments`
+  const commentBody = `**gitsema CI semantic diff**\n\n\`\`\`\n${body}\n\`\`\``
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify({ body: commentBody }),
+    })
+    if (response.ok) {
+      console.log(`GitHub PR comment posted to ${repo}#${prNumber}`)
+    } else {
+      const err = await response.text()
+      console.error(`Warning: failed to post GitHub PR comment: ${response.status} ${err.slice(0, 100)}`)
+    }
+  } catch (e) {
+    console.error(`Warning: failed to post GitHub PR comment: ${e instanceof Error ? e.message : String(e)}`)
   }
 }

@@ -582,6 +582,7 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--github-token <token>', 'GitHub token to post diff as a PR review comment (overrides GITHUB_TOKEN)')
   .action(ciDiffCommand)
 
 program
