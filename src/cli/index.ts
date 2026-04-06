@@ -13,6 +13,7 @@ import { searchCommand } from './commands/search.js'
 import { codeSearchCommand } from './commands/codeSearch.js'
 import { reposCommand } from './commands/repos.js'
 import { lspCommand } from './commands/lsp.js'
+import { securityScanCommand } from './commands/securityScan.js'
 import { firstSeenCommand } from './commands/firstSeen.js'
 import { evolutionCommand } from './commands/evolution.js'
 import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
@@ -426,6 +427,7 @@ program
 program.addCommand(codeSearchCommand())
 program.addCommand(reposCommand())
 program.addCommand(lspCommand())
+program.addCommand(securityScanCommand())
 
 program
   .command('first-seen <query>')
