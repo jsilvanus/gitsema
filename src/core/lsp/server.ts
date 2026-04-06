@@ -1,6 +1,7 @@
 import { vectorSearch } from '../search/vectorSearch.js'
 import { getActiveSession } from '../db/sqlite.js'
 import { embedQuery } from '../embedding/embedQuery.js'
+import { buildProvider } from '../embedding/providerFactory.js'
 
 export type JsonRpcRequest = { jsonrpc: '2.0'; id?: number | string; method: string; params?: any }
 export type JsonRpcResponse = { jsonrpc: '2.0'; id?: number | string; result?: any; error?: any }
@@ -42,11 +43,13 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
     // Extract the hovered word: prefer explicit text/word params over position-based lookup
     const rawWord = params?.text ?? params?.word ?? ''
     const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
-    // Use a lightweight embedding flow: embed the query then vectorSearch
+    // Use the configured embedding provider (honours GITSEMA_PROVIDER / GITSEMA_MODEL)
     try {
-      const provider = { model: 'mock' }
-      const queryEmb = await embedQuery(provider as any, q)
-      const results = vectorSearch(queryEmb, { topK: 5, model: undefined, query: q })
+      const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
+      const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+      const provider = buildProvider(providerType, model)
+      const queryEmb = await embedQuery(provider, q)
+      const results = vectorSearch(queryEmb, { topK: 5, model, query: q })
       // Build hover contents from top results
       const contents = results.map((r: any) => `${r.blobHash} ${r.score.toFixed(3)} ${((r.paths && r.paths[0]) || '')}`).join('\n')
       return { jsonrpc: '2.0', id, result: { contents } }
