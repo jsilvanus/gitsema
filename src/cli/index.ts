@@ -391,6 +391,48 @@ program
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
   .action(indexCommand)
 
+// index export / index import — Phase 54 subcommands
+// (export-index and import-index top-level aliases kept for backward compatibility)
+
+const indexSub = program.commands.find((c) => c.name() === 'index')!
+
+indexSub
+  .command('export')
+  .description('Export the index as a compressed bundle (tar.gz) for sharing or backup')
+  .option('--out <file>', 'output bundle file path', 'gitsema-index.tar.gz')
+  .option('--after <date>', 'only include metadata for blobs first seen after this date (YYYY-MM-DD, tag, or commit)')
+  .option('--since <ref>', 'alias for --after')
+  .action(async (opts: { out: string; after?: string; since?: string }) => {
+    await exportIndex(opts)
+  })
+
+indexSub
+  .command('import')
+  .description('Import a gitsema index bundle (tar.gz) into the current .gitsema/ directory')
+  .option('--in <file>', 'input bundle file path', 'gitsema-index.tar.gz')
+  .action(async (opts: { in: string }) => {
+    await importIndex(opts)
+  })
+
+// Backward-compatible top-level aliases
+program
+  .command('export-index', { hidden: true })
+  .description('[alias] gitsema index export')
+  .option('--out <file>', 'output bundle file path', 'gitsema-index.tar.gz')
+  .option('--after <date>', 'only include metadata for blobs first seen after this date')
+  .option('--since <ref>', 'alias for --after')
+  .action(async (opts: { out: string; after?: string; since?: string }) => {
+    await exportIndex(opts)
+  })
+
+program
+  .command('import-index', { hidden: true })
+  .description('[alias] gitsema index import')
+  .option('--in <file>', 'input bundle file path', 'gitsema-index.tar.gz')
+  .action(async (opts: { in: string }) => {
+    await importIndex(opts)
+  })
+
 program
   .command('doctor')
   .description('Run integrity checks, schema version/provenance checks, and report index health')
@@ -412,22 +454,6 @@ program
   .option('-y, --yes', 'skip confirmation prompt')
   .action(async (opts: { yes?: boolean }) => {
     await rebuildFtsCliCommand({ yes: opts.yes })
-  })
-
-program
-  .command('export-index')
-  .description('Export the gitsema index as a compressed bundle (tar.gz) for sharing or backup')
-  .option('--out <file>', 'output bundle file path', 'gitsema-index.tar.gz')
-  .action(async (opts: { out: string }) => {
-    await exportIndex(opts)
-  })
-
-program
-  .command('import-index')
-  .description('Import a gitsema index bundle (tar.gz) into the current .gitsema/ directory')
-  .option('--in <file>', 'input bundle file path', 'gitsema-index.tar.gz')
-  .action(async (opts: { in: string }) => {
-    await importIndex(opts)
   })
 
 program
@@ -463,6 +489,8 @@ program
   .option('--or <query>', 'combine results with OR (union, max score)')
   .option('--and <query>', 'combine results with AND (intersection, harmonic mean)')
   .option('--expand-query', 'expand query with top BM25 keywords before embedding to improve recall (Phase 52)')
+  .option('--narrate', 'generate an LLM summary of search results (requires GITSEMA_LLM_URL)')
+  .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo; use gitsema repos add to register)')
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())
@@ -488,6 +516,7 @@ program
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--vss', 'use the usearch HNSW ANN index for approximate search (requires prior `gitsema build-vss`; falls back to linear scan)')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise first-seen.html')
+  .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo)')
   .action(firstSeenCommand)
 
 program
@@ -547,6 +576,7 @@ program
   .option('--code-model <model>', 'override code embedding model')
   .option('--branch <name>', 'restrict evolution to blobs seen on this branch')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
+  .option('--narrate', 'generate an LLM summary of concept evolution results (requires GITSEMA_LLM_URL)')
   .action(conceptEvolutionCommand)
 
 program
@@ -773,6 +803,7 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--narrate', 'generate an LLM summary of cluster structure (requires GITSEMA_LLM_URL)')
   .action(clustersCommand)
 
 program

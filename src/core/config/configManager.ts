@@ -52,6 +52,8 @@ export const ENV_KEY_MAP: Record<string, string> = {
   serveKey:     'GITSEMA_SERVE_KEY',
   remoteUrl:    'GITSEMA_REMOTE',
   remoteKey:    'GITSEMA_REMOTE_KEY',
+  llmUrl:       'GITSEMA_LLM_URL',
+  llmModel:     'GITSEMA_LLM_MODEL',
 }
 
 /**
@@ -66,6 +68,9 @@ export const ALL_KEYS: ReadonlyArray<string> = [
   'codeModel',
   'httpUrl',
   'apiKey',
+  // LLM narration
+  'llmUrl',
+  'llmModel',
   // Logging / infra
   'verbose',
   'logMaxBytes',

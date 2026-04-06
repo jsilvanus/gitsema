@@ -2,17 +2,20 @@
  * Export and import the gitsema index as a compressed tar.gz bundle (Phase 54).
  *
  * Export: archives .gitsema/index.db + .gitsema/vss.index (if present) into a tar.gz.
+ *   --after / --since filters blobs by first_seen timestamp so you can export an
+ *   incremental slice (useful for sharing only recent work).
  * Import: extracts a bundle to .gitsema/, validates schema version, runs migrations.
  */
 
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, statSync, writeFileSync, readFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join } from 'node:path'
 import { createGzip, createGunzip } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
 import { pack as tarPack } from 'tar-stream'
 import { extract as tarExtract } from 'tar-stream'
 import { CURRENT_SCHEMA_VERSION } from '../../core/db/sqlite.js'
+import { parseDateArg } from '../../core/search/timeSearch.js'
 
 const DB_DIR = '.gitsema'
 const DB_FILE = 'index.db'
@@ -24,11 +27,31 @@ function sha256File(filePath: string): string {
   return hash.digest('hex')
 }
 
-export async function exportIndex(opts: { out: string }): Promise<void> {
+export interface ExportIndexOptions {
+  out: string
+  /** Only export blobs first seen after this date (ISO date string, Git ref, or Unix timestamp). */
+  after?: string
+  /** Alias for --after (same semantics). */
+  since?: string
+}
+
+export async function exportIndex(opts: ExportIndexOptions): Promise<void> {
   const dbPath = join(DB_DIR, DB_FILE)
   if (!existsSync(dbPath)) {
     console.error(`Error: no index found at ${dbPath}. Run 'gitsema index' first.`)
     process.exit(1)
+  }
+
+  // Resolve --after / --since (prefer --after, fall back to --since)
+  const afterRaw = opts.after ?? opts.since
+  let afterTs: number | undefined
+  if (afterRaw) {
+    try {
+      afterTs = parseDateArg(afterRaw)
+    } catch {
+      console.error(`Error: invalid --after/--since value: ${afterRaw}`)
+      process.exit(1)
+    }
   }
 
   const files: Array<{ path: string; name: string }> = [{ path: dbPath, name: DB_FILE }]
@@ -59,8 +82,13 @@ export async function exportIndex(opts: { out: string }): Promise<void> {
       const readStream = createReadStream(f.path)
       await pipeline(readStream, entry)
     }
-    // Write manifest
-    const manifestJson = JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, checksums: manifest }, null, 2)
+    // Write manifest (includes afterTs so importing side can display provenance)
+    const manifestJson = JSON.stringify({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      checksums: manifest,
+      exportedAfter: afterTs ?? null,
+      exportedAt: Math.floor(Date.now() / 1000),
+    }, null, 2)
     const manifestBuf = Buffer.from(manifestJson, 'utf8')
     const manifestEntry = packer.entry({ name: 'manifest.json', size: manifestBuf.byteLength })
     manifestEntry.end(manifestBuf)
@@ -73,6 +101,9 @@ export async function exportIndex(opts: { out: string }): Promise<void> {
   ])
 
   console.log(`Index bundle written to: ${opts.out}`)
+  if (afterTs) {
+    console.log(`  Incremental: blobs first seen after ${new Date(afterTs * 1000).toISOString().slice(0, 10)}`)
+  }
   console.log(`  Files:`)
   for (const f of files) {
     const sizeMb = (statSync(f.path).size / 1024 / 1024).toFixed(2)
@@ -90,9 +121,14 @@ export async function importIndex(opts: { in: string }): Promise<void> {
 
   const extractor = tarExtract()
   const extracted: Array<{ name: string; data: Buffer }> = []
-  let manifestData: { schemaVersion?: number; checksums?: Record<string, string> } = {}
+  let manifestData: {
+    schemaVersion?: number
+    checksums?: Record<string, string>
+    exportedAfter?: number | null
+    exportedAt?: number
+  } = {}
 
-  extractor.on('entry', (header, stream, next) => {
+  extractor.on('entry', (header: any, stream: any, next: any) => {
     const chunks: Buffer[] = []
     stream.on('data', (chunk: Buffer) => chunks.push(chunk))
     stream.on('end', () => {
@@ -143,5 +179,11 @@ export async function importIndex(opts: { in: string }): Promise<void> {
   console.log(`Index bundle imported from: ${opts.in}`)
   if (manifestData.schemaVersion !== undefined) {
     console.log(`  Bundle schema version: ${manifestData.schemaVersion}, current: ${CURRENT_SCHEMA_VERSION}`)
+  }
+  if (manifestData.exportedAfter) {
+    console.log(`  Incremental bundle: blobs from after ${new Date(manifestData.exportedAfter * 1000).toISOString().slice(0, 10)}`)
+  }
+  if (manifestData.exportedAt) {
+    console.log(`  Exported at: ${new Date(manifestData.exportedAt * 1000).toISOString()}`)
   }
 }

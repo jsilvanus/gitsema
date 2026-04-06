@@ -6,6 +6,7 @@ import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 import { toSarif } from '../../core/search/sarifOutput.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+import { narrateSecurityFindings } from '../../core/llm/narrator.js'
 
 export function securityScanCommand(): Command {
   return new Command('security-scan')
@@ -15,7 +16,8 @@ export function securityScanCommand(): Command {
     .option('--dump [file]', 'output JSON to file or stdout')
     .option('--sarif [file]', 'output SARIF 2.1.0 format to file or stdout')
     .option('--high-confidence-only', 'only report findings with both semantic + structural signal')
-    .action(async (opts: { top?: string; model?: string; dump?: string | boolean; sarif?: string | boolean; highConfidenceOnly?: boolean }) => {
+    .option('--narrate', 'generate an LLM triage summary of findings (requires GITSEMA_LLM_URL)')
+    .action(async (opts: { top?: string; model?: string; dump?: string | boolean; sarif?: string | boolean; highConfidenceOnly?: boolean; narrate?: boolean }) => {
       let top: number
       try {
         top = parsePositiveInt(opts.top ?? '10', '--top')
@@ -69,6 +71,14 @@ export function securityScanCommand(): Command {
         const conf = f.confidence === 'high' ? '🔴 HIGH' : f.confidence === 'structural' ? '🟡 STRUCT' : '🟠 MED'
         const heuristic = f.heuristicMatches?.length ? ` [heuristic: ${f.heuristicMatches[0].slice(0, 60)}]` : ''
         console.log(`[${f.patternName}]  ${conf}  score=${f.score.toFixed(3)}  ${f.blobHash.slice(0, 8)}  ${f.paths.join(', ')}${heuristic}`)
+      }
+
+      // LLM triage summary
+      if (opts.narrate && findings.length > 0) {
+        console.log('')
+        console.log('=== LLM Triage Summary ===')
+        const narrative = await narrateSecurityFindings(findings)
+        console.log(narrative)
       }
     })
 }

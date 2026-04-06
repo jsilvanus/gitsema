@@ -12,6 +12,7 @@ import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { getRawDb } from '../../core/db/sqlite.js'
 import { splitIdentifier } from '../../core/search/labelEnhancer.js'
+import { narrateSearchResults } from '../../core/llm/narrator.js'
 
 export interface SearchCommandOptions {
   top?: string
@@ -69,6 +70,10 @@ export interface SearchCommandOptions {
   and?: string
   /** When true, expand query with top BM25 keywords before embedding (improves recall) */
   expandQuery?: boolean
+  /** When true, generate an LLM narrative summary of search results */
+  narrate?: boolean
+  /** Comma-separated repo IDs to search (multi-repo mode, requires registered repos with db_path) */
+  repos?: string
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -447,6 +452,27 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
   }
 
+  // --repos: merge results across registered repositories
+  if (options.repos) {
+    try {
+      const { multiRepoSearch } = await import('../../core/indexing/repoRegistry.js')
+      const { getActiveSession } = await import('../../core/db/sqlite.js')
+      const session = getActiveSession()
+      const repoIds = options.repos.split(',').map((s) => s.trim()).filter(Boolean)
+      const multiResults = await multiRepoSearch(session, Array.from(textEmbedding) as number[], {
+        repoIds: repoIds.length > 0 ? repoIds : undefined,
+        topK,
+        model: textModel,
+      })
+      // Merge local results with multi-repo results
+      const combined = [...results, ...multiResults]
+      combined.sort((a, b) => b.score - a.score)
+      results = combined.slice(0, topK)
+    } catch (err) {
+      console.error(`Warning: multi-repo search failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   // Support boolean/composite queries: detect "A AND B" or "A OR B" in the main query
   const parsedBool = parseBooleanQuery(query)
   if (parsedBool) {
@@ -541,5 +567,13 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   if (commitResults) {
     console.log('\nCommit matches:')
     console.log(renderCommitResults(commitResults))
+  }
+
+  // LLM narration of search results
+  if (options.narrate && results.length > 0) {
+    console.log('')
+    console.log('=== LLM Search Narrative ===')
+    const narrative = await narrateSearchResults(query, results)
+    console.log(narrative)
   }
 }
