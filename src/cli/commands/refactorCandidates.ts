@@ -6,12 +6,15 @@ export interface RefactorCandidatesCommandOptions {
   top?: string
   level?: string
   dump?: string | boolean
+  noHeadings?: boolean
 }
 
-function renderReport(report: RefactorReport): string {
+function renderReport(report: RefactorReport, showHeadings = true): string {
   const lines: string[] = []
-  lines.push(`Refactoring candidates (level=${report.level}, threshold=${report.threshold}, scanned=${report.totalScanned})`)
-  lines.push('')
+  if (showHeadings) {
+    lines.push(`Refactoring candidates (level=${report.level}, threshold=${report.threshold}, scanned=${report.totalScanned})`)
+    lines.push('')
+  }
   if (report.pairs.length === 0) {
     lines.push('  No candidates found above threshold.')
     return lines.join('\n')
@@ -53,5 +56,5 @@ export async function refactorCandidatesCommand(options: RefactorCandidatesComma
     return
   }
 
-  console.log(renderReport(report))
+  console.log(renderReport(report, !options.noHeadings))
 }

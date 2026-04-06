@@ -527,6 +527,7 @@ program
   .option('--expand-query', 'expand query with top BM25 keywords before embedding to improve recall (Phase 52)')
   .option('--narrate', 'generate an LLM summary of search results (requires GITSEMA_LLM_URL)')
   .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo; use gitsema repos add to register)')
+  .option('--no-headings', "don't print column header row")
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())
@@ -587,6 +588,7 @@ program
   .option('--code-model <model>', 'override code embedding model')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--narrate', 'generate an LLM narrative summary of semantic shifts (requires GITSEMA_LLM_URL)')
+  .option('--no-headings', "don't print column header row")
   .action(evolutionCommand)
 
 program
@@ -616,6 +618,7 @@ program
   .option('--branch <name>', 'restrict evolution to blobs seen on this branch')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--narrate', 'generate an LLM summary of concept evolution results (requires GITSEMA_LLM_URL)')
+  .option('--no-headings', "don't print column header row")
   .action(conceptEvolutionCommand)
 
 program
@@ -636,6 +639,7 @@ program
   .option('-k, --top <n>', 'max pairs to return (default 50)', '50')
   .option('--level <level>', 'search granularity: symbol (default), chunk, file', 'symbol')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--no-headings', "don't print report header")
   .action(refactorCandidatesCommand)
 
 program
@@ -701,7 +705,8 @@ program
   .description('Show semantic activity heatmap — count of distinct blob changes by time period (week or month)')
   .option('--period <p>', 'aggregation period: week (default) or month', 'week')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-  .action(async (opts: { period?: string; dump?: string | boolean }) => { await heatmapCommand({ period: opts.period, dump: opts.dump }) })
+  .option('--no-headings', "don't print column header row")
+  .action(async (opts: { period?: string; dump?: string | boolean; noHeadings?: boolean }) => { await heatmapCommand({ period: opts.period, dump: opts.dump, noHeadings: opts.noHeadings }) })
 
 program
   .command('file-diff <ref1> <ref2> <path>')
@@ -807,6 +812,7 @@ program
     'output an interactive HTML visualization; writes to <file> if given, otherwise dead-concepts.html',
   )
   .option('--branch <name>', 'restrict dead-concept candidates to blobs seen on this branch')
+  .option('--no-headings', "don't print section header")
   .action(deadConceptsCommand)
 
 program
@@ -824,6 +830,7 @@ program
   .option('--code-model <model>', 'override code embedding model')
   .option('--branch <name>', 'restrict results to blobs seen on this branch')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise impact.html')
+  .option('--no-headings', "don't print section header")
   .action(impactCommand)
 
 program
@@ -848,6 +855,7 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .option('--narrate', 'generate an LLM summary of cluster structure (requires GITSEMA_LLM_URL)')
+  .option('--no-headings', "don't print summary header")
   .action(clustersCommand)
 
 program
@@ -919,6 +927,7 @@ program
     'output an interactive HTML visualization; writes to <file> if given, otherwise change-points.html',
   )
   .option('--narrate', 'generate an LLM narrative of change points (requires GITSEMA_LLM_URL)')
+  .option('--no-headings', "don't print report header")
   .action(changePointsCommand)
 
 program
@@ -939,6 +948,7 @@ program
     'output an interactive HTML visualization; writes to <file> if given, otherwise file-change-points.html',
   )
   .option('--narrate', 'generate an LLM narrative of file change points (requires GITSEMA_LLM_URL)')
+  .option('--no-headings', "don't print report header")
   .action(fileChangePointsCommand)
 
 program
@@ -1109,6 +1119,7 @@ program
   .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
   .option('--vss', 'use the usearch HNSW ANN index for approximate candidate selection')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise author.html')
+  .option('--no-headings', "don't print query title header")
   .action(authorCommand)
 
 program

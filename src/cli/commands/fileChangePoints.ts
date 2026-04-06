@@ -19,6 +19,7 @@ export interface FileChangePointsCommandOptions {
   includeContent?: boolean
   branch?: string
   narrate?: boolean
+  noHeadings?: boolean
 }
 
 function renderFileChangePoint(point: FileChangePoint, rank: number): string {
@@ -123,7 +124,7 @@ export async function fileChangePointsCommand(
       return
     }
 
-    console.log(`File change points: "${filePath}"`)
+    if (!options.noHeadings) console.log(`File change points: "${filePath}"`)
     console.log(renderReport(filePath.trim(), report))
 
     if (options.narrate && report.points.length > 0) {

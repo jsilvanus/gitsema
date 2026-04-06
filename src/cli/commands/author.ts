@@ -25,6 +25,7 @@ export interface AuthorCommandOptions {
   level?: string
   vss?: boolean
   html?: string | boolean
+  noHeadings?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -135,7 +136,7 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     console.warn('Note: --vss flag is not applicable to author attribution and will be ignored.')
   }
 
-  console.log(`\nAuthor contributions for: "${query}"\n`)
+  if (!options.noHeadings) console.log(`\nAuthor contributions for: "${query}"\n`)
   results.forEach((author: AuthorContribution, idx: number) => {
     const rank = idx + 1
     const scoreStr = author.totalScore.toFixed(3)

@@ -74,6 +74,7 @@ export interface SearchCommandOptions {
   narrate?: boolean
   /** Comma-separated repo IDs to search (multi-repo mode, requires registered repos with db_path) */
   repos?: string
+  noHeadings?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -140,7 +141,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
         hybrid: options.hybrid,
         bm25Weight: options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : undefined,
       })
-      console.log(renderResults(results))
+      console.log(renderResults(results, !options.noHeadings))
     } catch (err) {
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)
@@ -562,7 +563,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     return
   }
 
-  console.log(renderResults(results))
+  console.log(renderResults(results, !options.noHeadings))
 
   if (commitResults) {
     console.log('\nCommit matches:')

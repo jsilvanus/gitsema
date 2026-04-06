@@ -28,6 +28,7 @@ export interface ImpactCommandOptions {
   textModel?: string
   codeModel?: string
   html?: string | boolean
+  noHeadings?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -56,14 +57,16 @@ function renderModuleGroups(groups: ModuleGroup[]): string[] {
 /**
  * Renders impact results as human-readable CLI output.
  */
-function renderReport(report: ImpactReport): string {
+function renderReport(report: ImpactReport, showHeadings = true): string {
   const lines: string[] = []
 
-  lines.push(`Refactor impact: ${report.targetPath}`)
-  if (report.targetBlobHash) {
-    lines.push(`Target blob: ${shortHash(report.targetBlobHash)}`)
+  if (showHeadings) {
+    lines.push(`Refactor impact: ${report.targetPath}`)
+    if (report.targetBlobHash) {
+      lines.push(`Target blob: ${shortHash(report.targetBlobHash)}`)
+    }
+    lines.push('')
   }
-  lines.push('')
 
   if (report.results.length === 0) {
     lines.push('No semantically coupled blobs found. Run `gitsema index` to populate the index.')
@@ -154,5 +157,5 @@ export async function impactCommand(
     return
   }
 
-  console.log(renderReport(report))
+  console.log(renderReport(report, !options.noHeadings))
 }

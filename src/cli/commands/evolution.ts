@@ -26,6 +26,7 @@ export interface EvolutionCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  noHeadings?: boolean
 }
 
 /** A single alert entry – one of the top-N largest semantic jumps for a file. */
@@ -166,10 +167,14 @@ function renderEvolution(
   entries: EvolutionEntry[],
   threshold: number,
   originBlob?: string,
+  showHeadings = true,
 ): string {
   if (entries.length === 0) return '  (no history found — has the file been indexed?)'
 
   const lines: string[] = []
+  if (showHeadings) {
+    lines.push(`${'Date'.padEnd(10)}  ${'Blob'.padEnd(11)}  ${'Commit'.padEnd(9)}  ${'Dist_Prev'.padEnd(10)}  Dist_Origin`)
+  }
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i]
     const date = formatDate(e.timestamp)
@@ -319,7 +324,7 @@ export async function evolutionCommand(
     console.log(renderAlerts(enrichedAlerts, filePath, threshold))
   } else if (entries.length > 0) {
     console.log('')
-    console.log(renderEvolution(entries, threshold, origin))
+    console.log(renderEvolution(entries, threshold, origin, !options.noHeadings))
   }
 
   // Phase 56: LLM narration

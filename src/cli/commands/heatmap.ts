@@ -4,6 +4,7 @@ import { getActiveSession } from '../../core/db/sqlite.js'
 export interface HeatmapOptions {
   period?: string // 'week' or 'month'
   dump?: string | boolean
+  noHeadings?: boolean
 }
 
 export async function heatmapCommand(options: HeatmapOptions): Promise<void> {
@@ -32,6 +33,9 @@ export async function heatmapCommand(options: HeatmapOptions): Promise<void> {
     }
 
     // Human-friendly output
+    if (!options.noHeadings) {
+      console.log(`${'Period'.padEnd(10)}  Count`)
+    }
     for (const k of Object.keys(out)) {
       console.log(`${k}: ${out[k]}`)
     }

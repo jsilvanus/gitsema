@@ -19,6 +19,7 @@ export interface ClustersCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  noHeadings?: boolean
 }
 
 export async function clustersCommand(options: ClustersCommandOptions): Promise<void> {
@@ -75,7 +76,9 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
     }
 
     // human readable
-    console.log(`Computed ${report.clusters.length} clusters across ${report.totalBlobs} blobs\n`)
+    if (!options.noHeadings) {
+      console.log(`Computed ${report.clusters.length} clusters across ${report.totalBlobs} blobs\n`)
+    }
 
     for (let i = 0; i < report.clusters.length; i++) {
       const c = report.clusters[i]

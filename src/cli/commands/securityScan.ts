@@ -17,7 +17,8 @@ export function securityScanCommand(): Command {
     .option('--sarif [file]', 'output SARIF 2.1.0 format to file or stdout')
     .option('--high-confidence-only', 'only report findings with both semantic + structural signal')
     .option('--narrate', 'generate an LLM triage summary of findings (requires GITSEMA_LLM_URL)')
-    .action(async (opts: { top?: string; model?: string; dump?: string | boolean; sarif?: string | boolean; highConfidenceOnly?: boolean; narrate?: boolean }) => {
+    .option('--no-headings', "don't print column header row")
+    .action(async (opts: { top?: string; model?: string; dump?: string | boolean; sarif?: string | boolean; highConfidenceOnly?: boolean; narrate?: boolean; noHeadings?: boolean }) => {
       let top: number
       try {
         top = parsePositiveInt(opts.top ?? '10', '--top')
@@ -66,6 +67,9 @@ export function securityScanCommand(): Command {
       if (findings.length === 0) {
         console.log('No potential vulnerabilities detected.')
         return
+      }
+      if (!opts.noHeadings) {
+        console.log(`${'Pattern'.padEnd(26)}  ${'Confidence'.padEnd(11)}  ${'Score'.padEnd(7)}  ${'Blob'.padEnd(8)}  Path`)
       }
       for (const f of findings) {
         const conf = f.confidence === 'high' ? '🔴 HIGH' : f.confidence === 'structural' ? '🟡 STRUCT' : '🟠 MED'

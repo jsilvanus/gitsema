@@ -29,6 +29,7 @@ export interface ChangePointsCommandOptions {
   hybrid?: boolean
   bm25Weight?: string
   narrate?: boolean
+  noHeadings?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -182,7 +183,7 @@ export async function changePointsCommand(
       return
     }
 
-    console.log(`Concept change points: "${query}"`)
+    if (!options.noHeadings) console.log(`Concept change points: "${query}"`)
     console.log(renderReport(report))
 
     if (options.narrate && report.points.length > 0) {

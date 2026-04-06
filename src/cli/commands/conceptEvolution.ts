@@ -28,6 +28,7 @@ export interface ConceptEvolutionCommandOptions {
   bm25Weight?: string
   /** Generate an LLM narrative summary of concept evolution */
   narrate?: boolean
+  noHeadings?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -48,22 +49,26 @@ function buildProviderOrExit(providerType: string, model: string): EmbeddingProv
  *   2021-06-22  src/auth/oauth.ts           [b19e4a1]  score=0.912  dist_prev=0.145
  *   2022-09-10  src/auth/jwt.ts             [c02d8f7]  score=0.872  dist_prev=0.231  ← large change
  */
-function renderConceptEvolution(entries: ConceptEvolutionEntry[], threshold: number): string {
+function renderConceptEvolution(entries: ConceptEvolutionEntry[], threshold: number, showHeadings = true): string {
   if (entries.length === 0) return '  (no matching blobs found — has the index been built?)'
 
-  return entries
-    .map((e, i) => {
-      const date = formatDate(e.timestamp)
-      const path = (e.paths[0] ?? '(unknown path)').padEnd(50)
-      const blob = shortHash(e.blobHash)
-      const score = e.score.toFixed(3)
-      const dPrev = e.distFromPrev.toFixed(4)
-      let note = ''
-      if (i === 0) note = '  (origin)'
-      else if (e.distFromPrev >= threshold) note = '  ← large change'
-      return `${date}  ${path}  [${blob}]  score=${score}  dist_prev=${dPrev}${note}`
-    })
-    .join('\n')
+  const lines: string[] = []
+  if (showHeadings) {
+    lines.push(`${'Date'.padEnd(10)}  ${'Path'.padEnd(50)}  ${'[Blob]'.padEnd(8)}  ${'Score'.padEnd(7)}  Dist_Prev`)
+  }
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]
+    const date = formatDate(e.timestamp)
+    const path = (e.paths[0] ?? '(unknown path)').padEnd(50)
+    const blob = shortHash(e.blobHash)
+    const score = e.score.toFixed(3)
+    const dPrev = e.distFromPrev.toFixed(4)
+    let note = ''
+    if (i === 0) note = '  (origin)'
+    else if (e.distFromPrev >= threshold) note = '  ← large change'
+    lines.push(`${date}  ${path}  [${blob}]  score=${score}  dist_prev=${dPrev}${note}`)
+  }
+  return lines.join('\n')
 }
 
 /**
@@ -243,7 +248,7 @@ export async function conceptEvolutionCommand(
   console.log(`Entries found: ${entries.length}`)
   if (entries.length > 0) {
     console.log('')
-    console.log(renderConceptEvolution(entries, threshold))
+    console.log(renderConceptEvolution(entries, threshold, !options.noHeadings))
   }
 
   // LLM narration of concept evolution

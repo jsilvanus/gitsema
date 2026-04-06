@@ -80,10 +80,16 @@ export function groupResults(results: SearchResult[], mode: GroupMode, topK: num
  *   0.921  src/auth/oauth.ts:10-45                    [a3f9c2d]  first: 2022-03-15
  *   0.887  src/auth/session.ts                        [b19e4a1]
  */
-export function renderResults(results: SearchResult[]): string {
+export function renderResults(results: SearchResult[], showHeadings = true): string {
   if (results.length === 0) return '  (no results)'
 
   const lines: string[] = []
+  if (showHeadings) {
+    const headerScore = 'Score'
+    const headerPath = 'Path'
+    const headerBlob = '[Blob]'
+    lines.push(`${headerScore}  ${headerPath.padEnd(50)}  ${headerBlob}`)
+  }
   for (const result of results) {
     const score = formatScore(result.score)
     const hash = shortHash(result.blobHash)

@@ -22,12 +22,16 @@ export function reposCommand(): Command {
   cmd
     .command('list')
     .description('List all tracked repositories')
-    .action(() => {
+    .option('--no-headings', "don't print column header row")
+    .action((opts: { noHeadings?: boolean }) => {
       const session = getActiveSession()
       const repos = listRepos(session)
       if (repos.length === 0) {
         console.log('No repositories registered. Use: gitsema repos add <id> <name> [url]')
         return
+      }
+      if (!opts.noHeadings) {
+        console.log(`${'ID'.padEnd(16)}\t${'Name'.padEnd(20)}\t${'URL'.padEnd(30)}\t${'DB_Path'.padEnd(20)}\tAdded`)
       }
       for (const r of repos) {
         const added = new Date(r.addedAt * 1000).toISOString().slice(0, 10)
@@ -41,7 +45,8 @@ export function reposCommand(): Command {
     .option('--repos <ids>', 'comma-separated repo IDs to search (default: all)')
     .option('--top <n>', 'number of results (default 10)', '10')
     .option('--model <model>', 'embedding model override')
-    .action(async (query: string, opts: { repos?: string; top?: string; model?: string }) => {
+    .option('--no-headings', "don't print column header row")
+    .action(async (query: string, opts: { repos?: string; top?: string; model?: string; noHeadings?: boolean }) => {
       let topK: number
       try {
         topK = parsePositiveInt(opts.top ?? '10', '--top')
@@ -66,6 +71,9 @@ export function reposCommand(): Command {
       if (results.length === 0) {
         console.log('No results. Ensure repos have --db-path set and are indexed.')
         return
+      }
+      if (!opts.noHeadings) {
+        console.log(`${'Repo'.padEnd(16)}  ${'Score'.padEnd(6)}  Path`)
       }
       for (const r of results) {
         const path = r.paths?.[0] ?? r.blobHash.slice(0, 8)

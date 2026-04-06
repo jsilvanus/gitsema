@@ -13,7 +13,8 @@ export function debtCommand(): Command {
     .option('--model <model>', 'embedding model')
     .option('--branch <name>', 'restrict to blobs on this branch')
     .option('--dump [file]', 'output JSON to file or stdout')
-    .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean }) => {
+    .option('--no-headings', "don't print column header row")
+    .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean; noHeadings?: boolean }) => {
       let top: number
       try {
         top = parsePositiveInt(opts.top ?? '20', '--top')
@@ -48,6 +49,9 @@ export function debtCommand(): Command {
           process.stdout.write(json + '\n')
         }
         return
+      }
+      if (!opts.noHeadings) {
+        console.log(`${'Blob'.padEnd(8)}\t${'Score'.padEnd(7)}\tPath`)
       }
       for (const r of results) {
         console.log(`${r.blobHash.slice(0, 8)}\t${r.debtScore.toFixed(3)}\t${r.paths.join(',')}`)

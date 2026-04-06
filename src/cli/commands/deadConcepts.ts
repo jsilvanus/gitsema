@@ -27,6 +27,7 @@ export interface DeadConceptsCommandOptions {
   html?: string | boolean
   /** When set, restrict dead-concept candidates to blobs seen on this branch. */
   branch?: string
+  noHeadings?: boolean
 }
 
 function formatDate(timestamp: number | null): string {
@@ -37,15 +38,15 @@ function formatDate(timestamp: number | null): string {
 /**
  * Renders dead-concept results as human-readable CLI output.
  */
-function renderResults(results: DeadConceptResult[]): string {
+function renderResults(results: DeadConceptResult[], showHeadings = true): string {
   if (results.length === 0) {
     return 'No dead concepts found. All indexed blobs are present in HEAD, or the index is empty.'
   }
 
-  const lines: string[] = [
-    `Dead concepts — ${results.length} result${results.length === 1 ? '' : 's'}`,
-    '',
-  ]
+  const lines: string[] = []
+  if (showHeadings) {
+    lines.push(`Dead concepts — ${results.length} result${results.length === 1 ? '' : 's'}`, '')
+  }
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i]
@@ -117,5 +118,5 @@ export async function deadConceptsCommand(
     return
   }
 
-  console.log(renderResults(results))
+  console.log(renderResults(results, !options.noHeadings))
 }

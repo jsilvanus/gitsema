@@ -2349,20 +2349,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Long-Term Investments (Phase 60+) *(not yet implemented)*
-
-| Feature | Complexity | Notes |
-|---------|:----------:|-------|
-| DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
-| Cross-repo concept similarity | High | Index two repos; find when concept X first appeared in each |
-| Semantic regression CI gate | High | Flag PRs where key embedding drifts beyond threshold |
-| Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
-| Python model server (Phase 13 revival) | Medium | sentence-transformers in Docker; higher throughput than Ollama for bulk indexing |
-| Semantic code review assistant | Medium | Given a PR diff, find historical analogues and flag regressions |
-
----
-
-### Phase 59 — `gitsema tools` Subcommand Group (Protocol Servers) ✅ Implemented
+### Phase 59 — `gitsema tools` Subcommand Group (Protocol Servers) ✅ Implemented (v0.61.0)
 
 **Goal:** Collect the long-running protocol-server commands (`mcp`, `lsp`, `serve`) into a single discoverable subcommand group so users have one clear entry-point for all tooling integration.
 
@@ -2403,57 +2390,89 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-## Section II - What's weak or underexplored
+### Phase 60 — Uniform Column Headers + `--no-headings` Across All Commands ✅ Implemented (v.0.62.0)
 
-### 1. Function chunker is a regex heuristic
+**Goal:** Every command that produces tabular or structured output now prints a column header row by default, matching the existing `first-seen` pattern. All such commands also accept `--no-headings` to suppress the header row (useful for piping output to other tools).
 
-It matches `function`, `class`, `def`, `fn`, `pub fn`, etc. across all languages with one pattern. It works for mainstream cases but will misbehave on templated C++, Rust macros, Python decorators, or anything unusual. This matters because chunk quality directly determines retrieval quality.
+**Rationale:**
+- `first-seen` already had headers and `--no-headings`, but all other tabular commands did not. This made output inconsistent and harder to read at a glance.
+- Column headers communicate what each field means without requiring the user to consult docs.
+- `--no-headings` preserves machine-readable output for scripts and pipelines.
 
-### 2. Path relevance scoring is toy-grade
+**Commands updated:**
 
-It does lowercase substring matching of query tokens against file paths. `"auth"` matches `"unauthorized.ts"` — which is wrong. This is the weakest link in the three-signal ranker.
+| Command | Header columns added |
+|---|---|
+| `search` / `code-search` | Score, Path, [Blob] |
+| `file-evolution` | Date, Blob, Commit, Dist_Prev, Dist_Origin |
+| `evolution` / `concept-evolution` | Date, Path, [Blob], Score, Dist_Prev |
+| `debt` | Blob, Score, Path |
+| `security-scan` | Pattern, Confidence, Score, Blob, Path |
+| `health` | Period_Start, Period_End, Active, Churn, Dead |
+| `heatmap` | Period, Count |
+| `repos list` | ID, Name, URL, DB_Path, Added |
+| `repos search` | Repo, Score, Path |
+| `dead-concepts` | Section title (suppressed by `--no-headings`) |
+| `change-points` | Report title (suppressed by `--no-headings`) |
+| `file-change-points` | Report title (suppressed by `--no-headings`) |
+| `refactor-candidates` | Report header (suppressed by `--no-headings`) |
+| `clusters` | Summary line (suppressed by `--no-headings`) |
+| `author` | Query title (suppressed by `--no-headings`) |
+| `impact` | Target header (suppressed by `--no-headings`) |
 
-### 3. The evolution/drift features have no UX story
+**Naming convention:** Consistent with `first-seen`:
+- Commander.js option: `--no-headings`
+- TypeScript property: `noHeadings?: boolean`
+- Passed to renderer as: `!options.noHeadings`
 
-`gitsema evolution src/auth.ts` dumps a timeline of cosine distances between file versions. That's raw data. There's no narrative, no summary of what changed semantically, no way to answer "why did this file drift?" This is where the real value could be and it stops just before the useful part.
+**Implementation notes:**
+- `renderResults()` in `src/core/search/ranking.ts` gained a `showHeadings = true` parameter. The existing `renderFirstSeenResults()` already had this.
+- `renderEvolution()` in `src/cli/commands/evolution.ts` gained a `showHeadings` parameter.
+- `renderConceptEvolution()` in `src/cli/commands/conceptEvolution.ts` gained a `showHeadings` parameter (function refactored from `.map().join()` to a `for` loop to support header insertion).
+- `renderReport()` in `impact.ts` and `refactorCandidates.ts` gained a `showHeadings` parameter.
+- All structured commands (`dead-concepts`, `clusters`, `author`, `change-points`, `file-change-points`) suppress their top-level title line when `--no-headings` is set.
+- No schema changes. No database migrations.
 
-### 4. No test suite
-
-The CLAUDE.md admits this. It's described as "highest priority technical debt." For a tool that runs migrations and writes to a database, this is a real gap.
-
-### 5. Remote job registry leaks memory
-
-Completed job entries are never evicted from the in-memory map.
+**Files changed:**
+- `src/core/search/ranking.ts` — `renderResults()` gains `showHeadings` param
+- `src/cli/commands/search.ts` — `noHeadings` option
+- `src/cli/commands/codeSearch.ts` — `noHeadings` option + `--no-headings` flag
+- `src/cli/commands/evolution.ts` — `noHeadings` option, `renderEvolution()` gains header
+- `src/cli/commands/conceptEvolution.ts` — `noHeadings` option, `renderConceptEvolution()` gains header
+- `src/cli/commands/debt.ts` — `noHeadings` option + header row
+- `src/cli/commands/securityScan.ts` — `noHeadings` option + header row
+- `src/cli/commands/health.ts` — `noHeadings` option + header row
+- `src/cli/commands/heatmap.ts` — `noHeadings` option + header row
+- `src/cli/commands/repos.ts` — `noHeadings` for `list` and `search` subcommands + header rows
+- `src/cli/commands/deadConcepts.ts` — `noHeadings` to suppress section title
+- `src/cli/commands/changePoints.ts` — `noHeadings` to suppress report title
+- `src/cli/commands/fileChangePoints.ts` — `noHeadings` to suppress report title
+- `src/cli/commands/refactorCandidates.ts` — `renderReport()` gains `showHeadings` param
+- `src/cli/commands/clusters.ts` — `noHeadings` to suppress summary line
+- `src/cli/commands/author.ts` — `noHeadings` to suppress query title
+- `src/cli/commands/impact.ts` — `renderReport()` gains `showHeadings` param
+- `src/cli/index.ts` — `--no-headings` added to registrations for `search`, `file-evolution`, `evolution`, `heatmap`, `dead-concepts`, `impact`, `clusters`, `refactor-candidates`, `change-points`, `file-change-points`, `author`
 
 ---
 
-## Section III - What you could do with these embeddings
+## Section II - Next?
 
-The data model gives you: every unique blob, its vector, when it first appeared, which commits it appeared in, which branches it lives on, and its full text. That's a rich graph.
+---
 
-### High value, tractable
+### Long-Term Investments (Phase 60+) *(not yet implemented)*
 
-#### Code review assistant
-
-Given a PR diff, find semantically similar historical blobs. "Here's how this was done before, here are the commits where similar logic evolved." This is concrete utility.
-
-#### Dead concept detection
-
-Find embeddings with high historical similarity to current code that no longer appear in HEAD. These are deleted concepts — maybe they were removed intentionally, maybe accidentally.
-
-#### Semantic blame
-
-Instead of `git blame` (line-level authorship), answer "who introduced this concept into the codebase and when?" Trace semantic lineage rather than textual lineage.
-
-#### Refactor impact analysis
-
-Before renaming/restructuring a module, show which other blobs are semantically coupled to it (high cosine similarity). Flags non-obvious dependencies.
+| Feature | Complexity | Notes |
+|---------|:----------:|-------|
+| DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
+| Cross-repo concept similarity | High | Index two repos; find when concept X first appeared in each |
+| Semantic regression CI gate | High | Flag PRs where key embedding drifts beyond threshold |
+| Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
+| Python model server (Phase 13 revival) | Medium | sentence-transformers in Docker; higher throughput than Ollama for bulk indexing |
+| Semantic code review assistant | Medium | Given a PR diff, find historical analogues and flag regressions |
 
 #### Onboarding maps
 
 Cluster embeddings by semantic similarity and produce a concept graph of the codebase. "Here are the 8 semantic regions of this repo and the files that define each."
-
-### Higher effort but differentiated
 
 #### Semantic regression detection
 

@@ -13,7 +13,8 @@ export function codeSearchCommand(): Command {
     .option('--model <model>', 'Embedding model override')
     .option('--branch <branch>', 'Restrict to blobs on this branch')
     .option('--threshold <n>', 'Minimum similarity score (0-1)', '0')
-    .action(async (snippet: string, options: { top: string; level: string; model?: string; branch?: string; threshold: string }) => {
+    .option('--no-headings', "don't print column header row")
+    .action(async (snippet: string, options: { top: string; level: string; model?: string; branch?: string; threshold: string; noHeadings?: boolean }) => {
       const topK = parseInt(options.top, 10)
       const threshold = parseFloat(options.threshold)
       const codeProvider = getCodeProvider()
@@ -26,6 +27,6 @@ export function codeSearchCommand(): Command {
         branch: options.branch,
       })
       const filtered = threshold > 0 ? results.filter((r) => r.score >= threshold) : results
-      console.log(renderResults(filtered))
+      console.log(renderResults(filtered, !options.noHeadings))
     })
 }
