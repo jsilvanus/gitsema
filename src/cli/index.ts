@@ -325,6 +325,10 @@ program
     'skip blobs whose path contains any of these comma-separated patterns, e.g. "node_modules,dist,vendor"',
   )
   .option(
+    '--include-glob <patterns>',
+    'only index files matching these comma-separated glob patterns, e.g. "src/**/*.ts,tests/**"',
+  )
+  .option(
     '--chunker <strategy>',
     'chunking strategy: file (default, whole-file), function (function/class boundaries), fixed (fixed-size windows)',
   )

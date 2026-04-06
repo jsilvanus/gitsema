@@ -268,6 +268,7 @@ export interface IndexCommandOptions {
   ext?: string
   maxSize?: string
   exclude?: string
+  includeGlob?: string
   chunker?: string
   windowSize?: string
   overlap?: string
@@ -315,6 +316,9 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     const exclude = options.exclude
       ? options.exclude.split(',').map((e) => e.trim()).filter(Boolean)
       : undefined
+    const includeGlob = options.includeGlob
+      ? options.includeGlob.split(',').map((e) => e.trim()).filter(Boolean)
+      : undefined
 
     console.log(`Remote indexing → ${remoteUrl}`)
     if (options.since) logger.info(`  Since: ${options.since}`)
@@ -326,7 +330,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
       concurrency,
       maxCommits,
       maxBlobSize,
-      filter: { ext, exclude },
+      filter: { ext, exclude, includeGlob },
       onProgress: (s) => {
         lastLine = renderProgress(s)
         process.stdout.write(lastLine)
@@ -392,6 +396,9 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   // Parse exclude: "node_modules,dist" → ['node_modules', 'dist']
   const exclude = options.exclude
     ? options.exclude.split(',').map((e) => e.trim()).filter(Boolean)
+    : undefined
+  const includeGlob = options.includeGlob
+    ? options.includeGlob.split(',').map((e) => e.trim()).filter(Boolean)
     : undefined
 
   // Parse chunker strategy
@@ -488,7 +495,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     concurrency,
     maxCommits,
     maxBlobSize,
-    filter: { ext, exclude },
+    filter: { ext, exclude, includeGlob },
     chunker: chunkerStrategy,
     chunkerOptions: { windowSize, overlap },
     branchFilter: options.branch,
