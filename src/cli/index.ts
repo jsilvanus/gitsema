@@ -391,8 +391,9 @@ program
 program
   .command('doctor')
   .description('Run integrity checks, schema version/provenance checks, and report index health')
-  .action(async () => {
-    await doctorCommand()
+  .option('--lsp', 'only run the LSP startup check (gitsema doctor --lsp)')
+  .action(async (opts: { lsp?: boolean }) => {
+    await doctorCommand(opts)
   })
 
 program

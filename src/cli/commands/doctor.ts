@@ -1,7 +1,15 @@
 import { getRawDb } from '../../core/db/sqlite.js'
 import { runDoctor } from '../../core/db/doctor.js'
+import { verifyLspStartup } from '../../core/lsp/server.js'
 
-export async function doctorCommand(): Promise<void> {
+export async function doctorCommand(opts: { lsp?: boolean } = {}): Promise<void> {
+  if (opts.lsp) {
+    const result = verifyLspStartup()
+    console.log(`LSP startup check: ${result.ok ? '✓' : '✗'}  ${result.message}`)
+    if (!result.ok) process.exit(1)
+    return
+  }
+
   const rawDb = getRawDb()
   const report = runDoctor(rawDb)
 
@@ -47,6 +55,11 @@ export async function doctorCommand(): Promise<void> {
     console.log('')
     console.log('No issues detected. Index looks healthy.')
   }
+
+  // Also run LSP check
+  const lspResult = verifyLspStartup()
+  console.log('')
+  console.log(`LSP server check:  ${lspResult.ok ? '✓' : '✗'}  ${lspResult.message}`)
 
   // Exit with non-zero if critical issues
   const critical = !report.integrityCheckPassed || !report.schemaOk
