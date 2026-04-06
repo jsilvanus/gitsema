@@ -6,6 +6,7 @@ import {
 } from '../../core/search/changePoints.js'
 import { resolveRefToTimestamp } from '../../core/search/clustering.js'
 import { renderFileChangePointsHtml } from '../../core/viz/htmlRenderer.js'
+import { narrateFileChangePoints } from '../../core/llm/narrator.js'
 
 export interface FileChangePointsCommandOptions {
   threshold?: string
@@ -17,6 +18,7 @@ export interface FileChangePointsCommandOptions {
   level?: string
   includeContent?: boolean
   branch?: string
+  narrate?: boolean
 }
 
 function renderFileChangePoint(point: FileChangePoint, rank: number): string {
@@ -123,6 +125,13 @@ export async function fileChangePointsCommand(
 
     console.log(`File change points: "${filePath}"`)
     console.log(renderReport(filePath.trim(), report))
+
+    if (options.narrate && report.points.length > 0) {
+      console.log('')
+      console.log('=== LLM File Change-Points Narrative ===')
+      const narrative = await narrateFileChangePoints(filePath.trim(), report)
+      console.log(narrative)
+    }
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

@@ -37,8 +37,30 @@ export const repos = sqliteTable('repos', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   url: text('url'),
+  dbPath: text('db_path'),
   addedAt: integer('added_at').notNull(),
 })
+
+export const savedQueries = sqliteTable('saved_queries', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().unique(),
+  queryText: text('query_text').notNull(),
+  queryEmbedding: blob('query_embedding', { mode: 'buffer' }),
+  lastRunTs: integer('last_run_ts'),
+  webhookUrl: text('webhook_url'),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const projections = sqliteTable('projections', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
+  model: text('model').notNull(),
+  x: real('x').notNull(),
+  y: real('y').notNull(),
+  projectedAt: integer('projected_at').notNull(),
+}, (table) => ({
+  uniq: uniqueIndex('idx_projections_blob_model').on(table.blobHash, table.model),
+}))
 
 export const embeddings = sqliteTable('embeddings', {
   blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),

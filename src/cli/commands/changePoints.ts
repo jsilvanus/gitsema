@@ -11,6 +11,7 @@ import {
 import { resolveRefToTimestamp } from '../../core/search/clustering.js'
 import { renderConceptChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
+import { narrateChangePoints } from '../../core/llm/narrator.js'
 
 export interface ChangePointsCommandOptions {
   top?: string
@@ -27,6 +28,7 @@ export interface ChangePointsCommandOptions {
   codeModel?: string
   hybrid?: boolean
   bm25Weight?: string
+  narrate?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -182,6 +184,13 @@ export async function changePointsCommand(
 
     console.log(`Concept change points: "${query}"`)
     console.log(renderReport(report))
+
+    if (options.narrate && report.points.length > 0) {
+      console.log('')
+      console.log('=== LLM Change-Points Narrative ===')
+      const narrative = await narrateChangePoints(report)
+      console.log(narrative)
+    }
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

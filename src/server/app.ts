@@ -42,12 +42,19 @@ import { searchRouter } from './routes/search.js'
 import { evolutionRouter } from './routes/evolution.js'
 import { remoteRouter } from './routes/remote.js'
 import { analysisRouter } from './routes/analysis.js'
+import { watchRouter } from './routes/watch.js'
+import { projectionsRouter } from './routes/projections.js'
+import { readFileSync, existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export interface AppOptions {
   textProvider: EmbeddingProvider
   codeProvider?: EmbeddingProvider
   chunkerStrategy?: ChunkStrategy
   concurrency?: number
+  /** When true, serve the embedding space explorer web UI at /ui */
+  ui?: boolean
 }
 
 export function createApp(options: AppOptions): Express {
@@ -56,6 +63,7 @@ export function createApp(options: AppOptions): Express {
     codeProvider,
     chunkerStrategy = 'file',
     concurrency = 4,
+    ui = false,
   } = options
 
   const app = express()
@@ -85,6 +93,29 @@ export function createApp(options: AppOptions): Express {
   )
 
   app.use(`${base}/analysis`, analysisRouter({ textProvider }))
+
+  app.use(`${base}/watch`, watchRouter({ textProvider }))
+
+  app.use(`${base}/projections`, projectionsRouter())
+
+  // Phase 55: Serve the embedding space explorer web UI when --ui is set
+  if (ui) {
+    const __filename = fileURLToPath(import.meta.url)
+    const __dirname = dirname(__filename)
+    const uiHtmlPath = join(__dirname, '../../src/client/index.html')
+    // Try src/ path first (dev), then dist/client/
+    const altPath = join(__dirname, '../client/index.html')
+    const htmlPath = existsSync(uiHtmlPath) ? uiHtmlPath : altPath
+    app.get('/ui', (_req, res) => {
+      if (existsSync(htmlPath)) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        res.send(readFileSync(htmlPath, 'utf8'))
+      } else {
+        res.status(404).send('Web UI not found. Ensure src/client/index.html exists.')
+      }
+    })
+    app.get('/', (_req, res) => res.redirect('/ui'))
+  }
 
   return app
 }

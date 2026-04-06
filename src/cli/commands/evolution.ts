@@ -7,6 +7,7 @@ import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
 import { remoteFileEvolution } from '../../client/remoteClient.js'
 import { renderFileEvolutionHtml } from '../../core/viz/htmlRenderer.js'
+import { narrateEvolution } from '../../core/llm/narrator.js'
 
 export interface EvolutionCommandOptions {
   threshold?: string
@@ -19,6 +20,8 @@ export interface EvolutionCommandOptions {
   branch?: string
   /** Top-N largest-jump alerts. Pass `true` for default 5, or a numeric string for a custom count. */
   alerts?: string | boolean
+  /** When true, generate an LLM narrative summary of the semantic evolution (Phase 56). */
+  narrate?: boolean
   // CLI model overrides
   model?: string
   textModel?: string
@@ -317,5 +320,13 @@ export async function evolutionCommand(
   } else if (entries.length > 0) {
     console.log('')
     console.log(renderEvolution(entries, threshold, origin))
+  }
+
+  // Phase 56: LLM narration
+  if (options.narrate && entries.length > 0) {
+    console.log('')
+    console.log('=== LLM Evolution Narrative ===')
+    const narrative = await narrateEvolution(filePath, entries, threshold)
+    console.log(narrative)
   }
 }

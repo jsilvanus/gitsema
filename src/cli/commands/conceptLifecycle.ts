@@ -4,6 +4,7 @@ import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeConceptLifecycle, type ConceptLifecycleResult } from '../../core/search/conceptLifecycle.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import { narrateLifecycle } from '../../core/llm/narrator.js'
 
 export interface ConceptLifecycleCommandOptions {
   steps?: string
@@ -12,6 +13,7 @@ export interface ConceptLifecycleCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  narrate?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -100,4 +102,11 @@ export async function conceptLifecycleCommand(query: string, options: ConceptLif
   }
 
   console.log(renderLifecycle(result))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Lifecycle Narrative ===')
+    const narrative = await narrateLifecycle(result)
+    console.log(narrative)
+  }
 }

@@ -2232,7 +2232,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 49 — Auto-VSS Default Path *(not yet implemented)*
+### Phase 49 — Auto-VSS Default Path ✅ Implemented (v0.51.0)
 
 **Goal:** Surface ANN search without requiring `--vss` explicitly.
 
@@ -2244,7 +2244,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 50 — Real Multi-Repo Search *(not yet implemented)*
+### Phase 50 — Real Multi-Repo Search ✅ Implemented (v0.52.0)
 
 **Goal:** Deliver on the Phase 41 promise: query across multiple repos in one command.
 
@@ -2256,7 +2256,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 51 — LSP Completion of the Protocol *(not yet implemented)*
+### Phase 51 — LSP Completion of the Protocol ✅ Implemented (v0.53.0)
 
 **Goal:** Make `gitsema lsp` useful in real IDEs (VS Code, Neovim LSP, Helix).
 
@@ -2269,7 +2269,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 52 — Query Expansion *(not yet implemented)*
+### Phase 52 — Query Expansion ✅ Implemented (v0.54.0)
 
 **Goal:** Improve recall by expanding natural-language queries with repo-specific vocabulary before embedding.
 
@@ -2281,7 +2281,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 53 — Saved Searches and Watch Mode *(not yet implemented)*
+### Phase 53 — Saved Searches and Watch Mode ✅ Implemented (v0.55.0)
 
 **Goal:** Notify when new indexed content matches a saved query.
 
@@ -2293,7 +2293,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 54 — Index Bundle Export / Import *(not yet implemented)*
+### Phase 54 — Index Bundle Export / Import ✅ Implemented (v0.56.0)
 
 **Goal:** Share a pre-built index as a compressed artifact — useful for team settings where one machine builds the index and others query it.
 
@@ -2304,7 +2304,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 55 — Embedding Space Explorer (Web UI) *(not yet implemented)*
+### Phase 55 — Embedding Space Explorer (Web UI) ✅ Implemented (v0.57.0)
 
 **Goal:** Interactive 2D visualization of the embedding space.
 
@@ -2315,7 +2315,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 56 — LLM-Powered Evolution Narration *(not yet implemented)*
+### Phase 56 — LLM-Powered Evolution Narration ✅ Implemented (v0.58.0)
 
 **Goal:** Convert the raw cosine-distance timelines from `gitsema evolution` into human-readable semantic summaries.
 
@@ -2326,7 +2326,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 57 — GitHub Actions Integration for CI Diff *(not yet implemented)*
+### Phase 57 — GitHub Actions Integration for CI Diff ✅ Implemented (v0.59.0)
 
 **Goal:** Make `gitsema ci-diff` usable as a GitHub Actions step that posts a semantic diff comment on PRs.
 
@@ -2337,7 +2337,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 58 — Structured Security Scan (Static + Semantic) *(not yet implemented)*
+### Phase 58 — Structured Security Scan (Static + Semantic) ✅ Implemented (v0.60.0)
 
 **Goal:** Elevate `security-scan` from "semantic similarity" to a credible triage tool.
 
@@ -2349,7 +2349,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Long-Term Investments (Phase 59+) *(not yet implemented)*
+### Long-Term Investments (Phase 60+) *(not yet implemented)*
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
@@ -2359,6 +2359,47 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
 | Python model server (Phase 13 revival) | Medium | sentence-transformers in Docker; higher throughput than Ollama for bulk indexing |
 | Semantic code review assistant | Medium | Given a PR diff, find historical analogues and flag regressions |
+
+---
+
+### Phase 59 — `gitsema tools` Subcommand Group (Protocol Servers) ✅ Implemented
+
+**Goal:** Collect the long-running protocol-server commands (`mcp`, `lsp`, `serve`) into a single discoverable subcommand group so users have one clear entry-point for all tooling integration.
+
+**Rationale:**
+- `gitsema --help` currently intermixes one-shot analysis commands with persistent server processes that block the terminal. This makes it hard to discover server commands and understand that they are long-running.
+- A `gitsema tools` group provides a natural home for any future tooling integrations (e.g. a gRPC server, a Language Server Protocol 3.18 implementation, a debug proxy, etc.).
+- Backward-compatibility is preserved via hidden deprecated aliases at the top level.
+
+**New command surface:**
+
+| New preferred form | Description |
+|---|---|
+| `gitsema tools mcp` | Start the MCP stdio server (AI tool interface for Claude/Copilot) |
+| `gitsema tools lsp` | Start the LSP JSON-RPC server (editor semantic hover / definition) |
+| `gitsema tools lsp --tcp <port>` | Start LSP over TCP instead of stdio |
+| `gitsema tools serve` | Start the HTTP embedding/storage API server |
+| `gitsema tools serve --ui` | Include the embedding space explorer web UI |
+
+**Deprecated aliases (kept for backward compatibility):**
+
+| Old form | Status |
+|---|---|
+| `gitsema mcp` | Deprecated — prints deprecation notice, then delegates to `startMcpServer()` |
+| `gitsema lsp` | Deprecated — prints deprecation notice, then delegates to `startLspServer()` |
+| `gitsema serve` | Deprecated — prints deprecation notice, then delegates to `serveCommand()` |
+
+**Implementation notes:**
+- New file: `src/cli/commands/tools.ts` — exports `toolsCommand()` which registers `mcp`, `lsp`, and `serve` as Commander subcommands.
+- `tools` is registered via `program.addCommand(toolsCommand())` in `src/cli/index.ts`.
+- The `--help` command group map now has a new `Protocol Servers` group. `tools`, `serve`, `mcp`, and `lsp` are all assigned to it.
+- The old top-level `serve` and `mcp` command actions print a `console.warn` deprecation notice before delegating. The `lsp` command (registered via `lspCommand()`) likewise.
+- No schema changes, no version bump.
+
+**Files changed:**
+- `src/cli/commands/tools.ts` (new)
+- `src/cli/commands/lsp.ts` — deprecation notice added to action
+- `src/cli/index.ts` — import + `addCommand(toolsCommand())`, COMMAND_GROUPS updated, top-level `serve`/`mcp` actions updated
 
 ---
 

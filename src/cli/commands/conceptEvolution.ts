@@ -10,6 +10,7 @@ import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { ConceptEvolutionEntry } from '../../core/search/evolution.js'
 import { remoteConceptEvolution } from '../../client/remoteClient.js'
 import { renderConceptEvolutionHtml } from '../../core/viz/htmlRenderer.js'
+import { narrateSearchResults } from '../../core/llm/narrator.js'
 
 export interface ConceptEvolutionCommandOptions {
   top?: string
@@ -25,6 +26,8 @@ export interface ConceptEvolutionCommandOptions {
   codeModel?: string
   hybrid?: boolean
   bm25Weight?: string
+  /** Generate an LLM narrative summary of concept evolution */
+  narrate?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -241,5 +244,18 @@ export async function conceptEvolutionCommand(
   if (entries.length > 0) {
     console.log('')
     console.log(renderConceptEvolution(entries, threshold))
+  }
+
+  // LLM narration of concept evolution
+  if (options.narrate && entries.length > 0) {
+    const asSearchResults = entries.map((e) => ({
+      blobHash: e.blobHash,
+      paths: e.paths ?? [],
+      score: e.score,
+    }))
+    console.log('')
+    console.log('=== LLM Concept Evolution Narrative ===')
+    const narrative = await narrateSearchResults(query, asSearchResults)
+    console.log(narrative)
   }
 }

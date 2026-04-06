@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { computeClusters, getBlobHashesOnBranch, type ClusterReport } from '../../core/search/clustering.js'
 import { renderClustersHtml } from '../../core/viz/htmlRenderer.js'
 import { applyModelOverrides } from '../../core/embedding/providerFactory.js'
+import { narrateClusters } from '../../core/llm/narrator.js'
 
 export interface ClustersCommandOptions {
   k?: string
@@ -13,6 +14,7 @@ export interface ClustersCommandOptions {
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
   branch?: string
+  narrate?: boolean
   // CLI model overrides
   model?: string
   textModel?: string
@@ -92,6 +94,14 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
         })
       console.log(`  Neighbors: ${neighbors.join(', ')}`)
       console.log('')
+    }
+
+    // Phase 56: LLM narration
+    if (options.narrate) {
+      console.log('')
+      console.log('=== LLM Cluster Narrative ===')
+      const narrative = await narrateClusters(report)
+      console.log(narrative)
     }
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)

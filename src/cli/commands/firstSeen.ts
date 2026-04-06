@@ -27,6 +27,8 @@ export interface FirstSeenCommandOptions {
   codeModel?: string
   vss?: boolean
   html?: string | boolean
+  /** Comma-separated repo IDs to search across (multi-repo) */
+  repos?: string
 }
 
 function renderCommitResults(results: CommitSearchResult[]): string {
@@ -106,9 +108,29 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
   // Get top-k results by semantic similarity; vectorSearch populates firstSeen/firstCommit.
   // renderFirstSeenResults re-sorts by earliest date so the output shows when each
   // concept first appeared in the codebase.
-  const results = useHybrid
+  let results = useHybrid
     ? hybridSearch(query.trim(), queryEmbedding, { topK, bm25Weight, branch: options.branch })
     : vectorSearch(queryEmbedding, { topK, branch: options.branch })
+
+  // --repos: merge results across registered repositories
+  if (options.repos) {
+    try {
+      const { multiRepoSearch } = await import('../../core/indexing/repoRegistry.js')
+      const { getActiveSession } = await import('../../core/db/sqlite.js')
+      const session = getActiveSession()
+      const repoIds = options.repos.split(',').map((s) => s.trim()).filter(Boolean)
+      const multiResults = await multiRepoSearch(session, Array.from(queryEmbedding) as number[], {
+        repoIds: repoIds.length > 0 ? repoIds : undefined,
+        topK,
+        model,
+      })
+      const combined = [...results, ...multiResults]
+      combined.sort((a, b) => b.score - a.score)
+      results = combined.slice(0, topK)
+    } catch (err) {
+      console.error(`Warning: multi-repo search failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
 
   // Optionally include commit-message results (sorted chronologically)
   let commitResults: CommitSearchResult[] | undefined

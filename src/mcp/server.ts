@@ -43,6 +43,7 @@ import { scanForVulnerabilities } from '../core/search/securityScan.js'
 import { computeHealthTimeline } from '../core/search/healthTimeline.js'
 import { scoreDebt } from '../core/search/debtScoring.js'
 import { getActiveSession } from '../core/db/sqlite.js'
+import { multiRepoSearch } from '../core/indexing/repoRegistry.js'
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -1146,6 +1147,42 @@ export async function startMcpServer(): Promise<void> {
           const path = r.paths[0] ?? '(unknown path)'
           lines.push(`  ${r.debtScore.toFixed(3)}  ${path.padEnd(50)}  isolation=${r.isolationScore.toFixed(3)}  age=${r.ageScore.toFixed(3)}  chg=${r.changeFrequency}`)
         }
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: multi_repo_search
+  // -------------------------------------------------------------------------
+  server.tool(
+    'multi_repo_search',
+    'Search across multiple registered gitsema repos. Each repo must have a db_path registered via `gitsema repos add`.',
+    {
+      query: z.string().describe('Natural-language query'),
+      repo_ids: z.array(z.string()).optional().describe('Repo IDs to search (default: all registered repos with db_path)'),
+      top_k: z.number().int().positive().optional().default(10).describe('Max results'),
+      model: z.string().optional().describe('Embedding model override'),
+    },
+    async ({ query, repo_ids, top_k, model }) => {
+      const provider = getTextProvider()
+      let embedding: number[]
+      try {
+        embedding = await embedQuery(provider, query) as number[]
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
+      }
+      try {
+        const session = getActiveSession()
+        const results = await multiRepoSearch(session, embedding, { repoIds: repo_ids, topK: top_k, model })
+        if (results.length === 0) {
+          return { content: [{ type: 'text', text: 'No results found across registered repos.' }] }
+        }
+        const lines = results.map((r) => `[${r.repoId}] ${r.score.toFixed(3)}  ${r.paths?.[0] ?? r.blobHash.slice(0, 8)}`)
         return { content: [{ type: 'text', text: lines.join('\n') }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)

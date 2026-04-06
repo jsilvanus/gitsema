@@ -7,6 +7,7 @@ import {
   type ClusterChange,
 } from '../../core/search/clustering.js'
 import { renderClusterTimelineHtml } from '../../core/viz/htmlRenderer.js'
+import { narrateClusterTimeline } from '../../core/llm/narrator.js'
 
 export interface ClusterTimelineCommandOptions {
   k?: string
@@ -22,6 +23,7 @@ export interface ClusterTimelineCommandOptions {
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
   branch?: string
+  narrate?: boolean
 }
 
 /**
@@ -114,6 +116,13 @@ export async function clusterTimelineCommand(options: ClusterTimelineCommandOpti
     }
 
     printTimelineReport(report, threshold)
+
+    if (options.narrate) {
+      console.log('')
+      console.log('=== LLM Cluster Timeline Narrative ===')
+      const narrative = await narrateClusterTimeline(report)
+      console.log(narrative)
+    }
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

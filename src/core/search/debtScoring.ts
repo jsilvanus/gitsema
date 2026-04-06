@@ -169,7 +169,9 @@ export async function scoreDebt(
         stmt = rawDb.prepare(`SELECT blob_hash, path FROM paths WHERE blob_hash IN (${placeholders})`)
         stmtCache.set(slice.length, stmt)
       }
-      const rows = stmt.all(...slice) as Array<{ blob_hash: string; path: string }>
+      const rows = (stmt.all as (...args: string[]) => unknown[])(
+        ...slice,
+      ) as Array<{ blob_hash: string; path: string }>
       for (const { blob_hash, path } of rows) {
         const arr = pathMap.get(blob_hash) ?? []
         arr.push(path)

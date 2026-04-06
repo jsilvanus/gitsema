@@ -54,6 +54,10 @@ import { heatmapCommand } from './commands/heatmap.js'
 import { doctorCommand } from './commands/doctor.js'
 import { vacuumCommand } from './commands/vacuum.js'
 import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
+import { watchCommand } from './commands/watch.js'
+import { exportIndex, importIndex } from './commands/bundleIndex.js'
+import { projectCommand } from './commands/project.js'
+import { toolsCommand } from './commands/tools.js'
 
 const program = new Command()
 
@@ -95,6 +99,7 @@ program
 
 const GROUPS = [
   'Setup & Infrastructure',
+  'Protocol Servers',
   'Search & Discovery',
   'File History',
   'Concept History',
@@ -107,12 +112,15 @@ const COMMAND_GROUPS: Record<string, string> = {
   config:           'Setup & Infrastructure',
   status:           'Setup & Infrastructure',
   index:            'Setup & Infrastructure',
-  serve:            'Setup & Infrastructure',
   'remote-index':   'Setup & Infrastructure',
   'backfill-fts':   'Setup & Infrastructure',
   'update-modules': 'Setup & Infrastructure',
-  mcp:              'Setup & Infrastructure',
   'build-vss':      'Setup & Infrastructure',
+  // Protocol Servers (new group — preferred entry point is `gitsema tools`)
+  tools:            'Protocol Servers',
+  serve:            'Protocol Servers',
+  mcp:              'Protocol Servers',
+  lsp:              'Protocol Servers',
   // Search & Discovery
   search:           'Search & Discovery',
   'first-seen':     'Search & Discovery',
@@ -384,14 +392,58 @@ program
   .option('--code-model <model>', 'override source-code embedding model (defaults to text model)')
   .option('--quantize', 'store embeddings as int8-quantized vectors (4× smaller, ~1% recall loss)')
   .option('--build-vss', 'build a usearch HNSW ANN index after indexing completes (requires usearch package)')
+  .option('--auto-build-vss [threshold]', 'automatically build VSS index after indexing when blob count exceeds threshold (default: 10000)')
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
   .action(indexCommand)
+
+// index export / index import — Phase 54 subcommands
+// (export-index and import-index top-level aliases kept for backward compatibility)
+
+const indexSub = program.commands.find((c) => c.name() === 'index')!
+
+indexSub
+  .command('export')
+  .description('Export the index as a compressed bundle (tar.gz) for sharing or backup')
+  .option('--out <file>', 'output bundle file path', 'gitsema-index.tar.gz')
+  .option('--after <date>', 'only include metadata for blobs first seen after this date (YYYY-MM-DD, tag, or commit)')
+  .option('--since <ref>', 'alias for --after')
+  .action(async (opts: { out: string; after?: string; since?: string }) => {
+    await exportIndex(opts)
+  })
+
+indexSub
+  .command('import')
+  .description('Import a gitsema index bundle (tar.gz) into the current .gitsema/ directory')
+  .option('--in <file>', 'input bundle file path', 'gitsema-index.tar.gz')
+  .action(async (opts: { in: string }) => {
+    await importIndex(opts)
+  })
+
+// Backward-compatible top-level aliases
+program
+  .command('export-index', { hidden: true })
+  .description('[alias] gitsema index export')
+  .option('--out <file>', 'output bundle file path', 'gitsema-index.tar.gz')
+  .option('--after <date>', 'only include metadata for blobs first seen after this date')
+  .option('--since <ref>', 'alias for --after')
+  .action(async (opts: { out: string; after?: string; since?: string }) => {
+    await exportIndex(opts)
+  })
+
+program
+  .command('import-index', { hidden: true })
+  .description('[alias] gitsema index import')
+  .option('--in <file>', 'input bundle file path', 'gitsema-index.tar.gz')
+  .action(async (opts: { in: string }) => {
+    await importIndex(opts)
+  })
 
 program
   .command('doctor')
   .description('Run integrity checks, schema version/provenance checks, and report index health')
-  .action(async () => {
-    await doctorCommand()
+  .option('--lsp', 'only run the LSP startup check (gitsema doctor --lsp)')
+  .action(async (opts: { lsp?: boolean }) => {
+    await doctorCommand(opts)
   })
 
 program
@@ -441,14 +493,20 @@ program
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html')
   .option('--or <query>', 'combine results with OR (union, max score)')
   .option('--and <query>', 'combine results with AND (intersection, harmonic mean)')
+  .option('--expand-query', 'expand query with top BM25 keywords before embedding to improve recall (Phase 52)')
+  .option('--narrate', 'generate an LLM summary of search results (requires GITSEMA_LLM_URL)')
+  .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo; use gitsema repos add to register)')
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())
 program.addCommand(reposCommand())
+// Keep top-level lsp as hidden alias; preferred form is `gitsema tools lsp`
 program.addCommand(lspCommand())
+program.addCommand(watchCommand())
 program.addCommand(securityScanCommand())
 program.addCommand(healthCommand())
 program.addCommand(debtCommand())
+program.addCommand(toolsCommand())
 
 program
   .command('first-seen <query>')
@@ -465,6 +523,7 @@ program
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--vss', 'use the usearch HNSW ANN index for approximate search (requires prior `gitsema build-vss`; falls back to linear scan)')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise first-seen.html')
+  .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo)')
   .action(firstSeenCommand)
 
 program
@@ -495,6 +554,7 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
+  .option('--narrate', 'generate an LLM narrative summary of semantic shifts (requires GITSEMA_LLM_URL)')
   .action(evolutionCommand)
 
 program
@@ -523,6 +583,7 @@ program
   .option('--code-model <model>', 'override code embedding model')
   .option('--branch <name>', 'restrict evolution to blobs seen on this branch')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
+  .option('--narrate', 'generate an LLM summary of concept evolution results (requires GITSEMA_LLM_URL)')
   .action(conceptEvolutionCommand)
 
 program
@@ -558,6 +619,7 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--github-token <token>', 'GitHub token to post diff as a PR review comment (overrides GITHUB_TOKEN)')
   .action(ciDiffCommand)
 
 program
@@ -569,6 +631,7 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--narrate', 'generate an LLM narrative of concept lifecycle (requires GITSEMA_LLM_URL)')
   .action(conceptLifecycleCommand)
 
 program
@@ -615,6 +678,7 @@ program
     '--neighbors <n>',
     'number of nearest-neighbour blobs to show for each version (default 0)',
   )
+  .option('--narrate', 'generate an LLM narrative interpretation of the semantic diff (requires GITSEMA_LLM_URL)')
   .action(diffCommand)
 
 program
@@ -639,7 +703,7 @@ program
 
 program
   .command('serve')
-  .description('Start the gitsema HTTP API server (embedding and storage backend)')
+  .description('Start the gitsema HTTP API server [deprecated: use `gitsema tools serve`]')
   .option('--port <n>', 'port to listen on (default 4242, overrides GITSEMA_SERVE_PORT)')
   .option('--key <token>', 'require this Bearer token for all requests (overrides GITSEMA_SERVE_KEY)')
   .option(
@@ -647,7 +711,11 @@ program
     'chunking strategy for incoming blobs: file (default), function, fixed',
   )
   .option('--concurrency <n>', 'max concurrent embedding calls (default 4)')
-  .action(serveCommand)
+  .option('--ui', 'serve the embedding space explorer web UI at /ui (requires prior `gitsema project` run)')
+  .action(async (opts: Parameters<typeof serveCommand>[0]) => {
+    console.warn('Deprecation notice: `gitsema serve` is deprecated — use `gitsema tools serve` instead.')
+    await serveCommand(opts)
+  })
 
 program
   .command('remote-index <repoUrl>')
@@ -747,6 +815,7 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--narrate', 'generate an LLM summary of cluster structure (requires GITSEMA_LLM_URL)')
   .action(clustersCommand)
 
 program
@@ -767,6 +836,7 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .option('--branch <name>', 'restrict clustering to blobs seen on this branch at each ref')
+  .option('--narrate', 'generate an LLM narrative of the cluster diff (requires GITSEMA_LLM_URL)')
   .action(clusterDiffCommand)
 
 program
@@ -791,6 +861,7 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
+  .option('--narrate', 'generate an LLM narrative of the cluster timeline (requires GITSEMA_LLM_URL)')
   .action(clusterTimelineCommand)
 
 program
@@ -815,6 +886,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise change-points.html',
   )
+  .option('--narrate', 'generate an LLM narrative of change points (requires GITSEMA_LLM_URL)')
   .action(changePointsCommand)
 
 program
@@ -834,6 +906,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise file-change-points.html',
   )
+  .option('--narrate', 'generate an LLM narrative of file change points (requires GITSEMA_LLM_URL)')
   .action(fileChangePointsCommand)
 
 program
@@ -977,8 +1050,9 @@ program
 
 program
   .command('mcp')
-  .description('Start the gitsema MCP server (stdio transport)')
+  .description('Start the gitsema MCP server (stdio transport) [deprecated: use `gitsema tools mcp`]')
   .action(async () => {
+    console.warn('Deprecation notice: `gitsema mcp` is deprecated — use `gitsema tools mcp` instead.')
     await startMcpServer()
   })
 
@@ -1004,6 +1078,15 @@ program
   .option('--vss', 'use the usearch HNSW ANN index for approximate candidate selection')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise author.html')
   .action(authorCommand)
+
+program
+  .command('project')
+  .description('Compute 2D random projections of all embeddings for the web UI (requires prior `gitsema index`)')
+  .option('--model <model>', 'embedding model to project (default: GITSEMA_MODEL)')
+  .option('--limit <n>', 'max number of embeddings to project (default: 10000)')
+  .action(async (opts: { model?: string; limit?: string }) => {
+    await projectCommand(opts)
+  })
 
 program.parse()
 
