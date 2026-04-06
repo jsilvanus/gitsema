@@ -443,6 +443,7 @@ program
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html')
   .option('--or <query>', 'combine results with OR (union, max score)')
   .option('--and <query>', 'combine results with AND (intersection, harmonic mean)')
+  .option('--expand-query', 'expand query with top BM25 keywords before embedding to improve recall (Phase 52)')
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())

@@ -11,6 +11,7 @@ import { parseDateArg } from '../../core/search/timeSearch.js'
 import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { getRawDb } from '../../core/db/sqlite.js'
+import { splitIdentifier } from '../../core/search/labelEnhancer.js'
 
 export interface SearchCommandOptions {
   top?: string
@@ -66,6 +67,8 @@ export interface SearchCommandOptions {
   or?: string
   /** Combine results with another query via AND (intersection, harmonic mean) */
   and?: string
+  /** When true, expand query with top BM25 keywords before embedding (improves recall) */
+  expandQuery?: boolean
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -237,6 +240,45 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     console.error(`Error: could not embed query — ${msg}`)
     process.exit(1)
     throw err
+  }
+
+  // Phase 52: Query Expansion — expand query with top BM25 keywords before re-embedding
+  let effectiveQuery = query
+  if (options.expandQuery) {
+    try {
+      const rawDb = getRawDb()
+      const ftsRows = rawDb.prepare(
+        `SELECT blob_hash FROM blob_fts WHERE blob_fts MATCH ? ORDER BY bm25(blob_fts) LIMIT 5`,
+      ).all(query.replace(/['"]/g, '')) as Array<{ blob_hash: string }>
+      if (ftsRows.length > 0) {
+        const hashes = ftsRows.map((r) => r.blob_hash)
+        const placeholders = hashes.map(() => '?').join(',')
+        const contentRows = rawDb.prepare(
+          `SELECT content FROM blob_fts WHERE blob_hash IN (${placeholders}) LIMIT 5`,
+        ).all(...(hashes as [string, ...string[]])) as Array<{ content: string }>
+        const allTokens: string[] = []
+        for (const row of contentRows) {
+          const words = row.content.split(/\s+/).slice(0, 30)
+          for (const w of words) {
+            allTokens.push(...splitIdentifier(w))
+          }
+        }
+        // Pick top-5 unique tokens not already in the query
+        const queryLower = query.toLowerCase()
+        const expansion = [...new Set(allTokens)]
+          .filter((t) => t.length > 2 && !queryLower.includes(t.toLowerCase()))
+          .slice(0, 5)
+        if (expansion.length > 0) {
+          effectiveQuery = `${query} ${expansion.join(' ')}`
+          if (process.env.GITSEMA_VERBOSE) {
+            console.error(`[expand-query] expanded to: ${effectiveQuery}`)
+          }
+          textEmbedding = await sharedEmbedQuery(textProvider, effectiveQuery, { noCache: true })
+        }
+      }
+    } catch {
+      // If expansion fails, fall through with original embedding
+    }
   }
 
   // Resolve --level flag to per-table search flags
