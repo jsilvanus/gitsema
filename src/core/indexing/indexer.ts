@@ -116,6 +116,18 @@ export interface IndexStats {
   commitEmbeddings: number
   /** Number of commit message embedding failures (Phase 30). */
   commitEmbedFailed: number
+  /** Current pipeline stage (used by progress renderer) */
+  currentStage: 'collecting' | 'embedding' | 'commit-mapping' | 'done'
+  /** Per-stage wall-clock time in ms (set at completion) */
+  stageTimings: {
+    collection: number   // ms from start until queued set
+    embedding: number    // ms spent in embedding phase
+    commitMapping: number // ms spent in commit-mapping phase
+  }
+  /** Rolling average embedding latency in ms (last 200 samples) */
+  embedLatencyAvgMs: number
+  /** p95 embedding latency in ms (from last 200 samples) */
+  embedLatencyP95Ms: number
 }
 
 /**
@@ -243,15 +255,41 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     fbFunction: 0, fbFixed: 0,
     queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0, symbols: 0,
     moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0,
+    currentStage: 'collecting',
+    stageTimings: { collection: 0, embedding: 0, commitMapping: 0 },
+    embedLatencyAvgMs: 0,
+    embedLatencyP95Ms: 0,
   }
   const start = Date.now()
   const SIZE_CAP = 50_000
   const seenHashes = new Set<string>()
   let lastProgressTime = 0
+
+  // Latency rolling window for embedding calls (last 200 samples)
+  const embedLatencies: number[] = []
+  let embedLatenciesDirty = false
+  function pushLatency(lat: number) {
+    embedLatencies.push(lat)
+    if (embedLatencies.length > 200) embedLatencies.shift()
+    // Mark dirty so avg/p95 are recomputed on the next progress tick
+    embedLatenciesDirty = true
+  }
+
+  function computeLatencyStats() {
+    if (!embedLatenciesDirty || embedLatencies.length === 0) return
+    embedLatenciesDirty = false
+    const sum = embedLatencies.reduce((a, b) => a + b, 0)
+    stats.embedLatencyAvgMs = Math.round(sum / embedLatencies.length)
+    const sorted = [...embedLatencies].sort((a, b) => a - b)
+    const idx = Math.max(0, Math.ceil(0.95 * sorted.length) - 1)
+    stats.embedLatencyP95Ms = Math.round(sorted[idx] ?? 0)
+  }
+
   function reportProgress() {
     const now = Date.now()
     if (now - lastProgressTime >= 100) {
       lastProgressTime = now
+      computeLatencyStats()
       onProgress?.({ ...stats, elapsed: now - start })
     }
   }
@@ -260,6 +298,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   // Collect blobs first so we can fan-out embedding calls concurrently
   const blobsToProcess: BlobEntry[] = []
+  const collectionStart = Date.now()
 
   for await (const entry of stream as AsyncIterable<BlobEntry>) {
     const { blobHash, path } = entry
@@ -291,9 +330,22 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   // Expose the total work queue so callers can render a progress bar.
   stats.queued = blobsToProcess.length
+  // mark collection timing and transition to embedding
+  stats.stageTimings.collection = Date.now() - collectionStart
+  stats.currentStage = 'embedding'
   onProgress?.({ ...stats, elapsed: Date.now() - start })
 
   // Process blobs concurrently up to the configured limit.
+  const embeddingStart = Date.now()
+
+  // helper to time embedding calls and update rolling window
+  async function timedEmbed(provider: EmbeddingProvider, input: string) {
+    const t0 = Date.now()
+    const res = await provider.embed(input)
+    const lat = Date.now() - t0
+    pushLatency(lat)
+    return res
+  }
   // Note: stats mutations (stats.failed++, etc.) are safe here because Node.js
   // is single-threaded — each increment runs between await points and cannot
   // interleave with another increment on the same variable.
@@ -338,7 +390,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           let wholeEmbedding: Embedding | null = null
           if (computeModuleEmbedding) {
             try {
-              wholeEmbedding = await activeProvider.embed(text)
+              wholeEmbedding = await timedEmbed(activeProvider, text)
             } catch (err) {
               logger.debug?.(`Whole-file embedding failed for ${blobHash} (chunker=${chunkerStrategy}): ${err instanceof Error ? err.message : String(err)}`)
             }
@@ -379,7 +431,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           for (const chunk of blobChunks) {
             let chunkEmbedding: Embedding
             try {
-              chunkEmbedding = await activeProvider.embed(chunk.content)
+              chunkEmbedding = await timedEmbed(activeProvider, chunk.content)
             } catch (err) {
               logger.debug?.(`Embedding failed for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err instanceof Error ? err.message : String(err)}`)
               allOk = false
@@ -410,7 +462,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               )
               let symbolEmbedding: Embedding
               try {
-                symbolEmbedding = await activeProvider.embed(enriched)
+                symbolEmbedding = await timedEmbed(activeProvider, enriched)
               } catch (err) {
                 logger.debug?.(`Symbol embedding failed for ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
                 // Symbol embedding failure is non-fatal — the chunk embedding succeeded
@@ -437,7 +489,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           // Whole-file indexing (default, backward-compatible)
           let embedding: Embedding
           try {
-            embedding = await activeProvider.embed(text)
+            embedding = await timedEmbed(activeProvider, text)
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
             logger.debug?.(`Embedding failed for blob ${blobHash}: ${msg}`)
@@ -468,7 +520,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               for (const chunk of blobChunks) {
                 let chunkEmbedding: Embedding
                 try {
-                  chunkEmbedding = await activeProvider.embed(chunk.content)
+                  chunkEmbedding = await timedEmbed(activeProvider, chunk.content)
                 } catch (err3) {
                   const msg3 = err3 instanceof Error ? err3.message : String(err3)
                   logger.debug?.(`Embedding failed for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${msg3}`)
@@ -489,7 +541,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                       for (const sub of subChunks) {
                         let subEmb: Embedding | null = null
                         try {
-                          subEmb = await activeProvider.embed(sub.content)
+                          subEmb = await timedEmbed(activeProvider, sub.content)
                         } catch (err5) {
                           const msg5 = err5 instanceof Error ? err5.message : String(err5)
                           logger.debug?.(`Embedding failed for blob ${blobHash} subchunk ${chunk.startLine + sub.startLine - 1}-${chunk.startLine + sub.endLine - 1}: ${msg5}`)
@@ -596,6 +648,11 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     ),
   )
 
+  // finalize embedding timing and transition to commit mapping
+  stats.stageTimings.embedding = Date.now() - embeddingStart
+  stats.currentStage = 'commit-mapping'
+  const commitMappingStart = Date.now()
+
   // Phase B: Walk commit history, persist to commits/blobCommits
   const commitStream = streamCommitMap(repoPath, { maxCommits, branch: branchFilter }) as AsyncIterable<CommitMapEvent>
 
@@ -619,7 +676,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     // Failures are non-fatal: we log and count them, then move on.
     if (pendingCommit.message.trim().length > 0) {
       try {
-        const msgEmbedding = await provider.embed(pendingCommit.message)
+        const msgEmbedding = await timedEmbed(provider, pendingCommit.message)
         storeCommitEmbedding({
           commitHash: pendingCommit.commitHash,
           model: provider.model,
@@ -652,6 +709,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   }
 
   await flushPendingCommit()
+
+  // finalize commit mapping timing
+  stats.stageTimings.commitMapping = Date.now() - commitMappingStart
+  stats.currentStage = 'done'
+
+  // Ensure latency stats are finalized for the summary
+  computeLatencyStats()
 
   stats.elapsed = Date.now() - start
   return stats

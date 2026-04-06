@@ -304,18 +304,31 @@ program
 
 program
   .command('index')
-  .description('Index all blobs in the current Git repo')
+  .description(
+    'Walk Git history and embed all blobs into the semantic index.\n\n' +
+    'Default mode is INCREMENTAL: automatically resumes from the last indexed commit.\n' +
+    'Use --since all to force a full re-index from scratch.\n\n' +
+    'Progress output shows: stage (collecting/embedding/commit-mapping), % complete,\n' +
+    'throughput (blobs/s), embedding latency (avg + p95), and ETA.\n' +
+    'A final summary prints per-stage timings and totals.\n\n' +
+    'Performance tuning tips:\n' +
+    '  - Increase --concurrency if your embedding server supports parallel requests\n' +
+    '  - Use --chunker fixed with a smaller --window-size if you hit context-length errors\n' +
+    '  - Use --ext to limit indexed file types (e.g. ".ts,.py") and reduce noise\n' +
+    '  - Use --exclude node_modules,dist to skip irrelevant paths\n' +
+    '  - Run `gitsema doctor` after indexing to verify index health'
+  )
   .option(
     '--since <ref>',
-    'only index commits after this point; accepts a date (2024-01-01), tag (v1.0), or commit hash; use "all" to force a full re-index',
+    'resume from this point (date like 2024-01-01, tag, or commit hash); default: last indexed commit (incremental); use "all" to force full re-index',
   )
   .option(
     '--max-commits <n>',
-    'stop after indexing this many commits; pair with incremental indexing to split large histories into multiple sessions',
+    'stop after indexing this many commits; useful to split large histories into multiple incremental sessions',
   )
   .option(
     '--concurrency <n>',
-    'number of blobs to embed concurrently (default 4)',
+    'parallel embedding calls (default 4); increase for faster remote providers, decrease if you hit rate-limit errors',
   )
   .option(
     '--ext <extensions>',
@@ -335,11 +348,11 @@ program
   )
   .option(
     '--chunker <strategy>',
-    'chunking strategy: file (default, whole-file), function (function/class boundaries), fixed (fixed-size windows)',
+    'chunking strategy: file (default, one embedding per file), function (function/class boundaries), fixed (fixed-size windows with overlap)',
   )
   .option(
     '--window-size <n>',
-    'target chunk size in characters for the fixed chunker (default 1500)',
+    'target chunk size in characters for the fixed chunker (default 1500); reduce if you hit context-length errors',
   )
   .option(
     '--overlap <n>',
@@ -357,9 +370,9 @@ program
     '--branch <name>',
     'restrict indexing to commits reachable from this branch (short name, e.g. "main")',
   )
-  .option('--model <model>', 'override embedding model')
-  .option('--text-model <model>', 'override text embedding model')
-  .option('--code-model <model>', 'override code embedding model')
+  .option('--model <model>', 'override embedding model for this run')
+  .option('--text-model <model>', 'override text/prose embedding model')
+  .option('--code-model <model>', 'override source-code embedding model (defaults to text model)')
   .option('--quantize', 'store embeddings as int8-quantized vectors (4× smaller, ~1% recall loss)')
   .option('--build-vss', 'build a usearch HNSW ANN index after indexing completes (requires usearch package)')
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
