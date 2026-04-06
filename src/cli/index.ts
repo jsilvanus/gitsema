@@ -11,6 +11,11 @@ import { statusCommand } from './commands/status.js'
 import { indexCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
 import { codeSearchCommand } from './commands/codeSearch.js'
+import { reposCommand } from './commands/repos.js'
+import { lspCommand } from './commands/lsp.js'
+import { securityScanCommand } from './commands/securityScan.js'
+import { healthCommand } from './commands/health.js'
+import { debtCommand } from './commands/debt.js'
 import { firstSeenCommand } from './commands/firstSeen.js'
 import { evolutionCommand } from './commands/evolution.js'
 import { conceptEvolutionCommand } from './commands/conceptEvolution.js'
@@ -422,6 +427,11 @@ program
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())
+program.addCommand(reposCommand())
+program.addCommand(lspCommand())
+program.addCommand(securityScanCommand())
+program.addCommand(healthCommand())
+program.addCommand(debtCommand())
 
 program
   .command('first-seen <query>')
