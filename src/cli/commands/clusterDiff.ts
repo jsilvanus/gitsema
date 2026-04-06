@@ -9,6 +9,7 @@ import {
   type ClusterChange,
 } from '../../core/search/clustering.js'
 import { renderClusterDiffHtml } from '../../core/viz/htmlRenderer.js'
+import { narrateClusterDiff } from '../../core/llm/narrator.js'
 
 export interface ClusterDiffCommandOptions {
   k?: string
@@ -20,6 +21,7 @@ export interface ClusterDiffCommandOptions {
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
   branch?: string
+  narrate?: boolean
 }
 
 /**
@@ -115,6 +117,13 @@ export async function clusterDiffCommand(
     }
 
     printTemporalReport(report)
+
+    if (options.narrate) {
+      console.log('')
+      console.log('=== LLM Cluster Diff Narrative ===')
+      const narrative = await narrateClusterDiff(report)
+      console.log(narrative)
+    }
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

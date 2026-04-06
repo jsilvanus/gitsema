@@ -12,10 +12,13 @@
  * Falls back gracefully when GITSEMA_LLM_URL is not configured.
  */
 
-import type { EvolutionEntry } from '../search/evolution.js'
+import type { EvolutionEntry, DiffResult } from '../search/evolution.js'
 import type { SecurityFinding } from '../search/securityScan.js'
-import type { ClusterReport } from '../search/clustering.js'
+import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering.js'
 import type { SearchResult } from '../models/types.js'
+import type { ConceptChangePointReport, FileChangePointReport } from '../search/changePoints.js'
+import type { HealthSnapshot } from '../search/healthTimeline.js'
+import type { ConceptLifecycleResult } from '../search/conceptLifecycle.js'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -193,6 +196,249 @@ Provide a concise summary:`
 
   try {
     return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateClusterDiff — temporal cluster diff (ref1 → ref2)
+// ---------------------------------------------------------------------------
+
+export async function narrateClusterDiff(report: TemporalClusterReport): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  const active = report.changes.filter((c) => c.newBlobs > 0 || c.removedBlobs > 0 || c.inflows.length > 0 || c.outflows.length > 0)
+  const topMoves = active.slice(0, 6).map((c) => {
+    const label = c.afterCluster?.label ?? c.beforeCluster?.label ?? '?'
+    const inflowCount = c.inflows.reduce((s, f) => s + f.count, 0)
+    const outflowCount = c.outflows.reduce((s, f) => s + f.count, 0)
+    return `  "${label}": +${c.newBlobs} new, -${c.removedBlobs} removed, ${inflowCount} migrated-in, ${outflowCount} migrated-out`
+  })
+
+  const prompt = `You are a software architecture analyst reviewing a semantic cluster diff.
+The codebase evolved from ${report.ref1} to ${report.ref2}.
+Before: ${report.before.clusters.length} clusters, ${report.before.totalBlobs} blobs.
+After:  ${report.after.clusters.length} clusters, ${report.after.totalBlobs} blobs.
+Summary: ${report.newBlobsTotal} new blobs, ${report.removedBlobsTotal} removed, ${report.movedBlobsTotal} moved across clusters, ${report.stableBlobsTotal} stable.
+
+Top cluster changes:
+${topMoves.join('\n')}
+
+In 2-4 sentences, describe what this diff reveals about how the codebase architecture shifted between these two points. Focus on the most significant movements and what they likely indicate.
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt)
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateClusterTimeline — multi-step cluster evolution
+// ---------------------------------------------------------------------------
+
+export async function narrateClusterTimeline(report: ClusterTimelineReport): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  const stepLines = report.steps.map((s, i) => {
+    const stats = s.stats
+    const statStr = stats
+      ? ` (+${stats.newBlobs} new, -${stats.removedBlobs} removed, ${stats.movedBlobs} moved)`
+      : ' (baseline)'
+    const topLabels = s.clusters.slice(0, 3).map((c) => `"${c.label}"`).join(', ')
+    return `  Step ${i + 1} [${s.ref}] ${s.blobCount} blobs${statStr} — top clusters: ${topLabels}`
+  })
+
+  const prompt = `You are a software evolution analyst reviewing a semantic cluster timeline.
+The codebase was analyzed at ${report.steps.length} checkpoints (${report.k} clusters per step).
+
+Timeline:
+${stepLines.join('\n')}
+
+In 2-4 sentences, summarize the dominant trends in how the codebase's conceptual structure evolved over time. Note any significant acceleration or stabilization periods, and what the progression suggests about the project's development trajectory.
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt)
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateChangePoints — semantic concept change-points timeline
+// ---------------------------------------------------------------------------
+
+export async function narrateChangePoints(report: ConceptChangePointReport): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  const pointLines = report.points.slice(0, 8).map((p, i) =>
+    `  #${i + 1}  ${p.before.date} → ${p.after.date}  distance=${p.distance.toFixed(4)}  before=[${p.before.topPaths.slice(0, 2).join(', ')}]  after=[${p.after.topPaths.slice(0, 2).join(', ')}]`,
+  )
+
+  const prompt = `You are a software evolution analyst. The semantic change-point detector found ${report.points.length} major shifts in how the concept "${report.query}" is represented in the codebase.
+
+Change points (sorted by semantic distance, largest first):
+${pointLines.join('\n')}
+
+In 2-3 sentences, summarize when and how the concept "${report.query}" changed most significantly. What do the file paths suggest about the nature of each change?
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateFileChangePoints — semantic file change-points timeline
+// ---------------------------------------------------------------------------
+
+export async function narrateFileChangePoints(filePath: string, report: FileChangePointReport): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  const pointLines = report.points.slice(0, 8).map((p, i) =>
+    `  #${i + 1}  ${p.before.date} → ${p.after.date}  distance=${p.distance.toFixed(4)}  before=[${p.before.commit.slice(0, 7)}]  after=[${p.after.commit.slice(0, 7)}]`,
+  )
+
+  const prompt = `You are a software evolution analyst. A semantic change-point analysis found ${report.points.length} major semantic shifts in the file "${filePath}".
+
+Change points (sorted by distance, largest first):
+${pointLines.join('\n')}
+
+In 2-3 sentences, summarize the key inflection points in this file's history. What does the pattern of distances suggest about when and how significantly the file's purpose or implementation changed?
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateDiff — semantic file diff between two refs
+// ---------------------------------------------------------------------------
+
+export async function narrateDiff(filePath: string, result: DiffResult): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  if (result.cosineDistance === null) {
+    return '(LLM narration unavailable — one or both versions are not in the index)'
+  }
+
+  const interpretation =
+    result.cosineDistance < 0.05 ? 'virtually identical'
+    : result.cosineDistance < 0.15 ? 'minor drift'
+    : result.cosineDistance < 0.35 ? 'moderate change'
+    : result.cosineDistance < 0.6 ? 'significant rewrite'
+    : 'complete semantic overhaul'
+
+  const nn1 = result.neighbors1?.slice(0, 3).map((n) => n.paths[0] ?? n.blobHash.slice(0, 8)).join(', ') ?? '(none)'
+  const nn2 = result.neighbors2?.slice(0, 3).map((n) => n.paths[0] ?? n.blobHash.slice(0, 8)).join(', ') ?? '(none)'
+
+  const prompt = `You are a code review assistant analyzing a semantic diff of the file "${filePath}" between ${result.ref1} and ${result.ref2}.
+
+Cosine distance: ${result.cosineDistance.toFixed(4)} (${interpretation})
+Nearest neighbors at ${result.ref1}: ${nn1}
+Nearest neighbors at ${result.ref2}: ${nn2}
+
+In 2-3 sentences, interpret what this semantic distance and the neighbor shift suggests about how the file's purpose or implementation changed between these two versions.
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateHealthTimeline — codebase health metrics over time
+// ---------------------------------------------------------------------------
+
+export async function narrateHealthTimeline(snapshots: HealthSnapshot[]): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  const lines = snapshots.slice(0, 16).map((s) => {
+    const start = new Date(s.periodStart * 1000).toISOString().slice(0, 10)
+    const end = new Date(s.periodEnd * 1000).toISOString().slice(0, 10)
+    return `  ${start}–${end}  active=${s.activeBlobCount}  churn=${s.semanticChurnRate.toFixed(3)}  dead=${s.deadConceptRatio.toFixed(3)}`
+  })
+
+  const prompt = `You are a software engineering analyst reviewing a codebase health timeline.
+Each row shows a time period with active blob count, semantic churn rate (higher = more concept turnover), and dead concept ratio (higher = more stale/removed concepts).
+
+Health timeline:
+${lines.join('\n')}
+
+In 2-4 sentences, summarize the overall health trajectory of this codebase. Note any concerning spikes in churn or dead concepts, periods of stability, and what the trend suggests about the project's development health.
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300)
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateLifecycle — concept lifecycle analysis
+// ---------------------------------------------------------------------------
+
+export async function narrateLifecycle(result: ConceptLifecycleResult): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  const born = result.bornTimestamp
+    ? new Date(result.bornTimestamp * 1000).toISOString().slice(0, 10)
+    : 'unknown'
+  const peak = new Date(result.peakTimestamp * 1000).toISOString().slice(0, 10)
+  const pointLines = result.points.slice(0, 12).map((p) =>
+    `  ${p.date}  stage=${p.stage}  matches=${p.matchCount}  growth=${p.growthRate.toFixed(3)}`,
+  )
+
+  const prompt = `You are a software evolution analyst reviewing the lifecycle of the concept "${result.query}".
+Born: ${born}  Peak: ${peak} (${result.peakCount} matches)  Current stage: ${result.currentStage}  Dead: ${result.isDead}
+
+Lifecycle points (${result.points.length} steps):
+${pointLines.join('\n')}
+
+In 2-4 sentences, narrate the lifecycle story of this concept in the codebase. When did it emerge, grow, and what stage is it at now? What does this lifecycle suggest about the concept's long-term importance to the project?
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300)
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }

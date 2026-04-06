@@ -1,10 +1,12 @@
 import { computeDiff } from '../../core/search/evolution.js'
 import { shortHash } from '../../core/search/ranking.js'
 import { writeFileSync } from 'node:fs'
+import { narrateDiff } from '../../core/llm/narrator.js'
 
 export interface DiffCommandOptions {
   neighbors?: string
   dump?: string | boolean
+  narrate?: boolean
 }
 
 /**
@@ -102,4 +104,11 @@ export async function diffCommand(
   }
 
   console.log(renderDiff(result, filePath.trim()))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Diff Narrative ===')
+    const narrative = await narrateDiff(filePath.trim(), result)
+    console.log(narrative)
+  }
 }

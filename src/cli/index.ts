@@ -624,6 +624,7 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
+  .option('--narrate', 'generate an LLM narrative of concept lifecycle (requires GITSEMA_LLM_URL)')
   .action(conceptLifecycleCommand)
 
 program
@@ -670,6 +671,7 @@ program
     '--neighbors <n>',
     'number of nearest-neighbour blobs to show for each version (default 0)',
   )
+  .option('--narrate', 'generate an LLM narrative interpretation of the semantic diff (requires GITSEMA_LLM_URL)')
   .action(diffCommand)
 
 program
@@ -824,6 +826,7 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .option('--branch <name>', 'restrict clustering to blobs seen on this branch at each ref')
+  .option('--narrate', 'generate an LLM narrative of the cluster diff (requires GITSEMA_LLM_URL)')
   .action(clusterDiffCommand)
 
 program
@@ -848,6 +851,7 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
+  .option('--narrate', 'generate an LLM narrative of the cluster timeline (requires GITSEMA_LLM_URL)')
   .action(clusterTimelineCommand)
 
 program
@@ -872,6 +876,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise change-points.html',
   )
+  .option('--narrate', 'generate an LLM narrative of change points (requires GITSEMA_LLM_URL)')
   .action(changePointsCommand)
 
 program
@@ -891,6 +896,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise file-change-points.html',
   )
+  .option('--narrate', 'generate an LLM narrative of file change points (requires GITSEMA_LLM_URL)')
   .action(fileChangePointsCommand)
 
 program
