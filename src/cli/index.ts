@@ -41,6 +41,7 @@ import { semanticBisectCommand } from './commands/semanticBisect.js'
 import { refactorCandidatesCommand } from './commands/refactorCandidates.js'
 import { ciDiffCommand } from './commands/ciDiff.js'
 import { conceptLifecycleCommand } from './commands/conceptLifecycle.js'
+import { docGapCommand } from './commands/docGap.js'
 import { doctorCommand } from './commands/doctor.js'
 import { vacuumCommand } from './commands/vacuum.js'
 import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
@@ -538,6 +539,15 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .action(conceptLifecycleCommand)
+
+program
+  .command('doc-gap')
+  .description('Find undocumented code by comparing code blobs against prose/documentation embeddings')
+  .option('-k, --top <n>', 'number of results to return', '20')
+  .option('--threshold <n>', 'only include code files whose max similarity to docs is below this threshold (0–1)')
+  .option('--branch <name>', 'restrict to blobs seen on this branch')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(docGapCommand)
 
 program
   .command('file-diff <ref1> <ref2> <path>')
