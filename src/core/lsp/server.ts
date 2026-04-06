@@ -39,9 +39,9 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
   }
   if (req.method === 'textDocument/hover') {
     const params = req.params ?? {}
-    const word = params?.text ?? params?.word ?? (params?.position ? 'symbol' : 'symbol')
-    // Build a simple query from the hovered word
-    const q = typeof word === 'string' ? word : String(word)
+    // Extract the hovered word: prefer explicit text/word params over position-based lookup
+    const rawWord = params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
     // Use a lightweight embedding flow: embed the query then vectorSearch
     try {
       const provider = { model: 'mock' }

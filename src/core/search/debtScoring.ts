@@ -25,7 +25,13 @@ export function scoreDebt(dbSession: ReturnType<typeof getActiveSession>, provid
     const ageScore = Math.min(1, age / (60 * 60 * 24 * 365))
     const changeFreqRow = rawDb.prepare('SELECT COUNT(*) as c FROM blob_commits WHERE blob_hash = ?').get(r.blob_hash) as { c?: number } | undefined
     const changeFreq = (changeFreqRow?.c ?? 0) || 0
-    const isolation = 0.5 // placeholder
+  /**
+   * Isolation score: ideally (1 - average cosine similarity to k-nearest neighbours).
+   * Computing this correctly requires a full embedding scan which is expensive at scale.
+   * For now we use a conservative placeholder of 0.5 (middle of the scale); a future
+   * iteration can compute this via the usearch HNSW index or a sampled cosine scan.
+   */
+  const isolation = 0.5
 
     const debtScore = 0.5 * (1 - isolation) + 0.3 * ageScore + 0.2 * (1 - Math.min(1, changeFreq / 10))
     results.push({ blobHash: r.blob_hash, paths, debtScore, isolationScore: isolation, ageScore, changeFrequency: changeFreq })
