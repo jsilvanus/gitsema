@@ -285,12 +285,11 @@ do not implement `embedBatch`.
 
 ### 3.3 New Performance Concerns
 
-#### N1 — Health Timeline: Prepared Statements Inside Loop
+#### N1 — Health Timeline: Prepared Statements Inside Loop ✅ Fixed
 
-`src/core/search/healthTimeline.ts` calls `rawDb.prepare(...)` three times per
-bucket inside the for-loop. With 12 buckets, this creates 36 prepared-statement
-objects per invocation. Move the three `prepare()` calls above the loop and use
-parameterised binding.
+`src/core/search/healthTimeline.ts` previously called `rawDb.prepare(...)` inside
+the for-loop. The fix hoists all three `prepare()` calls above the loop and uses
+parameterised binding, reducing object allocation from 3×buckets to 3 per call.
 
 #### N2 — Debt Scoring: Full Paths Table Load
 
@@ -501,48 +500,41 @@ at minimum adding header lines to all TSV-style outputs.
 - **Credentials via `GIT_ASKPASS`** (Phase 17): HTTPS tokens are passed through a
   temp credential helper file rather than embedded in the URL that appears in process
   listings.
+- **SSH key file mode**: `writeSshKey()` (`src/core/git/cloneRepo.ts:231`) already
+  writes with `{ mode: 0o600 }`. **No action required.**
+- **Rate limiting on `/remote/index`**: The `getCloneSemaphore()` semaphore
+  (`src/server/routes/remote.ts:438–449`) caps concurrent clone operations (default 2,
+  configurable via `GITSEMA_CLONE_CONCURRENCY`) and returns `429 Too Many Requests`
+  when the cap is exceeded. **No action required.**
 
 ### 7.2 Open Concerns
 
-#### S1 — Timing-Safe Token Comparison
+#### S1 — Timing-Safe Token Comparison ✅ Fixed
 
-`src/server/middleware/auth.ts`:
-```typescript
-if (!auth || auth !== `Bearer ${key}`) {
-```
-String comparison (`!==`) is not constant-time. An attacker who can measure response
-latency could theoretically recover `GITSEMA_SERVE_KEY` byte-by-byte via a timing
-oracle. Use `crypto.timingSafeEqual()`:
-```typescript
-import { timingSafeEqual } from 'node:crypto'
-const expected = Buffer.from(`Bearer ${key}`)
-const actual   = Buffer.from(auth ?? '')
-if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) { ... }
-```
+`src/server/middleware/auth.ts` now uses `crypto.timingSafeEqual()` to compare
+the expected and actual `Authorization` header values, preventing timing-oracle
+attacks.
 
-#### S2 — No Rate Limiting on the HTTP Server
+#### S2 — No Rate Limiting on the HTTP Server ✅ Already Addressed
 
-`POST /remote/index` triggers a full `git clone` and embedding run against a
-caller-supplied URL. With no rate limiting, an authenticated caller (or an
-unauthenticated caller if `GITSEMA_SERVE_KEY` is not set) can initiate many
-concurrent clones and exhaust disk, memory, or network. Add a per-IP or
-global-concurrency rate limit on at minimum `/remote/index`.
+`POST /remote/index` is protected by a server-wide clone semaphore
+(`getCloneSemaphore()` in `src/core/git/cloneRepo.ts`, configurable via
+`GITSEMA_CLONE_CONCURRENCY`, default 2). When the semaphore is exhausted the
+route immediately returns `429 Too Many Requests` with a `Retry-After: 30`
+header. This was an incorrect finding in the initial review.
 
-#### S3 — `require()` in ESM Module (`securityScan.ts`)
+#### S3 — `require()` in ESM Module (`securityScan.ts`) ✅ Fixed
 
-Documented in §4.2. In addition to the ESM correctness concern, dynamic
-`require()` can be a vector for module-injection in unusual deploy environments
-(e.g., if the Node.js module cache is preloaded with a malicious `node:fs`
-shim). Use the static import.
+`src/cli/commands/securityScan.ts` now uses a top-level `import { writeFileSync }
+from 'node:fs'` instead of the dynamic `require()` call.
 
-#### S4 — Security Scan Output Can Mislead
+#### S4 — Security Scan Output Can Mislead ✅ Fixed
 
-`gitsema security-scan` labels results `[SQL Injection]`, `[Path Traversal]`, etc.
-These are semantic similarity scores, not confirmed vulnerabilities. A codebase
-with robust parameterized-query documentation will score high for "SQL Injection"
-because it talks about the concept. The output line format looks like a security
-tool finding. Add a header line: `# Results are semantic similarity scores, not
-confirmed vulnerabilities. Manual review required.`
+`gitsema security-scan` now prints a disclaimer header before results:
+`# Results are semantic similarity scores, not confirmed vulnerabilities.
+Manual review required.`
+The HTTP route (`POST /analysis/security-scan`) also includes a `disclaimer`
+field in the JSON response.
 
 #### S5 — Unvalidated Integer Options
 
@@ -552,11 +544,10 @@ will emit `LIMIT NaN` which SQLite interprets as `LIMIT 0`. This could silently
 return no results rather than an error. Validate all integer options at command
 entry with a guard that exits with a clear message.
 
-#### S6 — SSH Key Stored in Temp File World-Readable By Default
+#### S6 — SSH Key Stored in Temp File World-Readable By Default ✅ Already Fixed
 
-`src/core/git/cloneRepo.ts:204–224` writes a PEM SSH private key to a temp file
-via `writeFile(path, key)`. The default `umask` on most Linux systems is `0022`,
-making this file world-readable. Use `{ mode: 0o600 }` in the `writeFile` call.
+`writeSshKey()` in `src/core/git/cloneRepo.ts:231` already uses
+`{ mode: 0o600 }`. This was an incorrect finding in the initial review.
 
 ---
 
@@ -564,22 +555,22 @@ making this file world-readable. Use `{ mode: 0o600 }` in the `writeFile` call.
 
 ### Critical (must fix before production/public use)
 
-| # | Gap | File | Fix |
-|---|-----|------|-----|
-| **P0-1** | SSH key temp file world-readable | `src/core/git/cloneRepo.ts` | Add `{ mode: 0o600 }` to `writeFile` |
-| **P0-2** | `require()` in ESM module | `src/cli/commands/securityScan.ts:22` | Replace with top-level `import` |
-| **P0-3** | Timing-unsafe auth token comparison | `src/server/middleware/auth.ts` | Use `crypto.timingSafeEqual()` |
+| # | Gap | File | Status |
+|---|-----|------|--------|
+| **P0-1** | SSH key temp file world-readable | `src/core/git/cloneRepo.ts` | ✅ Already had `mode: 0o600` |
+| **P0-2** | `require()` in ESM module | `src/cli/commands/securityScan.ts` | ✅ Fixed: top-level `import` |
+| **P0-3** | Timing-unsafe auth token comparison | `src/server/middleware/auth.ts` | ✅ Fixed: `crypto.timingSafeEqual()` |
 
 ### High (significant UX or correctness impact)
 
-| # | Gap | File | Fix |
-|---|-----|------|-----|
-| **H1** | C6: No batch embedding in indexer | `src/core/indexing/indexer.ts` | Accumulate blobs into batches, call `embedBatch()` |
-| **H2** | `--branch` silently ignored in `health` | `src/core/search/healthTimeline.ts` | Filter `commits` via `blob_branches` |
-| **H3** | Debt scoring O(N²) fallback undocumented | `src/cli/commands/debt.ts` help | Warn when no HNSW index; recommend `build-vss` |
-| **H4** | No HTTP routes for Phase 41–47 | `src/server/routes/analysis.ts` | Add endpoints for `security-scan`, `health`, `debt` |
-| **H5** | No rate limiting on `/remote/index` | `src/server/` | Add request-concurrency middleware |
-| **H6** | `security-scan` output implies confirmed findings | `src/cli/commands/securityScan.ts` | Add disclaimer header in output |
+| # | Gap | File | Status |
+|---|-----|------|--------|
+| **H1** | C6: No batch embedding in indexer | `src/core/indexing/indexer.ts` | ✅ Fixed: `--embed-batch-size` option |
+| **H2** | `--branch` silently ignored in `health` | `src/core/search/healthTimeline.ts` | ✅ Fixed: filters via `blob_branches` |
+| **H3** | Debt scoring O(N²) fallback undocumented | `src/cli/commands/debt.ts` | ✅ Fixed: warns when no HNSW index |
+| **H4** | No HTTP routes for Phase 41–47 | `src/server/routes/analysis.ts` | ✅ Fixed: added `/security-scan`, `/health`, `/debt` |
+| **H5** | No rate limiting on `/remote/index` | `src/server/routes/remote.ts` | ✅ Already had semaphore + 429 response |
+| **H6** | `security-scan` output implies confirmed findings | `src/cli/commands/securityScan.ts` | ✅ Fixed: disclaimer header added |
 
 ### Medium (quality and maintainability)
 
@@ -616,18 +607,18 @@ making this file world-readable. Use `{ mode: 0o600 }` in the `writeFile` call.
 These phases build on the v0.49.0 foundation. They are ordered by expected value
 delivery, not implementation complexity.
 
-### Phase 48 — Batch Embedding and Provider Throughput
+### Phase 48 — Batch Embedding and Provider Throughput ✅ Implemented
 
 **Goal:** Close the longstanding C6 gap; enable practical indexing of large repos
 against local HTTP providers.
 
-- Add `--embed-batch-size <n>` option to `gitsema index` (default 32).
-- Modify `runIndex()` to accumulate blobs into batches, await
-  `provider.embedBatch()`, then distribute results.
-- Instrument batch throughput in the Phase 47 progress reporter (blobs/s climbs
-  significantly; make this visible).
-- Fall back to per-blob `embed()` for providers that don't implement `embedBatch`.
-- **Version:** minor bump.
+- Added `--embed-batch-size <n>` option to `gitsema index`.
+- When `--chunker file` (default), the provider implements `embedBatch`, and no
+  routing provider is active, blobs are processed in batches of `embedBatchSize`.
+  This collapses N serial HTTP round-trips into N/batchSize batch requests.
+- Falls back to per-blob `embed()` if `embedBatch` is unavailable or the batch
+  call fails.
+- **Recommended:** `--embed-batch-size 32` for local HTTP providers.
 
 ### Phase 49 — Auto-VSS Default Path
 

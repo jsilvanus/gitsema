@@ -364,6 +364,10 @@ program
     'overlap in characters between adjacent fixed chunks (default 200)',
   )
   .option(
+    '--embed-batch-size <n>',
+    'number of texts per embedBatch() call for HTTP providers with --chunker file (default 1; try 32-64 for local HTTP)',
+  )
+  .option(
     '--file <paths...>',
     'index specific file(s) from HEAD (can supply multiple paths)'
   )
