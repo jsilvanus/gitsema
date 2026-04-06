@@ -2349,7 +2349,7 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Long-Term Investments (Phase 59+) *(not yet implemented)*
+### Long-Term Investments (Phase 60+) *(not yet implemented)*
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
@@ -2359,6 +2359,47 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
 | Python model server (Phase 13 revival) | Medium | sentence-transformers in Docker; higher throughput than Ollama for bulk indexing |
 | Semantic code review assistant | Medium | Given a PR diff, find historical analogues and flag regressions |
+
+---
+
+### Phase 59 — `gitsema tools` Subcommand Group (Protocol Servers) ✅ Implemented
+
+**Goal:** Collect the long-running protocol-server commands (`mcp`, `lsp`, `serve`) into a single discoverable subcommand group so users have one clear entry-point for all tooling integration.
+
+**Rationale:**
+- `gitsema --help` currently intermixes one-shot analysis commands with persistent server processes that block the terminal. This makes it hard to discover server commands and understand that they are long-running.
+- A `gitsema tools` group provides a natural home for any future tooling integrations (e.g. a gRPC server, a Language Server Protocol 3.18 implementation, a debug proxy, etc.).
+- Backward-compatibility is preserved via hidden deprecated aliases at the top level.
+
+**New command surface:**
+
+| New preferred form | Description |
+|---|---|
+| `gitsema tools mcp` | Start the MCP stdio server (AI tool interface for Claude/Copilot) |
+| `gitsema tools lsp` | Start the LSP JSON-RPC server (editor semantic hover / definition) |
+| `gitsema tools lsp --tcp <port>` | Start LSP over TCP instead of stdio |
+| `gitsema tools serve` | Start the HTTP embedding/storage API server |
+| `gitsema tools serve --ui` | Include the embedding space explorer web UI |
+
+**Deprecated aliases (kept for backward compatibility):**
+
+| Old form | Status |
+|---|---|
+| `gitsema mcp` | Deprecated — prints deprecation notice, then delegates to `startMcpServer()` |
+| `gitsema lsp` | Deprecated — prints deprecation notice, then delegates to `startLspServer()` |
+| `gitsema serve` | Deprecated — prints deprecation notice, then delegates to `serveCommand()` |
+
+**Implementation notes:**
+- New file: `src/cli/commands/tools.ts` — exports `toolsCommand()` which registers `mcp`, `lsp`, and `serve` as Commander subcommands.
+- `tools` is registered via `program.addCommand(toolsCommand())` in `src/cli/index.ts`.
+- The `--help` command group map now has a new `Protocol Servers` group. `tools`, `serve`, `mcp`, and `lsp` are all assigned to it.
+- The old top-level `serve` and `mcp` command actions print a `console.warn` deprecation notice before delegating. The `lsp` command (registered via `lspCommand()`) likewise.
+- No schema changes, no version bump.
+
+**Files changed:**
+- `src/cli/commands/tools.ts` (new)
+- `src/cli/commands/lsp.ts` — deprecation notice added to action
+- `src/cli/index.ts` — import + `addCommand(toolsCommand())`, COMMAND_GROUPS updated, top-level `serve`/`mcp` actions updated
 
 ---
 

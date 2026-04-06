@@ -4,9 +4,10 @@ import { startLspServer, startLspTcpServer } from '../../core/lsp/server.js'
 
 export function lspCommand(): Command {
   return new Command('lsp')
-    .description('Start the LSP-compatible semantic hover server (JSON-RPC over stdio or TCP)')
+    .description('Start the LSP-compatible semantic hover server (JSON-RPC over stdio or TCP) [deprecated: use `gitsema tools lsp`]')
     .option('--tcp <port>', 'listen on TCP port instead of stdio (e.g. --tcp 2087)')
     .action((opts: { tcp?: string }) => {
+      console.warn('Deprecation notice: `gitsema lsp` is deprecated — use `gitsema tools lsp` instead.')
       const session = getActiveSession()
       if (opts.tcp) {
         const port = parseInt(opts.tcp, 10)

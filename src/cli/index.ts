@@ -57,6 +57,7 @@ import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
 import { watchCommand } from './commands/watch.js'
 import { exportIndex, importIndex } from './commands/bundleIndex.js'
 import { projectCommand } from './commands/project.js'
+import { toolsCommand } from './commands/tools.js'
 
 const program = new Command()
 
@@ -98,6 +99,7 @@ program
 
 const GROUPS = [
   'Setup & Infrastructure',
+  'Protocol Servers',
   'Search & Discovery',
   'File History',
   'Concept History',
@@ -110,12 +112,15 @@ const COMMAND_GROUPS: Record<string, string> = {
   config:           'Setup & Infrastructure',
   status:           'Setup & Infrastructure',
   index:            'Setup & Infrastructure',
-  serve:            'Setup & Infrastructure',
   'remote-index':   'Setup & Infrastructure',
   'backfill-fts':   'Setup & Infrastructure',
   'update-modules': 'Setup & Infrastructure',
-  mcp:              'Setup & Infrastructure',
   'build-vss':      'Setup & Infrastructure',
+  // Protocol Servers (new group — preferred entry point is `gitsema tools`)
+  tools:            'Protocol Servers',
+  serve:            'Protocol Servers',
+  mcp:              'Protocol Servers',
+  lsp:              'Protocol Servers',
   // Search & Discovery
   search:           'Search & Discovery',
   'first-seen':     'Search & Discovery',
@@ -495,11 +500,13 @@ program
 
 program.addCommand(codeSearchCommand())
 program.addCommand(reposCommand())
+// Keep top-level lsp as hidden alias; preferred form is `gitsema tools lsp`
 program.addCommand(lspCommand())
 program.addCommand(watchCommand())
 program.addCommand(securityScanCommand())
 program.addCommand(healthCommand())
 program.addCommand(debtCommand())
+program.addCommand(toolsCommand())
 
 program
   .command('first-seen <query>')
@@ -696,7 +703,7 @@ program
 
 program
   .command('serve')
-  .description('Start the gitsema HTTP API server (embedding and storage backend)')
+  .description('Start the gitsema HTTP API server [deprecated: use `gitsema tools serve`]')
   .option('--port <n>', 'port to listen on (default 4242, overrides GITSEMA_SERVE_PORT)')
   .option('--key <token>', 'require this Bearer token for all requests (overrides GITSEMA_SERVE_KEY)')
   .option(
@@ -705,7 +712,10 @@ program
   )
   .option('--concurrency <n>', 'max concurrent embedding calls (default 4)')
   .option('--ui', 'serve the embedding space explorer web UI at /ui (requires prior `gitsema project` run)')
-  .action(serveCommand)
+  .action(async (opts: Parameters<typeof serveCommand>[0]) => {
+    console.warn('Deprecation notice: `gitsema serve` is deprecated — use `gitsema tools serve` instead.')
+    await serveCommand(opts)
+  })
 
 program
   .command('remote-index <repoUrl>')
@@ -1040,8 +1050,9 @@ program
 
 program
   .command('mcp')
-  .description('Start the gitsema MCP server (stdio transport)')
+  .description('Start the gitsema MCP server (stdio transport) [deprecated: use `gitsema tools mcp`]')
   .action(async () => {
+    console.warn('Deprecation notice: `gitsema mcp` is deprecated — use `gitsema tools mcp` instead.')
     await startMcpServer()
   })
 
