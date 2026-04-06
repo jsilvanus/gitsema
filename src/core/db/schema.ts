@@ -37,6 +37,7 @@ export const repos = sqliteTable('repos', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   url: text('url'),
+  dbPath: text('db_path'),
   addedAt: integer('added_at').notNull(),
 })
 

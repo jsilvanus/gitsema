@@ -27,6 +27,8 @@ import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 import { computeHealthTimeline } from '../../core/search/healthTimeline.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
+import { multiRepoSearch } from '../../core/indexing/repoRegistry.js'
+import { embedQuery } from '../../core/embedding/embedQuery.js'
 
 const ClustersBodySchema = z.object({
   k: z.number().int().positive().optional().default(8),
@@ -373,6 +375,29 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     try {
       const session = getActiveSession()
       const results = await scoreDebt(session, textProvider, { top: opts.top, model: opts.model, branch: opts.branch })
+      res.json(results)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  const MultiRepoSearchBodySchema = z.object({
+    query: z.string().min(1),
+    repoIds: z.array(z.string()).optional(),
+    topK: z.number().int().positive().optional().default(10),
+    model: z.string().optional(),
+  })
+  router.post('/multi-repo-search', async (req, res) => {
+    const parsed = MultiRepoSearchBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const { query, repoIds, topK, model } = parsed.data
+    try {
+      const session = getActiveSession()
+      const embedding = await embedQuery(textProvider, query) as number[]
+      const results = await multiRepoSearch(session, embedding, { repoIds, topK, model })
       res.json(results)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
