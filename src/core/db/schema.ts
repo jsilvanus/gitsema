@@ -41,6 +41,16 @@ export const repos = sqliteTable('repos', {
   addedAt: integer('added_at').notNull(),
 })
 
+export const savedQueries = sqliteTable('saved_queries', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().unique(),
+  queryText: text('query_text').notNull(),
+  queryEmbedding: blob('query_embedding', { mode: 'buffer' }),
+  lastRunTs: integer('last_run_ts'),
+  webhookUrl: text('webhook_url'),
+  createdAt: integer('created_at').notNull(),
+})
+
 export const embeddings = sqliteTable('embeddings', {
   blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
   model: text('model').notNull(),

@@ -54,6 +54,7 @@ import { heatmapCommand } from './commands/heatmap.js'
 import { doctorCommand } from './commands/doctor.js'
 import { vacuumCommand } from './commands/vacuum.js'
 import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
+import { watchCommand } from './commands/watch.js'
 
 const program = new Command()
 
@@ -449,6 +450,7 @@ program
 program.addCommand(codeSearchCommand())
 program.addCommand(reposCommand())
 program.addCommand(lspCommand())
+program.addCommand(watchCommand())
 program.addCommand(securityScanCommand())
 program.addCommand(healthCommand())
 program.addCommand(debtCommand())

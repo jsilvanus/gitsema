@@ -42,6 +42,7 @@ import { searchRouter } from './routes/search.js'
 import { evolutionRouter } from './routes/evolution.js'
 import { remoteRouter } from './routes/remote.js'
 import { analysisRouter } from './routes/analysis.js'
+import { watchRouter } from './routes/watch.js'
 
 export interface AppOptions {
   textProvider: EmbeddingProvider
@@ -85,6 +86,8 @@ export function createApp(options: AppOptions): Express {
   )
 
   app.use(`${base}/analysis`, analysisRouter({ textProvider }))
+
+  app.use(`${base}/watch`, watchRouter({ textProvider }))
 
   return app
 }
