@@ -19,6 +19,15 @@
  *   POST /analysis/change-points
  *   POST /analysis/author
  *   POST /analysis/impact
+ *   POST /analysis/semantic-diff
+ *   POST /analysis/semantic-blame
+ *   POST /analysis/dead-concepts
+ *   POST /analysis/merge-audit
+ *   POST /analysis/merge-preview
+ *   POST /analysis/branch-summary
+ *   POST /analysis/security-scan  (Phase 43)
+ *   POST /analysis/health         (Phase 44)
+ *   POST /analysis/debt           (Phase 45)
  */
 
 import express from 'express'

@@ -290,6 +290,7 @@ export interface IndexCommandOptions {
   chunker?: string
   windowSize?: string
   overlap?: string
+  embedBatchSize?: string
   file?: string[]
   remote?: string
   branch?: string
@@ -447,6 +448,15 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     }
   }
 
+  let embedBatchSize: number | undefined
+  if (options.embedBatchSize !== undefined) {
+    embedBatchSize = parseInt(options.embedBatchSize, 10)
+    if (isNaN(embedBatchSize) || embedBatchSize < 1) {
+      console.error('Error: --embed-batch-size must be a positive integer')
+      process.exit(1)
+    }
+  }
+
   // Provenance / compatibility check: build an embed config and check for existing incompatible configs
   try {
     const rawDb = getRawDb()
@@ -536,6 +546,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
       process.stdout.write(lastLine)
     },
     quantize: options.quantize,
+    embedBatchSize,
   })
 
   // Clear progress line

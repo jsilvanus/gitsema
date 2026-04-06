@@ -2217,6 +2217,151 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
+### Phase 48 — Batch Embedding and Provider Throughput ✅ Implemented
+
+**Goal:** Close the longstanding C6 gap; enable practical indexing of large repos against local HTTP providers.
+
+- Added `--embed-batch-size <n>` option to `gitsema index`.
+- When `--chunker file` (default), the provider implements `embedBatch`, and no routing provider is active, blobs are processed in batches of `embedBatchSize`. This collapses N serial HTTP round-trips into N/batchSize batch requests.
+- Falls back to per-blob `embed()` if `embedBatch` is unavailable or the batch call fails.
+- **Recommended:** `--embed-batch-size 32` for local HTTP providers.
+
+**Deliverables:** `src/core/indexing/indexer.ts`, `src/cli/commands/index.ts`, `src/cli/index.ts`.
+
+**Version:** 0.50.0
+
+---
+
+### Phase 49 — Auto-VSS Default Path *(not yet implemented)*
+
+**Goal:** Surface ANN search without requiring `--vss` explicitly.
+
+- On `getActiveSession()` (or lazily on first search), check if `.gitsema/vss.index` exists. If so, load the usearch index and set a session-level flag.
+- `vectorSearch()` checks the flag and routes through HNSW automatically.
+- Print a one-time info line: `Using ANN index (build-vss to update).`
+- Add `gitsema index --auto-build-vss` to rebuild the index after each indexing run when blob count exceeds a configurable threshold.
+- **Version:** minor bump.
+
+---
+
+### Phase 50 — Real Multi-Repo Search *(not yet implemented)*
+
+**Goal:** Deliver on the Phase 41 promise: query across multiple repos in one command.
+
+- `gitsema repos search <query> [--repos id1,id2,...] [--top n]`
+- Each registered repo must have a `db_path` column in the `repos` table.
+- Open each DB with `openDatabaseAt(entry.db_path)`, run `vectorSearch()`, tag results with `repoId`, merge with `mergeSearchResults()`, re-rank.
+- Expose as `POST /analysis/multi-repo-search` HTTP route and `multi_repo_search` MCP tool.
+- **Version:** minor bump.
+
+---
+
+### Phase 51 — LSP Completion of the Protocol *(not yet implemented)*
+
+**Goal:** Make `gitsema lsp` useful in real IDEs (VS Code, Neovim LSP, Helix).
+
+- Implement `textDocument/definition` (find the blob that defines the symbol under cursor).
+- Implement `workspace/symbol` (search all symbols by partial name).
+- Return proper `MarkupContent` with Markdown hover cards.
+- Add `--tcp <port>` option as an alternative to stdio.
+- Expose a diagnostic: `gitsema doctor --lsp` to verify the LSP server starts correctly.
+- **Version:** minor bump.
+
+---
+
+### Phase 52 — Query Expansion *(not yet implemented)*
+
+**Goal:** Improve recall by expanding natural-language queries with repo-specific vocabulary before embedding.
+
+- After embedding the raw query, extract the top BM25 keywords from FTS5 results.
+- Split camelCase/snake_case identifiers in those keywords (`splitIdentifier` already exists in `labelEnhancer.ts`).
+- Append the top-5 keywords to the query string and re-embed.
+- Gate behind `--expand-query` flag initially; make default if F1 improves in integration tests.
+- **Version:** minor bump.
+
+---
+
+### Phase 53 — Saved Searches and Watch Mode *(not yet implemented)*
+
+**Goal:** Notify when new indexed content matches a saved query.
+
+- New DB table: `saved_queries (id, name, query_text, query_embedding BLOB, last_run_ts, webhook_url)`.
+- `gitsema watch add <name> <query> [--webhook url]` — stores the query.
+- `gitsema watch run` — for each saved query, re-run with `after=last_run_ts`, print/POST new matches, update `last_run_ts`.
+- Add `POST /watch/add` and `POST /watch/run` routes.
+- **Version:** minor bump.
+
+---
+
+### Phase 54 — Index Bundle Export / Import *(not yet implemented)*
+
+**Goal:** Share a pre-built index as a compressed artifact — useful for team settings where one machine builds the index and others query it.
+
+- `gitsema export-index --out bundle.tar.gz` — archives `.gitsema/index.db` + `.gitsema/vss.index` (if present).
+- `gitsema import-index --in bundle.tar.gz` — extracts to `.gitsema/`, validates schema version, runs any pending migrations.
+- Checksums verify bundle integrity.
+- **Version:** minor bump.
+
+---
+
+### Phase 55 — Embedding Space Explorer (Web UI) *(not yet implemented)*
+
+**Goal:** Interactive 2D visualization of the embedding space.
+
+- Compute UMAP/t-SNE projection on demand via a new `gitsema project` command (or reuse `gitsema map`). Store 2D coordinates in a `projections` table.
+- `gitsema serve --ui` starts the HTTP server and also serves a single-page app from `src/client/` (React or plain HTML/JS).
+- Features: pan/zoom, cluster coloring, hover → blob details, temporal slider animating by commit date, click → `gitsema show blob` in terminal.
+- **Version:** minor bump.
+
+---
+
+### Phase 56 — LLM-Powered Evolution Narration *(not yet implemented)*
+
+**Goal:** Convert the raw cosine-distance timelines from `gitsema evolution` into human-readable semantic summaries.
+
+- After computing `computeEvolution()`, format the timeline diffs as a prompt and call a configured LLM endpoint (OpenAI-compatible, controlled by `GITSEMA_LLM_URL` / `GITSEMA_LLM_MODEL`).
+- `gitsema evolution <path> --narrate` prints a paragraph summarizing the key semantic shifts.
+- Fall back gracefully when no LLM is configured.
+- **Version:** minor bump.
+
+---
+
+### Phase 57 — GitHub Actions Integration for CI Diff *(not yet implemented)*
+
+**Goal:** Make `gitsema ci-diff` usable as a GitHub Actions step that posts a semantic diff comment on PRs.
+
+- Ship an official `jsilvanus/gitsema-action@v1` GitHub Action in a companion repo (or subdirectory).
+- The action: checks out the repo, runs `gitsema index --file` for changed files, runs `gitsema ci-diff --format html`, and posts the result as a PR review comment via the GitHub API.
+- Add `--github-token` / `GITHUB_TOKEN` env var support to `ci-diff`.
+- **Version:** minor bump.
+
+---
+
+### Phase 58 — Structured Security Scan (Static + Semantic) *(not yet implemented)*
+
+**Goal:** Elevate `security-scan` from "semantic similarity" to a credible triage tool.
+
+- Add per-language regex/AST heuristics (parameterized queries, input sanitisation helpers) as a first pass to reduce false positives.
+- Use tree-sitter (already present as an optional dep in `functionChunker.ts`) to identify taint flows: user input → sink without sanitization.
+- Only promote a match to a finding when both semantic similarity AND a structural signal agree.
+- Integrate with SARIF output format for GitHub Code Scanning upload.
+- **Version:** minor bump.
+
+---
+
+### Long-Term Investments (Phase 59+) *(not yet implemented)*
+
+| Feature | Complexity | Notes |
+|---------|:----------:|-------|
+| DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
+| Cross-repo concept similarity | High | Index two repos; find when concept X first appeared in each |
+| Semantic regression CI gate | High | Flag PRs where key embedding drifts beyond threshold |
+| Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
+| Python model server (Phase 13 revival) | Medium | sentence-transformers in Docker; higher throughput than Ollama for bulk indexing |
+| Semantic code review assistant | Medium | Given a PR diff, find historical analogues and flag regressions |
+
+---
+
 ## Section II - What's weak or underexplored
 
 ### 1. Function chunker is a regex heuristic

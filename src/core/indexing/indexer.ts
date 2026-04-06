@@ -82,6 +82,17 @@ export interface IndexerOptions {
   /** When true, update module (directory) centroid embeddings inline while indexing (Phase 33). Default: true. */
   computeModuleEmbedding?: boolean
   quantize?: boolean
+  /**
+   * Number of texts to send in a single `embedBatch()` call when the provider
+   * supports it (only used when `--chunker file`, the default).
+   *
+   * Set to 32–128 for HTTP providers to collapse many serial round-trips into
+   * one batch request. Falls back to one-at-a-time when the provider does not
+   * implement `embedBatch`, or when chunking is enabled.
+   *
+   * Default: 1 (no batching — backward-compatible).
+   */
+  embedBatchSize?: number
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -222,7 +233,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     computeModuleEmbedding = true,
     onProgress,
   } = options
-  const { quantize = false } = options
+  const { quantize = false, embedBatchSize = 1 } = options
 
   // Resolve --since: use provided value, or fall back to the last indexed commit
   // for automatic incremental indexing. The special value 'all' forces a full re-index.
@@ -346,6 +357,123 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     pushLatency(lat)
     return res
   }
+
+  // ---------------------------------------------------------------------------
+  // Batch embedding path (whole-file + single provider only)
+  // When embedBatchSize > 1, the provider implements embedBatch, and no
+  // chunker is active, we collapse N HTTP round-trips into N/batchSize calls.
+  // This dramatically improves throughput for local HTTP providers.
+  // ---------------------------------------------------------------------------
+  const useBatchPath =
+    embedBatchSize > 1 &&
+    typeof provider.embedBatch === 'function' &&
+    !router &&
+    chunkerStrategy === 'file'
+
+  if (useBatchPath) {
+    for (let batchStart = 0; batchStart < blobsToProcess.length; batchStart += embedBatchSize) {
+      const batch = blobsToProcess.slice(batchStart, batchStart + embedBatchSize)
+
+      // Read all blob contents in this batch in parallel
+      const contentResults = await Promise.all(
+        batch.map(async (entry) => {
+          try {
+            const content = await showBlob(entry.blobHash, repoPath, maxBlobSize)
+            return { entry, content, error: null as Error | null }
+          } catch (err) {
+            return { entry, content: null, error: err as Error | null }
+          }
+        }),
+      )
+
+      // Partition into readable vs failed/oversized
+      const readable: Array<{ entry: typeof blobsToProcess[0]; content: Buffer }> = []
+      for (const r of contentResults) {
+        if (r.error) {
+          logger.error(`Error reading blob ${r.entry.blobHash}: ${r.error instanceof Error ? r.error.message : String(r.error)}`)
+          stats.failed++
+          stats.otherFailed++
+        } else if (r.content === null) {
+          stats.oversized++
+        } else {
+          readable.push({ entry: r.entry, content: r.content })
+        }
+      }
+
+      if (readable.length === 0) {
+        reportProgress()
+        continue
+      }
+
+      // Batch-embed all readable blobs in a single provider call
+      const texts = readable.map((r) => r.content.toString('utf8'))
+      let embeddings: Array<Embedding | null>
+      const batchT0 = Date.now()
+      try {
+        embeddings = await provider.embedBatch!(texts)
+        const latPerItem = Math.max(1, Math.round((Date.now() - batchT0) / readable.length))
+        for (let i = 0; i < readable.length; i++) pushLatency(latPerItem)
+      } catch (batchErr) {
+        // Batch failed — fall back to individual embeds for this batch
+        logger.debug?.(`Batch embed failed (size=${readable.length}), falling back to per-blob: ${batchErr instanceof Error ? batchErr.message : String(batchErr)}`)
+        embeddings = await Promise.all(
+          texts.map(async (text) => {
+            try {
+              return await timedEmbed(provider, text)
+            } catch {
+              return null
+            }
+          }),
+        )
+      }
+
+      // Store results
+      for (let i = 0; i < readable.length; i++) {
+        const { entry, content } = readable[i]
+        const embedding = embeddings[i]
+        const text = content.toString('utf8')
+
+        if (!embedding) {
+          stats.failed++
+          stats.embedFailed++
+          reportProgress()
+          continue
+        }
+
+        const fileType = getFileCategory(entry.path)
+        try {
+          storeBlob({ blobHash: entry.blobHash, size: content.length, path: entry.path, model: provider.model, embedding, fileType, content: text, quantize })
+          stats.indexed++
+        } catch (err) {
+          logger.error(`Failed to store blob ${entry.blobHash}: ${err instanceof Error ? err.message : String(err)}`)
+          stats.failed++
+          stats.otherFailed++
+          reportProgress()
+          continue
+        }
+
+        // Update module centroid running mean
+        if (computeModuleEmbedding) {
+          try {
+            const dir = dirname(entry.path)
+            const existing = getModuleEmbedding(dir, provider.model)
+            if (existing === null) {
+              storeModuleEmbedding({ modulePath: dir, model: provider.model, embedding, blobCount: 1 })
+            } else {
+              const newCount = existing.blobCount + 1
+              const newVec = existing.vector.map((v, j) => (v * existing.blobCount + (embedding as number[])[j]) / newCount)
+              storeModuleEmbedding({ modulePath: dir, model: provider.model, embedding: newVec, blobCount: newCount })
+            }
+            stats.moduleEmbeddings++
+          } catch (err) {
+            logger.debug?.(`Failed to update module embedding for ${entry.path}: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        }
+
+        reportProgress()
+      }
+    }
+  } else {
   // Note: stats mutations (stats.failed++, etc.) are safe here because Node.js
   // is single-threaded — each increment runs between await points and cannot
   // interleave with another increment on the same variable.
@@ -647,6 +775,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       }),
     ),
   )
+  } // end else (per-blob path)
 
   // finalize embedding timing and transition to commit mapping
   stats.stageTimings.embedding = Date.now() - embeddingStart

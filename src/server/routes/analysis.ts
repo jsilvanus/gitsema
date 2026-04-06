@@ -23,6 +23,10 @@ import { findDeadConcepts } from '../../core/search/deadConcepts.js'
 import { computeSemanticCollisions, computeMergeImpact } from '../../core/search/mergeAudit.js'
 import { computeBranchSummary } from '../../core/search/branchSummary.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../../core/git/branchDiff.js'
+import { scanForVulnerabilities } from '../../core/search/securityScan.js'
+import { computeHealthTimeline } from '../../core/search/healthTimeline.js'
+import { scoreDebt } from '../../core/search/debtScoring.js'
+import { getActiveSession } from '../../core/db/sqlite.js'
 
 const ClustersBodySchema = z.object({
   k: z.number().int().positive().optional().default(8),
@@ -302,6 +306,74 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     try {
       const report = await computeBranchSummary(opts.branch, opts.baseBranch, { topConcepts: opts.topConcepts })
       res.json(report)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/security-scan
+  // Returns semantic similarity findings for common vulnerability patterns.
+  // Results are similarity scores, NOT confirmed vulnerabilities.
+  const SecurityScanBodySchema = z.object({
+    top: z.number().int().positive().optional().default(10),
+    model: z.string().optional(),
+  })
+  router.post('/security-scan', async (req, res) => {
+    const parsed = SecurityScanBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    try {
+      const session = getActiveSession()
+      const findings = await scanForVulnerabilities(session, textProvider, { top: opts.top, model: opts.model })
+      res.json({ disclaimer: 'Results are semantic similarity scores, not confirmed vulnerabilities. Manual review required.', findings })
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/health
+  // Returns time-bucketed codebase health snapshots.
+  const HealthBodySchema = z.object({
+    buckets: z.number().int().positive().optional().default(12),
+    branch: z.string().optional(),
+  })
+  router.post('/health', (req, res) => {
+    const parsed = HealthBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    try {
+      const session = getActiveSession()
+      const snapshots = computeHealthTimeline(session, { buckets: opts.buckets, branch: opts.branch })
+      res.json(snapshots)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/debt
+  // Scores blobs by technical debt (age + isolation + change-frequency signals).
+  const DebtBodySchema = z.object({
+    top: z.number().int().positive().optional().default(20),
+    model: z.string().optional(),
+    branch: z.string().optional(),
+  })
+  router.post('/debt', async (req, res) => {
+    const parsed = DebtBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    try {
+      const session = getActiveSession()
+      const results = await scoreDebt(session, textProvider, { top: opts.top, model: opts.model, branch: opts.branch })
+      res.json(results)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }

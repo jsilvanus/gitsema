@@ -50,8 +50,10 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       const provider = buildProvider(providerType, model)
       const queryEmb = await embedQuery(provider, q)
       const results = vectorSearch(queryEmb, { topK: 5, model, query: q })
-      // Build hover contents from top results
-      const contents = results.map((r: any) => `${r.blobHash} ${r.score.toFixed(3)} ${((r.paths && r.paths[0]) || '')}`).join('\n')
+      // Build hover contents as valid LSP MarkupContent (plaintext).
+      // This satisfies editors that validate the hover response shape.
+      const value = results.map((r: any) => `${r.blobHash} ${r.score.toFixed(3)} ${((r.paths && r.paths[0]) || '')}`).join('\n')
+      const contents = { kind: 'plaintext', value }
       return { jsonrpc: '2.0', id, result: { contents } }
     } catch (e: any) {
       return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
