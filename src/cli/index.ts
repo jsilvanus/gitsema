@@ -42,6 +42,7 @@ import { refactorCandidatesCommand } from './commands/refactorCandidates.js'
 import { ciDiffCommand } from './commands/ciDiff.js'
 import { conceptLifecycleCommand } from './commands/conceptLifecycle.js'
 import { docGapCommand } from './commands/docGap.js'
+import { contributorProfileCommand } from './commands/contributorProfile.js'
 import { doctorCommand } from './commands/doctor.js'
 import { vacuumCommand } from './commands/vacuum.js'
 import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
@@ -548,6 +549,14 @@ program
   .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .action(docGapCommand)
+
+program
+  .command('contributor-profile <author>')
+  .description('Compute a contributor semantic profile and show top-N blobs they specialize in')
+  .option('-k, --top <n>', 'number of top results to return', '10')
+  .option('--branch <name>', 'restrict to blobs seen on this branch')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(contributorProfileCommand)
 
 program
   .command('file-diff <ref1> <ref2> <path>')
