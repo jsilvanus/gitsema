@@ -518,6 +518,7 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
+  .option('--narrate', 'generate an LLM narrative summary of semantic shifts (requires GITSEMA_LLM_URL)')
   .action(evolutionCommand)
 
 program
