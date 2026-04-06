@@ -227,6 +227,13 @@
     "@types/methods" "^1.1.4"
     "@types/superagent" "^8.1.0"
 
+"@types/tar-stream@^3.1.4":
+  version "3.1.4"
+  resolved "https://registry.npmjs.org/@types/tar-stream/-/tar-stream-3.1.4.tgz"
+  integrity sha512-921gW0+g29mCJX0fRvqeHzBlE/XclDaAG0Ousy1LCghsOhvaKacDeRGEVzQP9IPfKn8Vysy7FEXAIxycpc/CMg==
+  dependencies:
+    "@types/node" "*"
+
 "@vitest/expect@4.1.2":
   version "4.1.2"
   resolved "https://registry.npmjs.org/@vitest/expect/-/expect-4.1.2.tgz"

@@ -55,6 +55,7 @@ import { doctorCommand } from './commands/doctor.js'
 import { vacuumCommand } from './commands/vacuum.js'
 import { rebuildFtsCliCommand } from './commands/rebuildFts.js'
 import { watchCommand } from './commands/watch.js'
+import { exportIndex, importIndex } from './commands/bundleIndex.js'
 
 const program = new Command()
 
@@ -410,6 +411,22 @@ program
   .option('-y, --yes', 'skip confirmation prompt')
   .action(async (opts: { yes?: boolean }) => {
     await rebuildFtsCliCommand({ yes: opts.yes })
+  })
+
+program
+  .command('export-index')
+  .description('Export the gitsema index as a compressed bundle (tar.gz) for sharing or backup')
+  .option('--out <file>', 'output bundle file path', 'gitsema-index.tar.gz')
+  .action(async (opts: { out: string }) => {
+    await exportIndex(opts)
+  })
+
+program
+  .command('import-index')
+  .description('Import a gitsema index bundle (tar.gz) into the current .gitsema/ directory')
+  .option('--in <file>', 'input bundle file path', 'gitsema-index.tar.gz')
+  .action(async (opts: { in: string }) => {
+    await importIndex(opts)
   })
 
 program
