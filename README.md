@@ -88,19 +88,24 @@ gitsema index
 
 ## Commands
 
-Commands are organised into six groups:
+Commands are organised into groups. See [`features.md`](features.md) for the full feature catalog.
 
 | Group | Commands |
 |---|---|
-| **Setup & Infrastructure** | `status`, `index`, `serve`, `remote-index`, `backfill-fts`, `mcp` |
-| **DB Maintenance** | `doctor`, `vacuum`, `rebuild-fts` |
-| **Search & Discovery** | `search`, `first-seen`, `dead-concepts` |
+| **Indexing** | `index` (+ `export`/`import` subcommands), `status`, `remote-index`, `update-modules`, `watch` |
+| **Protocol Servers** | `tools mcp`, `tools serve`, `tools lsp` |
+| **Search & Discovery** | `search`, `code-search`, `first-seen`, `dead-concepts` |
 | **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
-| **Concept History** | `evolution`, `diff` |
+| **Concept History** | `evolution`, `diff`, `lifecycle`, `bisect` |
 | **Cluster Analysis** | `clusters`, `cluster-diff`, `cluster-timeline` |
 | **Change Detection** | `change-points`, `file-change-points`, `cluster-change-points` |
+| **Branch / Merge** | `branch-summary`, `merge-audit`, `merge-preview`, `cherry-pick-suggest`, `ci-diff` |
+| **Analysis** | `author`, `impact`, `refactor-candidates`, `doc-gap`, `contributor-profile`, `security-scan`, `health`, `debt` |
+| **Visualization** | `map`, `heatmap` |
+| **DB Maintenance** | `doctor`, `vacuum`, `rebuild-fts`, `backfill-fts`, `gc`, `build-vss`, `clear-model` |
+| **Configuration** | `config`, `repos`, `project` |
 
-> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`. The old names still work. Note: `diff` is now the new **conceptual diff** command (not `file-diff`), and `evolution` is now the **concept evolution** command (not `file-evolution`).
+> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`, `gitsema mcp` / `gitsema serve` / `gitsema lsp` → use `gitsema tools mcp` / `gitsema tools serve` / `gitsema tools lsp` instead (old names still work but emit a deprecation notice).
 
 ---
 
@@ -158,23 +163,9 @@ gitsema index --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
 
 ---
 
-#### `gitsema serve [options]`
-
-Start the gitsema HTTP API server so remote machines can delegate embedding and storage to a central host.
-
-```
-Options:
-  --port <n>      Port to listen on (default: 4242)
-  --key <token>   Require this Bearer token on all requests
-  --chunker       Chunking strategy for incoming blobs: file (default), function, fixed
-  --concurrency   Max concurrent embedding calls (default: 4)
-```
-
----
-
 #### `gitsema remote-index <repoUrl>`
 
-Ask a remote `gitsema serve` instance to clone and index a Git repository.
+Ask a remote `gitsema tools serve` instance to clone and index a Git repository.
 
 ---
 
@@ -225,13 +216,37 @@ gitsema rebuild-fts --yes  # skip confirmation
 
 ---
 
-#### `gitsema mcp`
+#### `gitsema tools mcp`
 
 Start the gitsema MCP server over stdio. Allows AI assistants (Claude, VS Code Copilot, etc.) to query the semantic index via the Model Context Protocol.
 
 ```bash
-gitsema mcp
+gitsema tools mcp
 ```
+
+> **Alias:** `gitsema mcp` still works but is deprecated. Use `gitsema tools mcp`.
+
+#### `gitsema tools lsp [--tcp <port>]`
+
+Start the LSP semantic hover server. Responds to hover requests with nearest-neighbor blobs.
+
+```bash
+gitsema tools lsp          # stdio (default)
+gitsema tools lsp --tcp 7777
+```
+
+#### `gitsema tools serve [options]`
+
+Start the gitsema HTTP API server so remote machines can delegate embedding and storage to a central host. Replaces the deprecated top-level `gitsema serve` command.
+
+```
+Options:
+  --port <n>      Port to listen on (default: 4242)
+  --key <token>   Require this Bearer token on all requests
+  --ui            Serve the embedded 2D codebase map web UI at /ui
+```
+
+> **Alias:** `gitsema serve` still works but is deprecated. Use `gitsema tools serve`.
 
 ---
 
@@ -591,6 +606,60 @@ gitsema cluster-change-points --k 6 --threshold 0.4 --top-points 3
 gitsema cluster-change-points --max-commits 200 --dump cluster-changes.json
 ```
 
+---
+
+### Repo Insights
+
+#### `gitsema experts [options]`
+
+Rank contributors by the number of distinct blobs they introduced and show which semantic clusters/concepts they worked on. No embedding provider required — uses data already in the index.
+
+> **Tip:** Run `gitsema clusters` first to populate cluster labels. Without clusters, semantic areas are shown as `cluster-<id>`.
+
+*See also: [`author`](#gitsema-author-query-options), [`contributor-profile`](#gitsema-contributor-profile-author-options)*
+
+```
+Options:
+  --top <n>           Number of top contributors to show (default: 10)
+  --since <ref>       Only count commits at or after this date (YYYY-MM-DD or ISO 8601)
+  --until <ref>       Only count commits at or before this date (YYYY-MM-DD or ISO 8601)
+  --min-blobs <n>     Suppress contributors with fewer than this many blobs (default: 1)
+  --top-clusters <n>  Max semantic areas to show per contributor (default: 5)
+  --dump [file]       Output structured JSON; writes to <file> or stdout if omitted
+  --html [file]       Output an interactive HTML report; writes to <file> or experts.html
+```
+
+```bash
+# Top 10 contributors overall
+gitsema experts
+
+# Top 5 contributors since 2024, with JSON output
+gitsema experts --top 5 --since 2024-01-01 --dump experts.json
+
+# Interactive HTML report
+gitsema experts --html experts.html
+```
+
+Example text output:
+```
+Top 3 contributors by semantic area (since 2024-01-01)
+
+1. Alice <alice@example.com>
+   Blobs: 142
+   Semantic areas:
+     · auth-module  [38 blobs]  (src/auth/jwt.ts, src/auth/session.ts)
+     · api-routes   [31 blobs]  (src/routes/auth.ts)
+     · db-layer     [12 blobs]  (src/db/users.ts)
+
+2. Bob <bob@example.com>
+   Blobs: 97
+   Semantic areas:
+     · db-layer     [44 blobs]  (src/db/schema.ts, src/db/migrations.ts)
+     · tests        [29 blobs]  (tests/integration/db.test.ts)
+```
+
+---
+
 ## Automated Indexing (Git Hooks)
 
 You can keep the semantic index in sync with your repository automatically by
@@ -655,3 +724,15 @@ The index is stored in `.gitsema/index.db` (SQLite) in the root of the repositor
 ```
 .gitsema/
 ```
+
+---
+
+## Feature catalog
+
+See [`features.md`](features.md) for the complete, grouped catalog of implemented features including indexing options, all search flags, history/temporal commands, clustering, branch/merge tools, the HTTP API route list, and all MCP tools.
+
+---
+
+## Roadmap / Plans
+
+See [`docs/PLAN.md`](docs/PLAN.md) for the full development roadmap, phase history, and backlog of planned features.
