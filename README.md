@@ -246,6 +246,24 @@ Options:
   --ui            Serve the embedded 2D codebase map web UI at /ui
 ```
 
+**P2 operational features** exposed by the HTTP server:
+
+| Endpoint | Description |
+|---|---|
+| `GET /metrics` | Prometheus metrics scrape (protected by auth; set `GITSEMA_METRICS_PUBLIC=1` to bypass) |
+| `GET /openapi.json` | OpenAPI 3.1 spec (always public) |
+| `GET /docs` | Swagger UI (always public) |
+
+**Rate limiting env vars:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITSEMA_RATE_LIMIT_RPM` | `300` | Requests per minute per token/IP |
+| `GITSEMA_RATE_LIMIT_BURST` | `= RPM` | Per-window burst allowance |
+| `GITSEMA_METRICS_PUBLIC` | off | Set to `1` to expose `/metrics` without auth |
+
+For full deployment instructions (systemd, Docker, secrets, backups) see [`docs/deploy.md`](docs/deploy.md).
+
 > **Alias:** `gitsema serve` still works but is deprecated. Use `gitsema tools serve`.
 
 ---

@@ -28,6 +28,9 @@
  *   POST /analysis/security-scan  (Phase 43)
  *   POST /analysis/health         (Phase 44)
  *   POST /analysis/debt           (Phase 45)
+ *   GET  /metrics                 (P2 — Prometheus exposition)
+ *   GET  /openapi.json            (P2 — OpenAPI 3.1 spec)
+ *   GET  /docs                    (P2 — Swagger UI)
  */
 
 import express from 'express'
@@ -35,6 +38,8 @@ import type { Express } from 'express'
 import type { EmbeddingProvider } from '../core/embedding/provider.js'
 import type { ChunkStrategy } from '../core/chunking/chunker.js'
 import { authMiddleware } from './middleware/auth.js'
+import { requestTimingMiddleware, metricsRegistry, refreshIndexGauges, syncProcessCounters } from './middleware/metrics.js'
+import { buildRateLimiter } from './middleware/rateLimiter.js'
 import { statusRouter } from './routes/status.js'
 import { blobsRouter } from './routes/blobs.js'
 import { commitsRouter } from './routes/commits.js'
@@ -44,6 +49,8 @@ import { remoteRouter } from './routes/remote.js'
 import { analysisRouter } from './routes/analysis.js'
 import { watchRouter } from './routes/watch.js'
 import { projectionsRouter } from './routes/projections.js'
+import { openapiRouter } from './routes/openapi.js'
+import { getActiveSession } from '../core/db/sqlite.js'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -80,8 +87,49 @@ export function createApp(options: AppOptions): Express {
   const app = express()
   app.use(express.json({ limit: '50mb' }))
 
+  // P2: request timing (must be before auth so we can measure 401 latency too)
+  app.use(requestTimingMiddleware)
+
+  // P2: rate limiting (applied before auth so 429 is returned for overloaded clients)
+  app.use(buildRateLimiter())
+
+  // P2: /metrics — Prometheus scrape endpoint.
+  // Registered BEFORE the global auth middleware so that GITSEMA_METRICS_PUBLIC=1
+  // can expose metrics to monitoring scrapers without a bearer token.
+  // When GITSEMA_METRICS_PUBLIC is not set, metrics fall through to the auth
+  // middleware below and are protected by GITSEMA_SERVE_KEY like all other routes.
+  app.get('/metrics', async (req, res, next) => {
+    if (!process.env.GITSEMA_METRICS_PUBLIC) {
+      // Defer to the global auth middleware installed below
+      next()
+      return
+    }
+    // Public scrape path
+    try {
+      refreshIndexGauges(getActiveSession().rawDb)
+    } catch {
+      // non-fatal — DB might not be open in tests
+    }
+    syncProcessCounters()
+    res.setHeader('Content-Type', metricsRegistry.contentType)
+    res.send(await metricsRegistry.metrics())
+  })
+
+  // When GITSEMA_METRICS_PUBLIC is not set, register the metrics handler again
+  // AFTER auth so it is protected by GITSEMA_SERVE_KEY.
   // Optional Bearer-token auth on all routes
   app.use(authMiddleware)
+
+  app.get('/metrics', async (_req, res) => {
+    try {
+      refreshIndexGauges(getActiveSession().rawDb)
+    } catch {
+      // non-fatal — DB might not be open in tests
+    }
+    syncProcessCounters()
+    res.setHeader('Content-Type', metricsRegistry.contentType)
+    res.send(await metricsRegistry.metrics())
+  })
 
   const base = '/api/v1'
 
@@ -108,6 +156,9 @@ export function createApp(options: AppOptions): Express {
   app.use(`${base}/watch`, watchRouter({ textProvider }))
 
   app.use(`${base}/projections`, projectionsRouter())
+
+  // P2: OpenAPI spec + Swagger UI (no auth required — spec is public)
+  app.use('/', openapiRouter())
 
   // Phase 64: Capabilities manifest — machine-readable list of server capabilities
   app.get(`${base}/capabilities`, (_req, res) => {
