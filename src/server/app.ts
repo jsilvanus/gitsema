@@ -57,6 +57,17 @@ export interface AppOptions {
   ui?: boolean
 }
 
+// Read package version dynamically so the capabilities endpoint always matches package.json
+let _pkgVersion = '0.0.0'
+try {
+  const pkgPath = new URL('../../package.json', import.meta.url)
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string }
+  if (pkg && typeof pkg.version === 'string') _pkgVersion = pkg.version
+} catch {
+  // fall back to default
+}
+const SERVER_VERSION = _pkgVersion
+
 export function createApp(options: AppOptions): Express {
   const {
     textProvider,
@@ -101,7 +112,7 @@ export function createApp(options: AppOptions): Express {
   // Phase 64: Capabilities manifest — machine-readable list of server capabilities
   app.get(`${base}/capabilities`, (_req, res) => {
     res.json({
-      version: '0.65.0',
+      version: SERVER_VERSION,
       features: [
         'semantic_search',
         'first_seen',

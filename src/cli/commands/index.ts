@@ -387,7 +387,8 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   // When --profile is specified, apply its defaults for any option that was not
   // explicitly set by the user. Explicit flags always win over profile defaults.
   let profileBatchSize: number | undefined
-  let effectiveOptions = options
+  let profileConcurrency: number | undefined
+  let profileChunker: string | undefined
   if (options.profile) {
     let profile
     try {
@@ -397,17 +398,19 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
       process.exit(1)
     }
     profileBatchSize = profile.embedBatchSize
-    // Apply profile concurrency only when user did not set it explicitly
-    const effectiveConcurrency = options.concurrency ?? String(profile.concurrency)
-    // Apply profile chunker only when user did not set it explicitly
-    const effectiveChunker = options.chunker ?? profile.chunker
-    effectiveOptions = { ...options, concurrency: effectiveConcurrency, chunker: effectiveChunker }
-    console.log(`Profile: ${options.profile} (concurrency=${effectiveConcurrency}, batchSize=${profileBatchSize}, chunker=${effectiveChunker})`)
+    // Profile defaults apply only when the user has not explicitly set the flag
+    if (options.concurrency === undefined) profileConcurrency = profile.concurrency
+    if (options.chunker === undefined) profileChunker = profile.chunker
+    const effConcurrency = options.concurrency !== undefined ? parseInt(options.concurrency, 10) : profile.concurrency
+    const effChunker = options.chunker ?? profile.chunker
+    console.log(`Profile: ${options.profile} (concurrency=${effConcurrency}, batchSize=${profileBatchSize}, chunker=${effChunker})`)
   }
-  const opts = effectiveOptions
+  const opts = options
 
-  // Parse concurrency
-  const concurrency = opts.concurrency !== undefined ? parseInt(opts.concurrency, 10) : 4
+  // Parse concurrency (profile default takes effect when user did not supply --concurrency)
+  const concurrency = opts.concurrency !== undefined
+    ? parseInt(opts.concurrency, 10)
+    : (profileConcurrency ?? 4)
   if (isNaN(concurrency) || concurrency < 1) {
     console.error('Error: --concurrency must be a positive integer')
     process.exit(1)
@@ -447,14 +450,15 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     ? options.includeGlob.split(',').map((e) => e.trim()).filter(Boolean)
     : undefined
 
-  // Parse chunker strategy
+  // Parse chunker strategy (profile default applies when user did not supply --chunker)
+  const effectiveChunker = opts.chunker ?? profileChunker
   let chunkerStrategy: ChunkStrategy = 'file'
-  if (opts.chunker !== undefined) {
-    if (opts.chunker !== 'file' && opts.chunker !== 'function' && opts.chunker !== 'fixed') {
+  if (effectiveChunker !== undefined) {
+    if (effectiveChunker !== 'file' && effectiveChunker !== 'function' && effectiveChunker !== 'fixed') {
       console.error('Error: --chunker must be one of: file, function, fixed')
       process.exit(1)
     }
-    chunkerStrategy = opts.chunker as ChunkStrategy
+    chunkerStrategy = effectiveChunker as ChunkStrategy
   }
 
   // Parse chunker options (only relevant for `fixed` strategy)
