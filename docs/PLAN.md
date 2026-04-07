@@ -2563,6 +2563,23 @@ Goal: Overlap read/embed/store stages in the indexer via a simple AsyncQueue so 
 
 ---
 
+### Phase 70 — Unified Output System *(completed v0.69.0)*
+
+Goal: Replace the scattered `--dump`, `--html`, `--format` flags with a single composable `--out <spec>` flag that can be repeated to produce multiple outputs simultaneously. Headers, verbose content, and machine-readable formats all flow through the same abstraction.
+
+**Design:**
+- `--out <format>[:<file>]` — format is one of `text | json | html | markdown | sarif`; if `:file` is omitted, output goes to stdout
+- Repeatable: `--out json:results.json --out html:report.html` produces both outputs in one run
+- `src/utils/outputSink.ts` — `parseOutputSpec()`, `resolveOutputs()`, `writeToSink()`, `hasSinkFormat()`, `getSink()` helpers
+- `resolveOutputs()` bridges from the legacy `--dump` / `--html` / `--format` flags transparently so existing scripts keep working
+- Wired into: `search`, `evolution`, `triage`, `policy check`, `ownership`, `workflow run`
+
+**Backward compatibility:** `--dump` / `--html` / `--format` kept as deprecated aliases on all modified commands; they are auto-translated to the equivalent `--out` spec internally.
+
+**Implemented:** `src/utils/outputSink.ts`, updated `search.ts`, `conceptEvolution.ts`, `triage.ts`, `policyCheck.ts`, `ownership.ts`, `workflow.ts`, `cli/index.ts`. 20 new tests in `tests/outputSink.test.ts`.
+
+---
+
 ## Section II - Next?
 
 ---

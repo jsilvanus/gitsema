@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { applyModelOverrides, buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { computeConceptChangePoints } from '../../core/search/changePoints.js'
@@ -14,6 +15,8 @@ export interface PolicyCheckOptions {
   minSecurityScore?: string
   query?: string
   dump?: string | boolean
+  /** Unified output spec (repeatable) */
+  out?: string[]
   model?: string
   textModel?: string
   codeModel?: string
@@ -130,15 +133,23 @@ export async function policyCheckCommand(options: PolicyCheckOptions): Promise<v
   }
 
   // ── Output ──────────────────────────────────────────────────────────────
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump })
+  const jsonSink = getSink(sinks, 'json')
+  if (jsonSink) {
     const json = JSON.stringify(results, null, 2)
-    if (typeof options.dump === 'string' && options.dump !== '') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Policy check JSON written to: ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Policy check JSON written to: ${jsonSink.file}`)
     } else {
       process.stdout.write(json + '\n')
     }
-  } else {
+    if (!hasSinkFormat(sinks, 'text') && results.passed) return
+    if (!hasSinkFormat(sinks, 'text') && !results.passed) {
+      process.exit(1)
+    }
+  }
+
+  if (!jsonSink || hasSinkFormat(sinks, 'text')) {
     if (results.passed) {
       console.log('✅  Policy check passed')
     } else {

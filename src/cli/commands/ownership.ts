@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { computeOwnershipHeatmap } from '../../core/search/ownershipHeatmap.js'
@@ -8,6 +9,8 @@ export interface OwnershipOptions {
   top?: string
   window?: string
   dump?: string | boolean
+  /** Unified output spec (repeatable) */
+  out?: string[]
 }
 
 export async function ownershipCommand(query: string, options: OwnershipOptions): Promise<void> {
@@ -36,15 +39,17 @@ export async function ownershipCommand(query: string, options: OwnershipOptions)
 
   try {
     const heatmap = computeOwnershipHeatmap({ embedding: emb as any, topK: top, windowDays })
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump })
+    const jsonSink = getSink(sinks, 'json')
+    if (jsonSink) {
       const json = JSON.stringify(heatmap, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Ownership heatmap JSON written to: ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Ownership heatmap JSON written to: ${jsonSink.file}`)
       } else {
         process.stdout.write(json + '\n')
       }
-      return
+      if (!hasSinkFormat(sinks, 'text')) return
     }
     // Default: print simple table
     for (const e of heatmap) {

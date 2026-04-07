@@ -65,6 +65,7 @@ import { triageCommand } from './commands/triage.js'
 import { policyCheckCommand } from './commands/policyCheck.js'
 import { ownershipCommand } from './commands/ownership.js'
 import { workflowCommand } from './commands/workflow.js'
+import { collectOut } from '../utils/outputSink.js'
 
 const program = new Command()
 
@@ -536,19 +537,20 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
-  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
   .option('--not-like <query>', 'negative example query whose similarity is subtracted from the score')
   .option('--lambda <n>', 'weight for the negative example subtraction (default 0.5)')
   .option('--explain', 'show score component breakdown for each result')
   .option('--early-cut <n>', 'limit candidate pool to n random samples to speed up search on large indexes')
   .option('--explain-llm', 'output LLM-ready provenance citation block for each result')
-  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html')
+  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html (legacy: prefer --out html)')
   .option('--or <query>', 'combine results with OR (union, max score)')
   .option('--and <query>', 'combine results with AND (intersection, harmonic mean)')
   .option('--expand-query', 'expand query with top BM25 keywords before embedding to improve recall (Phase 52)')
   .option('--narrate', 'generate an LLM summary of search results (requires GITSEMA_LLM_URL)')
   .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo; use gitsema repos add to register)')
   .option('--no-headings', "don't print column header row")
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())
@@ -640,6 +642,7 @@ program
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--narrate', 'generate an LLM summary of concept evolution results (requires GITSEMA_LLM_URL)')
   .option('--no-headings', "don't print column header row")
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(conceptEvolutionCommand)
 
 program
@@ -729,9 +732,10 @@ program
   .option('--ref1 <ref>', 'bisect left ref')
   .option('--ref2 <ref>', 'bisect right ref')
   .option('--file <path>', 'focus on a specific file')
-  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump)', collectOut, [] as string[])
   .option('-k, --top <n>', 'number of top results per section', '5')
-  .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, top: opts.top }) })
+  .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, out: opts.out, top: opts.top }) })
 
 program
   .command('policy check')
@@ -740,27 +744,30 @@ program
   .option('--max-debt-score <n>', 'fail if aggregate debt score exceeds n')
   .option('--min-security-score <n>', 'fail if any security similarity score is below this threshold')
   .option('--query <text>', 'concept query (required for drift gate)')
-  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-  .action(async (opts: any) => { await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump }) })
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[])
+  .action(async (opts: any) => { await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump, out: opts.out }) })
 
 program
   .command('ownership <query>')
   .description('Show ownership heatmap for a concept (ownership confidence and trends)')
   .option('-k, --top <n>', 'number of owners to show', '5')
   .option('--window <days>', 'compare ownership in last N days vs before (default 90)', '90')
-  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-  .action(async (query: string, opts: any) => { await ownershipCommand(query, { top: opts.top, window: opts.window, dump: opts.dump }) })
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[])
+  .action(async (query: string, opts: any) => { await ownershipCommand(query, { top: opts.top, window: opts.window, dump: opts.dump, out: opts.out }) })
 
 program
   .command('workflow run <template>')
   .description('Run a built-in workflow template: pr-review, incident, release-audit')
-  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-  .option('--format <fmt>', 'output format: markdown (default) or json', 'markdown')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--format <fmt>', 'output format: markdown (default) or json — legacy; prefer --out', 'markdown')
   .option('--base <ref>', 'base ref for pr-review')
   .option('--file <path>', 'file to analyze (pr-review)')
   .option('--query <text>', 'concept query (incident)')
   .option('-k, --top <n>', 'result limit', '5')
-  .action(async (template: string, args: string[], opts: any) => { await workflowCommand(template, args, { dump: opts.dump, format: opts.format, base: opts.base, file: opts.file, query: opts.query, top: opts.top }) })
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump/--format)', collectOut, [] as string[])
+  .action(async (template: string, args: string[], opts: any) => { await workflowCommand(template, args, { dump: opts.dump, format: opts.format, base: opts.base, file: opts.file, query: opts.query, top: opts.top, out: opts.out }) })
 
 program
   .command('cherry-pick-suggest <query>')

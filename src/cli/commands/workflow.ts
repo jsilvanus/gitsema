@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { computeImpact } from '../../core/search/impact.js'
@@ -10,6 +11,8 @@ import { parsePositiveInt } from '../../utils/parse.js'
 export interface WorkflowOptions {
   dump?: string | boolean
   format?: string
+  /** Unified output spec (repeatable) */
+  out?: string[]
   base?: string
   file?: string
   query?: string
@@ -136,23 +139,28 @@ export async function workflowCommand(
   }
 
   // ── output ────────────────────────────────────────────────────────────────
-  if (options.dump !== undefined) {
+  // --out takes priority; fall back to --dump / --format for backward compat.
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, format: fmt === 'json' ? 'json' : undefined })
+  const jsonSink = getSink(sinks, 'json')
+  const mdSink = getSink(sinks, 'markdown')
+
+  if (jsonSink) {
     const json = JSON.stringify(out, null, 2)
-    if (typeof options.dump === 'string' && options.dump !== '') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Workflow JSON written to: ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Workflow JSON written to: ${jsonSink.file}`)
     } else {
       process.stdout.write(json + '\n')
     }
-    return
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'markdown')) return
   }
 
-  if (fmt === 'json') {
+  if (fmt === 'json' && !jsonSink) {
     console.log(JSON.stringify(out, null, 2))
     return
   }
 
-  // Markdown output
+  // Markdown output (default)
   console.log(`# Workflow: ${template}`)
   console.log('')
   for (const [key, val] of Object.entries(sections)) {

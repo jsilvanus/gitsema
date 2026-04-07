@@ -109,9 +109,10 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | Semantic bisect (find regressions) | `gitsema bisect <good> <bad> <query>` |
 | Dead-concept detection (deleted blobs) | `gitsema dead-concepts` |
 | Evolution alerts (largest jumps) | `--alerts [n]` on `file-evolution` |
-| Structured JSON / HTML dump | `--dump [file]`, `--html [file]` |
+| Structured JSON / HTML dump | `--dump [file]`, `--html [file]` *(legacy; prefer `--out`)* |
 | Include stored content in dumps | `--include-content` |
 | LLM narrative | `--narrate` on `evolution`, `diff`, `file-evolution` |
+| **Unified output system (Phase 70)** | `--out <format>[:<file>]` (repeatable) on `search`, `evolution`, `triage`, `policy check`, `ownership`, `workflow run`; formats: `text\|json\|html\|markdown\|sarif` |
 
 ---
 

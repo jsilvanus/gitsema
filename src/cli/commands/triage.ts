@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
@@ -13,6 +14,8 @@ export interface TriageOptions {
   ref2?: string
   file?: string
   dump?: string | boolean
+  /** Unified output spec (repeatable) */
+  out?: string[]
   top?: string
   model?: string
   textModel?: string
@@ -97,15 +100,17 @@ export async function triageCommand(query: string, options: TriageOptions): Prom
     sections.experts = { error: err instanceof Error ? err.message : String(err) }
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump })
+  const jsonSink = getSink(sinks, 'json')
+  if (jsonSink) {
     const json = JSON.stringify(output, null, 2)
-    if (typeof options.dump === 'string' && options.dump !== '') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Triage JSON written to: ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Triage JSON written to: ${jsonSink.file}`)
     } else {
       process.stdout.write(json + '\n')
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   // Human-readable output
