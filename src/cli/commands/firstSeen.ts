@@ -8,6 +8,7 @@ import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { renderFirstSeenResults, formatDate, shortHash, formatScore } from '../../core/search/ranking.js'
 import { remoteFirstSeen } from '../../client/remoteClient.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface FirstSeenCommandOptions {
   top?: string
@@ -30,6 +31,7 @@ export interface FirstSeenCommandOptions {
   /** Comma-separated repo IDs to search across (multi-repo) */
   repos?: string
   noHeadings?: boolean
+  out?: string[]
 }
 
 function renderCommitResults(results: CommitSearchResult[]): string {
@@ -139,27 +141,33 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
     commitResults = searchCommits(queryEmbedding, { topK, model })
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const jsonSink = getSink(sinks, 'json')
+  const htmlSink = getSink(sinks, 'html')
+
+  if (jsonSink) {
     const payload: Record<string, unknown> = { results }
     if (commitResults !== undefined) payload.commits = commitResults
     const json = JSON.stringify(payload, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`First-seen results JSON written to: ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`First-seen results JSON written to: ${jsonSink.file}`)
     } else {
       process.stdout.write(json + '\n')
     }
-    return
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
-  // --html support
-  if (options.html !== undefined) {
+  if (htmlSink) {
     const { renderFirstSeenHtml } = await import('../../core/viz/htmlRenderer.js')
     const html = renderFirstSeenHtml(results, query)
-    const outFile = typeof options.html === 'string' ? options.html : 'first-seen.html'
-    writeFileSync(outFile, html, 'utf8')
-    console.log(`First-seen HTML written to: ${outFile}`)
-    return
+    if (htmlSink.file) {
+      writeFileSync(htmlSink.file, html, 'utf8')
+      console.log(`First-seen HTML written to: ${htmlSink.file}`)
+    } else {
+      process.stdout.write(html + '\n')
+    }
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   // --vss note

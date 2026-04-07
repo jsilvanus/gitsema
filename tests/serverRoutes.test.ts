@@ -144,3 +144,18 @@ describe('POST /api/v1/analysis/security-scan', () => {
     expect(Array.isArray(res.body.findings)).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/analysis/experts
+// ---------------------------------------------------------------------------
+describe('POST /api/v1/analysis/experts', () => {
+  it('returns 200 with experts array (empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/experts')
+      .send({})
+    expect(res.status).toBe(200)
+    // The experts route returns an object with an "experts" key
+    expect(res.body).toHaveProperty('experts')
+    expect(Array.isArray(res.body.experts)).toBe(true)
+  })
+})

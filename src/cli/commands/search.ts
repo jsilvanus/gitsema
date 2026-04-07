@@ -1,4 +1,6 @@
 import { writeFileSync, existsSync } from 'node:fs'
+import { resolveOutputs, writeToSink, hasSinkFormat, getSink, collectOut } from '../../utils/outputSink.js'
+export { collectOut }
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
@@ -13,6 +15,7 @@ import { searchCommits, type CommitSearchResult } from '../../core/search/commit
 import { getRawDb } from '../../core/db/sqlite.js'
 import { splitIdentifier } from '../../core/search/labelEnhancer.js'
 import { narrateSearchResults } from '../../core/llm/narrator.js'
+import { formatExplainForLlm } from '../../core/search/explainFormatter.js'
 
 export interface SearchCommandOptions {
   top?: string
@@ -62,8 +65,14 @@ export interface SearchCommandOptions {
   lambda?: string
   /** When true, print signal breakdown for each result */
   explain?: boolean
+  /** Limit candidate pool to this many random samples for large indexes (0 = disabled) */
+  earlyCut?: string
+  /** When true, output LLM-ready provenance citations for each result */
+  explainLlm?: boolean
   /** Output interactive HTML (writes to <file> if supplied, otherwise search.html) */
   html?: string | boolean
+  /** Unified output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] */
+  out?: string[]
   /** Combine results with another query via OR (union, max score) */
   or?: string
   /** Combine results with another query via AND (intersection, harmonic mean) */
@@ -336,6 +345,10 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   if (options.explain) searchOpts.explain = true
+  if (options.earlyCut !== undefined) {
+    const ec = parseInt(options.earlyCut, 10)
+    if (!isNaN(ec) && ec > 0) searchOpts.earlyCut = ec
+  }
 
   // M8: Auto-detect VSS index — if --vss is not explicitly supplied but a
   // .gitsema/*.usearch file exists for the current model, use it automatically.
@@ -539,42 +552,50 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
   }
 
-  // --dump: emit structured JSON instead of human-readable output
-  if (options.dump !== undefined) {
+    // Unified output handling (--out, or legacy --dump / --html)
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+
+  // JSON sink
+  const jsonSink = getSink(sinks, 'json')
+  if (jsonSink) {
     const payload: Record<string, unknown> = { results }
     if (commitResults) payload.commits = commitResults
-    const json = JSON.stringify(payload, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Search results JSON written to: ${options.dump}`)
-    } else {
-      process.stdout.write(json + '\n')
-    }
-    return
+    writeToSink(jsonSink, JSON.stringify(payload, null, 2), 'Search results JSON')
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
-  // --html: output interactive HTML visualization
-  if (options.html !== undefined) {
+  // HTML sink
+  const htmlSink = getSink(sinks, 'html')
+  if (htmlSink) {
     const { renderSearchHtml } = await import('../../core/viz/htmlRenderer.js')
     const html = renderSearchHtml(results, query)
-    const outFile = typeof options.html === 'string' ? options.html : 'search.html'
+    const outFile = htmlSink.file ?? 'search.html'
     writeFileSync(outFile, html, 'utf8')
     console.log(`Search HTML written to: ${outFile}`)
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
-  console.log(renderResults(results, !options.noHeadings))
+  // Default text output
+  if (hasSinkFormat(sinks, 'text') || (!jsonSink && !htmlSink)) {
+    console.log(renderResults(results, !options.noHeadings))
 
-  if (commitResults) {
-    console.log('\nCommit matches:')
-    console.log(renderCommitResults(commitResults))
-  }
+    if (commitResults) {
+      console.log('\nCommit matches:')
+      console.log(renderCommitResults(commitResults))
+    }
 
-  // LLM narration of search results
-  if (options.narrate && results.length > 0) {
-    console.log('')
-    console.log('=== LLM Search Narrative ===')
-    const narrative = await narrateSearchResults(query, results)
-    console.log(narrative)
+    // LLM-ready provenance citations (--explain-llm)
+    if (options.explainLlm && results.length > 0) {
+      console.log('\n=== Provenance Citations (LLM Context) ===')
+      console.log(formatExplainForLlm(results, { includeSnippet: true }))
+    }
+
+    // LLM narration of search results
+    if (options.narrate && results.length > 0) {
+      console.log('')
+      console.log('=== LLM Search Narrative ===')
+      const narrative = await narrateSearchResults(query, results)
+      console.log(narrative)
+    }
   }
 }

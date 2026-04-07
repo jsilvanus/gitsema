@@ -1,10 +1,12 @@
 import { writeFileSync } from 'node:fs'
 import { getActiveSession } from '../../core/db/sqlite.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface HeatmapOptions {
   period?: string // 'week' or 'month'
   dump?: string | boolean
   noHeadings?: boolean
+  out?: string[]
 }
 
 export async function heatmapCommand(options: HeatmapOptions): Promise<void> {
@@ -21,15 +23,19 @@ export async function heatmapCommand(options: HeatmapOptions): Promise<void> {
     const out: Record<string, number> = {}
     for (const r of rows) out[r.period] = r.cnt
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+    const jsonSink = getSink(sinks, 'json')
+
+    if (jsonSink) {
       const json = JSON.stringify(out, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Wrote heatmap JSON to ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Wrote heatmap JSON to ${jsonSink.file}`)
       } else {
-        console.log(json)
+        process.stdout.write(json + '\n')
+        return
       }
-      return
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     // Human-friendly output

@@ -2455,73 +2455,128 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 61 — MCP/HTTP Parity + Semantic PR Report *(planned)*
+### Phase 61 — MCP/HTTP Parity + Semantic PR Report *(completed v0.64.0)*
 
 **Goal:** Productize current analysis primitives into a single CI/review workflow and close cross-surface parity gaps.
 
-**Planned scope:**
+**Implemented scope:**
 
-- Add `experts` parity outside CLI:
+- Added `experts` parity outside CLI:
   - MCP tool: `experts`
   - HTTP route: `POST /api/v1/analysis/experts`
-- Add `gitsema pr-report` command to compose:
+- Added `gitsema pr-report` command composing:
   - semantic diff summary
   - impacted modules
   - change-point highlights
   - reviewer suggestions (`experts`)
-- Add machine-readable output (`--dump`) for CI/bot ingestion.
+- Machine-readable output (`--dump`) for CI/bot ingestion.
 
-**Status:** not yet implemented.
-
----
-
-### Phase 62 — Node.js In-Process Embedding Backend + Heavy Batching *(planned)*
-
-**Goal:** Improve indexing throughput and operational simplicity by supporting a Node-module embedding backend optimized for aggressive batch execution.
-
-**Planned scope:**
-
-- Add a Node.js in-process embedding provider module implementing `EmbeddingProvider` + robust `embedBatch()`.
-- Introduce a provider-side queue/micro-batch scheduler for local/self-hosted flows.
-- Extend indexer batch path to support pipelined read/embed/store windows (bounded overlap).
-- Add throughput guardrails: retry policy, adaptive backpressure, and provider capability checks.
-
-**Status:** not yet implemented.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 63 — Indexing Auto-Defaults and Adaptive Tuning *(planned)*
+### Phase 62 — Heavy Batching for Ollama + HTTP Providers *(completed v0.67.0)*
+
+**Goal:** Improve indexing throughput by adding robust batch embedding support optimised for both Ollama and OpenAI-compatible HTTP providers.
+
+**Implemented scope:**
+
+- **`BatchingProvider`** wrapper (`src/core/embedding/batching.ts`): wraps any `EmbeddingProvider` and adds transparent sub-batch chunking (configurable `maxSubBatchSize`, default 32), per-sub-batch retry with exponential back-off (`retries`, `retryDelayMs`), and automatic per-item fallback (zero-vector on total failure so indexing continues).
+- **OllamaProvider true-batch** (`src/core/embedding/local.ts`): `embedBatch()` now uses Ollama's `/api/embed` endpoint (available since Ollama 0.1.34) which accepts `input: string[]` natively — eliminating N round-trips for a batch. Gracefully falls back to concurrent per-item `/api/embeddings` calls when the server returns 404, and remembers the unavailability so no further probing occurs.
+- **`buildBatchingProvider()`** factory (`src/core/embedding/providerFactory.ts`): convenience function that constructs any provider and wraps it in `BatchingProvider` in one call.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 63 — Indexing Auto-Defaults and Adaptive Tuning *(completed v0.65.0)*
 
 **Goal:** Make indexing fast by default without requiring deep manual tuning.
 
-**Planned scope:**
+**Implemented scope:**
 
-- Auto-enable batch mode when provider supports `embedBatch()`.
-- Add adaptive tuning for `embedBatchSize` and concurrency based on:
-  - observed embedding latency
-  - error/throttle rate
-  - memory safety limits
-- Add profile presets (`--profile speed|balanced|quality`) to set coherent indexing/search defaults.
-- Add optional auto-maintenance hooks after indexing runs:
-  - VSS auto-build/update threshold policy
-  - post-run maintenance recommendations (FTS/vacuum)
+- Auto-enabled batch mode when provider supports `embedBatch()` (via `resolveEmbedBatchSize` in `adaptiveTuning.ts`).
+- `AdaptiveBatchController` class for in-flight batch size adjustment based on observed latency and error rate.
+- Profile presets (`--profile speed|balanced|quality`) on `gitsema index` for coherent concurrency/batch/chunker defaults.
+- Post-run maintenance recommendations (`postRunRecommendations`) for VSS/FTS/vacuum.
+- `IndexerOptions.profileBatchSize` field for profile-driven auto-batch.
 
-**Status:** not yet implemented.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 64 — Search Scalability + AI Retrieval Reliability *(planned)*
+### Phase 64 — Search Scalability + AI Retrieval Reliability *(completed v0.66.0)*
+
+
+### Phase 65 — Incident Triage Bundle *(completed v0.68.0)*
+
+Goal: Provide a one-command incident triage workflow that composes first-seen, change-points, file-evolution alerts, bisect, and experts into a single guided report. CLI: `gitsema triage <query> [--ref1 <ref>] [--ref2 <ref>] [--file <path>] [--top <n>] [--dump <file>]`.
+
+**Implemented:** `src/cli/commands/triage.ts`. Gracefully handles per-section failures.
+
+---
+
+### Phase 66 — Policy Checks for CI *(completed v0.68.0)*
+
+Goal: Threshold-based CI gates for drift, debt score, and security similarity. CLI: `gitsema policy check [--max-drift <n>] [--max-debt-score <n>] [--min-security-score <n>] --query <text> [--dump <file>]`.
+
+**Implemented:** `src/cli/commands/policyCheck.ts`. Exits with code 1 when any gate fails.
+
+---
+
+### Phase 67 — Ownership Heatmap by Concept *(completed v0.68.0)*
+
+Goal: Compute ownership confidence and temporal trends for a semantic concept. Introduces `computeOwnershipHeatmap()` and CLI `gitsema ownership <query> [--top <n>] [--window <days>] [--dump <file>]`.
+
+**Implemented:** `src/core/search/ownershipHeatmap.ts`, `src/cli/commands/ownership.ts`.
+
+---
+
+### Phase 68 — Persistent Workflow Templates *(completed v0.68.0)*
+
+Goal: Config-driven workflow templates that chain existing commands (pr-review, incident, release-audit) and emit markdown or JSON reports. CLI: `gitsema workflow run <template> [--format markdown|json] [--dump <file>]`.
+
+**Implemented:** `src/cli/commands/workflow.ts`. Templates call core functions in-process.
+
+---
+
+### Phase 69 — Pipelined Batch Indexing *(completed v0.68.0)*
+
+Goal: Overlap read/embed/store stages in the indexer via a simple AsyncQueue so embed and store stages can work concurrently on successive batches. Adds `src/utils/asyncQueue.ts` and changes the batch-path in `src/core/indexing/indexer.ts` when `useBatchPath === true`.
+
+**Implemented:** `src/utils/asyncQueue.ts`, modified `src/core/indexing/indexer.ts` batch path.
+
+---
+
+
 
 **Goal:** Reduce broad-query cost and improve trust for AI-assisted coding workflows.
 
-**Planned scope:**
+**Implemented scope:**
 
-- Add top-k early-cut scoring mode to avoid full candidate materialization on very large pools.
-- Add capabilities manifest endpoint for CLI/MCP/HTTP integration clients.
-- Add provenance-oriented explain output optimized for LLM prompts.
-- Add retrieval evaluation harness (precision/latency tracking across model/ranking settings).
+- Top-k early-cut scoring mode (`--early-cut <n>` on `gitsema search`, `earlyCut` in `VectorSearchOptions`) to avoid full candidate materialization on very large pools.
+- Capabilities manifest endpoint (`GET /api/v1/capabilities`) for CLI/MCP/HTTP integration clients.
+- Provenance-oriented explain output optimized for LLM prompts (`--explain-llm` on `gitsema search`, `formatExplainForLlm` in `explainFormatter.ts`).
+- Retrieval evaluation harness (`gitsema eval <file>`) measuring P@k, R@k, MRR, and latency from a JSONL eval file.
 
-**Status:** not yet implemented.
+**Status:** ✅ complete.
+
+---
+
+### Phase 70 — Unified Output System *(completed v0.69.0)*
+
+Goal: Replace the scattered `--dump`, `--html`, `--format` flags with a single composable `--out <spec>` flag that can be repeated to produce multiple outputs simultaneously. Headers, verbose content, and machine-readable formats all flow through the same abstraction.
+
+**Design:**
+- `--out <format>[:<file>]` — format is one of `text | json | html | markdown | sarif`; if `:file` is omitted, output goes to stdout
+- Repeatable: `--out json:results.json --out html:report.html` produces both outputs in one run
+- `src/utils/outputSink.ts` — `parseOutputSpec()`, `resolveOutputs()`, `writeToSink()`, `hasSinkFormat()`, `getSink()` helpers
+- `resolveOutputs()` bridges from the legacy `--dump` / `--html` / `--format` flags transparently so existing scripts keep working
+- Wired into: `search`, `evolution`, `triage`, `policy check`, `ownership`, `workflow run`
+
+**Backward compatibility:** `--dump` / `--html` / `--format` kept as deprecated aliases on all modified commands; they are auto-translated to the equivalent `--out` spec internally.
+
+**Implemented:** `src/utils/outputSink.ts`, updated `search.ts`, `conceptEvolution.ts`, `triage.ts`, `policyCheck.ts`, `ownership.ts`, `workflow.ts`, `cli/index.ts`. 20 new tests in `tests/outputSink.test.ts`.
 
 ---
 

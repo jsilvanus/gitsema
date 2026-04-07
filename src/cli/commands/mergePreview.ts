@@ -5,6 +5,7 @@ import {
   type ClusterChange,
 } from '../../core/search/clustering.js'
 import { renderClusterDiffHtml } from '../../core/viz/htmlRenderer.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface MergePreviewCommandOptions {
   into?: string
@@ -16,6 +17,7 @@ export interface MergePreviewCommandOptions {
   html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
+  out?: string[]
 }
 
 /**
@@ -56,31 +58,38 @@ export async function mergePreviewCommand(
       enhancedKeywordsN,
     })
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Wrote merge-preview JSON to ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Wrote merge-preview JSON to ${jsonSink.file}`)
       } else {
-        console.log(json)
+        process.stdout.write(json + '\n')
+        return
       }
-      return
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderClusterDiffHtml(report)
-      const outFile =
-        typeof options.html === 'string' ? options.html : 'merge-preview.html'
-      try {
-        writeFileSync(outFile, html, 'utf8')
-        console.log(`Wrote merge-preview HTML to ${outFile}`)
-      } catch (err) {
-        console.error(
-          `Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`,
-        )
-        process.exit(1)
+      if (htmlSink.file) {
+        try {
+          writeFileSync(htmlSink.file, html, 'utf8')
+          console.log(`Wrote merge-preview HTML to ${htmlSink.file}`)
+        } catch (err) {
+          console.error(
+            `Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`,
+          )
+          process.exit(1)
+        }
+      } else {
+        process.stdout.write(html + '\n')
       }
-      return
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     printReport(report, branch, baseBranch)

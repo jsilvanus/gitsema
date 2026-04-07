@@ -7,6 +7,7 @@ import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 import { toSarif } from '../../core/search/sarifOutput.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { narrateSecurityFindings } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export function securityScanCommand(): Command {
   return new Command('security-scan')
@@ -18,7 +19,7 @@ export function securityScanCommand(): Command {
     .option('--high-confidence-only', 'only report findings with both semantic + structural signal')
     .option('--narrate', 'generate an LLM triage summary of findings (requires GITSEMA_LLM_URL)')
     .option('--no-headings', "don't print column header row")
-    .action(async (opts: { top?: string; model?: string; dump?: string | boolean; sarif?: string | boolean; highConfidenceOnly?: boolean; narrate?: boolean; noHeadings?: boolean }) => {
+    .action(async (opts: { top?: string; model?: string; dump?: string | boolean; sarif?: string | boolean; highConfidenceOnly?: boolean; narrate?: boolean; noHeadings?: boolean; out?: string[] }) => {
       let top: number
       try {
         top = parsePositiveInt(opts.top ?? '10', '--top')
@@ -36,7 +37,16 @@ export function securityScanCommand(): Command {
         findings = findings.filter((f) => f.confidence === 'high')
       }
 
+      const sinks = resolveOutputs({ out: opts.out, dump: opts.dump, html: undefined })
+      // Translate legacy --sarif into a sink (preserve file path when provided)
       if (opts.sarif !== undefined) {
+        sinks.push({ format: 'sarif', file: typeof opts.sarif === 'string' && opts.sarif !== '' ? opts.sarif : undefined })
+      }
+
+      const sarifSink = getSink(sinks, 'sarif')
+      const jsonSink = getSink(sinks, 'json')
+
+      if (sarifSink) {
         // Read version from package.json for SARIF tool version
         let toolVersion = '0.0.0'
         try {
@@ -44,24 +54,25 @@ export function securityScanCommand(): Command {
           toolVersion = pkg.version ?? '0.0.0'
         } catch { /* fall back */ }
         const sarif = toSarif(findings, toolVersion)
-        if (typeof opts.sarif === 'string') {
-          writeFileSync(opts.sarif, sarif, 'utf8')
-          console.log(`SARIF report written to: ${opts.sarif}`)
+        if (sarifSink.file) {
+          writeFileSync(sarifSink.file, sarif, 'utf8')
+          console.log(`SARIF report written to: ${sarifSink.file}`)
         } else {
           process.stdout.write(sarif + '\n')
         }
-        return
+        if (!hasSinkFormat(sinks, 'text')) return
       }
 
-      if (opts.dump !== undefined) {
+      if (jsonSink) {
         const json = JSON.stringify(findings, null, 2)
-        if (typeof opts.dump === 'string') {
-          writeFileSync(opts.dump, json, 'utf8')
-          console.log(`Security findings written to: ${opts.dump}`)
+        if (jsonSink.file) {
+          writeFileSync(jsonSink.file, json, 'utf8')
+          console.log(`Security findings written to: ${jsonSink.file}`)
         } else {
           process.stdout.write(json + '\n')
+          return
         }
-        return
+        if (!hasSinkFormat(sinks, 'text')) return
       }
       console.log('# Results are semantic similarity scores, not confirmed vulnerabilities. Manual review required.')
       if (findings.length === 0) {

@@ -1,8 +1,10 @@
 import { Command } from 'commander'
 import { getActiveSession } from '../../core/db/sqlite.js'
+import { writeFileSync } from 'node:fs'
 import { computeHealthTimeline } from '../../core/search/healthTimeline.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { narrateHealthTimeline } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export function healthCommand(): Command {
   return new Command('health')
@@ -11,7 +13,7 @@ export function healthCommand(): Command {
     .option('--branch <name>', 'branch name')
     .option('--narrate', 'generate an LLM narrative summary of health trends (requires GITSEMA_LLM_URL)')
     .option('--no-headings', "don't print column header row")
-    .action(async (opts: { buckets?: string; branch?: string; narrate?: boolean; noHeadings?: boolean }) => {
+    .action(async (opts: { buckets?: string; branch?: string; narrate?: boolean; noHeadings?: boolean; out?: string[] }) => {
       let buckets: number
       try {
         buckets = parsePositiveInt(opts.buckets ?? '12', '--buckets')
@@ -21,6 +23,22 @@ export function healthCommand(): Command {
       }
       const session = getActiveSession()
       const snaps = computeHealthTimeline(session, { buckets, branch: opts.branch })
+
+      const sinks = resolveOutputs({ out: opts.out, dump: undefined, html: undefined })
+      const jsonSink = getSink(sinks, 'json')
+
+      if (jsonSink) {
+        const json = JSON.stringify(snaps, null, 2)
+        if (jsonSink.file) {
+          writeFileSync(jsonSink.file, json, 'utf8')
+          console.log(`Health timeline written to: ${jsonSink.file}`)
+        } else {
+          process.stdout.write(json + '\n')
+          return
+        }
+        if (!hasSinkFormat(sinks, 'text')) return
+      }
+
       if (!opts.noHeadings) {
         console.log(`${'Period_Start'.padEnd(24)}  ${'Period_End'.padEnd(24)}  ${'Active'.padEnd(6)}  ${'Churn'.padEnd(6)}  Dead`)
       }

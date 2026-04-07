@@ -1,4 +1,6 @@
 import { writeFileSync } from 'node:fs'
+import { resolveOutputs, hasSinkFormat, getSink, collectOut } from '../../utils/outputSink.js'
+export { collectOut }
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
@@ -17,6 +19,8 @@ export interface ConceptEvolutionCommandOptions {
   threshold?: string
   dump?: string | boolean
   html?: string | boolean
+  /** Unified output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] */
+  out?: string[]
   includeContent?: boolean
   remote?: string
   branch?: string
@@ -206,41 +210,41 @@ export async function conceptEvolutionCommand(
 
   const entries = computeConceptEvolution(queryEmbedding, topK, options.branch, candidateHashes)
 
-  // --dump: emit structured JSON to a file or stdout
-  if (options.dump !== undefined) {
-    const json = serializeConceptEvolutionJson(query.trim(), entries, threshold, includeContent)
+  // Unified output handling (--out, or legacy --dump / --html)
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
 
-    if (typeof options.dump === 'string') {
-      // --dump <file> → write JSON to file, then print human-readable to stdout
+  // JSON sink
+  const jsonSink = getSink(sinks, 'json')
+  if (jsonSink) {
+    const json = serializeConceptEvolutionJson(query.trim(), entries, threshold, includeContent)
+    if (jsonSink.file) {
       try {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Concept evolution JSON written to: ${options.dump}`)
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Concept evolution JSON written to: ${jsonSink.file}`)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`Error writing dump file: ${msg}`)
+        console.error(`Error writing JSON file: ${err instanceof Error ? err.message : String(err)}`)
         process.exit(1)
       }
-      // Fall through to also print human-readable summary below
+      // fall through to text if text sink also present
     } else {
-      // --dump without a file path → print JSON to stdout and exit
       process.stdout.write(json + '\n')
-      return
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
   }
 
-  // --html: emit interactive HTML visualization
-  if (options.html !== undefined) {
+  // HTML sink
+  const htmlSink = getSink(sinks, 'html')
+  if (htmlSink) {
     const html = renderConceptEvolutionHtml(query.trim(), entries, threshold)
-    const outFile = typeof options.html === 'string' ? options.html : 'concept-evolution.html'
+    const outFile = htmlSink.file ?? 'concept-evolution.html'
     try {
       writeFileSync(outFile, html, 'utf8')
       console.log(`Concept evolution HTML written to: ${outFile}`)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`Error writing HTML file: ${msg}`)
+      console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   // Human-readable output

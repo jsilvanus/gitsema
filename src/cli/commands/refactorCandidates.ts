@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { computeRefactorCandidates, type RefactorReport, type RefactorPair } from '../../core/search/refactorCandidates.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface RefactorCandidatesCommandOptions {
   threshold?: string
@@ -7,6 +8,7 @@ export interface RefactorCandidatesCommandOptions {
   level?: string
   dump?: string | boolean
   noHeadings?: boolean
+  out?: string[]
 }
 
 function renderReport(report: RefactorReport, showHeadings = true): string {
@@ -45,15 +47,19 @@ export async function refactorCandidatesCommand(options: RefactorCandidatesComma
     throw err
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(report, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Refactor candidates written to: ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Refactor candidates written to: ${jsonSink.file}`)
     } else {
       process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderReport(report, !options.noHeadings))

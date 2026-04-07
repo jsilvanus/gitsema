@@ -57,6 +57,17 @@ export interface AppOptions {
   ui?: boolean
 }
 
+// Read package version dynamically so the capabilities endpoint always matches package.json
+let _pkgVersion = '0.0.0'
+try {
+  const pkgPath = new URL('../../package.json', import.meta.url)
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string }
+  if (pkg && typeof pkg.version === 'string') _pkgVersion = pkg.version
+} catch {
+  // fall back to default
+}
+const SERVER_VERSION = _pkgVersion
+
 export function createApp(options: AppOptions): Express {
   const {
     textProvider,
@@ -97,6 +108,42 @@ export function createApp(options: AppOptions): Express {
   app.use(`${base}/watch`, watchRouter({ textProvider }))
 
   app.use(`${base}/projections`, projectionsRouter())
+
+  // Phase 64: Capabilities manifest — machine-readable list of server capabilities
+  app.get(`${base}/capabilities`, (_req, res) => {
+    res.json({
+      version: SERVER_VERSION,
+      features: [
+        'semantic_search',
+        'first_seen',
+        'file_evolution',
+        'concept_evolution',
+        'change_points',
+        'semantic_diff',
+        'semantic_blame',
+        'impact',
+        'clusters',
+        'merge_audit',
+        'merge_preview',
+        'branch_summary',
+        'dead_concepts',
+        'security_scan',
+        'health_timeline',
+        'debt_score',
+        'experts',
+        'multi_repo_search',
+        'hybrid_search',
+        'early_cut',
+        'projections',
+        'watch',
+      ],
+      providers: {
+        text: textProvider.model,
+        code: codeProvider ? codeProvider.model : textProvider.model,
+      },
+      chunker: chunkerStrategy,
+    })
+  })
 
   // Phase 55: Serve the embedding space explorer web UI when --ui is set
   if (ui) {

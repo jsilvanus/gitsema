@@ -660,6 +660,89 @@ Top 3 contributors by semantic area (since 2024-01-01)
 
 ---
 
+#### `gitsema pr-report [options]`
+
+Generates a **semantic PR report** combining semantic diff, impacted modules, change-point highlights, and reviewer suggestions. Designed for CI/bot ingestion.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--ref1 <ref>` | `HEAD~1` | Earlier git ref |
+| `--ref2 <ref>` | `HEAD` | Later git ref |
+| `--file <path>` | — | File to compute semantic diff and impact for |
+| `--query <q>` | — | Topic query for change-point highlights |
+| `-k, --top <n>` | `10` | Top-k results per section |
+| `--since <date>` | — | Only include reviewer activity after this date |
+| `--until <date>` | — | Only include reviewer activity before this date |
+| `--dump [file]` | — | Output JSON to `<file>` or stdout if no file given |
+
+```bash
+gitsema pr-report --file src/auth.ts
+gitsema pr-report --ref1 main --ref2 feature/auth --dump report.json
+```
+
+---
+
+#### `gitsema eval <file> [options]`
+
+**Retrieval evaluation harness** — measures search quality (P@k, R@k, MRR, latency) against a JSONL file of evaluation cases.
+
+Each line of the JSONL file must be: `{ "query": "...", "expectedPaths": ["src/foo.ts"] }`
+
+| Flag | Default | Description |
+|---|---|---|
+| `-k, --top <n>` | `10` | Top-k results per query |
+| `--dump [file]` | — | Write full JSON results to `<file>` or stdout |
+
+```bash
+gitsema eval eval-cases.jsonl --top 10
+gitsema eval eval-cases.jsonl --dump eval-results.json
+```
+
+---
+
+### Search Performance & AI Reliability
+
+#### `--early-cut <n>` (on `gitsema search`)
+
+Limits the candidate pool to **n randomly-sampled blobs** before scoring. Useful for very large indexes (>100K blobs) to trade recall for speed.
+
+```bash
+gitsema search "authentication middleware" --early-cut 5000
+```
+
+#### `--explain-llm` (on `gitsema search`)
+
+Outputs a **provenance citation block** for each result, formatted for injection into LLM prompts. Each block includes the file path, blob hash, first-seen date, score signals, and a content snippet.
+
+```bash
+gitsema search "authentication middleware" --explain-llm
+```
+
+#### `--profile <name>` (on `gitsema index`)
+
+Applies a **preset indexing profile** that sets coherent defaults for concurrency, embed batch size, and chunker strategy.
+
+| Profile | Concurrency | Batch size | Chunker | Best for |
+|---|---|---|---|---|
+| `speed` | 8 | 32 | file | Fast indexing on fast hardware |
+| `balanced` | 4 | 16 | file | Default (auto-tuned) |
+| `quality` | 2 | 4 | function | Deep chunk/symbol indexing |
+
+```bash
+gitsema index --profile speed
+gitsema index --profile quality
+```
+
+#### `GET /api/v1/capabilities` (HTTP server)
+
+Returns a machine-readable JSON manifest of all features supported by the running server, including version, provider models, and enabled features. Useful for client auto-configuration.
+
+```bash
+curl http://localhost:4242/api/v1/capabilities
+```
+
+---
+
 ## Automated Indexing (Git Hooks)
 
 You can keep the semantic index in sync with your repository automatically by

@@ -1,11 +1,13 @@
 import { writeFileSync } from 'node:fs'
 import { computeContributorProfile } from '../../core/search/contributorProfile.js'
 import { renderResults } from '../../core/search/ranking.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface ContributorProfileOptions {
   top?: string
   branch?: string
   dump?: string | boolean
+  out?: string[]
 }
 
 export async function contributorProfileCommand(author: string, options: ContributorProfileOptions): Promise<void> {
@@ -28,15 +30,19 @@ export async function contributorProfileCommand(author: string, options: Contrib
     process.exit(1)
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(results, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Wrote contributor-profile JSON to ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Wrote contributor-profile JSON to ${jsonSink.file}`)
     } else {
-      console.log(json)
+      process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   // Render as search results

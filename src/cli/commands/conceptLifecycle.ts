@@ -5,6 +5,7 @@ import type { Embedding } from '../../core/models/types.js'
 import { computeConceptLifecycle, type ConceptLifecycleResult } from '../../core/search/conceptLifecycle.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { narrateLifecycle } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface ConceptLifecycleCommandOptions {
   steps?: string
@@ -14,6 +15,7 @@ export interface ConceptLifecycleCommandOptions {
   textModel?: string
   codeModel?: string
   narrate?: boolean
+  out?: string[]
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -90,15 +92,19 @@ export async function conceptLifecycleCommand(query: string, options: ConceptLif
     throw err
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(result, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Lifecycle result written to: ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Lifecycle result written to: ${jsonSink.file}`)
     } else {
       process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderLifecycle(result))

@@ -6,6 +6,7 @@ import {
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { shortHash } from '../../core/search/ranking.js'
 import { renderDeadConceptsHtml } from '../../core/viz/htmlRenderer.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface DeadConceptsCommandOptions {
   /** Number of results to return (default 10). */
@@ -28,6 +29,7 @@ export interface DeadConceptsCommandOptions {
   /** When set, restrict dead-concept candidates to blobs seen on this branch. */
   branch?: string
   noHeadings?: boolean
+  out?: string[]
 }
 
 function formatDate(timestamp: number | null): string {
@@ -99,23 +101,31 @@ export async function deadConceptsCommand(
     process.exit(1)
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const jsonSink = getSink(sinks, 'json')
+  const htmlSink = getSink(sinks, 'html')
+
+  if (jsonSink) {
     const json = JSON.stringify(results, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Wrote dead concepts JSON to ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Wrote dead concepts JSON to ${jsonSink.file}`)
     } else {
-      console.log(json)
+      process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
-  if (options.html !== undefined) {
+  if (htmlSink) {
     const html = renderDeadConceptsHtml(results)
-    const outFile = typeof options.html === 'string' ? options.html : 'dead-concepts.html'
-    writeFileSync(outFile, html, 'utf8')
-    console.log(`Dead concepts HTML written to: ${outFile}`)
-    return
+    if (htmlSink.file) {
+      writeFileSync(htmlSink.file, html, 'utf8')
+      console.log(`Dead concepts HTML written to: ${htmlSink.file}`)
+    } else {
+      process.stdout.write(html + '\n')
+    }
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderResults(results, !options.noHeadings))

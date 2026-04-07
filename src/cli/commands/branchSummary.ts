@@ -5,6 +5,7 @@ import {
   type DriftedPath,
 } from '../../core/search/branchSummary.js'
 import { renderBranchSummaryHtml } from '../../core/viz/htmlRenderer.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface BranchSummaryCommandOptions {
   base?: string
@@ -13,6 +14,7 @@ export interface BranchSummaryCommandOptions {
   html?: string | boolean
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
+  out?: string[]
 }
 
 /**
@@ -37,28 +39,37 @@ export async function branchSummaryCommand(
   try {
     const result = await computeBranchSummary(branch, baseBranch, { topConcepts })
 
-    if (options.dump !== undefined) {
-      // Strip the heavy centroid array from JSON output unless explicitly needed
-      const json = JSON.stringify(
-        { ...result, branchCentroid: `[${result.branchCentroid.length} dimensions]` },
-        null,
-        2,
-      )
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Wrote branch-summary JSON to ${options.dump}`)
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    // Strip the heavy centroid array from JSON output unless explicitly needed
+    const json = JSON.stringify(
+      { ...result, branchCentroid: `[${result.branchCentroid.length} dimensions]` },
+      null,
+      2,
+    )
+
+    if (jsonSink) {
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Wrote branch-summary JSON to ${jsonSink.file}`)
       } else {
-        console.log(json)
+        process.stdout.write(json + '\n')
+        return
       }
-      return
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderBranchSummaryHtml(result)
-      const outFile = typeof options.html === 'string' ? options.html : 'branch-summary.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Branch summary HTML written to: ${outFile}`)
-      return
+      if (htmlSink.file) {
+        writeFileSync(htmlSink.file, html, 'utf8')
+        console.log(`Branch summary HTML written to: ${htmlSink.file}`)
+      } else {
+        process.stdout.write(html + '\n')
+      }
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     printResult(result, baseBranch, options.enhancedLabels ? enhancedKeywordsN : 5)

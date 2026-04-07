@@ -59,6 +59,13 @@ import { exportIndex, importIndex } from './commands/bundleIndex.js'
 import { projectCommand } from './commands/project.js'
 import { toolsCommand } from './commands/tools.js'
 import { expertsCommand } from './commands/experts.js'
+import { prReportCommand } from './commands/prReport.js'
+import { evalCommand } from './commands/eval.js'
+import { triageCommand } from './commands/triage.js'
+import { policyCheckCommand } from './commands/policyCheck.js'
+import { ownershipCommand } from './commands/ownership.js'
+import { workflowCommand } from './commands/workflow.js'
+import { collectOut } from '../utils/outputSink.js'
 
 const program = new Command()
 
@@ -102,12 +109,14 @@ const GROUPS = [
   'Setup & Infrastructure',
   'Protocol Servers',
   'Search & Discovery',
+  'Analysis',
   'File History',
   'Concept History',
   'Cluster Analysis',
   'Change Detection',
   'Code Quality',
   'Workflow & CI',
+  'Workflows',
   'Repo Insights',
   'Visualization',
   'Maintenance',
@@ -166,6 +175,12 @@ const COMMAND_GROUPS: Record<string, string> = {
   'cherry-pick-suggest':   'Workflow & CI',
   repos:                   'Workflow & CI',
   watch:                   'Workflow & CI',
+  // Analysis
+  triage:                  'Analysis',
+  policy:                  'Analysis',
+  ownership:               'Analysis',
+  // Workflows
+  workflow:                'Workflows',
   // Repo Insights
   experts:                 'Repo Insights',
   // Visualization
@@ -429,6 +444,7 @@ program
   .option('--build-vss', 'build a usearch HNSW ANN index after indexing completes (requires usearch package)')
   .option('--auto-build-vss [threshold]', 'automatically build VSS index after indexing when blob count exceeds threshold (default: 10000)')
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
+  .option('--profile <name>', 'apply a preset profile: speed (high concurrency, large batches), balanced (default), quality (deep chunking)')
   .action(indexCommand)
 
 // index export / index import — Phase 54 subcommands
@@ -521,17 +537,20 @@ program
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
-  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
   .option('--not-like <query>', 'negative example query whose similarity is subtracted from the score')
   .option('--lambda <n>', 'weight for the negative example subtraction (default 0.5)')
   .option('--explain', 'show score component breakdown for each result')
-  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html')
+  .option('--early-cut <n>', 'limit candidate pool to n random samples to speed up search on large indexes')
+  .option('--explain-llm', 'output LLM-ready provenance citation block for each result')
+  .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html (legacy: prefer --out html)')
   .option('--or <query>', 'combine results with OR (union, max score)')
   .option('--and <query>', 'combine results with AND (intersection, harmonic mean)')
   .option('--expand-query', 'expand query with top BM25 keywords before embedding to improve recall (Phase 52)')
   .option('--narrate', 'generate an LLM summary of search results (requires GITSEMA_LLM_URL)')
   .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo; use gitsema repos add to register)')
   .option('--no-headings', "don't print column header row")
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(searchCommand)
 
 program.addCommand(codeSearchCommand())
@@ -560,6 +579,7 @@ program
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--vss', 'use the usearch HNSW ANN index for approximate search (requires prior `gitsema build-vss`; falls back to linear scan)')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise first-seen.html')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo)')
   .action(firstSeenCommand)
 
@@ -579,6 +599,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise file-evolution.html',
   )
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option(
     '--include-content',
     'include the stored file content for each version in the JSON dump (only used with --dump)',
@@ -612,6 +633,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise concept-evolution.html',
   )
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option(
     '--include-content',
     'include the stored file content for each entry in the JSON dump (only used with --dump)',
@@ -623,6 +645,7 @@ program
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--narrate', 'generate an LLM summary of concept evolution results (requires GITSEMA_LLM_URL)')
   .option('--no-headings', "don't print column header row")
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(conceptEvolutionCommand)
 
 program
@@ -634,6 +657,7 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(semanticBisectCommand)
 
 program
@@ -643,6 +667,7 @@ program
   .option('-k, --top <n>', 'max pairs to return (default 50)', '50')
   .option('--level <level>', 'search granularity: symbol (default), chunk, file', 'symbol')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--no-headings', "don't print report header")
   .action(refactorCandidatesCommand)
 
@@ -668,6 +693,7 @@ program
   .option('--steps <n>', 'number of time windows to sample (default 10)', '10')
   .option('--threshold <n>', 'cosine similarity threshold for "match" (default 0.7)', '0.7')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
@@ -681,6 +707,7 @@ program
   .option('--threshold <n>', 'only include code files whose max similarity to docs is below this threshold (0–1)')
   .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(docGapCommand)
 
 program
@@ -689,7 +716,67 @@ program
   .option('-k, --top <n>', 'number of top results to return', '10')
   .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(contributorProfileCommand)
+
+program
+  .command('pr-report')
+  .description('Compose a semantic PR report: diff, impacted modules, change-points, reviewer suggestions')
+  .option('--ref1 <ref>', 'Base ref (default: HEAD~1)', 'HEAD~1')
+  .option('--ref2 <ref>', 'Head ref (default: HEAD)', 'HEAD')
+  .option('--file <path>', 'File path to analyze for semantic diff and impact')
+  .option('--query <text>', 'Concept query for change-point highlights')
+  .option('-k, --top <n>', 'Result limit', '10')
+  .option('--since <date>', 'Filter reviewer activity since date (YYYY-MM-DD)')
+  .option('--until <date>', 'Filter reviewer activity until date (YYYY-MM-DD)')
+  .option('--dump [file]', 'Output JSON report; writes to file or stdout if no path given')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+  .action(async (options) => {
+    await prReportCommand(options)
+  })
+
+program
+  .command('triage <query>')
+  .description('Incident triage: composite workflow (first-seen, change-points, file-evolution, bisect, experts)')
+  .option('--ref1 <ref>', 'bisect left ref')
+  .option('--ref2 <ref>', 'bisect right ref')
+  .option('--file <path>', 'focus on a specific file')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump)', collectOut, [] as string[])
+  .option('-k, --top <n>', 'number of top results per section', '5')
+  .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, out: opts.out, top: opts.top }) })
+
+program
+  .command('policy check')
+  .description('Run policy gates for drift, debt, and security scores (CI-friendly exit codes)')
+  .option('--max-drift <n>', 'fail if any concept change-point distance exceeds n')
+  .option('--max-debt-score <n>', 'fail if aggregate debt score exceeds n')
+  .option('--min-security-score <n>', 'fail if any security similarity score is below this threshold')
+  .option('--query <text>', 'concept query (required for drift gate)')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[])
+  .action(async (opts: any) => { await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump, out: opts.out }) })
+
+program
+  .command('ownership <query>')
+  .description('Show ownership heatmap for a concept (ownership confidence and trends)')
+  .option('-k, --top <n>', 'number of owners to show', '5')
+  .option('--window <days>', 'compare ownership in last N days vs before (default 90)', '90')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[])
+  .action(async (query: string, opts: any) => { await ownershipCommand(query, { top: opts.top, window: opts.window, dump: opts.dump, out: opts.out }) })
+
+program
+  .command('workflow run <template>')
+  .description('Run a built-in workflow template: pr-review, incident, release-audit')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+  .option('--format <fmt>', 'output format: markdown (default) or json — legacy; prefer --out', 'markdown')
+  .option('--base <ref>', 'base ref for pr-review')
+  .option('--file <path>', 'file to analyze (pr-review)')
+  .option('--query <text>', 'concept query (incident)')
+  .option('-k, --top <n>', 'result limit', '5')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump/--format)', collectOut, [] as string[])
+  .action(async (template: string, args: string[], opts: any) => { await workflowCommand(template, args, { dump: opts.dump, format: opts.format, base: opts.base, file: opts.file, query: opts.query, top: opts.top, out: opts.out }) })
 
 program
   .command('cherry-pick-suggest <query>')
@@ -697,6 +784,7 @@ program
   .option('-k, --top <n>', 'number of results to return', '10')
   .option('--model <model>', 'embedding model to use')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(cherryPickSuggestCommand)
 
 program
@@ -709,6 +797,7 @@ program
   .description('Show semantic activity heatmap — count of distinct blob changes by time period (week or month)')
   .option('--period <p>', 'aggregation period: week (default) or month', 'week')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--no-headings', "don't print column header row")
   .action(async (opts: { period?: string; dump?: string | boolean; noHeadings?: boolean }) => { await heatmapCommand({ period: opts.period, dump: opts.dump, noHeadings: opts.noHeadings }) })
 
@@ -719,6 +808,8 @@ program
     '--neighbors <n>',
     'number of nearest-neighbour blobs to show for each version (default 0)',
   )
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--narrate', 'generate an LLM narrative interpretation of the semantic diff (requires GITSEMA_LLM_URL)')
   .action(diffCommand)
 
@@ -740,6 +831,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise semantic-diff.html',
   )
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(semanticDiffCommand)
 
 program
@@ -1169,6 +1261,18 @@ program
   )
   .action(async (opts: Parameters<typeof expertsCommand>[0]) => {
     await expertsCommand(opts)
+  })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 64: gitsema eval — retrieval evaluation harness
+// ─────────────────────────────────────────────────────────────────────────────
+program
+  .command('eval <file>')
+  .description('Evaluate retrieval quality against a JSONL file of (query, expectedPaths) pairs.')
+  .option('-k, --top <n>', 'retrieve top-k results per query (default: 10)')
+  .option('--dump [file]', 'write full JSON results to <file> (or stdout if no file given)')
+  .action(async (file: string, opts: { top?: string; dump?: string | boolean }) => {
+    await evalCommand({ file, ...opts })
   })
 
 program.parse()

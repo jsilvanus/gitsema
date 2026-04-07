@@ -1,12 +1,14 @@
 import { writeFileSync } from 'node:fs'
 import { computeDocGap, type DocGapResult } from '../../core/search/docGap.js'
 import { shortHash, formatScore } from '../../core/search/ranking.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface DocGapCommandOptions {
   top?: string
   threshold?: string
   branch?: string
   dump?: string | boolean
+  out?: string[]
 }
 
 function renderResults(results: DocGapResult[]): string {
@@ -51,15 +53,19 @@ export async function docGapCommand(options: DocGapCommandOptions): Promise<void
     process.exit(1)
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(results, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Wrote doc-gap JSON to ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Wrote doc-gap JSON to ${jsonSink.file}`)
     } else {
-      console.log(json)
+      process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderResults(results))
