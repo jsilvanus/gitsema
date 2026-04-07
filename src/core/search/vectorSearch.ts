@@ -4,6 +4,101 @@ import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import type { Embedding, SearchResult } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../embedding/quantize.js'
+import { getCachedResults, setCachedResults, buildCacheKey, embeddingFingerprint } from './resultCache.js'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+// ---------------------------------------------------------------------------
+// HNSW / ANN search support
+// ---------------------------------------------------------------------------
+
+/**
+ * Threshold (blob count) above which ANN search is automatically preferred
+ * when a usearch index is available.  Override via GITSEMA_VSS_THRESHOLD.
+ */
+const DEFAULT_VSS_THRESHOLD = 50_000
+
+function getVssThreshold(): number {
+  const raw = process.env.GITSEMA_VSS_THRESHOLD
+  if (raw) {
+    const n = parseInt(raw, 10)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return DEFAULT_VSS_THRESHOLD
+}
+
+const DB_DIR = '.gitsema'
+
+/** Cached usearch module so we only dynamic-import once. */
+let _usearchModule: typeof import('usearch') | null | undefined = undefined
+
+async function loadUsearch(): Promise<typeof import('usearch') | null> {
+  if (_usearchModule !== undefined) return _usearchModule
+  try {
+    _usearchModule = await import('usearch')
+  } catch {
+    _usearchModule = null
+  }
+  return _usearchModule
+}
+
+/**
+ * Resolves the paths to the usearch index file and blob-hash map for a model.
+ * Returns null when no index exists on disk.
+ */
+export function getVssIndexPaths(model: string): { indexPath: string; mapPath: string } | null {
+  const safeName = model.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const indexPath = join(DB_DIR, `vectors-${safeName}.usearch`)
+  const mapPath = join(DB_DIR, `vectors-${safeName}.map.json`)
+  if (existsSync(indexPath) && existsSync(mapPath)) {
+    return { indexPath, mapPath }
+  }
+  return null
+}
+
+/**
+ * Attempts an ANN search via usearch HNSW index.
+ * Returns the top-k blob hashes (approximate nearest neighbours) sorted by
+ * similarity (best first), or null when the index cannot be used.
+ *
+ * The caller is responsible for falling back to exact search on null.
+ */
+export async function annSearch(
+  queryEmbedding: Embedding,
+  model: string,
+  topK: number,
+): Promise<string[] | null> {
+  const paths = getVssIndexPaths(model)
+  if (!paths) return null
+
+  const usearch = await loadUsearch()
+  if (!usearch) return null
+
+  try {
+    const Index = (usearch as any).Index ?? (usearch as any).default?.Index
+    if (!Index) return null
+
+    const idToHash: string[] = JSON.parse(readFileSync(paths.mapPath, 'utf8'))
+    const index = new Index({ metric: 'cos' })
+    index.load(paths.indexPath)
+
+    const vec = queryEmbedding instanceof Float32Array
+      ? queryEmbedding
+      : new Float32Array(queryEmbedding as number[])
+
+    // Request more candidates than topK to account for filters applied later
+    const searchK = Math.min(Math.max(topK * 4, 50), idToHash.length)
+    const { keys } = index.search(vec, searchK)
+    const hashes: string[] = []
+    for (let i = 0; i < keys.length; i++) {
+      const id = typeof keys[i] === 'bigint' ? Number(keys[i]) : keys[i]
+      if (id >= 0 && id < idToHash.length) hashes.push(idToHash[id])
+    }
+    return hashes
+  } catch {
+    return null
+  }
+}
 
 /**
  * Computes the cosine similarity between two vectors.
@@ -127,6 +222,27 @@ export interface VectorSearchOptions {
    * Set to 0 or omit to disable (default: full scan).
    */
   earlyCut?: number
+  /**
+   * When true, route through the HNSW/usearch ANN index when available.
+   * Also triggered automatically when the blob count exceeds GITSEMA_VSS_THRESHOLD (default 50K).
+   * Falls back to exact cosine scan when no index exists or usearch is not installed.
+   */
+  useVss?: boolean
+  /**
+   * The original query text (used as cache key component).
+   * When omitted, a fingerprint of the embedding is used instead.
+   */
+  queryText?: string
+  /**
+   * When true, bypass the result cache.
+   * Useful for tests and when fresh results are always required.
+   */
+  noCache?: boolean
+  /**
+   * When set, restrict the candidate pool to only these blob hashes.
+   * Used internally by ANN/HNSW pre-filtering to speed up exact scoring.
+   */
+  allowedHashes?: Set<string>
 }
 
 /**
@@ -134,6 +250,9 @@ export interface VectorSearchOptions {
  * vector, then returns the top-k results sorted by cosine similarity (or
  * blended score when `recent` is true). Supports temporal filtering via
  * `before` / `after` Unix timestamps and three-signal ranking.
+ *
+ * Results are cached in memory (default TTL 60 s) keyed by query text/embedding
+ * fingerprint + options. Use `noCache: true` to bypass.
  */
 export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOptions = {}): SearchResult[] {
   const {
@@ -141,7 +260,26 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     weightVector, weightRecency, weightPath, query = '',
     searchChunks = false, searchSymbols = false, searchModules = false, branch,
     negativeQueryEmbedding, negativeLambda, explain, earlyCut = 0,
+    queryText, noCache = false, allowedHashes,
   } = options
+
+  // ── Result cache lookup ───────────────────────────────────────────────────
+  // Cache key excludes `noCache` and `allowedHashes` (internal optimisation flag)
+  // so callers get consistent results regardless of whether ANN pre-filtered.
+  const cacheKeyOptions: Record<string, unknown> = {
+    topK, model, recent, alpha, before, after,
+    weightVector, weightRecency, weightPath, query,
+    searchChunks, searchSymbols, searchModules, branch,
+    negativeLambda, explain, earlyCut,
+  }
+  const cacheKey = buildCacheKey(
+    queryText ?? embeddingFingerprint(queryEmbedding),
+    cacheKeyOptions,
+  )
+  if (!noCache) {
+    const cached = getCachedResults(cacheKey)
+    if (cached) return cached
+  }
 
   // Determine if three-signal ranking is active
   const useThreeSignal = weightVector !== undefined || weightRecency !== undefined || weightPath !== undefined
@@ -176,6 +314,12 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     quantMin: r.quantMin ?? null,
     quantScale: r.quantScale ?? null,
   }))
+
+  // Apply ANN pre-filter: when `allowedHashes` is provided (set by vectorSearchWithAnn),
+  // restrict the candidate pool to those hashes before loading chunk/symbol embeddings.
+  if (allowedHashes) {
+    candidatePool = candidatePool.filter((r) => allowedHashes.has(r.blobHash))
+  }
 
   if (searchChunks) {
     const chunkQuery = db.select({
@@ -394,13 +538,14 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   // Resolve firstCommit / firstSeen for the result set
   const firstSeenMap = getFirstSeenMap(blobHashes)
 
-  return topEntries.map((b) => {
+  const results = topEntries.map((b) => {
     const firstSeen = firstSeenMap.get(b.blobHash)
     // Module results use a synthetic blobHash `module:<path>` and do not have
     // entries in the paths table. Map them to modulePath and expose a single
     // path equal to the modulePath for display purposes.
     if (b.modulePath !== undefined) {
       const base: any = {
+        kind: 'module',
         blobHash: b.blobHash,
         paths: [b.modulePath],
         score: b.score,
@@ -412,7 +557,13 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       return base
     }
 
+    // Determine kind from available fields
+    let kind: 'file' | 'chunk' | 'symbol' = 'file'
+    if (b.symbolId !== undefined) kind = 'symbol'
+    else if (b.chunkId !== undefined) kind = 'chunk'
+
     const base: any = {
+      kind,
       blobHash: b.blobHash,
       paths: pathsByBlob!.get(b.blobHash) ?? [],
       score: b.score,
@@ -436,6 +587,83 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
     return base
   })
+
+  // Store in cache (skip when noCache or when ANN pre-filter was applied — the
+  // ANN wrapper handles caching for that path)
+  if (!noCache && !allowedHashes) {
+    setCachedResults(cacheKey, results)
+  }
+
+  return results
+}
+
+/**
+ * Async variant of vectorSearch that first runs an ANN query via the usearch
+ * HNSW index (when available) to pre-filter the candidate pool, then runs
+ * exact cosine scoring on the smaller candidate set.
+ *
+ * Decision logic:
+ *   - If `options.useVss` is explicitly true → attempt ANN
+ *   - If the embedding count exceeds GITSEMA_VSS_THRESHOLD (default 50K) → attempt ANN
+ *   - On any failure (no index, usearch not installed, usearch error) → exact search
+ *
+ * Results are stored in the result cache (same key as sync vectorSearch).
+ */
+export async function vectorSearchWithAnn(
+  queryEmbedding: Embedding,
+  options: VectorSearchOptions = {},
+): Promise<SearchResult[]> {
+  const { topK = 10, model, useVss, queryText, noCache = false } = options
+
+  // Cache check (same logic as vectorSearch)
+  const cacheKeyOptions: Record<string, unknown> = {
+    topK, model,
+    recent: options.recent, alpha: options.alpha,
+    before: options.before, after: options.after,
+    weightVector: options.weightVector, weightRecency: options.weightRecency, weightPath: options.weightPath,
+    query: options.query, searchChunks: options.searchChunks, searchSymbols: options.searchSymbols,
+    searchModules: options.searchModules, branch: options.branch,
+    negativeLambda: options.negativeLambda, explain: options.explain, earlyCut: options.earlyCut,
+  }
+  const cacheKey = buildCacheKey(
+    queryText ?? embeddingFingerprint(queryEmbedding),
+    cacheKeyOptions,
+  )
+  if (!noCache) {
+    const cached = getCachedResults(cacheKey)
+    if (cached) return cached
+  }
+
+  // Decide whether to attempt ANN
+  const resolvedModel = model ?? (process.env.GITSEMA_MODEL ?? 'nomic-embed-text')
+  let shouldUseAnn = useVss === true
+
+  if (!shouldUseAnn) {
+    // Auto-trigger when index is large enough
+    try {
+      const { rawDb } = getActiveSession()
+      const countRow = rawDb.prepare('SELECT COUNT(*) AS n FROM embeddings').get() as { n: number }
+      if (countRow && countRow.n >= getVssThreshold()) shouldUseAnn = true
+    } catch {
+      // Ignore errors — fall through to exact search
+    }
+  }
+
+  let allowedHashes: Set<string> | undefined
+  if (shouldUseAnn) {
+    const annHashes = await annSearch(queryEmbedding, resolvedModel, topK)
+    if (annHashes && annHashes.length > 0) {
+      allowedHashes = new Set(annHashes)
+    }
+  }
+
+  const results = vectorSearch(queryEmbedding, { ...options, allowedHashes, noCache: true })
+
+  if (!noCache) {
+    setCachedResults(cacheKey, results)
+  }
+
+  return results
 }
 
 /**

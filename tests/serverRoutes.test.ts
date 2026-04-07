@@ -656,6 +656,187 @@ describe('POST /api/v1/analysis/semantic-blame', () => {
 })
 
 // ===========================================================================
+// POST /api/v1/analysis/doc-gap
+// ===========================================================================
+describe('POST /api/v1/analysis/doc-gap', () => {
+  it('returns 200 with an array (empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/doc-gap')
+      .send({ top: 5 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns 400 for invalid body', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/doc-gap')
+      .send({ top: -1 })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/contributor-profile
+// ===========================================================================
+describe('POST /api/v1/analysis/contributor-profile', () => {
+  it('returns 200 with an array (empty DB, unknown author)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/contributor-profile')
+      .send({ author: 'nobody', top: 5 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns 400 when author is missing', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/contributor-profile')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/triage
+// ===========================================================================
+describe('POST /api/v1/analysis/triage', () => {
+  it('returns 200 with query + sections (empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/triage')
+      .send({ query: 'authentication', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('query', 'authentication')
+    expect(res.body).toHaveProperty('sections')
+  })
+
+  it('returns 400 when query is missing', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/triage')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/policy-check
+// ===========================================================================
+describe('POST /api/v1/analysis/policy-check', () => {
+  it('returns 200 with passed=true (no checks set, empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/policy-check')
+      .send({})
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('passed', true)
+    expect(res.body).toHaveProperty('checks')
+  })
+
+  it('returns 400 when maxDrift is set without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/policy-check')
+      .send({ maxDrift: 0.5 })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/ownership
+// ===========================================================================
+describe('POST /api/v1/analysis/ownership', () => {
+  it('returns 200 with an array (empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/ownership')
+      .send({ query: 'authentication middleware' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns 400 when query is missing', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/ownership')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/workflow
+// ===========================================================================
+describe('POST /api/v1/analysis/workflow', () => {
+  it('returns 200 for incident template with query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'incident', query: 'database crash', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'incident')
+    expect(res.body).toHaveProperty('sections')
+  })
+
+  it('returns 200 for release-audit template without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'release-audit' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'release-audit')
+  })
+
+  it('returns 400 for unknown template', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'unknown' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for pr-review without file', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'pr-review' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for incident without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'incident' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/eval
+// ===========================================================================
+describe('POST /api/v1/analysis/eval', () => {
+  it('returns 200 with cases and summary for valid inline cases', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/eval')
+      .send({
+        cases: [{ query: 'authentication', expectedPaths: ['src/auth.ts'] }],
+        top: 5,
+      })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('cases')
+    expect(res.body).toHaveProperty('summary')
+    expect(Array.isArray(res.body.cases)).toBe(true)
+    const summary = res.body.summary
+    expect(summary).toHaveProperty('avgPrecision')
+    expect(summary).toHaveProperty('avgRecall')
+    expect(summary).toHaveProperty('avgMRR')
+  })
+
+  it('returns 400 for missing cases', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/eval')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for empty cases array', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/eval')
+      .send({ cases: [] })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
 // Embedding provider failure → 502
 // ===========================================================================
 describe('Embedding provider failure → 502', () => {
@@ -723,3 +904,227 @@ describe('non-existent routes', () => {
   })
 })
 
+  it('returns 400 for invalid k (string)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ k: 'bad' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for k=0 (not positive)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ k: 0 })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/change-points
+// ===========================================================================
+describe('POST /api/v1/analysis/change-points', () => {
+  it('returns 400 for missing query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/change-points')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 with change-points structure (empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/change-points')
+      .send({ query: 'authentication' })
+    expect(res.status).toBe(200)
+    // May return {} or { changePoints: [] } depending on implementation
+    expect(typeof res.body).toBe('object')
+  })
+
+  it('returns 400 for invalid threshold', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/change-points')
+      .send({ query: 'auth', threshold: 'bad' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/author
+// ===========================================================================
+describe('POST /api/v1/analysis/author', () => {
+  it('returns 400 for missing query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 with contributions structure (empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication' })
+    expect(res.status).toBe(200)
+    expect(typeof res.body).toBe('object')
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/impact
+// ===========================================================================
+describe('POST /api/v1/analysis/impact', () => {
+  it('returns 400 for missing file', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for valid request (no git repo)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts' })
+    // May 500 because there's no git repo; should not be 400
+    expect([200, 500]).toContain(res.status)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/dead-concepts
+// ===========================================================================
+describe('POST /api/v1/analysis/dead-concepts', () => {
+  it('returns 200 with array (empty DB)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/dead-concepts')
+      .send({})
+    expect(res.status).toBe(200)
+    // Result may be an array or { concepts: [] }
+    expect(typeof res.body).toBe('object')
+  })
+
+  it('returns 400 for invalid topK', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/dead-concepts')
+      .send({ topK: 'bad' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/semantic-diff
+// ===========================================================================
+describe('POST /api/v1/analysis/semantic-diff', () => {
+  it('returns 400 for missing required fields', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for partially missing fields (ref2 missing)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', query: 'auth' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for valid request (no git repo)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication' })
+    expect([200, 500]).toContain(res.status)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/semantic-blame
+// ===========================================================================
+describe('POST /api/v1/analysis/semantic-blame', () => {
+  it('returns 400 for missing filePath', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ content: 'some content' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for missing content', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 with array on empty DB', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts', content: 'export function auth() {}' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+})
+
+// ===========================================================================
+// Embedding provider failure → 502
+// ===========================================================================
+describe('Embedding provider failure → 502', () => {
+  it('POST /api/v1/search returns 502 when embedding throws', async () => {
+    const failProvider: EmbeddingProvider = {
+      model: 'fail',
+      embed: async () => { throw new Error('embed failed') },
+      dimensions: 4,
+    }
+    const failApp = createApp({ textProvider: failProvider })
+    const res = await request(failApp)
+      .post('/api/v1/search')
+      .send({ query: 'auth' })
+    expect(res.status).toBe(502)
+    expect(res.body.error).toMatch(/embed/i)
+  })
+
+  it('POST /api/v1/search/first-seen returns 502 when embedding throws', async () => {
+    const failProvider: EmbeddingProvider = {
+      model: 'fail',
+      embed: async () => { throw new Error('embed failed') },
+      dimensions: 4,
+    }
+    const failApp = createApp({ textProvider: failProvider })
+    const res = await request(failApp)
+      .post('/api/v1/search/first-seen')
+      .send({ query: 'auth' })
+    expect(res.status).toBe(502)
+  })
+
+  it('POST /api/v1/analysis/change-points returns 502 when embedding throws', async () => {
+    const failProvider: EmbeddingProvider = {
+      model: 'fail',
+      embed: async () => { throw new Error('embed failed') },
+      dimensions: 4,
+    }
+    const failApp = createApp({ textProvider: failProvider })
+    const res = await request(failApp)
+      .post('/api/v1/analysis/change-points')
+      .send({ query: 'auth' })
+    expect(res.status).toBe(502)
+  })
+
+  it('POST /api/v1/evolution/concept returns 502 when embedding throws', async () => {
+    const failProvider: EmbeddingProvider = {
+      model: 'fail',
+      embed: async () => { throw new Error('embed failed') },
+      dimensions: 4,
+    }
+    const failApp = createApp({ textProvider: failProvider })
+    const res = await request(failApp)
+      .post('/api/v1/evolution/concept')
+      .send({ query: 'auth' })
+    expect(res.status).toBe(502)
+  })
+})
+
+// ===========================================================================
+// Non-existent routes
+// ===========================================================================
+describe('non-existent routes', () => {
+  it('returns 404 for unknown route', async () => {
+    const res = await request(app).get('/api/v1/nonexistent')
+    expect(res.status).toBe(404)
+  })
+})
