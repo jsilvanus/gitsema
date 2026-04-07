@@ -60,6 +60,7 @@ import { projectCommand } from './commands/project.js'
 import { toolsCommand } from './commands/tools.js'
 import { expertsCommand } from './commands/experts.js'
 import { prReportCommand } from './commands/prReport.js'
+import { evalCommand } from './commands/eval.js'
 
 const program = new Command()
 
@@ -527,6 +528,8 @@ program
   .option('--not-like <query>', 'negative example query whose similarity is subtracted from the score')
   .option('--lambda <n>', 'weight for the negative example subtraction (default 0.5)')
   .option('--explain', 'show score component breakdown for each result')
+  .option('--early-cut <n>', 'limit candidate pool to n random samples to speed up search on large indexes')
+  .option('--explain-llm', 'output LLM-ready provenance citation block for each result')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise search.html')
   .option('--or <query>', 'combine results with OR (union, max score)')
   .option('--and <query>', 'combine results with AND (intersection, harmonic mean)')
@@ -1186,6 +1189,18 @@ program
   )
   .action(async (opts: Parameters<typeof expertsCommand>[0]) => {
     await expertsCommand(opts)
+  })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 64: gitsema eval — retrieval evaluation harness
+// ─────────────────────────────────────────────────────────────────────────────
+program
+  .command('eval <file>')
+  .description('Evaluate retrieval quality against a JSONL file of (query, expectedPaths) pairs.')
+  .option('-k, --top <n>', 'retrieve top-k results per query (default: 10)')
+  .option('--dump [file]', 'write full JSON results to <file> (or stdout if no file given)')
+  .action(async (file: string, opts: { top?: string; dump?: string | boolean }) => {
+    await evalCommand({ file, ...opts })
   })
 
 program.parse()

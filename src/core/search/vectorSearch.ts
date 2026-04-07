@@ -121,6 +121,12 @@ export interface VectorSearchOptions {
   negativeLambda?: number
   /** When true, populate `signals` on returned SearchResult objects with per-signal values. */
   explain?: boolean
+  /**
+   * When set, limit the candidate pool to this many randomly-sampled rows before scoring.
+   * Useful for very large indexes (>100K blobs) where full cosine scan is expensive.
+   * Set to 0 or omit to disable (default: full scan).
+   */
+  earlyCut?: number
 }
 
 /**
@@ -134,7 +140,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',
     searchChunks = false, searchSymbols = false, searchModules = false, branch,
-    negativeQueryEmbedding, negativeLambda, explain,
+    negativeQueryEmbedding, negativeLambda, explain, earlyCut = 0,
   } = options
 
   // Determine if three-signal ranking is active
@@ -276,17 +282,32 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   if (filteredPool.length === 0) return []
 
+  // ── Early-cut: random sample when pool is very large ─────────────────────
+  // When earlyCut > 0 and the pool exceeds that size, randomly sample `earlyCut`
+  // candidates to avoid O(pool) cosine computation on huge indexes.
+  const scoringPool = (earlyCut > 0 && filteredPool.length > earlyCut)
+    ? (() => {
+        // Fisher-Yates partial shuffle to pick earlyCut items in O(earlyCut)
+        const arr = filteredPool.slice()
+        for (let i = 0; i < earlyCut; i++) {
+          const j = i + Math.floor(Math.random() * (arr.length - i))
+          const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp
+        }
+        return arr.slice(0, earlyCut)
+      })()
+    : filteredPool
+
   // Pre-compute query norm once (H8 optimization — avoids recomputing it for every candidate)
   const queryNorm = vectorNorm(queryEmbedding)
   const negEmbedding = options.negativeQueryEmbedding ?? null
   const negLambda = options.negativeLambda ?? 0.5
   const negNorm = negEmbedding ? vectorNorm(negEmbedding) : 0
 
-  // Compute recency scores when needed (use filteredPool directly)
+  // Compute recency scores when needed (use scoringPool)
   const needRecency = recent || useThreeSignal
   let recencyScores: Map<string, number> | null = null
   if (needRecency) {
-    const candidateHashes = [...new Set(filteredPool.map((r) => r.blobHash))]
+    const candidateHashes = [...new Set(scoringPool.map((r) => r.blobHash))]
     const firstSeenMap = getFirstSeenMap(candidateHashes)
     recencyScores = computeRecencyScores(firstSeenMap)
   }
@@ -294,7 +315,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   // Resolve paths for path-relevance scoring (only when using three-signal ranking)
   let pathsByBlob: Map<string, string[]> | null = null
   if (useThreeSignal) {
-    const hashes = [...new Set(filteredPool.map((r) => r.blobHash))]
+    const hashes = [...new Set(scoringPool.map((r) => r.blobHash))]
     const pathRows = db.select({ blobHash: paths.blobHash, path: paths.path })
       .from(paths)
       .where(inArray(paths.blobHash, hashes))
@@ -321,7 +342,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     }
   }
   const finalScored: FinalEntry[] = []
-  for (const row of filteredPool) {
+  for (const row of scoringPool) {
     const emb = rowToEmbedding(row)
     const cosine = cosineSimilarityPrecomputed(queryEmbedding, queryNorm, emb)
     let score = cosine

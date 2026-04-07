@@ -13,6 +13,7 @@ import { searchCommits, type CommitSearchResult } from '../../core/search/commit
 import { getRawDb } from '../../core/db/sqlite.js'
 import { splitIdentifier } from '../../core/search/labelEnhancer.js'
 import { narrateSearchResults } from '../../core/llm/narrator.js'
+import { formatExplainForLlm } from '../../core/search/explainFormatter.js'
 
 export interface SearchCommandOptions {
   top?: string
@@ -62,6 +63,10 @@ export interface SearchCommandOptions {
   lambda?: string
   /** When true, print signal breakdown for each result */
   explain?: boolean
+  /** Limit candidate pool to this many random samples for large indexes (0 = disabled) */
+  earlyCut?: string
+  /** When true, output LLM-ready provenance citations for each result */
+  explainLlm?: boolean
   /** Output interactive HTML (writes to <file> if supplied, otherwise search.html) */
   html?: string | boolean
   /** Combine results with another query via OR (union, max score) */
@@ -336,6 +341,10 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   if (options.explain) searchOpts.explain = true
+  if (options.earlyCut !== undefined) {
+    const ec = parseInt(options.earlyCut, 10)
+    if (!isNaN(ec) && ec > 0) searchOpts.earlyCut = ec
+  }
 
   // M8: Auto-detect VSS index — if --vss is not explicitly supplied but a
   // .gitsema/*.usearch file exists for the current model, use it automatically.
@@ -568,6 +577,12 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   if (commitResults) {
     console.log('\nCommit matches:')
     console.log(renderCommitResults(commitResults))
+  }
+
+  // LLM-ready provenance citations (--explain-llm)
+  if (options.explainLlm && results.length > 0) {
+    console.log('\n=== Provenance Citations (LLM Context) ===')
+    console.log(formatExplainForLlm(results, { includeSnippet: true }))
   }
 
   // LLM narration of search results
