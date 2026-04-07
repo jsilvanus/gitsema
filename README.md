@@ -733,6 +733,18 @@ See [`features.md`](features.md) for the complete, grouped catalog of implemente
 
 ---
 
+## Strategic review
+
+For the latest deep review of bottlenecks, missing features, productization ideas, and AI-assisted coding workflows, see [`docs/review4.md`](docs/review4.md).
+
+---
+
+## AI skill
+
+A reusable AI-operator playbook is available at [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md). Use it as a prompt scaffold for coding assistants that interact with `gitsema`.
+
+---
+
 ## Roadmap / Plans
 
 See [`docs/PLAN.md`](docs/PLAN.md) for the full development roadmap, phase history, and backlog of planned features.

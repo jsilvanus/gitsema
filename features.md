@@ -22,6 +22,7 @@
 - [Protocol Servers (tools subcommand)](#protocol-servers-tools-subcommand)
 - [Maintenance & DB](#maintenance--db)
 - [Configuration](#configuration)
+- [Strategic Productization Backlog](#strategic-productization-backlog)
 - [Planned / In Progress](#planned--in-progress)
 
 ---
@@ -294,6 +295,25 @@ gitsema config list                     # show all active values + sources
 ```
 
 Environment variables always override config-file values. See [`README.md`](README.md) for the full env-var reference.
+
+---
+
+## Strategic Productization Backlog
+
+Detailed rationale is documented in [`docs/review4.md`](docs/review4.md). High-value productizations proposed from the current codebase:
+
+1. Add `experts` parity to MCP and HTTP (`/analysis/experts` + MCP tool).
+2. Add a machine-readable capabilities manifest across CLI/MCP/HTTP.
+3. Add pipelined batch indexing (overlap read/embed/store stages).
+4. Add speed/quality/balanced search profile presets.
+5. Add top-K early-cut scoring mode for large candidate sets.
+6. Add semantic PR report generation for CI and code review.
+7. Add incident triage bundles (`bisect` + `change-points` + `first-seen`).
+8. Add concept ownership heatmap and ownership-shift tracking.
+9. Add policy-style CI gates for drift/debt/security thresholds.
+10. Add AI-oriented provenance explain mode for prompt grounding.
+11. Add saved workflow templates (`pr-review`, `incident`, `release-audit`).
+12. Add retrieval quality evaluation harness for AI workflows.
 
 ---
 
