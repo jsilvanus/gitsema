@@ -160,15 +160,20 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
+    let since: number | undefined
+    let until: number | undefined
     try {
-      let since: number | undefined
-      let until: number | undefined
       if (opts.since) since = parseDateArg(opts.since)
       if (opts.until) until = parseDateArg(opts.until)
+    } catch {
+      res.status(400).json({ error: 'Invalid date' })
+      return
+    }
+    try {
       const experts = computeExperts({ topN: opts.topN, since, until, minBlobs: opts.minBlobs, topClusters: opts.topClusters })
       res.json({ experts })
     } catch (err) {
-      res.status(500).json({ error: String(err) })
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }
   })
 

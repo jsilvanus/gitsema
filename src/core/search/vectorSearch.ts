@@ -282,19 +282,12 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
   if (filteredPool.length === 0) return []
 
-  // ── Early-cut: random sample when pool is very large ─────────────────────
-  // When earlyCut > 0 and the pool exceeds that size, randomly sample `earlyCut`
-  // candidates to avoid O(pool) cosine computation on huge indexes.
+  // ── Early-cut: reservoir sampling when pool is very large ─────────────────
+  // When earlyCut > 0 and the pool exceeds that size, use reservoir sampling
+  // (Knuth Algorithm R) to pick `earlyCut` items without cloning the full pool.
+  // Memory cost is O(earlyCut), not O(pool).
   const scoringPool = (earlyCut > 0 && filteredPool.length > earlyCut)
-    ? (() => {
-        // Fisher-Yates partial shuffle to pick earlyCut items in O(earlyCut)
-        const arr = filteredPool.slice()
-        for (let i = 0; i < earlyCut; i++) {
-          const j = i + Math.floor(Math.random() * (arr.length - i))
-          const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp
-        }
-        return arr.slice(0, earlyCut)
-      })()
+    ? reservoirSample(filteredPool, earlyCut)
     : filteredPool
 
   // Pre-compute query norm once (H8 optimization — avoids recomputing it for every candidate)
@@ -443,6 +436,22 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
     return base
   })
+}
+
+/**
+ * Reservoir sampling (Knuth Algorithm R): selects `k` items from `pool`
+ * without cloning the full array.  Memory cost is O(k).
+ *
+ * Exported for unit testing.
+ */
+export function reservoirSample<T>(pool: T[], k: number): T[] {
+  if (k >= pool.length) return pool
+  const reservoir = pool.slice(0, k)
+  for (let i = k; i < pool.length; i++) {
+    const j = Math.floor(Math.random() * (i + 1))
+    if (j < k) reservoir[j] = pool[i]
+  }
+  return reservoir
 }
 
 /**

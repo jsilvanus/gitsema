@@ -644,7 +644,26 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     const rawDb = getRawDb()
     const countRow = rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c: number }
     const existingBlobCount = Math.max(0, (countRow.c ?? 0) - stats.indexed)
-    const recs = postRunRecommendations({ indexed: stats.indexed, existingBlobCount })
+
+    // Detect whether any blobs are missing FTS5 content (gap for --hybrid search).
+    // blob_fts stores content keyed by blob_hash; any embedding row without a
+    // corresponding fts entry has a gap. We use EXISTS for a short-circuit check.
+    let hasFtsGap = false
+    try {
+      const ftsGapRow = rawDb.prepare(`
+        SELECT EXISTS(
+          SELECT 1 FROM embeddings e
+          LEFT JOIN blob_fts f ON f.blob_hash = e.blob_hash
+          WHERE f.blob_hash IS NULL
+          LIMIT 1
+        ) AS hasGap
+      `).get() as { hasGap: number } | undefined
+      hasFtsGap = Boolean(ftsGapRow?.hasGap)
+    } catch {
+      // blob_fts may not exist on older schemas — leave hasFtsGap false
+    }
+
+    const recs = postRunRecommendations({ indexed: stats.indexed, existingBlobCount, hasFtsGap })
     if (recs.length > 0) {
       console.log()
       for (const r of recs) console.log(r)

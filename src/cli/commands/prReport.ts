@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, readFileSync } from 'node:fs'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
 import { computeImpact } from '../../core/search/impact.js'
 import { computeConceptChangePoints } from '../../core/search/changePoints.js'
@@ -50,7 +50,15 @@ export async function prReportCommand(options: PrReportOptions): Promise<void> {
   // ── Semantic diff (if --file provided) ────────────────────────────────────
   if (options.file && textProvider) {
     try {
-      const queryEmbedding = await embedQuery(textProvider, options.file)
+      // Embed file *content* (not the path string) so the semantic diff topic
+      // reflects the actual changes in the file, not just its name.
+      let fileContent: string
+      try {
+        fileContent = readFileSync(options.file, 'utf8')
+      } catch {
+        fileContent = options.file // Fall back to path if file unreadable (e.g. deleted in diff)
+      }
+      const queryEmbedding = await embedQuery(textProvider, fileContent)
       const diff = computeSemanticDiff(queryEmbedding, options.file, ref1, ref2, topK)
       report.semanticDiff = {
         ref1: diff.ref1,

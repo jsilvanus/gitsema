@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { cosineSimilarity, pathRelevanceScore } from '../src/core/search/vectorSearch.js'
+import { describe, it, expect, vi } from 'vitest'
+import { cosineSimilarity, pathRelevanceScore, reservoirSample } from '../src/core/search/vectorSearch.js'
 
 // ---------------------------------------------------------------------------
 // cosineSimilarity
@@ -87,5 +87,52 @@ describe('pathRelevanceScore', () => {
   it('handles partial substring matches', () => {
     // "auth" appears as a substring of "authentication"
     expect(pathRelevanceScore('auth', 'src/authentication.ts')).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reservoirSample (early-cut helper)
+// ---------------------------------------------------------------------------
+
+describe('reservoirSample', () => {
+  it('returns the pool unchanged when k >= pool.length', () => {
+    const pool = [1, 2, 3]
+    expect(reservoirSample(pool, 5)).toBe(pool) // same reference
+    expect(reservoirSample(pool, 3)).toBe(pool)
+  })
+
+  it('returns exactly k items when pool is larger than k', () => {
+    const pool = Array.from({ length: 100 }, (_, i) => i)
+    const sample = reservoirSample(pool, 10)
+    expect(sample).toHaveLength(10)
+  })
+
+  it('all sampled items come from the original pool', () => {
+    const pool = Array.from({ length: 50 }, (_, i) => i)
+    const poolSet = new Set(pool)
+    const sample = reservoirSample(pool, 5)
+    for (const item of sample) {
+      expect(poolSet.has(item)).toBe(true)
+    }
+  })
+
+  it('does not produce duplicate items in the sample', () => {
+    const pool = Array.from({ length: 50 }, (_, i) => i)
+    const sample = reservoirSample(pool, 20)
+    const sampleSet = new Set(sample)
+    expect(sampleSet.size).toBe(20)
+  })
+
+  it('uses Math.random and is deterministic when stubbed', () => {
+    // Always return j = 0 so every new item replaces reservoir[0]
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const pool = [10, 20, 30, 40, 50]
+    const sample = reservoirSample(pool, 2)
+    // With Math.random() === 0 for all i >= k=2:
+    // i=2: j = floor(0 * 3) = 0 → reservoir[0] = pool[2] = 30  → [30, 20]
+    // i=3: j = floor(0 * 4) = 0 → reservoir[0] = pool[3] = 40  → [40, 20]
+    // i=4: j = floor(0 * 5) = 0 → reservoir[0] = pool[4] = 50  → [50, 20]
+    expect(sample).toEqual([50, 20])
+    vi.restoreAllMocks()
   })
 })
