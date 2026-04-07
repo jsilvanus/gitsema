@@ -6,6 +6,13 @@
  *   - Dynamic data (JSON) is injected at the top of each <script> block via TypeScript interpolation.
  *   - All JS strings use "double quotes" to avoid conflicts with outer TypeScript template literals.
  *   - No backtick strings are used inside the embedded JS.
+ *
+ * Modular structure (see sibling files):
+ *   - htmlRenderer-shared.ts  — shared utilities (PALETTE, escHtml, safeJson, sanitize*, BASE_CSS, COMMON_JS)
+ *   - htmlRenderer-search.ts  — search/author/firstSeen/impact/experts renderers
+ *
+ * This file is the backward-compatible barrel that re-exports everything, plus it contains
+ * the cluster/evolution/analysis renderers which use complex shared JS constants.
  */
 
 import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering.js'
@@ -16,140 +23,14 @@ import type { DeadConceptResult } from '../search/deadConcepts.js'
 import type { SemanticCollisionReport } from '../search/mergeAudit.js'
 import type { BranchSummaryResult } from '../search/branchSummary.js'
 import type { SemanticDiffResult } from '../search/semanticDiff.js'
-import type { AuthorContribution } from '../search/authorSearch.js'
-import type { ImpactReport } from '../search/impact.js'
-import type { SearchResult } from '../models/types.js'
-import type { Expert } from '../search/experts.js'
 
-// ─── Shared constants ─────────────────────────────────────────────────────────
+// Re-export shared utilities so consumers that import from htmlRenderer continue to work
+export { PALETTE, escHtml, safeJson, sanitizeCluster, sanitizeClusterReport, sanitizeTemporalReport, sanitizeTimelineReport, BASE_CSS, COMMON_JS } from './htmlRenderer-shared.js'
 
-const PALETTE = [
-  '#7aa2f7', '#9ece6a', '#e0af68', '#f7768e', '#bb9af7',
-  '#7dcfff', '#ff9e64', '#73daca', '#c0caf5', '#db4b4b',
-  '#2ac3de', '#41a6b5', '#b4f9f8', '#ff75a0', '#a9b1d6', '#6ebb9e',
-]
+// Re-export search renderers
+export { renderSearchHtml, renderAuthorHtml, renderFirstSeenHtml, renderImpactHtml, renderExpertsHtml } from './htmlRenderer-search.js'
 
-function escHtml(s: unknown): string {
-  if (s === null || s === undefined) return ''
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-/**
- * Serializes data as JSON safe for embedding inside a <script> block.
- * Replaces `<`, `>`, `&`, and the Unicode line/paragraph separators with their
- * unicode escapes so the browser HTML parser cannot see `</script>` or `<!--`
- * in the source, preventing script injection.
- * The JSON value is still valid and will be parsed correctly by the JS engine.
- */
-function safeJson(data: unknown): string {
-  return JSON.stringify(data)
-    .replace(/</g, '\\u003c')
-    .replace(/>/g, '\\u003e')
-    .replace(/&/g, '\\u0026')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029')
-}
-
-// ─── Data sanitizers (strip heavy centroid arrays) ────────────────────────────
-
-function sanitizeCluster(c: { id: number; label: string; size: number; representativePaths: string[]; topKeywords: string[]; enhancedKeywords: string[] }) {
-  return {
-    id: c.id,
-    label: c.label,
-    size: c.size,
-    representativePaths: c.representativePaths ?? [],
-    topKeywords: c.topKeywords ?? [],
-    enhancedKeywords: c.enhancedKeywords ?? [],
-  }
-}
-
-function sanitizeClusterReport(r: ClusterReport) {
-  return {
-    k: r.k,
-    clusteredAt: r.clusteredAt,
-    totalBlobs: r.totalBlobs,
-    clusters: r.clusters.map(sanitizeCluster),
-    edges: (r.edges ?? []).map((e) => ({ fromId: e.fromId, toId: e.toId, similarity: e.similarity })),
-  }
-}
-
-function sanitizeTemporalReport(r: TemporalClusterReport) {
-  const sanitizeChange = (ch: typeof r.changes[number]) => ({
-    afterCluster: ch.afterCluster ? sanitizeCluster(ch.afterCluster) : null,
-    beforeCluster: ch.beforeCluster ? sanitizeCluster(ch.beforeCluster) : null,
-    centroidDrift: ch.centroidDrift,
-    stable: ch.stable,
-    newBlobs: ch.newBlobs,
-    removedBlobs: ch.removedBlobs,
-    inflows: ch.inflows ?? [],
-    outflows: ch.outflows ?? [],
-  })
-  return {
-    ref1: r.ref1,
-    ref2: r.ref2,
-    newBlobsTotal: r.newBlobsTotal,
-    removedBlobsTotal: r.removedBlobsTotal,
-    movedBlobsTotal: r.movedBlobsTotal,
-    stableBlobsTotal: r.stableBlobsTotal,
-    before: sanitizeClusterReport(r.before),
-    after: sanitizeClusterReport(r.after),
-    changes: (r.changes ?? []).map(sanitizeChange),
-  }
-}
-
-function sanitizeTimelineReport(r: ClusterTimelineReport) {
-  return {
-    k: r.k,
-    since: r.since,
-    until: r.until,
-    steps: (r.steps ?? []).map((s) => ({
-      ref: s.ref,
-      timestamp: s.timestamp,
-      blobCount: s.blobCount,
-      clusters: (s.clusters ?? []).map(sanitizeCluster),
-      stats: s.stats ?? null,
-      prevRef: s.prevRef ?? null,
-      changes: (s.changes ?? []).map((ch) => ({
-        afterCluster: ch.afterCluster ? sanitizeCluster(ch.afterCluster) : null,
-        beforeCluster: ch.beforeCluster ? sanitizeCluster(ch.beforeCluster) : null,
-        centroidDrift: ch.centroidDrift,
-        inflows: ch.inflows ?? [],
-        outflows: ch.outflows ?? [],
-      })),
-    })),
-  }
-}
-
-// ─── Shared CSS ───────────────────────────────────────────────────────────────
-
-const BASE_CSS = `
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#1a1b26;color:#c0caf5;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5}
-.hdr{padding:10px 16px;background:#24283b;border-bottom:1px solid #2f3451;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.hdr h1{font-size:16px;font-weight:600;color:#7aa2f7}
-.stat{background:#2f3451;padding:2px 9px;border-radius:10px;font-size:12px;color:#a9b1d6}
-.stat b{color:#7aa2f7}
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-track{background:#1a1b26}
-::-webkit-scrollbar-thumb{background:#2f3451;border-radius:3px}
-`
-
-// ─── Shared JS helper (no ${} in this block) ─────────────────────────────────
-
-const COMMON_JS = `
-function esc(s) {
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-function shortHash(h) { return String(h).slice(0, 7); }
-`
+import { PALETTE, escHtml, safeJson, sanitizeCluster, sanitizeClusterReport, sanitizeTemporalReport, sanitizeTimelineReport, BASE_CSS, COMMON_JS } from './htmlRenderer-shared.js'
 
 // ─── Cluster force simulation JS (no ${} in this block) ──────────────────────
 
@@ -1460,7 +1341,9 @@ ${COMMON_JS}
 </html>`
 }
 
-// ─── renderSemanticDiffHtml ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// renderSemanticDiffHtml
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function renderSemanticDiffHtml(result: SemanticDiffResult): string {
   const fmtDate = (ts: number) => new Date(ts * 1000).toISOString().slice(0, 10)
@@ -1527,261 +1410,6 @@ function escH(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;
 renderTable(DATA.gained, 'gained');
 renderTable(DATA.lost, 'lost');
 renderTable(DATA.stable, 'stable');
-</script>
-</body>
-</html>`
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Lightweight HTML renderers for search/author/first-seen/impact — dark theme
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function renderSearchHtml(results: any[], query: string): string {
-  const data = { query, results: results.map((r) => ({
-    blobHash: r.blobHash,
-    paths: r.paths ?? [],
-    score: r.score,
-    firstSeen: r.firstSeen ?? null,
-    firstCommit: r.firstCommit ?? null,
-    signals: r.signals ?? null,
-  })) }
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Search Results — ${escHtml(query)}</title>
-<style>
-${BASE_CSS}
-.table{width:100%;border-collapse:collapse;margin:12px}
-th,td{padding:8px;border-bottom:1px solid #232534}
-th{color:#565f89;text-align:left}
-.score{color:#e0af68;font-family:monospace}
-.hash{color:#9ece6a;font-family:monospace}
-.path{color:#c0caf5}
-.sig{color:#a9b1d6;font-size:12px}
-</style>
-</head>
-<body>
-<div class="hdr"><h1>Search Results</h1><div class="stat">query: <b>${escHtml(query)}</b></div><div class="stat">hits: <b>${escHtml(data.results.length)}</b></div></div>
-<div style="padding:12px;overflow:auto">
-  <table class="table" id="results-table">
-    <thead><tr><th>Score</th><th>Path</th><th>First seen</th><th>Hash</th></tr></thead>
-    <tbody></tbody>
-  </table>
-</div>
-<script>
-var DATA = ${safeJson(data)};
-${COMMON_JS}
-(function(){
-  var tb = document.querySelector('#results-table tbody');
-  if (!DATA.results.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">(no results)</td></tr>'; return; }
-  DATA.results.forEach(function(r){
-    var path = (r.paths && r.paths[0]) || '(unknown)';
-    var date = r.firstSeen ? new Date(r.firstSeen * 1000).toISOString().slice(0,10) : '-';
-    var sig = r.signals ? ('cos=' + (r.signals.cosine||0).toFixed(3) + (r.signals.recency?(' rec=' + r.signals.recency.toFixed(3)):'')) : '';
-    var row = '<tr>' +
-      '<td class="score">' + (r.score||0).toFixed(3) + '</td>' +
-      '<td class="path">' + esc(path) + (sig?('<div class="sig">'+esc(sig)+'</div>'): '') + '</td>' +
-      '<td class="date">' + esc(date) + '</td>' +
-      '<td class="hash">' + esc(r.blobHash.slice(0,7)) + '</td>' +
-      '</tr>';
-    tb.insertAdjacentHTML('beforeend', row);
-  });
-})();
-</script>
-</body>
-</html>`
-}
-
-export function renderAuthorHtml(contributions: AuthorContribution[], query: string): string {
-  const data = { query, contributions: contributions.map((c) => ({
-    authorName: c.authorName,
-    authorEmail: c.authorEmail,
-    totalScore: c.totalScore,
-    blobCount: c.blobCount,
-    blobs: (c.blobs ?? []).map((b) => ({ blobHash: b.blobHash, paths: b.paths, score: b.score, timestamp: b.timestamp }))
-  })) }
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Author Contributions — ${escHtml(query)}</title>
-<style>
-${BASE_CSS}
-.table{width:100%;border-collapse:collapse;margin:12px}
-th,td{padding:8px;border-bottom:1px solid #232534}
-th{color:#565f89;text-align:left}
-.name{color:#7aa2f7;font-weight:600}
-.meta{color:#a9b1d6;font-size:12px}
-</style>
-</head>
-<body>
-<div class="hdr"><h1>Author Contributions</h1><div class="stat">query: <b>${escHtml(query)}</b></div><div class="stat">authors: <b>${escHtml(data.contributions.length)}</b></div></div>
-<div style="padding:12px;overflow:auto">
-  <table class="table" id="auth-table"><thead><tr><th>Author</th><th>Blobs</th><th>Top score</th><th>Last contribution</th></tr></thead><tbody></tbody></table>
-</div>
-<script>
-var DATA = ${safeJson(data)};
-${COMMON_JS}
-(function(){
-  var tb = document.querySelector('#auth-table tbody');
-  if (!DATA.contributions.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">(no authors)</td></tr>'; return; }
-  DATA.contributions.forEach(function(a){
-    var top = (a.blobs && a.blobs.length)>0 ? Math.max.apply(null,a.blobs.map(function(b){return b.score||0;})) : 0;
-    var last = (a.blobs && a.blobs.length)>0 ? new Date(a.blobs.reduce(function(m,b){return Math.max(m,b.timestamp||0);},0)*1000).toISOString().slice(0,10) : '-';
-    var row = '<tr><td class="name">' + esc(a.authorName) + (a.authorEmail?(' &lt;'+esc(a.authorEmail)+'&gt;'):'') + '</td>' +
-      '<td>' + (a.blobCount||0) + '</td><td class="score">' + top.toFixed(3) + '</td><td class="date">' + esc(last) + '</td></tr>';
-    tb.insertAdjacentHTML('beforeend', row);
-  });
-})();
-</script>
-</body>
-</html>`
-}
-
-export function renderFirstSeenHtml(results: any[], query: string): string {
-  // Sort oldest-first
-  const data = { query, results: (results||[]).slice().sort((a,b)=> (a.firstSeen||0)-(b.firstSeen||0)).map((r)=>({blobHash:r.blobHash, path:r.paths&&r.paths[0]||'', score:r.score, firstSeen:r.firstSeen||null})) }
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>First Seen — ${escHtml(query)}</title>
-<style>
-${BASE_CSS}
-.table{width:100%;border-collapse:collapse;margin:12px}
-th,td{padding:8px;border-bottom:1px solid #232534}
-</style>
-</head>
-<body>
-<div class="hdr"><h1>First Seen</h1><div class="stat">query: <b>${escHtml(query)}</b></div><div class="stat">hits: <b>${escHtml(data.results.length)}</b></div></div>
-<div style="padding:12px;overflow:auto">
-  <table class="table" id="fs-table"><thead><tr><th>Date</th><th>Score</th><th>Path</th><th>Hash</th></tr></thead><tbody></tbody></table>
-</div>
-<script>
-var DATA=${safeJson(data)};
-${COMMON_JS}
-(function(){
-  var tb=document.querySelector('#fs-table tbody');
-  DATA.results.forEach(function(r){
-    var date=r.firstSeen?new Date(r.firstSeen*1000).toISOString().slice(0,10):'-';
-    tb.insertAdjacentHTML('beforeend','<tr><td>'+esc(date)+'</td><td class="score">'+(r.score||0).toFixed(3)+'</td><td>'+esc(r.path)+'</td><td class="hash">'+esc(r.blobHash.slice(0,7))+'</td></tr>');
-  });
-})();
-</script>
-</body>
-</html>`
-}
-
-export function renderImpactHtml(report: ImpactReport, targetPath: string): string {
-  const data = { targetPath, results: report.results.map((r)=>({path:r.paths[0]||'',score:r.score,module:r.module,hash:r.blobHash.slice(0,7)})), groups: report.moduleGroups||[] }
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Impact Analysis — ${escHtml(targetPath)}</title>
-<style>
-${BASE_CSS}
-.table{width:100%;border-collapse:collapse;margin:12px}
-th,td{padding:8px;border-bottom:1px solid #232534}
-</style>
-</head>
-<body>
-<div class="hdr"><h1>Impact Analysis</h1><div class="stat">target: <b>${escHtml(targetPath)}</b></div><div class="stat">coupled: <b>${escHtml(data.results.length)}</b></div></div>
-<div style="padding:12px;overflow:auto">
-  <table class="table"><thead><tr><th>Score</th><th>Path</th><th>Module</th><th>Hash</th></tr></thead><tbody>${data.results.map(r=>`<tr><td class="score">${r.score.toFixed(3)}</td><td class="path">${escHtml(r.path)}</td><td class="meta">${escHtml(r.module)}</td><td class="hash">${escHtml(r.hash)}</td></tr>`).join('')}</tbody></table>
-  <h3 style="color:#7aa2f7">Cross-module coupling</h3>
-  <div>${data.groups.map(g=>`<div style="margin:6px 0">${escHtml(g.module)}: ${g.maxScore.toFixed(3)} (${g.count})</div>`).join('')}</div>
-</div>
-</body>
-</html>`
-}
-
-// ─── renderExpertsHtml ────────────────────────────────────────────────────────
-
-export function renderExpertsHtml(experts: Expert[], opts: { since?: number; until?: number } = {}): string {
-  const data = {
-    since: opts.since ? new Date(opts.since * 1000).toISOString().slice(0, 10) : null,
-    until: opts.until ? new Date(opts.until * 1000).toISOString().slice(0, 10) : null,
-    experts: experts.map((e) => ({
-      authorName: e.authorName,
-      authorEmail: e.authorEmail,
-      blobCount: e.blobCount,
-      clusters: e.clusters.map((c) => ({
-        label: c.label,
-        blobCount: c.blobCount,
-        representativePaths: c.representativePaths,
-      })),
-    })),
-  }
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Experts — Contributor Semantic Areas</title>
-<style>
-${BASE_CSS}
-.table{width:100%;border-collapse:collapse;margin:12px}
-th,td{padding:8px 12px;border-bottom:1px solid #232534;vertical-align:top}
-th{color:#565f89;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-.name{color:#7aa2f7;font-weight:600}
-.email{color:#565f89;font-size:11px}
-.badge{display:inline-block;background:#2f3451;color:#9ece6a;padding:1px 7px;border-radius:8px;font-size:11px;margin:2px 3px 2px 0}
-.cluster-row{margin:3px 0}
-.cluster-label{color:#e0af68}
-.cluster-count{color:#565f89;font-size:11px}
-.paths{color:#a9b1d6;font-size:11px;margin-top:2px}
-</style>
-</head>
-<body>
-<div class="hdr">
-  <h1>Experts</h1>
-  <div class="stat">contributors: <b>${escHtml(data.experts.length)}</b></div>
-  ${data.since ? `<div class="stat">since: <b>${escHtml(data.since)}</b></div>` : ''}
-  ${data.until ? `<div class="stat">until: <b>${escHtml(data.until)}</b></div>` : ''}
-</div>
-<div style="padding:12px;overflow:auto">
-  <table class="table" id="experts-table">
-    <thead><tr><th>#</th><th>Contributor</th><th>Blobs</th><th>Semantic Areas</th></tr></thead>
-    <tbody></tbody>
-  </table>
-</div>
-<script>
-var DATA = ${safeJson(data)};
-${COMMON_JS}
-(function(){
-  var tb = document.querySelector("#experts-table tbody");
-  if (!DATA.experts.length) {
-    tb.innerHTML = "<tr><td colspan=\"4\" style=\"color:#565f89;padding:16px\">(no contributor data — run gitsema index first)</td></tr>";
-    return;
-  }
-  DATA.experts.forEach(function(e, idx) {
-    var clusters = "";
-    if (e.clusters && e.clusters.length) {
-      clusters = e.clusters.map(function(c) {
-        var paths = c.representativePaths && c.representativePaths.length
-          ? "<div class=\"paths\">" + c.representativePaths.slice(0,2).map(esc).join(", ") + "</div>"
-          : "";
-        return "<div class=\"cluster-row\"><span class=\"cluster-label\">" + esc(c.label) + "</span>" +
-          " <span class=\"cluster-count\">[" + c.blobCount + " blob" + (c.blobCount !== 1 ? "s" : "") + "]</span>" +
-          paths + "</div>";
-      }).join("");
-    } else {
-      clusters = "<span style=\"color:#565f89\">(no cluster data)</span>";
-    }
-    var row = "<tr>" +
-      "<td style=\"color:#565f89;width:32px\">" + (idx + 1) + "</td>" +
-      "<td><div class=\"name\">" + esc(e.authorName) + "</div>" +
-        (e.authorEmail ? "<div class=\"email\">" + esc(e.authorEmail) + "</div>" : "") + "</td>" +
-      "<td><span class=\"badge\">" + e.blobCount + "</span></td>" +
-      "<td>" + clusters + "</td>" +
-      "</tr>";
-    tb.insertAdjacentHTML("beforeend", row);
-  });
-})();
 </script>
 </body>
 </html>`

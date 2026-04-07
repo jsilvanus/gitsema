@@ -6,6 +6,7 @@ import type { BlobHash, Embedding } from '../models/types.js'
 import type { FileCategory } from '../embedding/fileType.js'
 import type { CommitEntry } from '../git/commitMap.js'
 import { quantizeVector, serializeQuantized } from '../embedding/quantize.js'
+import { invalidateResultCache } from '../search/resultCache.js'
 
 /**
  * Serializes a float32 embedding to a SQLite-ready Buffer, optionally quantizing to Int8.
@@ -72,6 +73,8 @@ export function storeBlob(args: StoreBlobArgs): void {
   if (content !== undefined) {
     storeFtsContent(blobHash, content)
   }
+
+  invalidateResultCache()
 }
 
 export interface StoreBlobRecordArgs {
@@ -198,6 +201,7 @@ export function markCommitIndexed(commitHash: string): void {
     .values({ commitHash, indexedAt: Date.now() })
     .onConflictDoNothing()
     .run()
+  invalidateResultCache()
 }
 
 /**

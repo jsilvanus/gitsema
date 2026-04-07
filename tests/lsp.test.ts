@@ -16,5 +16,35 @@ describe('lsp server framing', () => {
     const res = await handleRequest(session, { jsonrpc: '2.0', id: 10, method: 'initialize' })
     expect(res).not.toBeNull()
     expect(res?.result?.capabilities?.hoverProvider).toBe(true)
+    expect(res?.result?.capabilities?.definitionProvider).toBe(true)
+    expect(res?.result?.capabilities?.referencesProvider).toBe(true)
+  })
+
+  it('handles textDocument/references with empty db gracefully', async () => {
+    const session = openDatabaseAt(':memory:')
+    const res = await handleRequest(session, {
+      jsonrpc: '2.0',
+      id: 11,
+      method: 'textDocument/references',
+      params: { text: 'authenticate' },
+    })
+    expect(res).not.toBeNull()
+    // With empty DB it should return an empty array (no error)
+    expect(res?.result).toBeDefined()
+    expect(Array.isArray(res?.result)).toBe(true)
+  })
+
+  it('handles textDocument/definition with empty db gracefully', async () => {
+    const session = openDatabaseAt(':memory:')
+    const res = await handleRequest(session, {
+      jsonrpc: '2.0',
+      id: 12,
+      method: 'textDocument/definition',
+      params: { text: 'myFunction' },
+    })
+    expect(res).not.toBeNull()
+    // With empty DB it should return an empty result or an error (both acceptable)
+    expect(res?.id).toBe(12)
   })
 })
+
