@@ -88,19 +88,24 @@ gitsema index
 
 ## Commands
 
-Commands are organised into six groups:
+Commands are organised into groups. See [`features.md`](features.md) for the full feature catalog.
 
 | Group | Commands |
 |---|---|
-| **Setup & Infrastructure** | `status`, `index`, `serve`, `remote-index`, `backfill-fts`, `mcp` |
-| **DB Maintenance** | `doctor`, `vacuum`, `rebuild-fts` |
-| **Search & Discovery** | `search`, `first-seen`, `dead-concepts` |
+| **Indexing** | `index` (+ `export`/`import` subcommands), `status`, `remote-index`, `update-modules`, `watch` |
+| **Protocol Servers** | `tools mcp`, `tools serve`, `tools lsp` |
+| **Search & Discovery** | `search`, `code-search`, `first-seen`, `dead-concepts` |
 | **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
-| **Concept History** | `evolution`, `diff` |
+| **Concept History** | `evolution`, `diff`, `lifecycle`, `bisect` |
 | **Cluster Analysis** | `clusters`, `cluster-diff`, `cluster-timeline` |
 | **Change Detection** | `change-points`, `file-change-points`, `cluster-change-points` |
+| **Branch / Merge** | `branch-summary`, `merge-audit`, `merge-preview`, `cherry-pick-suggest`, `ci-diff` |
+| **Analysis** | `author`, `impact`, `refactor-candidates`, `doc-gap`, `contributor-profile`, `security-scan`, `health`, `debt` |
+| **Visualization** | `map`, `heatmap` |
+| **DB Maintenance** | `doctor`, `vacuum`, `rebuild-fts`, `backfill-fts`, `gc`, `build-vss`, `clear-model` |
+| **Configuration** | `config`, `repos`, `project` |
 
-> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`. The old names still work. Note: `diff` is now the new **conceptual diff** command (not `file-diff`), and `evolution` is now the **concept evolution** command (not `file-evolution`).
+> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`, `gitsema mcp` / `gitsema serve` / `gitsema lsp` → use `gitsema tools mcp` / `gitsema tools serve` / `gitsema tools lsp` instead (old names still work but emit a deprecation notice).
 
 ---
 
@@ -158,23 +163,9 @@ gitsema index --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
 
 ---
 
-#### `gitsema serve [options]`
-
-Start the gitsema HTTP API server so remote machines can delegate embedding and storage to a central host.
-
-```
-Options:
-  --port <n>      Port to listen on (default: 4242)
-  --key <token>   Require this Bearer token on all requests
-  --chunker       Chunking strategy for incoming blobs: file (default), function, fixed
-  --concurrency   Max concurrent embedding calls (default: 4)
-```
-
----
-
 #### `gitsema remote-index <repoUrl>`
 
-Ask a remote `gitsema serve` instance to clone and index a Git repository.
+Ask a remote `gitsema tools serve` instance to clone and index a Git repository.
 
 ---
 
@@ -225,13 +216,37 @@ gitsema rebuild-fts --yes  # skip confirmation
 
 ---
 
-#### `gitsema mcp`
+#### `gitsema tools mcp`
 
 Start the gitsema MCP server over stdio. Allows AI assistants (Claude, VS Code Copilot, etc.) to query the semantic index via the Model Context Protocol.
 
 ```bash
-gitsema mcp
+gitsema tools mcp
 ```
+
+> **Alias:** `gitsema mcp` still works but is deprecated. Use `gitsema tools mcp`.
+
+#### `gitsema tools lsp [--tcp <port>]`
+
+Start the LSP semantic hover server. Responds to hover requests with nearest-neighbor blobs.
+
+```bash
+gitsema tools lsp          # stdio (default)
+gitsema tools lsp --tcp 7777
+```
+
+#### `gitsema tools serve [options]`
+
+Start the gitsema HTTP API server so remote machines can delegate embedding and storage to a central host. Replaces the deprecated top-level `gitsema serve` command.
+
+```
+Options:
+  --port <n>      Port to listen on (default: 4242)
+  --key <token>   Require this Bearer token on all requests
+  --ui            Serve the embedded 2D codebase map web UI at /ui
+```
+
+> **Alias:** `gitsema serve` still works but is deprecated. Use `gitsema tools serve`.
 
 ---
 
@@ -655,3 +670,15 @@ The index is stored in `.gitsema/index.db` (SQLite) in the root of the repositor
 ```
 .gitsema/
 ```
+
+---
+
+## Feature catalog
+
+See [`features.md`](features.md) for the complete, grouped catalog of implemented features including indexing options, all search flags, history/temporal commands, clustering, branch/merge tools, the HTTP API route list, and all MCP tools.
+
+---
+
+## Roadmap / Plans
+
+See [`docs/PLAN.md`](docs/PLAN.md) for the full development roadmap, phase history, and backlog of planned features.

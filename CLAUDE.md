@@ -1,8 +1,20 @@
-# CLAUDE.md
+## Canonical documentation
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+These are the three canonical reference documents for this repository. Keep them accurate and up-to-date.
 
-# gitsema — CLAUDE.md
+| Document | Purpose |
+|---|---|
+| [`README.md`](README.md) | User-facing overview: installation, quick start, configuration, command reference |
+| [`features.md`](features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
+| [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
+
+When implementing a new feature or phase:
+1. Add the feature to **`features.md`** under the relevant group.
+2. Update the command/option tables in **`README.md`** if the feature adds a new command or flag.
+3. Mark the phase as completed in **`docs/PLAN.md`** and note any deviations from the original spec.
+4. Run `npm version minor` (or `patch` for hotfixes) **after each phase** and push the tag.
+
+---
 
 ## Project overview
 
@@ -222,7 +234,7 @@ git repo
 
 ## Configuration
 
-All configuration is via environment variables. No config file.
+Configuration is via environment variables or the `gitsema config` command (persists to `.gitsema/config.json`). Environment variables always take precedence.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -234,8 +246,9 @@ All configuration is via environment variables. No config file.
 | `GITSEMA_API_KEY` | *(optional)* | Bearer token for HTTP provider |
 | `GITSEMA_VERBOSE` | off | Set to `1` for debug logging |
 | `GITSEMA_LOG_MAX_BYTES` | `1048576` | Log rotation threshold (1 MB) |
-| `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema serve` HTTP server |
-| `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema serve` |
+| `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema tools serve` HTTP server |
+| `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
+| `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
 
 **Ollama quick start:**
 ```bash
@@ -263,7 +276,7 @@ gitsema index
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
 
-**Schema overview (20 tables as of v0.49.0 / schema v14):**
+**Schema overview (current schema v17):**
 
 | Table | Purpose |
 |---|---|
@@ -296,7 +309,8 @@ gitsema index
 - v2 → v3: Added `query_embeddings` cache table (Phase 18)
 - … (v3–v13: symbols, commit embeddings, clustering, module embeddings, provenance, HNSW quantization columns)
 - v13 → v14: Added `repos` table for multi-repo registry (Phase 41)
-- **Current version: 14**
+- v14 → v17: Added `projections`, `saved_queries`, and related tables (Phases 53–55)
+- **Current version: 17**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 
@@ -315,7 +329,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (23 total):**
+**Exposed tools (24 total):**
 
 | Tool | Description |
 |---|---|
@@ -323,8 +337,8 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `search_history` | Vector search with date filtering + optional chronological sort |
 | `first_seen` | Find concept origin (sorted oldest-first) |
 | `code_search` | Symbol-level semantic code search |
-| `evolution` | Concept drift timeline across the codebase (formerly `concept_evolution`) |
-| `file_evolution` | Single-file semantic drift timeline |
+| `concept_evolution` | Concept drift timeline across the codebase |
+| `evolution` | Single-file semantic drift timeline |
 | `semantic_diff` | Semantic diff between two refs |
 | `semantic_blame` | Per-block nearest-neighbor attribution |
 | `index` | Trigger incremental re-indexing |
@@ -342,6 +356,7 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `security_scan` | Semantic vulnerability pattern scan (results are similarity scores, not confirmed CVEs) |
 | `health_timeline` | Codebase health metrics by time bucket |
 | `debt_score` | Technical debt scoring by isolation, age, and change frequency |
+| `multi_repo_search` | Search across multiple registered gitsema repos |
 
 ---
 
@@ -376,8 +391,13 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 
 ## Known gaps & future phases
 
+For the full list of gaps and planned work, see [`docs/PLAN.md`](docs/PLAN.md) and [`features.md`](features.md#planned--in-progress).
+
 | Gap | Notes |
 |---|---|
-| **Test suite (partial)** | Unit and integration tests cover core modules. `tests/serverRoutes.test.ts` and `tests/mcpTools.test.ts` provide baseline coverage for server routes and MCP handlers. Full end-to-end coverage of all 47 CLI commands is still a gap. |
-| **Phase 13: Python model server** | `modelserver/` is scaffolded (FastAPI + sentence-transformers) but blocked on Windows — `tokenizers` requires a Rust toolchain. A Docker image would solve this. |
-| **Cosine at scale** | Pure-JS cosine works to ~500K blobs. `sqlite-vss` or DuckDB migration path is in the risk register but not designed. Build the HNSW index with `gitsema build-vss` for large repos. |
+| **Batch embedding** | Indexer sends one blob per HTTP round-trip by default (`--embed-batch-size` exists but backend must support batching) |
+| **Test coverage** | Unit and integration tests cover core modules. Full end-to-end coverage of all CLI commands is still incomplete. |
+| **LSP completeness** | Current LSP server handles hover only; `go-to-definition`, `find-references`, and document-symbol are stubs. |
+| **HTTP route gaps** | Phase 41–47 analysis commands (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`) have no HTTP API routes yet. |
+| **Python model server** | `modelserver/` is scaffolded (FastAPI + sentence-transformers) but blocked on Windows — `tokenizers` requires a Rust toolchain. A Docker image would solve this. |
+| **Cosine at scale** | Pure-JS cosine works to ~500K blobs. Build the HNSW index with `gitsema build-vss` for large repos. |
