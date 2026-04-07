@@ -15,6 +15,7 @@ import type { Embedding } from '../../core/models/types.js'
 import { computeClusters, getBlobHashesOnBranch } from '../../core/search/clustering.js'
 import { computeConceptChangePoints } from '../../core/search/changePoints.js'
 import { computeAuthorContributions } from '../../core/search/authorSearch.js'
+import { computeExperts } from '../../core/search/experts.js'
 import { computeImpact } from '../../core/search/impact.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
@@ -56,6 +57,14 @@ const ImpactBodySchema = z.object({
   file: z.string().min(1),
   topK: z.number().int().positive().optional().default(10),
   branch: z.string().optional(),
+})
+
+const ExpertsBodySchema = z.object({
+  topN: z.number().int().positive().optional().default(10),
+  since: z.string().optional(),
+  until: z.string().optional(),
+  minBlobs: z.number().int().positive().optional().default(1),
+  topClusters: z.number().int().positive().optional().default(5),
 })
 
 export interface AnalysisRouterDeps {
@@ -140,6 +149,26 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       res.json(contributions)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  // POST /analysis/experts
+  router.post('/experts', async (req, res) => {
+    const parsed = ExpertsBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+      return
+    }
+    const opts = parsed.data
+    try {
+      let since: number | undefined
+      let until: number | undefined
+      if (opts.since) since = parseDateArg(opts.since)
+      if (opts.until) until = parseDateArg(opts.until)
+      const experts = computeExperts({ topN: opts.topN, since, until, minBlobs: opts.minBlobs, topClusters: opts.topClusters })
+      res.json({ experts })
+    } catch (err) {
+      res.status(500).json({ error: String(err) })
     }
   })
 

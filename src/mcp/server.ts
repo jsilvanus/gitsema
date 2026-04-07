@@ -35,6 +35,7 @@ import { computeBranchSummary } from '../core/search/branchSummary.js'
 import { computeClusters, computeClusterSnapshot, compareClusterSnapshots, computeClusterTimeline, resolveRefToTimestamp, getBlobHashesUpTo } from '../core/search/clustering.js'
 import { computeConceptChangePoints, computeFileChangePoints } from '../core/search/changePoints.js'
 import { computeAuthorContributions } from '../core/search/authorSearch.js'
+import { computeExperts } from '../core/search/experts.js'
 import { computeImpact } from '../core/search/impact.js'
 import { findDeadConcepts } from '../core/search/deadConcepts.js'
 import { hybridSearch } from '../core/search/hybridSearch.js'
@@ -792,6 +793,37 @@ export async function startMcpServer(): Promise<void> {
         return { content: [{ type: 'text', text: `Error: ${msg}` }] }
       }
     },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: experts
+  // -------------------------------------------------------------------------
+  server.tool(
+    'experts',
+    'List top contributors by semantic area (which concepts/clusters they work on).',
+    {
+      top_n: z.number().int().positive().optional().default(10).describe('Number of top contributors to return'),
+      since: z.string().optional().describe('Only include activity after this date (YYYY-MM-DD)'),
+      until: z.string().optional().describe('Only include activity before this date (YYYY-MM-DD)'),
+      min_blobs: z.number().int().positive().optional().default(1).describe('Minimum blob count to include a contributor'),
+      top_clusters: z.number().int().positive().optional().default(5).describe('Max semantic clusters per contributor'),
+    },
+    async ({ top_n, since, until, min_blobs, top_clusters }) => {
+      let sinceTs: number | undefined
+      let untilTs: number | undefined
+      if (since) sinceTs = parseDateArg(since)
+      if (until) untilTs = parseDateArg(until)
+      const experts = computeExperts({ topN: top_n, since: sinceTs, until: untilTs, minBlobs: min_blobs, topClusters: top_clusters })
+      if (experts.length === 0) return { content: [{ type: 'text', text: 'No contributor data found.' }] }
+      const lines: string[] = []
+      for (const e of experts) {
+        lines.push(`${e.authorName}${e.authorEmail ? ` <${e.authorEmail}>` : ''} — ${e.blobCount} blob(s)`)
+        for (const c of e.clusters) {
+          lines.push(`  · ${c.label} [${c.blobCount}]${c.representativePaths.length > 0 ? ` (${c.representativePaths.slice(0, 2).join(', ')})` : ''}`)
+        }
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }] }
+    }
   )
 
   // -------------------------------------------------------------------------

@@ -59,6 +59,7 @@ import { exportIndex, importIndex } from './commands/bundleIndex.js'
 import { projectCommand } from './commands/project.js'
 import { toolsCommand } from './commands/tools.js'
 import { expertsCommand } from './commands/experts.js'
+import { prReportCommand } from './commands/prReport.js'
 
 const program = new Command()
 
@@ -690,6 +691,21 @@ program
   .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
   .action(contributorProfileCommand)
+
+program
+  .command('pr-report')
+  .description('Compose a semantic PR report: diff, impacted modules, change-points, reviewer suggestions')
+  .option('--ref1 <ref>', 'Base ref (default: HEAD~1)', 'HEAD~1')
+  .option('--ref2 <ref>', 'Head ref (default: HEAD)', 'HEAD')
+  .option('--file <path>', 'File path to analyze for semantic diff and impact')
+  .option('--query <text>', 'Concept query for change-point highlights')
+  .option('-k, --top <n>', 'Result limit', '10')
+  .option('--since <date>', 'Filter reviewer activity since date (YYYY-MM-DD)')
+  .option('--until <date>', 'Filter reviewer activity until date (YYYY-MM-DD)')
+  .option('--dump [file]', 'Output JSON report; writes to file or stdout if no path given')
+  .action(async (options) => {
+    await prReportCommand(options)
+  })
 
 program
   .command('cherry-pick-suggest <query>')
