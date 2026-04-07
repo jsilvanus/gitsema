@@ -20,6 +20,7 @@ import { createInterface } from 'node:readline'
 import { getTextProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface EvalCase {
   query: string
@@ -40,6 +41,7 @@ export interface EvalCommandOptions {
   file: string
   top?: string
   dump?: string | boolean
+  out?: string[]
 }
 
 async function loadEvalCases(filePath: string): Promise<EvalCase[]> {
@@ -145,13 +147,17 @@ export async function evalCommand(options: EvalCommandOptions): Promise<void> {
   console.log(`  Mean MRR:     ${avgMRR.toFixed(4)}`)
   console.log(`  Mean latency: ${avgLat.toFixed(1)}ms`)
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify({ cases: results, summary: { avgPrecision: avgP, avgRecall: avgR, avgMRR, avgLatencyMs: avgLat, topK } }, null, 2)
-    if (typeof options.dump === 'string' && options.dump !== '') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`\nEval results written to ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`\nEval results written to ${jsonSink.file}`)
     } else {
       console.log('\n' + json)
     }
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 }

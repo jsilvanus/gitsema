@@ -2,11 +2,13 @@ import { computeDiff } from '../../core/search/evolution.js'
 import { shortHash } from '../../core/search/ranking.js'
 import { writeFileSync } from 'node:fs'
 import { narrateDiff } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface DiffCommandOptions {
   neighbors?: string
   dump?: string | boolean
   narrate?: boolean
+  out?: string[]
 }
 
 /**
@@ -86,12 +88,15 @@ export async function diffCommand(
 
   const result = await computeDiff(ref1, ref2, filePath.trim(), { neighbors })
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(result, null, 2)
-    if (typeof options.dump === 'string') {
+    if (jsonSink.file) {
       try {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Diff JSON written to: ${options.dump}`)
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Diff JSON written to: ${jsonSink.file}`)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         console.error(`Error writing dump file: ${msg}`)
@@ -101,6 +106,7 @@ export async function diffCommand(
       process.stdout.write(json + '\n')
       return
     }
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderDiff(result, filePath.trim()))

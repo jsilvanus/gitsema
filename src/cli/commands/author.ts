@@ -8,6 +8,7 @@ import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { logger } from '../../utils/logger.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface AuthorCommandOptions {
   top?: string
@@ -26,6 +27,7 @@ export interface AuthorCommandOptions {
   vss?: boolean
   html?: string | boolean
   noHeadings?: boolean
+  out?: string[]
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -103,27 +105,35 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     commitResults = searchCommits(queryEmbedding, { topK: 50, model: textModel })
   }
 
-  if (options.dump !== undefined) {
-    const out: any = { authors: results }
-    if (commitResults) out.commits = commitResults
-    const json = JSON.stringify(out, null, 2)
-    if (typeof options.dump === 'string' && options.dump !== '') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Author attribution written to ${options.dump}`)
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const jsonSink = getSink(sinks, 'json')
+  const htmlSink = getSink(sinks, 'html')
+
+  const outObj: any = { authors: results }
+  if (commitResults) outObj.commits = commitResults
+  const json = JSON.stringify(outObj, null, 2)
+
+  if (jsonSink) {
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Author attribution written to ${jsonSink.file}`)
     } else {
-      console.log(json)
+      process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
-  // --html output
-  if (options.html !== undefined) {
+  if (htmlSink) {
     const { renderAuthorHtml } = await import('../../core/viz/htmlRenderer.js')
     const html = renderAuthorHtml(results, query)
-    const outFile = typeof options.html === 'string' ? options.html : 'author.html'
-    writeFileSync(outFile, html, 'utf8')
-    console.log(`Author HTML written to: ${outFile}`)
-    return
+    if (htmlSink.file) {
+      writeFileSync(htmlSink.file, html, 'utf8')
+      console.log(`Author HTML written to: ${htmlSink.file}`)
+    } else {
+      process.stdout.write(html + '\n')
+    }
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   if (results.length === 0 && !commitResults) {

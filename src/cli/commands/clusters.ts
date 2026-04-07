@@ -3,6 +3,7 @@ import { computeClusters, getBlobHashesOnBranch, type ClusterReport } from '../.
 import { renderClustersHtml } from '../../core/viz/htmlRenderer.js'
 import { applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { narrateClusters } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface ClustersCommandOptions {
   k?: string
@@ -20,6 +21,7 @@ export interface ClustersCommandOptions {
   textModel?: string
   codeModel?: string
   noHeadings?: boolean
+  out?: string[]
 }
 
 export async function clustersCommand(options: ClustersCommandOptions): Promise<void> {
@@ -51,28 +53,36 @@ export async function clustersCommand(options: ClustersCommandOptions): Promise<
       blobHashFilter,
     })
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Wrote clusters JSON to ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Wrote clusters JSON to ${jsonSink.file}`)
       } else {
-        console.log(json)
+        process.stdout.write(json + '\n')
+        return
       }
-      return
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderClustersHtml(report)
-      const outFile = typeof options.html === 'string' ? options.html : 'clusters.html'
-      try {
-        writeFileSync(outFile, html, 'utf8')
-        console.log(`Wrote clusters HTML to ${outFile}`)
-      } catch (err) {
-        console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
-        process.exit(1)
+      if (htmlSink.file) {
+        try {
+          writeFileSync(htmlSink.file, html, 'utf8')
+          console.log(`Wrote clusters HTML to ${htmlSink.file}`)
+        } catch (err) {
+          console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
+          process.exit(1)
+        }
+      } else {
+        process.stdout.write(html + '\n')
       }
-      return
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     // human readable

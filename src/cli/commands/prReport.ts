@@ -8,6 +8,7 @@ import { getTextProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface PrReportOptions {
   ref1?: string
@@ -18,6 +19,7 @@ export interface PrReportOptions {
   since?: string
   until?: string
   dump?: string | boolean
+  out?: string[]
 }
 
 export async function prReportCommand(options: PrReportOptions): Promise<void> {
@@ -106,15 +108,19 @@ export async function prReportCommand(options: PrReportOptions): Promise<void> {
   }
 
   // ── Output ────────────────────────────────────────────────────────────────
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(report, null, 2)
-    if (typeof options.dump === 'string' && options.dump !== '') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`PR report written to ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`PR report written to ${jsonSink.file}`)
     } else {
       console.log(json)
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   // Human-readable output

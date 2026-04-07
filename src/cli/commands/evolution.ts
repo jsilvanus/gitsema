@@ -7,6 +7,7 @@ import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/evolution.js'
 import { remoteFileEvolution } from '../../client/remoteClient.js'
 import { renderFileEvolutionHtml } from '../../core/viz/htmlRenderer.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { narrateEvolution } from '../../core/llm/narrator.js'
 
 export interface EvolutionCommandOptions {
@@ -27,6 +28,7 @@ export interface EvolutionCommandOptions {
   textModel?: string
   codeModel?: string
   noHeadings?: boolean
+  out?: string[]
 }
 
 /** A single alert entry – one of the top-N largest semantic jumps for a file. */
@@ -214,16 +216,22 @@ export async function evolutionCommand(
         threshold,
         includeContent: options.includeContent ?? false,
       })
+      const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+      const jsonSink = getSink(sinks, 'json')
+      const htmlSink = getSink(sinks, 'html')
+
       const json = JSON.stringify(result, null, 2)
-      if (options.dump !== undefined) {
-        if (typeof options.dump === 'string') {
-          writeFileSync(options.dump, json, 'utf8')
-          console.log(`Evolution JSON written to: ${options.dump}`)
+      if (jsonSink) {
+        if (jsonSink.file) {
+          writeFileSync(jsonSink.file, json, 'utf8')
+          console.log(`Evolution JSON written to: ${jsonSink.file}`)
         } else {
           process.stdout.write(json + '\n')
           return
         }
+        if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
       }
+
       // Human-readable summary from structured data
       const data = result as { path: string; versions: number; timeline: Array<{ date: string; blobHash: string; commitHash: string; distFromPrev: number; distFromOrigin: number; isOrigin: boolean; isLargeChange: boolean }> }
       console.log(`Evolution of: ${data.path}`)
@@ -276,15 +284,17 @@ export async function evolutionCommand(
     enrichedAlerts = await enrichAlerts(candidates)
   }
 
-  // --dump: emit structured JSON to a file or stdout
-  if (options.dump !== undefined) {
-    const json = serializeEvolutionJson(filePath.trim(), entries, threshold, includeContent, origin, enrichedAlerts)
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const jsonSink = getSink(sinks, 'json')
+  const htmlSink = getSink(sinks, 'html')
 
-    if (typeof options.dump === 'string') {
-      // --dump <file> → write JSON to file, then print human-readable to stdout
+  const json = serializeEvolutionJson(filePath.trim(), entries, threshold, includeContent, origin, enrichedAlerts)
+
+  if (jsonSink) {
+    if (jsonSink.file) {
       try {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Evolution JSON written to: ${options.dump}`)
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Evolution JSON written to: ${jsonSink.file}`)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         console.error(`Error writing dump file: ${msg}`)
@@ -292,10 +302,10 @@ export async function evolutionCommand(
       }
       // Fall through to also print human-readable summary below
     } else {
-      // --dump without a file path → print JSON to stdout and exit
       process.stdout.write(json + '\n')
       return
     }
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
   // Human-readable output
@@ -303,19 +313,21 @@ export async function evolutionCommand(
   if (options.origin) console.log(`Origin blob: ${options.origin}`)
   console.log(`Versions found: ${entries.length}`)
 
-  // --html: emit interactive HTML visualization
-  if (options.html !== undefined) {
+  if (htmlSink) {
     const html = renderFileEvolutionHtml(filePath.trim(), entries, threshold)
-    const outFile = typeof options.html === 'string' ? options.html : 'file-evolution.html'
-    try {
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`File-evolution HTML written to: ${outFile}`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`Error writing HTML file: ${msg}`)
-      process.exit(1)
+    if (htmlSink.file) {
+      try {
+        writeFileSync(htmlSink.file, html, 'utf8')
+        console.log(`File-evolution HTML written to: ${htmlSink.file}`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`Error writing HTML file: ${msg}`)
+        process.exit(1)
+      }
+    } else {
+      process.stdout.write(html + '\n')
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   if (enrichedAlerts !== undefined) {

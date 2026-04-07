@@ -8,6 +8,7 @@ import {
 } from '../../core/search/clustering.js'
 import { renderClusterTimelineHtml } from '../../core/viz/htmlRenderer.js'
 import { narrateClusterTimeline } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface ClusterTimelineCommandOptions {
   k?: string
@@ -24,6 +25,7 @@ export interface ClusterTimelineCommandOptions {
   enhancedKeywordsN?: string
   branch?: string
   narrate?: boolean
+  out?: string[]
 }
 
 /**
@@ -91,28 +93,36 @@ export async function clusterTimelineCommand(options: ClusterTimelineCommandOpti
       return
     }
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Wrote cluster-timeline JSON to ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Wrote cluster-timeline JSON to ${jsonSink.file}`)
       } else {
-        console.log(json)
+        process.stdout.write(json + '\n')
+        return
       }
-      return
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderClusterTimelineHtml(report, threshold)
-      const outFile = typeof options.html === 'string' ? options.html : 'cluster-timeline.html'
-      try {
-        writeFileSync(outFile, html, 'utf8')
-        console.log(`Wrote cluster-timeline HTML to ${outFile}`)
-      } catch (err) {
-        console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
-        process.exit(1)
+      if (htmlSink.file) {
+        try {
+          writeFileSync(htmlSink.file, html, 'utf8')
+          console.log(`Wrote cluster-timeline HTML to ${htmlSink.file}`)
+        } catch (err) {
+          console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
+          process.exit(1)
+        }
+      } else {
+        process.stdout.write(html + '\n')
       }
-      return
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     printTimelineReport(report, threshold)

@@ -8,6 +8,7 @@ import {
   type ImpactResult,
   type ModuleGroup,
 } from '../../core/search/impact.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { shortHash } from '../../core/search/ranking.js'
 
 export interface ImpactCommandOptions {
@@ -29,6 +30,7 @@ export interface ImpactCommandOptions {
   codeModel?: string
   html?: string | boolean
   noHeadings?: boolean
+  out?: string[]
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -136,25 +138,33 @@ export async function impactCommand(
     process.exit(1)
   }
 
-  if (options.dump !== undefined) {
-    const json = JSON.stringify(report, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Wrote impact report JSON to ${options.dump}`)
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const jsonSink = getSink(sinks, 'json')
+  const htmlSink = getSink(sinks, 'html')
+
+  const json = JSON.stringify(report, null, 2)
+  if (jsonSink) {
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Wrote impact report JSON to ${jsonSink.file}`)
     } else {
-      console.log(json)
+      process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
   // --html
-  if (options.html !== undefined) {
+  if (htmlSink) {
     const { renderImpactHtml } = await import('../../core/viz/htmlRenderer.js')
-    const outFile = typeof options.html === 'string' ? options.html : 'impact.html'
     const html = renderImpactHtml(report, filePath)
-    writeFileSync(outFile, html, 'utf8')
-    console.log(`Impact HTML written to: ${outFile}`)
-    return
+    if (htmlSink.file) {
+      writeFileSync(htmlSink.file, html, 'utf8')
+      console.log(`Impact HTML written to: ${htmlSink.file}`)
+    } else {
+      process.stdout.write(html + '\n')
+    }
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderReport(report, !options.noHeadings))

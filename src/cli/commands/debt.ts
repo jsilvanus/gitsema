@@ -5,6 +5,7 @@ import { getActiveSession } from '../../core/db/sqlite.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export function debtCommand(): Command {
   return new Command('debt')
@@ -14,7 +15,7 @@ export function debtCommand(): Command {
     .option('--branch <name>', 'restrict to blobs on this branch')
     .option('--dump [file]', 'output JSON to file or stdout')
     .option('--no-headings', "don't print column header row")
-    .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean; noHeadings?: boolean }) => {
+    .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean; noHeadings?: boolean; out?: string[] }) => {
       let top: number
       try {
         top = parsePositiveInt(opts.top ?? '20', '--top')
@@ -40,15 +41,19 @@ export function debtCommand(): Command {
       }
 
       const results = await scoreDebt(session, provider, { top, model, branch: opts.branch })
-      if (opts.dump !== undefined) {
+      const sinks = resolveOutputs({ out: opts.out, dump: opts.dump })
+      const jsonSink = getSink(sinks, 'json')
+
+      if (jsonSink) {
         const json = JSON.stringify(results, null, 2)
-        if (typeof opts.dump === 'string') {
-          writeFileSync(opts.dump, json, 'utf8')
-          console.log(`Debt results written to: ${opts.dump}`)
+        if (jsonSink.file) {
+          writeFileSync(jsonSink.file, json, 'utf8')
+          console.log(`Debt results written to: ${jsonSink.file}`)
         } else {
           process.stdout.write(json + '\n')
+          return
         }
-        return
+        if (!hasSinkFormat(sinks, 'text')) return
       }
       if (!opts.noHeadings) {
         console.log(`${'Blob'.padEnd(8)}\t${'Score'.padEnd(7)}\tPath`)

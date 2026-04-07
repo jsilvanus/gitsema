@@ -6,6 +6,7 @@ import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import type { SemanticDiffEntry, SemanticDiffResult } from '../../core/search/semanticDiff.js'
 
 export interface SemanticDiffCommandOptions {
@@ -19,6 +20,7 @@ export interface SemanticDiffCommandOptions {
   hybrid?: boolean
   bm25Weight?: string
   branch?: string
+  out?: string[]
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -131,26 +133,33 @@ export async function semanticDiffCommand(
     throw err
   }
 
-  if (options.html !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const jsonSink = getSink(sinks, 'json')
+  const htmlSink = getSink(sinks, 'html')
+
+  if (htmlSink) {
     const html = renderSemanticDiffHtml(result)
-    const outFile = typeof options.html === 'string' ? options.html : 'semantic-diff.html'
-    try {
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Semantic diff HTML written to: ${outFile}`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`Error writing HTML file: ${msg}`)
-      process.exit(1)
+    if (htmlSink.file) {
+      try {
+        writeFileSync(htmlSink.file, html, 'utf8')
+        console.log(`Semantic diff HTML written to: ${htmlSink.file}`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`Error writing HTML file: ${msg}`)
+        process.exit(1)
+      }
+    } else {
+      process.stdout.write(html + '\n')
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
-  if (options.dump !== undefined) {
+  if (jsonSink) {
     const json = serializeSemanticDiffJson(result)
-    if (typeof options.dump === 'string') {
+    if (jsonSink.file) {
       try {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Semantic diff JSON written to: ${options.dump}`)
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Semantic diff JSON written to: ${jsonSink.file}`)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         console.error(`Error writing dump file: ${msg}`)
@@ -160,6 +169,7 @@ export async function semanticDiffCommand(
       process.stdout.write(json + '\n')
       return
     }
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
   console.log(renderSemanticDiff(result))

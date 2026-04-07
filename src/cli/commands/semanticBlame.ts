@@ -7,6 +7,7 @@ import {
   type SemanticBlameEntry,
 } from '../../core/search/semanticBlame.js'
 import { shortHash } from '../../core/search/ranking.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface SemanticBlameCommandOptions {
   /** Number of nearest-neighbor blobs per block (default 3). */
@@ -22,6 +23,7 @@ export interface SemanticBlameCommandOptions {
   textModel?: string
   codeModel?: string
   branch?: string
+  out?: string[]
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -126,15 +128,19 @@ export async function semanticBlameCommand(
     process.exit(1)
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(entries, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Wrote semantic blame JSON to ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Wrote semantic blame JSON to ${jsonSink.file}`)
     } else {
-      console.log(json)
+      process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderResults(filePath.trim(), entries))

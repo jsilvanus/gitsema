@@ -7,6 +7,7 @@ import {
 } from '../../core/search/mergeAudit.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { renderMergeAuditHtml } from '../../core/viz/htmlRenderer.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface MergeAuditCommandOptions {
   base?: string
@@ -15,6 +16,7 @@ export interface MergeAuditCommandOptions {
   dump?: string | boolean
   html?: string | boolean
   enhancedLabels?: boolean
+  out?: string[]
 }
 
 /**
@@ -73,23 +75,31 @@ export async function mergeAuditCommand(
       topK,
     })
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Wrote merge-audit JSON to ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Wrote merge-audit JSON to ${jsonSink.file}`)
       } else {
-        console.log(json)
+        process.stdout.write(json + '\n')
+        return
       }
-      return
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderMergeAuditHtml(report)
-      const outFile = typeof options.html === 'string' ? options.html : 'merge-audit.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Merge audit HTML written to: ${outFile}`)
-      return
+      if (htmlSink.file) {
+        writeFileSync(htmlSink.file, html, 'utf8')
+        console.log(`Merge audit HTML written to: ${htmlSink.file}`)
+      } else {
+        process.stdout.write(html + '\n')
+      }
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     printReport(report, threshold, options.enhancedLabels ?? false)

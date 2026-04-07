@@ -4,6 +4,7 @@ import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticBisect, type BisectResult } from '../../core/search/semanticBisect.js'
 import { formatDate } from '../../core/search/ranking.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 
 export interface SemanticBisectCommandOptions {
@@ -13,6 +14,7 @@ export interface SemanticBisectCommandOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  out?: string[]
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -81,15 +83,19 @@ export async function semanticBisectCommand(
     throw err
   }
 
-  if (options.dump !== undefined) {
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
+  const jsonSink = getSink(sinks, 'json')
+
+  if (jsonSink) {
     const json = JSON.stringify(result, null, 2)
-    if (typeof options.dump === 'string') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Bisect result written to: ${options.dump}`)
+    if (jsonSink.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Bisect result written to: ${jsonSink.file}`)
     } else {
       process.stdout.write(json + '\n')
+      return
     }
-    return
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   console.log(renderBisectResult(result))

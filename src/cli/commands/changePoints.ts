@@ -12,6 +12,7 @@ import { resolveRefToTimestamp } from '../../core/search/clustering.js'
 import { renderConceptChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
 import { narrateChangePoints } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface ChangePointsCommandOptions {
   top?: string
@@ -30,6 +31,7 @@ export interface ChangePointsCommandOptions {
   bm25Weight?: string
   narrate?: boolean
   noHeadings?: boolean
+  out?: string[]
 }
 
 function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
@@ -164,23 +166,31 @@ export async function changePointsCommand(
       candidateHashes,
     })
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Change points JSON written to: ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Change points JSON written to: ${jsonSink.file}`)
       } else {
         process.stdout.write(json + '\n')
         return
       }
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderConceptChangePointsHtml(report)
-      const outFile = typeof options.html === 'string' ? options.html : 'change-points.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Change points HTML written to: ${outFile}`)
-      return
+      if (htmlSink.file) {
+        writeFileSync(htmlSink.file, html, 'utf8')
+        console.log(`Change points HTML written to: ${htmlSink.file}`)
+      } else {
+        process.stdout.write(html + '\n')
+      }
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     if (!options.noHeadings) console.log(`Concept change points: "${query}"`)

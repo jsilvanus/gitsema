@@ -579,6 +579,7 @@ program
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--vss', 'use the usearch HNSW ANN index for approximate search (requires prior `gitsema build-vss`; falls back to linear scan)')
   .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise first-seen.html')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo)')
   .action(firstSeenCommand)
 
@@ -598,6 +599,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise file-evolution.html',
   )
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option(
     '--include-content',
     'include the stored file content for each version in the JSON dump (only used with --dump)',
@@ -631,6 +633,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise concept-evolution.html',
   )
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option(
     '--include-content',
     'include the stored file content for each entry in the JSON dump (only used with --dump)',
@@ -654,6 +657,7 @@ program
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(semanticBisectCommand)
 
 program
@@ -663,6 +667,7 @@ program
   .option('-k, --top <n>', 'max pairs to return (default 50)', '50')
   .option('--level <level>', 'search granularity: symbol (default), chunk, file', 'symbol')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--no-headings', "don't print report header")
   .action(refactorCandidatesCommand)
 
@@ -688,6 +693,7 @@ program
   .option('--steps <n>', 'number of time windows to sample (default 10)', '10')
   .option('--threshold <n>', 'cosine similarity threshold for "match" (default 0.7)', '0.7')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--model <model>', 'override embedding model')
   .option('--text-model <model>', 'override text embedding model')
   .option('--code-model <model>', 'override code embedding model')
@@ -701,6 +707,7 @@ program
   .option('--threshold <n>', 'only include code files whose max similarity to docs is below this threshold (0–1)')
   .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(docGapCommand)
 
 program
@@ -709,6 +716,7 @@ program
   .option('-k, --top <n>', 'number of top results to return', '10')
   .option('--branch <name>', 'restrict to blobs seen on this branch')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(contributorProfileCommand)
 
 program
@@ -722,6 +730,7 @@ program
   .option('--since <date>', 'Filter reviewer activity since date (YYYY-MM-DD)')
   .option('--until <date>', 'Filter reviewer activity until date (YYYY-MM-DD)')
   .option('--dump [file]', 'Output JSON report; writes to file or stdout if no path given')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(async (options) => {
     await prReportCommand(options)
   })
@@ -775,6 +784,7 @@ program
   .option('-k, --top <n>', 'number of results to return', '10')
   .option('--model <model>', 'embedding model to use')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(cherryPickSuggestCommand)
 
 program
@@ -787,6 +797,7 @@ program
   .description('Show semantic activity heatmap — count of distinct blob changes by time period (week or month)')
   .option('--period <p>', 'aggregation period: week (default) or month', 'week')
   .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--no-headings', "don't print column header row")
   .action(async (opts: { period?: string; dump?: string | boolean; noHeadings?: boolean }) => { await heatmapCommand({ period: opts.period, dump: opts.dump, noHeadings: opts.noHeadings }) })
 
@@ -797,6 +808,8 @@ program
     '--neighbors <n>',
     'number of nearest-neighbour blobs to show for each version (default 0)',
   )
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .option('--narrate', 'generate an LLM narrative interpretation of the semantic diff (requires GITSEMA_LLM_URL)')
   .action(diffCommand)
 
@@ -818,6 +831,7 @@ program
     '--html [file]',
     'output an interactive HTML visualization; writes to <file> if given, otherwise semantic-diff.html',
   )
+  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(semanticDiffCommand)
 
 program

@@ -6,6 +6,7 @@ import {
   type ClusterChangePoint,
 } from '../../core/search/clustering.js'
 import { renderClusterChangePointsHtml } from '../../core/viz/htmlRenderer.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface ClusterChangePointsCommandOptions {
   k?: string
@@ -19,6 +20,7 @@ export interface ClusterChangePointsCommandOptions {
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
   branch?: string
+  out?: string[]
 }
 
 function renderClusterChangePoint(point: ClusterChangePoint, rank: number): string {
@@ -139,23 +141,31 @@ export async function clusterChangePointsCommand(
       return
     }
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Cluster change points JSON written to: ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Cluster change points JSON written to: ${jsonSink.file}`)
       } else {
         process.stdout.write(json + '\n')
         return
       }
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderClusterChangePointsHtml(report)
-      const outFile = typeof options.html === 'string' ? options.html : 'cluster-change-points.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`Cluster change points HTML written to: ${outFile}`)
-      return
+      if (htmlSink.file) {
+        writeFileSync(htmlSink.file, html, 'utf8')
+        console.log(`Cluster change points HTML written to: ${htmlSink.file}`)
+      } else {
+        process.stdout.write(html + '\n')
+      }
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     console.log('Cluster change points')

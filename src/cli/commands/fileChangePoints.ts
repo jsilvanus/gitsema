@@ -7,6 +7,7 @@ import {
 import { resolveRefToTimestamp } from '../../core/search/clustering.js'
 import { renderFileChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 import { narrateFileChangePoints } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface FileChangePointsCommandOptions {
   threshold?: string
@@ -20,6 +21,7 @@ export interface FileChangePointsCommandOptions {
   branch?: string
   narrate?: boolean
   noHeadings?: boolean
+  out?: string[]
 }
 
 function renderFileChangePoint(point: FileChangePoint, rank: number): string {
@@ -105,23 +107,31 @@ export async function fileChangePointsCommand(
   try {
     const report = computeFileChangePoints(filePath.trim(), { threshold, topPoints, since, until, useSymbolLevel: options.level === 'symbol' })
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`File change points JSON written to: ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`File change points JSON written to: ${jsonSink.file}`)
       } else {
         process.stdout.write(json + '\n')
         return
       }
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderFileChangePointsHtml(report)
-      const outFile = typeof options.html === 'string' ? options.html : 'file-change-points.html'
-      writeFileSync(outFile, html, 'utf8')
-      console.log(`File change points HTML written to: ${outFile}`)
-      return
+      if (htmlSink.file) {
+        writeFileSync(htmlSink.file, html, 'utf8')
+        console.log(`File change points HTML written to: ${htmlSink.file}`)
+      } else {
+        process.stdout.write(html + '\n')
+      }
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     if (!options.noHeadings) console.log(`File change points: "${filePath}"`)

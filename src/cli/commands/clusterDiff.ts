@@ -10,6 +10,7 @@ import {
 } from '../../core/search/clustering.js'
 import { renderClusterDiffHtml } from '../../core/viz/htmlRenderer.js'
 import { narrateClusterDiff } from '../../core/llm/narrator.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface ClusterDiffCommandOptions {
   k?: string
@@ -22,6 +23,7 @@ export interface ClusterDiffCommandOptions {
   enhancedKeywordsN?: string
   branch?: string
   narrate?: boolean
+  out?: string[]
 }
 
 /**
@@ -92,28 +94,36 @@ export async function clusterDiffCommand(
 
     const report = compareClusterSnapshots(snapshot1, snapshot2, ref1, ref2)
 
-    if (options.dump !== undefined) {
+    const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+    const jsonSink = getSink(sinks, 'json')
+    const htmlSink = getSink(sinks, 'html')
+
+    if (jsonSink) {
       const json = JSON.stringify(report, null, 2)
-      if (typeof options.dump === 'string') {
-        writeFileSync(options.dump, json, 'utf8')
-        console.log(`Wrote cluster-diff JSON to ${options.dump}`)
+      if (jsonSink.file) {
+        writeFileSync(jsonSink.file, json, 'utf8')
+        console.log(`Wrote cluster-diff JSON to ${jsonSink.file}`)
       } else {
-        console.log(json)
+        process.stdout.write(json + '\n')
+        return
       }
-      return
+      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
     }
 
-    if (options.html !== undefined) {
+    if (htmlSink) {
       const html = renderClusterDiffHtml(report)
-      const outFile = typeof options.html === 'string' ? options.html : 'cluster-diff.html'
-      try {
-        writeFileSync(outFile, html, 'utf8')
-        console.log(`Wrote cluster-diff HTML to ${outFile}`)
-      } catch (err) {
-        console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
-        process.exit(1)
+      if (htmlSink.file) {
+        try {
+          writeFileSync(htmlSink.file, html, 'utf8')
+          console.log(`Wrote cluster-diff HTML to ${htmlSink.file}`)
+        } catch (err) {
+          console.error(`Error writing HTML file: ${err instanceof Error ? err.message : String(err)}`)
+          process.exit(1)
+        }
+      } else {
+        process.stdout.write(html + '\n')
       }
-      return
+      if (!hasSinkFormat(sinks, 'text')) return
     }
 
     printTemporalReport(report)
