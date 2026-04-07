@@ -8,7 +8,27 @@ export interface BlobRecord {
   indexedAt: number
 }
 
+/**
+ * Discriminant for SearchResult variants.
+ *
+ * - `'file'`   — whole-file embedding match (the default)
+ * - `'chunk'`  — sub-file chunk match (`chunkId` is set)
+ * - `'symbol'` — named symbol match (`symbolId`, `symbolName`, `symbolKind` are set)
+ * - `'module'` — directory centroid match (`modulePath` is set; `blobHash` is synthetic)
+ */
+export type SearchResultKind = 'file' | 'chunk' | 'symbol' | 'module'
+
 export interface SearchResult {
+  /**
+   * Discriminant field identifying the type of result.
+   * - `'file'`   → whole-file match
+   * - `'chunk'`  → sub-file chunk match
+   * - `'symbol'` → named symbol match
+   * - `'module'` → directory centroid match
+   *
+   * Optional for backward compatibility; set by vectorSearch for all new results.
+   */
+  kind?: SearchResultKind
   blobHash: BlobHash
   paths: string[]
   score: number
