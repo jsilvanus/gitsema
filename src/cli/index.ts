@@ -58,6 +58,7 @@ import { watchCommand } from './commands/watch.js'
 import { exportIndex, importIndex } from './commands/bundleIndex.js'
 import { projectCommand } from './commands/project.js'
 import { toolsCommand } from './commands/tools.js'
+import { expertsCommand } from './commands/experts.js'
 
 const program = new Command()
 
@@ -107,6 +108,7 @@ const GROUPS = [
   'Change Detection',
   'Code Quality',
   'Workflow & CI',
+  'Repo Insights',
   'Visualization',
   'Maintenance',
 ] as const
@@ -164,6 +166,8 @@ const COMMAND_GROUPS: Record<string, string> = {
   'cherry-pick-suggest':   'Workflow & CI',
   repos:                   'Workflow & CI',
   watch:                   'Workflow & CI',
+  // Repo Insights
+  experts:                 'Repo Insights',
   // Visualization
   map:     'Visualization',
   heatmap: 'Visualization',
@@ -1129,6 +1133,42 @@ program
   .option('--limit <n>', 'max number of embeddings to project (default: 10000)')
   .action(async (opts: { model?: string; limit?: string }) => {
     await projectCommand(opts)
+  })
+
+program
+  .command('experts')
+  .description('Show top contributors ranked by blob count and the semantic areas they worked on (see also: author, contributor-profile)')
+  .addHelpText(
+    'after',
+    '\nNo embedding provider required — uses data already in the index.\n' +
+    'Run `gitsema clusters` first to get richer semantic-area labels.\n\n' +
+    'Examples:\n' +
+    '  gitsema experts                         # top 10 contributors overall\n' +
+    '  gitsema experts --top 5 --since 2024-01-01  # top 5 in 2024\n' +
+    '  gitsema experts --dump experts.json     # export to JSON\n' +
+    '  gitsema experts --html experts.html     # interactive HTML report',
+  )
+  .option('--top <n>', 'number of top contributors to show (default 10)', '10')
+  .option(
+    '--since <ref>',
+    'only count commits at or after this date or ISO 8601 timestamp (e.g. 2024-01-01)',
+  )
+  .option(
+    '--until <ref>',
+    'only count commits at or before this date or ISO 8601 timestamp (e.g. 2024-12-31)',
+  )
+  .option('--min-blobs <n>', 'suppress contributors with fewer than this many blobs (default 1)', '1')
+  .option('--top-clusters <n>', 'max semantic areas to show per contributor (default 5)', '5')
+  .option(
+    '--dump [file]',
+    'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout',
+  )
+  .option(
+    '--html [file]',
+    'output an interactive HTML report; writes to <file> if given, otherwise experts.html',
+  )
+  .action(async (opts: Parameters<typeof expertsCommand>[0]) => {
+    await expertsCommand(opts)
   })
 
 program.parse()

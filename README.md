@@ -606,6 +606,60 @@ gitsema cluster-change-points --k 6 --threshold 0.4 --top-points 3
 gitsema cluster-change-points --max-commits 200 --dump cluster-changes.json
 ```
 
+---
+
+### Repo Insights
+
+#### `gitsema experts [options]`
+
+Rank contributors by the number of distinct blobs they introduced and show which semantic clusters/concepts they worked on. No embedding provider required — uses data already in the index.
+
+> **Tip:** Run `gitsema clusters` first to populate cluster labels. Without clusters, semantic areas are shown as `cluster-<id>`.
+
+*See also: [`author`](#gitsema-author-query-options), [`contributor-profile`](#gitsema-contributor-profile-author-options)*
+
+```
+Options:
+  --top <n>           Number of top contributors to show (default: 10)
+  --since <ref>       Only count commits at or after this date (YYYY-MM-DD or ISO 8601)
+  --until <ref>       Only count commits at or before this date (YYYY-MM-DD or ISO 8601)
+  --min-blobs <n>     Suppress contributors with fewer than this many blobs (default: 1)
+  --top-clusters <n>  Max semantic areas to show per contributor (default: 5)
+  --dump [file]       Output structured JSON; writes to <file> or stdout if omitted
+  --html [file]       Output an interactive HTML report; writes to <file> or experts.html
+```
+
+```bash
+# Top 10 contributors overall
+gitsema experts
+
+# Top 5 contributors since 2024, with JSON output
+gitsema experts --top 5 --since 2024-01-01 --dump experts.json
+
+# Interactive HTML report
+gitsema experts --html experts.html
+```
+
+Example text output:
+```
+Top 3 contributors by semantic area (since 2024-01-01)
+
+1. Alice <alice@example.com>
+   Blobs: 142
+   Semantic areas:
+     · auth-module  [38 blobs]  (src/auth/jwt.ts, src/auth/session.ts)
+     · api-routes   [31 blobs]  (src/routes/auth.ts)
+     · db-layer     [12 blobs]  (src/db/users.ts)
+
+2. Bob <bob@example.com>
+   Blobs: 97
+   Semantic areas:
+     · db-layer     [44 blobs]  (src/db/schema.ts, src/db/migrations.ts)
+     · tests        [29 blobs]  (tests/integration/db.test.ts)
+```
+
+---
+
 ## Automated Indexing (Git Hooks)
 
 You can keep the semantic index in sync with your repository automatically by
