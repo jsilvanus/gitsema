@@ -114,7 +114,13 @@ export function computeExperts(opts: ComputeExpertsOptions = {}): Expert[] {
     clusterLabelMap.set(row.id, { label: row.label, representativePaths: paths.slice(0, 3) })
   }
 
-  // Build the per-author cluster query
+  // Build the per-author cluster query. Extract the author filter condition to avoid
+  // duplicating it across the two WHERE clause variants.
+  const authorFilter = '(c.author_name = ? OR c.author_email = ?)'
+  const clusterWhereClause = whereClause
+    ? `${whereClause} AND ${authorFilter}`
+    : `WHERE ${authorFilter}`
+
   const authorClusterStmt = rawDb.prepare(`
     SELECT
       ca.cluster_id AS clusterId,
@@ -122,7 +128,7 @@ export function computeExperts(opts: ComputeExpertsOptions = {}): Expert[] {
     FROM blob_commits bc
     JOIN commits c ON c.commit_hash = bc.commit_hash
     JOIN cluster_assignments ca ON ca.blob_hash = bc.blob_hash
-    ${whereClause ? whereClause + ' AND (c.author_name = ? OR c.author_email = ?)' : 'WHERE (c.author_name = ? OR c.author_email = ?)'}
+    ${clusterWhereClause}
     GROUP BY ca.cluster_id
     ORDER BY blobCount DESC
     LIMIT ?

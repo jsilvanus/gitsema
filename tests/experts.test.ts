@@ -96,13 +96,13 @@ describe('computeExperts', () => {
     const authorRows = [
       { authorName: 'Carol', authorEmail: 'carol@example.com', blobCount: 5 },
     ]
-    // No cluster rows → clusterLabelMap will be empty
-    const clusterRows: never[] = []
+    // Empty cluster rows — clusterLabelMap will be empty, forcing fallback labels
+    const emptyClusterRows: Array<{ id: number; label: string; representative_paths: string }> = []
     const clusterDataByAuthor = new Map([
       ['Carol', [{ clusterId: 42, blobCount: 5 }]],
     ])
 
-    const rawDb = makeRawDb(authorRows, clusterRows, clusterDataByAuthor)
+    const rawDb = makeRawDb(authorRows, emptyClusterRows, clusterDataByAuthor)
     vi.mocked(getActiveSession).mockReturnValue({ rawDb } as any)
 
     const result = computeExperts()
