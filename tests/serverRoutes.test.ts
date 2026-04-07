@@ -10,9 +10,9 @@
  * Zod validation, response shapes, and error handling.
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import request from 'supertest'
-import { openDatabaseAt, withDbSession } from '../src/core/db/sqlite.js'
+import { openDatabaseAt } from '../src/core/db/sqlite.js'
 import { createApp } from '../src/server/app.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
@@ -34,9 +34,6 @@ let app: ReturnType<typeof createApp>
 const session = openDatabaseAt(':memory:')
 
 beforeAll(() => {
-  // createApp reads the active session via getActiveSession() which falls back
-  // to the default session.  We wrap the test in withDbSession below in the
-  // concurrent-test block; for most tests the in-memory session is the default.
   app = createApp({ textProvider: mockProvider })
 })
 
@@ -153,8 +150,10 @@ describe('POST /api/v1/search — validation', () => {
     const res = await request(app)
       .post('/api/v1/search')
       .send({ query: 'auth', before: 'not-a-date' })
-    // Either 400 from Zod or from date-parse error — both are valid
-    expect([400, 200]).toContain(res.status)
+    // The date is parsed inside the route handler after Zod validation passes
+    // (before is z.string().optional()), so the route should catch the parse
+    // error and return 400.
+    expect(res.status).toBe(400)
   })
 })
 

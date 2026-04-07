@@ -409,9 +409,10 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
 function initTables(sqlite: InstanceType<typeof Database>): void {
   // Detect whether this is a truly fresh database BEFORE creating any tables.
   // We use this to stamp fresh DBs with CURRENT_SCHEMA_VERSION so that
-  // applyMigrations() skips all destructive ALTER TABLE migration steps that
-  // would otherwise fail on a schema that was already created with the latest
-  // column definitions (e.g. quantized columns already present in initTables).
+  // applyMigrations() skips migration steps that drop-and-recreate tables.
+  // Without this, those migrations would strip columns that initTables
+  // already included, and later migrations adding those columns back would
+  // fail with "duplicate column name" errors.
   const isFresh =
     (
       sqlite
@@ -630,9 +631,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
   if (isFresh) {
     // Stamp this brand-new database at the current schema version so that
     // applyMigrations() skips all migration steps.  Without this, migrations
-    // that drop-and-recreate tables (e.g. v9→v10) would strip the quantized
-    // columns that initTables already included, and v10→v11 would then fail
-    // with "duplicate column name: quantized".
+    // that drop-and-recreate tables would strip columns that initTables
+    // already included, and later migrations that try to add those columns
+    // back would fail with "duplicate column name" errors.
     sqlite.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)`)
     sqlite
       .prepare(`INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)`)
