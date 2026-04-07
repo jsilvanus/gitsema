@@ -124,7 +124,8 @@ export function createApp(options: AppOptions): Express {
 
   // When GITSEMA_METRICS_PUBLIC is not set, register the metrics handler again
   // AFTER auth so it is protected by GITSEMA_SERVE_KEY.
-  // Optional Bearer-token auth on all routes
+  // Auth middleware: all routes registered below require a valid Bearer token
+  // when GITSEMA_SERVE_KEY is set.
   app.use(authMiddleware)
 
   app.get('/metrics', serveMetrics)

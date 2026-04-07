@@ -54,16 +54,17 @@ export function buildRateLimiter() {
     limit,
     standardHeaders: 'draft-7', // RateLimit header (RFC draft 7)
     legacyHeaders: false,
-    // Use bearer token as key when auth is enabled; fall back to IP
+    // Use bearer token as key when auth is enabled; fall back to IP.
+    // Prefixes prevent collisions between token and IP keys.
     keyGenerator(req: Request): string {
       if (process.env.GITSEMA_SERVE_KEY) {
         const auth = req.headers.authorization ?? ''
         // Extract the token part from "Bearer <token>"
-        if (auth.startsWith('Bearer ')) return auth.slice(7)
+        if (auth.startsWith('Bearer ')) return `token:${auth.slice(7)}`
         // No token provided — treat as anonymous (will fail auth anyway)
-        return `anon:${ipKeyGenerator(req.ip ?? '')}`
+        return `ip:anon:${ipKeyGenerator(req.ip ?? '')}`
       }
-      return ipKeyGenerator(req.ip ?? '')
+      return `ip:${ipKeyGenerator(req.ip ?? '')}`
     },
     handler(req: Request, res: Response, _next: NextFunction, _options: Options): void {
       // Use the actual window reset time so clients get an accurate Retry-After

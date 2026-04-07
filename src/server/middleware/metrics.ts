@@ -52,25 +52,27 @@ export const indexEmbeddingsGauge = new Gauge({
 
 // ---------------------------------------------------------------------------
 // Embedding error counter (synced from shared in-process counter on scrape)
+// Note: uses Gauge (not Counter) because the value is read from an external
+// in-process counter; prom-client Counters cannot be set to arbitrary values.
 // ---------------------------------------------------------------------------
-export const embeddingErrorsGauge = new Gauge({
+export const embeddingErrorsTotal = new Gauge({
   name: 'gitsema_embedding_errors_total',
-  help: 'Total number of embedding provider errors',
+  help: 'Total number of embedding provider errors since process start',
   registers: [metricsRegistry],
 })
 
 // ---------------------------------------------------------------------------
 // Query cache gauges (synced from shared in-process counters on scrape)
 // ---------------------------------------------------------------------------
-export const queryCacheHitsGauge = new Gauge({
+export const queryCacheHitsTotal = new Gauge({
   name: 'gitsema_query_cache_hits_total',
-  help: 'Total number of query embedding cache hits',
+  help: 'Total number of query embedding cache hits since process start',
   registers: [metricsRegistry],
 })
 
-export const queryCacheMissesGauge = new Gauge({
+export const queryCacheMissesTotal = new Gauge({
   name: 'gitsema_query_cache_misses_total',
-  help: 'Total number of query embedding cache misses',
+  help: 'Total number of query embedding cache misses since process start',
   registers: [metricsRegistry],
 })
 
@@ -130,7 +132,7 @@ export function refreshIndexGauges(rawDb: import('better-sqlite3').Database): vo
 /** Sync the shared in-process counters into prom-client gauges. */
 export function syncProcessCounters(): void {
   const c = getCounters()
-  queryCacheHitsGauge.set(c.queryCacheHits)
-  queryCacheMissesGauge.set(c.queryCacheMisses)
-  embeddingErrorsGauge.set(c.embeddingErrors)
+  queryCacheHitsTotal.set(c.queryCacheHits)
+  queryCacheMissesTotal.set(c.queryCacheMisses)
+  embeddingErrorsTotal.set(c.embeddingErrors)
 }

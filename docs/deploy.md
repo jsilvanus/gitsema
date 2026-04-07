@@ -150,8 +150,8 @@ services:
     image: ollama/ollama:latest
     volumes:
       - ollama_models:/root/.ollama
-    # Pull the embedding model on first boot
-    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull nomic-embed-text && wait"]
+    # Wait for Ollama to be ready, then pull the embedding model
+    entrypoint: ["/bin/sh", "-c", "ollama serve & until curl -sf http://localhost:11434; do sleep 2; done && ollama pull nomic-embed-text && wait"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434"]
       interval: 10s

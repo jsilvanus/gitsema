@@ -204,13 +204,13 @@ registry.registerPath({
 // ---------------------------------------------------------------------------
 // Generate the spec (lazy, cached)
 // ---------------------------------------------------------------------------
-let _cachedSpec: Record<string, unknown> | null = null
+let cachedSpec: Record<string, unknown> | null = null
 
 function generateSpec(): Record<string, unknown> {
-  if (_cachedSpec) return _cachedSpec
+  if (cachedSpec) return cachedSpec
 
   const generator = new OpenApiGeneratorV31(registry.definitions)
-  _cachedSpec = generator.generateDocument({
+  cachedSpec = generator.generateDocument({
     openapi: '3.1.0',
     info: {
       title: 'gitsema HTTP API',
@@ -224,7 +224,7 @@ function generateSpec(): Record<string, unknown> {
     servers: [{ url: '/api/v1', description: 'Local server' }],
   }) as unknown as Record<string, unknown>
 
-  return _cachedSpec
+  return cachedSpec
 }
 
 // ---------------------------------------------------------------------------
