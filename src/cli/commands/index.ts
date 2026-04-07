@@ -343,7 +343,7 @@ export async function indexCommand(_options: IndexCommandOptions): Promise<void>
   } catch (err) {
     // DB may not exist yet
     const msg = err instanceof Error ? err.message : String(err)
-    if (/no such file\|ENOENT\|unable to open/i.test(msg)) {
+    if (/no such file|ENOENT|unable to open/i.test(msg)) {
       console.log('No index found at .gitsema/index.db')
       console.log('Run `gitsema index start` to create the index.')
     } else {

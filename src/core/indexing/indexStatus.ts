@@ -72,8 +72,8 @@ export interface IndexStatus {
  */
 export function countGitReachableBlobs(repoPath: string): { count: number; error?: string } {
   try {
-    // Use --quiet to suppress progress and --filter=object:type=blob to list blobs only.
-    // `git cat-file --batch-check --batch-all-objects` is another option but slower.
+    // `git rev-list --all --objects --filter=object:type=blob` emits one line per blob OID.
+    // The `--filter` argument restricts output to blobs only (no tree or commit objects).
     const out = execSync(
       'git rev-list --all --objects --filter=object:type=blob',
       { cwd: repoPath, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] },

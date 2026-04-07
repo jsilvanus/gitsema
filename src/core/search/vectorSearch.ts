@@ -264,7 +264,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     for (const row of modRows) {
       candidatePool.push({
         // Module results use a NUL-prefixed internal key for dedup in the candidate pool.
-        // The NUL prefix is stripped before returning results to callers (blobHash → '').
+        // The NUL prefix is stripped in the result-mapping phase (see below: blobHash set to '').
         blobHash: `\0module:${row.modulePath}`,
         vector: row.vector as Buffer,
         modulePath: row.modulePath,

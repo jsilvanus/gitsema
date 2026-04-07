@@ -125,7 +125,7 @@ describe('computeIndexStatus — integration (real git repo)', () => {
     expect(status.gitReachableBlobs).toBeGreaterThanOrEqual(2)
 
     // At least one model should have coverage
-    expect(status.configs.length).toBeGreaterThanOrEqual(0)
+    expect(status.configs.length).toBeGreaterThanOrEqual(1)
   })
 })
 
