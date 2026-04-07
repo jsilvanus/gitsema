@@ -1,0 +1,313 @@
+# gitsema — Feature Catalog
+
+> Current version: **v0.62.0** · Schema: **v17** · Test suite: **~364 tests**
+>
+> This document is a concise reference for implemented features grouped by area.
+> For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
+
+---
+
+## Table of Contents
+
+- [Indexing](#indexing)
+- [Search](#search)
+- [History / Temporal](#history--temporal)
+- [Change Detection](#change-detection)
+- [Clustering](#clustering)
+- [Branch / Merge](#branch--merge)
+- [Analysis](#analysis)
+- [Visualization (HTML)](#visualization-html)
+- [HTTP API Server](#http-api-server)
+- [MCP Tools](#mcp-tools)
+- [Protocol Servers (tools subcommand)](#protocol-servers-tools-subcommand)
+- [Maintenance & DB](#maintenance--db)
+- [Configuration](#configuration)
+- [Planned / In Progress](#planned--in-progress)
+
+---
+
+## Indexing
+
+All indexing is **content-addressed**: a blob (file snapshot) is embedded exactly once per SHA-1 hash, regardless of how many commits or paths reference it.
+
+| Feature | Flag / command |
+|---|---|
+| Full history index | `gitsema index` |
+| **Incremental** (default when run after prior index) | `--since <ref|date|"all">` |
+| Parallel embedding | `--concurrency <n>` (default 4) |
+| Batch embedding requests | `--embed-batch-size <n>` |
+| Extension filter | `--ext ".ts,.py"` |
+| Path exclusion | `--exclude "node_modules,dist"` |
+| Max blob size cap | `--max-size 200kb` |
+| Glob-based selective indexing | `--include-glob "src/**"` |
+| Specific file indexing from HEAD | `--file <paths...>` |
+| Chunking strategies | `--chunker file|function|fixed` |
+| Fixed-window chunk tuning | `--window-size <n>`, `--overlap <n>` |
+| VSS / HNSW index build after indexing | `--auto-build-vss [threshold]` |
+| Int8 scalar quantization | `--quantize` |
+| Cap commits per run | `--max-commits <n>` |
+| Mixed-model index guard | `--allow-mixed` |
+| Index bundle export / import | `gitsema index export/import` |
+| Automated hooks (post-commit, post-merge) | `gitsema config set hooks.enabled true` |
+| Module-level embeddings (directory centroids) | `gitsema update-modules` |
+| Remote-repo indexing via HTTP server | `gitsema remote-index <url>` |
+| Multi-repo registry | `gitsema repos add/list/remove` |
+| Per-repo project metadata | `gitsema project` (2D projections) |
+
+**Chunking fallback chain:** whole-file → function boundaries → fixed windows (1500 chars) → fixed windows (800 chars) when a blob exceeds the embedding model's context limit.
+
+---
+
+## Search
+
+All search uses the **text embedding model** (not the code model) to embed queries (natural language is the common case).
+
+| Feature | Flag / command |
+|---|---|
+| Vector similarity search | `gitsema search <query>` |
+| Top-k results | `-k / --top <n>` |
+| Symbol / chunk-level code search | `gitsema code-search <query>` |
+| Hybrid search (vector + BM25) | `--hybrid`, `--bm25-weight <n>` |
+| Query expansion (BM25 keywords pre-embedding) | `--expand-query` |
+| Recency-blended ranking | `--recent`, `--alpha <n>` |
+| Three-signal ranking | `--weight-vector`, `--weight-recency`, `--weight-path` |
+| Date range filter | `--before <date>`, `--after <date>` |
+| Branch-scoped search | `--branch <name>` |
+| Group results | `--group file|module|commit` |
+| Include chunk results | `--chunks` |
+| Contrastive / negative-example search | `--not-like <query>` |
+| Lambda contrastive parameter | `--lambda <n>` |
+| Result explanation | `--explain` |
+| Boolean queries | `--or`, `--and`; inline `A AND B` / `A OR B` |
+| LLM narrative summary | `--narrate` (requires `GITSEMA_LLM_URL`) |
+| HNSW approximate-nearest-neighbor search | `--vss` (requires built VSS index) |
+| HTML output | `--html [file]` |
+| Multi-repo search | `gitsema repos` + MCP `multi_repo_search` |
+
+---
+
+## History / Temporal
+
+| Feature | Flag / command |
+|---|---|
+| Find concept origin (first-seen chronologically) | `gitsema first-seen <query>` |
+| Single-file semantic drift timeline | `gitsema file-evolution <path>` |
+| Concept drift timeline across history | `gitsema evolution <query>` |
+| Semantic diff between two refs | `gitsema diff <ref1> <ref2> <query>` |
+| Semantic diff of a file between two refs | `gitsema file-diff <ref1> <ref2> <path>` |
+| Per-block nearest-neighbor attribution | `gitsema blame <file>` (alias: `semantic-blame`) |
+| Concept lifecycle (birth, growth, plateau, decay) | `gitsema lifecycle <query>` |
+| Semantic bisect (find regressions) | `gitsema bisect <good> <bad> <query>` |
+| Dead-concept detection (deleted blobs) | `gitsema dead-concepts` |
+| Evolution alerts (largest jumps) | `--alerts [n]` on `file-evolution` |
+| Structured JSON / HTML dump | `--dump [file]`, `--html [file]` |
+| Include stored content in dumps | `--include-content` |
+| LLM narrative | `--narrate` on `evolution`, `diff`, `file-evolution` |
+
+---
+
+## Change Detection
+
+| Feature | Flag / command |
+|---|---|
+| Concept-level change points across history | `gitsema change-points <query>` |
+| Single-file semantic change points | `gitsema file-change-points <path>` |
+| Cluster-structure change points | `gitsema cluster-change-points` |
+| Threshold tuning | `--threshold <n>` (cosine distance, default 0.3) |
+| Show top-N jumps | `--top-points <n>` |
+| Date range | `--since <ref>`, `--until <ref>` |
+| Commit cap (for large repos) | `--max-commits <n>` on `cluster-change-points` |
+| Structured JSON dump | `--dump [file]` |
+| LLM narrative | `--narrate` |
+
+---
+
+## Clustering
+
+| Feature | Flag / command |
+|---|---|
+| K-means cluster snapshot | `gitsema clusters` |
+| Temporal cluster diff (two refs) | `gitsema cluster-diff <ref1> <ref2>` |
+| Multi-step cluster timeline | `gitsema cluster-timeline` |
+| Number of clusters | `--k <n>` (default 8) |
+| Timeline steps | `--steps <n>` |
+| Date range | `--since <ref>`, `--until <ref>` |
+| HTML interactive output | `--html [file]` |
+| LLM narrative | `--narrate` |
+| HNSW warm-start k-means | built into `build-vss` pipeline |
+
+---
+
+## Branch / Merge
+
+| Feature | Flag / command |
+|---|---|
+| Branch semantic summary vs base | `gitsema branch-summary <branch>` |
+| Semantic collision detection before merge | `gitsema merge-audit <branch-a> <branch-b>` |
+| Pre-merge concept landscape preview | `gitsema merge-preview <branch>` |
+| Cherry-pick suggestions based on semantic similarity | `gitsema cherry-pick-suggest <query>` |
+| CI diff (post to PR as GitHub review comment) | `gitsema ci-diff --github-token <token>` |
+| Branch filter on search/evolution | `--branch <name>` |
+
+---
+
+## Analysis
+
+| Feature | Flag / command |
+|---|---|
+| Semantic authorship attribution | `gitsema author <query>` |
+| Cross-module coupling / refactor impact | `gitsema impact <path>` |
+| Refactor candidates (cross-cutting duplication) | `gitsema refactor-candidates` |
+| Documentation gap analysis | `gitsema doc-gap` |
+| Contributor profile (per-author concept map) | `gitsema contributor-profile <author>` |
+| Security scan (vulnerability pattern similarity) | `gitsema security-scan` (results are similarity scores, not confirmed CVEs) |
+| Health timeline (churn rate, dead-concept ratio) | `gitsema health` |
+| Technical debt scoring (isolation, age, frequency) | `gitsema debt` |
+
+---
+
+## Visualization (HTML)
+
+Interactive single-file HTML outputs; no external dependencies required.
+
+| Renderer | Command(s) |
+|---|---|
+| Evolution / concept-evolution timeline | `gitsema evolution --html` |
+| Cluster snapshot | `gitsema clusters --html` |
+| Cluster diff | `gitsema cluster-diff --html` |
+| Cluster timeline | `gitsema cluster-timeline --html` |
+| Search results | `gitsema search --html` |
+| Author attribution | `gitsema author --html` |
+| First-seen results | `gitsema first-seen --html` |
+| Impact heatmap | `gitsema impact --html` |
+| Semantic diff | `gitsema diff --html` |
+| Codebase map (2D scatter) | `gitsema map` |
+| Temporal heatmap | `gitsema heatmap` |
+| Web UI (served inline) | `gitsema tools serve --ui` |
+
+---
+
+## HTTP API Server
+
+Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
+
+| Route prefix | Endpoints |
+|---|---|
+| `GET /api/v1/status` | Index statistics |
+| `POST /api/v1/blobs/check` | Check if blobs are already indexed |
+| `POST /api/v1/blobs` | Write blob + embedding |
+| `POST /api/v1/commits`, `POST /api/v1/commits/mark-indexed` | Commit metadata |
+| `POST /api/v1/search`, `POST /api/v1/search/first-seen` | Search |
+| `POST /api/v1/evolution/file`, `POST /api/v1/evolution/concept` | Evolution |
+| `POST /api/v1/remote/index` | Remote repo indexing |
+| `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
+| `POST /api/v1/analysis/clusters` | Clustering |
+| `POST /api/v1/analysis/change-points` | Change-point detection |
+| `POST /api/v1/analysis/author` | Author attribution |
+| `POST /api/v1/analysis/impact` | Impact analysis |
+| `POST /api/v1/analysis/semantic-diff` | Semantic diff |
+| `POST /api/v1/analysis/semantic-blame` | Semantic blame |
+| `POST /api/v1/analysis/dead-concepts` | Dead-concept detection |
+| `POST /api/v1/analysis/merge-audit` | Merge audit |
+| `POST /api/v1/analysis/merge-preview` | Merge preview |
+| `POST /api/v1/analysis/branch-summary` | Branch summary |
+| `GET /ui` | Embedded 2D codebase map UI (requires `--ui` flag) |
+
+Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`.
+
+---
+
+## MCP Tools
+
+Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
+
+| Tool name | Description |
+|---|---|
+| `semantic_search` | Vector similarity search |
+| `code_search` | Symbol / chunk-level code search |
+| `search_history` | Vector search enriched with Git history metadata |
+| `first_seen` | Find when a concept first appeared (chronological sort) |
+| `evolution` | Single-file semantic drift timeline |
+| `concept_evolution` | Concept drift across codebase history |
+| `index` | Trigger incremental (or full) re-indexing |
+| `branch_summary` | Semantic summary of a branch vs base |
+| `merge_audit` | Detect semantic collisions between two branches |
+| `merge_preview` | Predict concept-landscape shift after merge |
+| `clusters` | K-means cluster snapshot |
+| `change_points` | Concept-level change-point detection |
+| `semantic_diff` | Conceptual diff across two git refs |
+| `semantic_blame` | Semantic origin of each logical block |
+| `file_change_points` | Change points for a single file |
+| `cluster_diff` | Compare cluster snapshots at two refs |
+| `cluster_timeline` | Multi-step cluster drift timeline |
+| `author` | Authorship attribution for a concept |
+| `impact` | Cross-module coupling / refactor-impact analysis |
+| `dead_concepts` | Find deleted semantic blobs |
+| `security_scan` | Vulnerability-pattern similarity scan |
+| `health_timeline` | Time-bucketed codebase health metrics |
+| `debt_score` | Technical debt scoring |
+| `multi_repo_search` | Search across multiple registered gitsema repos |
+
+---
+
+## Protocol Servers (`tools` subcommand)
+
+| Subcommand | Description |
+|---|---|
+| `gitsema tools mcp` | MCP stdio server (preferred entry point for AI clients) |
+| `gitsema tools lsp [--tcp <port>]` | LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
+
+> Legacy top-level aliases `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work but emit a deprecation warning.
+
+---
+
+## Maintenance & DB
+
+| Feature | Command |
+|---|---|
+| Index statistics | `gitsema status [file]` |
+| DB integrity check | `gitsema doctor` |
+| SQLite VACUUM + ANALYZE | `gitsema vacuum` |
+| Garbage-collect orphan embeddings | `gitsema gc` |
+| Rebuild FTS5 index | `gitsema rebuild-fts` |
+| Backfill FTS5 content for pre-Phase-11 blobs | `gitsema backfill-fts` |
+| Build / rebuild HNSW VSS index | `gitsema build-vss` |
+| Remove embeddings for a specific model | `gitsema clear-model <model>` |
+| Recalculate module-level embeddings | `gitsema update-modules` |
+| Export index bundle (tar.gz) | `gitsema index export` |
+| Import index bundle | `gitsema index import` |
+| Saved semantic watches | `gitsema watch add/list/remove/run` |
+
+---
+
+## Configuration
+
+Persistent configuration lives in `.gitsema/config.json` (repo-level) or `~/.config/gitsema/config.json` (global, `--global`).
+
+```bash
+gitsema config set provider http
+gitsema config set model text-embedding-3-small
+gitsema config set index.concurrency 8
+gitsema config set hooks.enabled true   # auto-install git hooks
+gitsema config list                     # show all active values + sources
+```
+
+Environment variables always override config-file values. See [`README.md`](README.md) for the full env-var reference.
+
+---
+
+## Planned / In Progress
+
+This section is intentionally brief. The canonical roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
+
+Key areas still in progress or planned:
+
+- **Batch embedding**: the indexer still sends one blob per request to the embedding backend. A proper batched path (`--embed-batch-size` flag exists but batching support depends on the backend).
+- **GPU-accelerated local embeddings**: Xenova/Transformers.js local-inference provider for offline use without Ollama.
+- **LSP completeness**: current LSP server handles hover only; `go-to-definition`, `find-references`, and document-symbol are stubs.
+- **Multi-repo UX polish**: `repos` registry exists but search UI and cross-repo result ranking need work.
+- **HTTP route coverage**: Phase 41–47 analysis commands (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`) have no HTTP API routes yet.
+- **OpenAPI / capabilities endpoint**: no `GET /api/v1/capabilities` or OpenAPI spec; clients must know routes out of band.
+
+For the full list of planned phases and backlog items, see [`docs/PLAN.md`](docs/PLAN.md).
