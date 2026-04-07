@@ -332,7 +332,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (24 total):**
+**Exposed tools (25 total):**
 
 | Tool | Description |
 |---|---|
@@ -354,6 +354,7 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `merge_preview` | Preview merge semantic impact |
 | `branch_summary` | Branch semantic summary vs main |
 | `author` | Author attribution for a concept |
+| `experts` | Identify expert authors for a semantic area |
 | `impact` | Cross-module coupling analysis |
 | `dead_concepts` | Find deleted semantic blobs |
 | `security_scan` | Semantic vulnerability pattern scan (results are similarity scores, not confirmed CVEs) |
