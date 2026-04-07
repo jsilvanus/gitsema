@@ -46,6 +46,23 @@ This is effective at moderate scale, but at large scale the hot costs become:
 
 **Impact:** on high-latency embedding backends, total throughput can remain lower than expected because there is no pipelined overlap across batch windows.
 
+### 2.2.a Node.js embedding backend module + aggressive batching
+
+Yes — there is likely strong upside in running an in-process Node.js embedding backend module (for local/self-hosted paths) and treating batching as a first-class execution mode.
+
+Expected benefits:
+
+- fewer process/network boundaries for local embedding flows
+- easier central queueing and micro-batching
+- better control over backpressure and retry policy
+- predictable throughput tuning with batch-size + concurrency together
+
+Recommended shape:
+
+- keep the existing provider abstraction (`EmbeddingProvider`) unchanged
+- add a Node-module provider implementation that supports `embedBatch()` well
+- route indexer defaults toward batched paths when provider capability is present
+
 ## 2.3 Search-time branch/time/path enrichments can amplify work
 
 `vectorSearch()` composes optional recency and path relevance features by building extra maps and set operations (`getFirstSeenMap`, path lookup, path scoring). This is correct, but these enrichments add overhead proportionally to filtered pool size.
@@ -57,6 +74,18 @@ This is effective at moderate scale, but at large scale the hot costs become:
 Operations such as VSS builds, FTS rebuild/backfill, and index export/import are powerful but can be expensive in CPU/IO and are still largely “operator-managed” primitives.
 
 **Impact:** predictable production operations still require experience/manual care.
+
+### 2.4.a Auto-defaults and auto-tuning for indexing
+
+Yes — several heavy-operation behaviors can be automated into indexing defaults so users get better performance without hand-tuning flags.
+
+Good candidates:
+
+- auto-enable batching when provider exposes `embedBatch()`
+- adaptive batch size/concurrency from observed latency + error rate
+- optional auto-build/update VSS based on blob-count threshold
+- automatic post-run maintenance hints (or safe background tasks) for FTS/vacuum
+- profile presets (`speed|balanced|quality`) to set coherent defaults
 
 ---
 

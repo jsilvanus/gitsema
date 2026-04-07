@@ -2455,6 +2455,76 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
+### Phase 61 — MCP/HTTP Parity + Semantic PR Report *(planned)*
+
+**Goal:** Productize current analysis primitives into a single CI/review workflow and close cross-surface parity gaps.
+
+**Planned scope:**
+
+- Add `experts` parity outside CLI:
+  - MCP tool: `experts`
+  - HTTP route: `POST /api/v1/analysis/experts`
+- Add `gitsema pr-report` command to compose:
+  - semantic diff summary
+  - impacted modules
+  - change-point highlights
+  - reviewer suggestions (`experts`)
+- Add machine-readable output (`--dump`) for CI/bot ingestion.
+
+**Status:** not yet implemented.
+
+---
+
+### Phase 62 — Node.js In-Process Embedding Backend + Heavy Batching *(planned)*
+
+**Goal:** Improve indexing throughput and operational simplicity by supporting a Node-module embedding backend optimized for aggressive batch execution.
+
+**Planned scope:**
+
+- Add a Node.js in-process embedding provider module implementing `EmbeddingProvider` + robust `embedBatch()`.
+- Introduce a provider-side queue/micro-batch scheduler for local/self-hosted flows.
+- Extend indexer batch path to support pipelined read/embed/store windows (bounded overlap).
+- Add throughput guardrails: retry policy, adaptive backpressure, and provider capability checks.
+
+**Status:** not yet implemented.
+
+---
+
+### Phase 63 — Indexing Auto-Defaults and Adaptive Tuning *(planned)*
+
+**Goal:** Make indexing fast by default without requiring deep manual tuning.
+
+**Planned scope:**
+
+- Auto-enable batch mode when provider supports `embedBatch()`.
+- Add adaptive tuning for `embedBatchSize` and concurrency based on:
+  - observed embedding latency
+  - error/throttle rate
+  - memory safety limits
+- Add profile presets (`--profile speed|balanced|quality`) to set coherent indexing/search defaults.
+- Add optional auto-maintenance hooks after indexing runs:
+  - VSS auto-build/update threshold policy
+  - post-run maintenance recommendations (FTS/vacuum)
+
+**Status:** not yet implemented.
+
+---
+
+### Phase 64 — Search Scalability + AI Retrieval Reliability *(planned)*
+
+**Goal:** Reduce broad-query cost and improve trust for AI-assisted coding workflows.
+
+**Planned scope:**
+
+- Add top-k early-cut scoring mode to avoid full candidate materialization on very large pools.
+- Add capabilities manifest endpoint for CLI/MCP/HTTP integration clients.
+- Add provenance-oriented explain output optimized for LLM prompts.
+- Add retrieval evaluation harness (precision/latency tracking across model/ranking settings).
+
+**Status:** not yet implemented.
+
+---
+
 ## Section II - Next?
 
 ---
