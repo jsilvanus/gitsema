@@ -407,6 +407,18 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
 
 /** The full CREATE TABLE block used for every new database file. */
 function initTables(sqlite: InstanceType<typeof Database>): void {
+  // Detect whether this is a truly fresh database BEFORE creating any tables.
+  // We use this to stamp fresh DBs with CURRENT_SCHEMA_VERSION so that
+  // applyMigrations() skips all destructive ALTER TABLE migration steps that
+  // would otherwise fail on a schema that was already created with the latest
+  // column definitions (e.g. quantized columns already present in initTables).
+  const isFresh =
+    (
+      sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='blobs'")
+        .get() as undefined | { name: string }
+    ) === undefined
+
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS blobs (
       blob_hash TEXT PRIMARY KEY,
@@ -559,7 +571,73 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       updated_at INTEGER NOT NULL,
       UNIQUE (module_path, model)
     );
+
+    -- Embedding provenance (Phase 35 / v13)
+    CREATE TABLE IF NOT EXISTS embed_config (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      config_hash TEXT NOT NULL UNIQUE,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      code_model TEXT,
+      dimensions INTEGER NOT NULL,
+      chunker TEXT NOT NULL,
+      window_size INTEGER,
+      overlap INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    -- Incremental-indexing resume markers (Phase 35 / v13)
+    CREATE TABLE IF NOT EXISTS indexing_checkpoints (
+      blob_hash TEXT PRIMARY KEY,
+      commit_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at INTEGER NOT NULL
+    );
+
+    -- Multi-repo registry (Phase 41 / v14); db_path added in v15
+    CREATE TABLE IF NOT EXISTS repos (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      url TEXT,
+      db_path TEXT,
+      added_at INTEGER NOT NULL
+    );
+
+    -- Saved search queries / watch-mode entries (Phase 53 / v16)
+    CREATE TABLE IF NOT EXISTS saved_queries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      query_text TEXT NOT NULL,
+      query_embedding BLOB,
+      last_run_ts INTEGER,
+      webhook_url TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    -- Embedding space 2-D projections (Phase 55 / v17)
+    CREATE TABLE IF NOT EXISTS projections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+      model TEXT NOT NULL,
+      x REAL NOT NULL,
+      y REAL NOT NULL,
+      projected_at INTEGER NOT NULL,
+      UNIQUE (blob_hash, model)
+    );
   `)
+
+  if (isFresh) {
+    // Stamp this brand-new database at the current schema version so that
+    // applyMigrations() skips all migration steps.  Without this, migrations
+    // that drop-and-recreate tables (e.g. v9→v10) would strip the quantized
+    // columns that initTables already included, and v10→v11 would then fail
+    // with "duplicate column name: quantized".
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)`)
+    sqlite
+      .prepare(`INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)`)
+      .run(String(CURRENT_SCHEMA_VERSION))
+  }
 }
 
 // ---------------------------------------------------------------------------
