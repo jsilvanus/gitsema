@@ -43,8 +43,11 @@ describe('lsp server framing', () => {
       params: { text: 'myFunction' },
     })
     expect(res).not.toBeNull()
-    // With empty DB it should return an empty result or an error (both acceptable)
     expect(res?.id).toBe(12)
+    // With empty DB, result should be an empty array (no symbols) or an error
+    const isSuccess = Array.isArray(res?.result)
+    const isError = res?.error != null
+    expect(isSuccess || isError).toBe(true)
   })
 })
 

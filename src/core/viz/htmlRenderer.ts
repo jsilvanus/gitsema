@@ -24,12 +24,12 @@ import type { SemanticCollisionReport } from '../search/mergeAudit.js'
 import type { BranchSummaryResult } from '../search/branchSummary.js'
 import type { SemanticDiffResult } from '../search/semanticDiff.js'
 
-// Re-export shared utilities so consumers that import from htmlRenderer continue to work
-export { PALETTE, escHtml, safeJson, sanitizeCluster, sanitizeClusterReport, sanitizeTemporalReport, sanitizeTimelineReport, BASE_CSS, COMMON_JS } from './htmlRenderer-shared.js'
-
-// Re-export search renderers
+// Re-export search renderers (allows `import { renderSearchHtml } from '.../htmlRenderer.js'`)
 export { renderSearchHtml, renderAuthorHtml, renderFirstSeenHtml, renderImpactHtml, renderExpertsHtml } from './htmlRenderer-search.js'
 
+// Import shared utilities for internal use within this file.
+// These are NOT re-exported here because no external consumer imports them from htmlRenderer.ts;
+// they are available directly from htmlRenderer-shared.ts.
 import { PALETTE, escHtml, safeJson, sanitizeCluster, sanitizeClusterReport, sanitizeTemporalReport, sanitizeTimelineReport, BASE_CSS, COMMON_JS } from './htmlRenderer-shared.js'
 
 // ─── Cluster force simulation JS (no ${} in this block) ──────────────────────
