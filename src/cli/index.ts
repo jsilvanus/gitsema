@@ -61,6 +61,10 @@ import { toolsCommand } from './commands/tools.js'
 import { expertsCommand } from './commands/experts.js'
 import { prReportCommand } from './commands/prReport.js'
 import { evalCommand } from './commands/eval.js'
+import { triageCommand } from './commands/triage.js'
+import { policyCheckCommand } from './commands/policyCheck.js'
+import { ownershipCommand } from './commands/ownership.js'
+import { workflowCommand } from './commands/workflow.js'
 
 const program = new Command()
 
@@ -104,12 +108,14 @@ const GROUPS = [
   'Setup & Infrastructure',
   'Protocol Servers',
   'Search & Discovery',
+  'Analysis',
   'File History',
   'Concept History',
   'Cluster Analysis',
   'Change Detection',
   'Code Quality',
   'Workflow & CI',
+  'Workflows',
   'Repo Insights',
   'Visualization',
   'Maintenance',
@@ -168,6 +174,12 @@ const COMMAND_GROUPS: Record<string, string> = {
   'cherry-pick-suggest':   'Workflow & CI',
   repos:                   'Workflow & CI',
   watch:                   'Workflow & CI',
+  // Analysis
+  triage:                  'Analysis',
+  policy:                  'Analysis',
+  ownership:               'Analysis',
+  // Workflows
+  workflow:                'Workflows',
   // Repo Insights
   experts:                 'Repo Insights',
   // Visualization
@@ -710,6 +722,45 @@ program
   .action(async (options) => {
     await prReportCommand(options)
   })
+
+program
+  .command('triage <query>')
+  .description('Incident triage: composite workflow (first-seen, change-points, file-evolution, bisect, experts)')
+  .option('--ref1 <ref>', 'bisect left ref')
+  .option('--ref2 <ref>', 'bisect right ref')
+  .option('--file <path>', 'focus on a specific file')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('-k, --top <n>', 'number of top results per section', '5')
+  .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, top: opts.top }) })
+
+program
+  .command('policy check')
+  .description('Run policy gates for drift, debt, and security scores (CI-friendly exit codes)')
+  .option('--max-drift <n>', 'fail if any concept change-point distance exceeds n')
+  .option('--max-debt-score <n>', 'fail if aggregate debt score exceeds n')
+  .option('--min-security-score <n>', 'fail if any security similarity score is below this threshold')
+  .option('--query <text>', 'concept query (required for drift gate)')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(async (opts: any) => { await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump }) })
+
+program
+  .command('ownership <query>')
+  .description('Show ownership heatmap for a concept (ownership confidence and trends)')
+  .option('-k, --top <n>', 'number of owners to show', '5')
+  .option('--window <days>', 'compare ownership in last N days vs before (default 90)', '90')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .action(async (query: string, opts: any) => { await ownershipCommand(query, { top: opts.top, window: opts.window, dump: opts.dump }) })
+
+program
+  .command('workflow run <template>')
+  .description('Run a built-in workflow template: pr-review, incident, release-audit')
+  .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+  .option('--format <fmt>', 'output format: markdown (default) or json', 'markdown')
+  .option('--base <ref>', 'base ref for pr-review')
+  .option('--file <path>', 'file to analyze (pr-review)')
+  .option('--query <text>', 'concept query (incident)')
+  .option('-k, --top <n>', 'result limit', '5')
+  .action(async (template: string, args: string[], opts: any) => { await workflowCommand(template, args, { dump: opts.dump, format: opts.format, base: opts.base, file: opts.file, query: opts.query, top: opts.top }) })
 
 program
   .command('cherry-pick-suggest <query>')

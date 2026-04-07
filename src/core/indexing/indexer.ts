@@ -13,6 +13,7 @@ import { logger } from '../../utils/logger.js'
 import { createLimiter } from '../../utils/concurrency.js'
 import { extname, dirname } from 'node:path'
 import { minimatch } from 'minimatch'
+import { AsyncQueue } from '../../utils/asyncQueue.js'
 
 export interface FilterOptions {
   /**
@@ -383,66 +384,81 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     chunkerStrategy === 'file'
 
   if (useBatchPath) {
-    for (let batchStart = 0; batchStart < blobsToProcess.length; batchStart += embedBatchSize) {
-      const batch = blobsToProcess.slice(batchStart, batchStart + embedBatchSize)
+    // Pipelined batching: overlap read -> embed -> store using AsyncQueue
+    const readQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer }>>()
+    const embedQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer; embedding: Embedding | null }>>()
 
-      // Read all blob contents in this batch in parallel
-      const contentResults = await Promise.all(
-        batch.map(async (entry) => {
-          try {
-            const content = await showBlob(entry.blobHash, repoPath, maxBlobSize)
-            return { entry, content, error: null as Error | null }
-          } catch (err) {
-            return { entry, content: null, error: err as Error | null }
-          }
-        }),
-      )
-
-      // Partition into readable vs failed/oversized
-      const readable: Array<{ entry: typeof blobsToProcess[0]; content: Buffer }> = []
-      for (const r of contentResults) {
-        if (r.error) {
-          logger.error(`Error reading blob ${r.entry.blobHash}: ${r.error instanceof Error ? r.error.message : String(r.error)}`)
-          stats.failed++
-          stats.otherFailed++
-        } else if (r.content === null) {
-          stats.oversized++
-        } else {
-          readable.push({ entry: r.entry, content: r.content })
-        }
-      }
-
-      if (readable.length === 0) {
-        reportProgress()
-        continue
-      }
-
-      // Batch-embed all readable blobs in a single provider call
-      const texts = readable.map((r) => r.content.toString('utf8'))
-      let embeddings: Array<Embedding | null>
-      const batchT0 = Date.now()
-      try {
-        embeddings = await provider.embedBatch!(texts)
-        const latPerItem = Math.max(1, Math.round((Date.now() - batchT0) / readable.length))
-        for (let i = 0; i < readable.length; i++) pushLatency(latPerItem)
-      } catch (batchErr) {
-        // Batch failed — fall back to individual embeds for this batch
-        logger.debug?.(`Batch embed failed (size=${readable.length}), falling back to per-blob: ${batchErr instanceof Error ? batchErr.message : String(batchErr)}`)
-        embeddings = await Promise.all(
-          texts.map(async (text) => {
+    // Producer: read batches and push readable items to readQueue
+    const producer = (async () => {
+      for (let batchStart = 0; batchStart < blobsToProcess.length; batchStart += embedBatchSize) {
+        const batch = blobsToProcess.slice(batchStart, batchStart + embedBatchSize)
+        const contentResults = await Promise.all(
+          batch.map(async (entry) => {
             try {
-              return await timedEmbed(provider, text)
-            } catch {
-              return null
+              const content = await showBlob(entry.blobHash, repoPath, maxBlobSize)
+              return { entry, content, error: null as Error | null }
+            } catch (err) {
+              return { entry, content: null, error: err as Error | null }
             }
           }),
         )
-      }
 
-      // Store results
-      for (let i = 0; i < readable.length; i++) {
-        const { entry, content } = readable[i]
-        const embedding = embeddings[i]
+        const readable: Array<{ entry: typeof blobsToProcess[0]; content: Buffer }> = []
+        for (const r of contentResults) {
+          if (r.error) {
+            logger.error(`Error reading blob ${r.entry.blobHash}: ${r.error instanceof Error ? r.error.message : String(r.error)}`)
+            stats.failed++
+            stats.otherFailed++
+          } else if (r.content === null) {
+            stats.oversized++
+          } else {
+            readable.push({ entry: r.entry, content: r.content })
+          }
+        }
+
+        if (readable.length > 0) readQueue.push(readable)
+        reportProgress()
+      }
+      readQueue.close()
+    })()
+
+    // Embedder: consume readQueue, produce embeddings and push to embedQueue
+    const embedder = (async () => {
+      for (;;) {
+        const readable = await readQueue.shift()
+        if (readable === null) break
+        const texts = readable.map((r) => r.content.toString('utf8'))
+        let embeddings: Array<Embedding | null>
+        const batchT0 = Date.now()
+        try {
+          embeddings = await provider.embedBatch!(texts)
+          const latPerItem = Math.max(1, Math.round((Date.now() - batchT0) / readable.length))
+          for (let i = 0; i < readable.length; i++) pushLatency(latPerItem)
+        } catch (batchErr) {
+          logger.debug?.(`Batch embed failed (size=${readable.length}), falling back to per-blob: ${batchErr instanceof Error ? batchErr.message : String(batchErr)}`)
+          embeddings = await Promise.all(
+            texts.map(async (text) => {
+              try {
+                return await timedEmbed(provider, text)
+              } catch {
+                return null
+              }
+            }),
+          )
+        }
+
+        const items = readable.map((r, i) => ({ entry: r.entry, content: r.content, embedding: embeddings[i] }))
+        embedQueue.push(items)
+      }
+      embedQueue.close()
+    })()
+
+    // Storer: consume embedQueue and store results
+    for (;;) {
+      const batch = await embedQueue.shift()
+      if (batch === null) break
+      for (let i = 0; i < batch.length; i++) {
+        const { entry, content, embedding } = batch[i]
         const text = content.toString('utf8')
 
         if (!embedding) {
@@ -464,7 +480,6 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           continue
         }
 
-        // Update module centroid running mean
         if (computeModuleEmbedding) {
           try {
             const dir = dirname(entry.path)
@@ -485,6 +500,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         reportProgress()
       }
     }
+
+    await Promise.all([producer, embedder])
   } else {
   // Note: stats mutations (stats.failed++, etc.) are safe here because Node.js
   // is single-threaded — each increment runs between await points and cannot

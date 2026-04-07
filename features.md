@@ -175,6 +175,10 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | **Experts / reviewer suggestions (Phase 61)** | `gitsema experts` |
 | **Semantic PR report (Phase 61)** | `gitsema pr-report` |
 | **Retrieval evaluation harness (Phase 64)** | `gitsema eval <file.jsonl>` |
+| **Incident triage bundle (Phase 65)** | `gitsema triage <query> [--ref1] [--ref2] [--file] [--top] [--dump]` |
+| **Policy checks for CI (Phase 66)** | `gitsema policy check [--max-drift] [--max-debt-score] [--min-security-score] [--query]` |
+| **Ownership heatmap by concept (Phase 67)** | `gitsema ownership <query> [--top] [--window] [--dump]` |
+| **Workflow templates (Phase 68)** | `gitsema workflow run <pr-review\|incident\|release-audit> [--format] [--dump]` |
 
 ---
 

@@ -2507,6 +2507,49 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ### Phase 64 — Search Scalability + AI Retrieval Reliability *(completed v0.66.0)*
 
+
+### Phase 65 — Incident Triage Bundle *(completed v0.68.0)*
+
+Goal: Provide a one-command incident triage workflow that composes first-seen, change-points, file-evolution alerts, bisect, and experts into a single guided report. CLI: `gitsema triage <query> [--ref1 <ref>] [--ref2 <ref>] [--file <path>] [--top <n>] [--dump <file>]`.
+
+**Implemented:** `src/cli/commands/triage.ts`. Gracefully handles per-section failures.
+
+---
+
+### Phase 66 — Policy Checks for CI *(completed v0.68.0)*
+
+Goal: Threshold-based CI gates for drift, debt score, and security similarity. CLI: `gitsema policy check [--max-drift <n>] [--max-debt-score <n>] [--min-security-score <n>] --query <text> [--dump <file>]`.
+
+**Implemented:** `src/cli/commands/policyCheck.ts`. Exits with code 1 when any gate fails.
+
+---
+
+### Phase 67 — Ownership Heatmap by Concept *(completed v0.68.0)*
+
+Goal: Compute ownership confidence and temporal trends for a semantic concept. Introduces `computeOwnershipHeatmap()` and CLI `gitsema ownership <query> [--top <n>] [--window <days>] [--dump <file>]`.
+
+**Implemented:** `src/core/search/ownershipHeatmap.ts`, `src/cli/commands/ownership.ts`.
+
+---
+
+### Phase 68 — Persistent Workflow Templates *(completed v0.68.0)*
+
+Goal: Config-driven workflow templates that chain existing commands (pr-review, incident, release-audit) and emit markdown or JSON reports. CLI: `gitsema workflow run <template> [--format markdown|json] [--dump <file>]`.
+
+**Implemented:** `src/cli/commands/workflow.ts`. Templates call core functions in-process.
+
+---
+
+### Phase 69 — Pipelined Batch Indexing *(completed v0.68.0)*
+
+Goal: Overlap read/embed/store stages in the indexer via a simple AsyncQueue so embed and store stages can work concurrently on successive batches. Adds `src/utils/asyncQueue.ts` and changes the batch-path in `src/core/indexing/indexer.ts` when `useBatchPath === true`.
+
+**Implemented:** `src/utils/asyncQueue.ts`, modified `src/core/indexing/indexer.ts` batch path.
+
+---
+
+
+
 **Goal:** Reduce broad-query cost and improve trust for AI-assisted coding workflows.
 
 **Implemented scope:**
