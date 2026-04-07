@@ -93,6 +93,21 @@ export function createApp(options: AppOptions): Express {
   // P2: rate limiting (applied before auth so 429 is returned for overloaded clients)
   app.use(buildRateLimiter())
 
+  // P2: OpenAPI spec + Swagger UI — public, registered before auth middleware
+  app.use('/', openapiRouter())
+
+  // P2: Shared /metrics handler (used in both public and auth-gated paths below)
+  async function serveMetrics(_req: import('express').Request, res: import('express').Response): Promise<void> {
+    try {
+      refreshIndexGauges(getActiveSession().rawDb)
+    } catch {
+      // non-fatal — DB might not be open in tests
+    }
+    syncProcessCounters()
+    res.setHeader('Content-Type', metricsRegistry.contentType)
+    res.send(await metricsRegistry.metrics())
+  }
+
   // P2: /metrics — Prometheus scrape endpoint.
   // Registered BEFORE the global auth middleware so that GITSEMA_METRICS_PUBLIC=1
   // can expose metrics to monitoring scrapers without a bearer token.
@@ -104,15 +119,7 @@ export function createApp(options: AppOptions): Express {
       next()
       return
     }
-    // Public scrape path
-    try {
-      refreshIndexGauges(getActiveSession().rawDb)
-    } catch {
-      // non-fatal — DB might not be open in tests
-    }
-    syncProcessCounters()
-    res.setHeader('Content-Type', metricsRegistry.contentType)
-    res.send(await metricsRegistry.metrics())
+    await serveMetrics(req, res)
   })
 
   // When GITSEMA_METRICS_PUBLIC is not set, register the metrics handler again
@@ -120,16 +127,7 @@ export function createApp(options: AppOptions): Express {
   // Optional Bearer-token auth on all routes
   app.use(authMiddleware)
 
-  app.get('/metrics', async (_req, res) => {
-    try {
-      refreshIndexGauges(getActiveSession().rawDb)
-    } catch {
-      // non-fatal — DB might not be open in tests
-    }
-    syncProcessCounters()
-    res.setHeader('Content-Type', metricsRegistry.contentType)
-    res.send(await metricsRegistry.metrics())
-  })
+  app.get('/metrics', serveMetrics)
 
   const base = '/api/v1'
 
@@ -156,9 +154,6 @@ export function createApp(options: AppOptions): Express {
   app.use(`${base}/watch`, watchRouter({ textProvider }))
 
   app.use(`${base}/projections`, projectionsRouter())
-
-  // P2: OpenAPI spec + Swagger UI (no auth required — spec is public)
-  app.use('/', openapiRouter())
 
   // Phase 64: Capabilities manifest — machine-readable list of server capabilities
   app.get(`${base}/capabilities`, (_req, res) => {

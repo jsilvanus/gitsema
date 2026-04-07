@@ -118,13 +118,12 @@ describe('GET /openapi.json', () => {
     expect(paths).toHaveProperty('/metrics')
   })
 
-  it('is accessible even when auth is required (public spec)', async () => {
+  it('is accessible even when auth is required (public spec before auth middleware)', async () => {
     process.env.GITSEMA_SERVE_KEY = 'secret'
     const res = await request(app).get('/openapi.json')
-    // OpenAPI spec is mounted before auth middleware
-    // If it returns 401, that means it's behind auth — either behaviour is acceptable
-    // but we document the current behaviour here
-    expect([200, 401]).toContain(res.status)
+    // OpenAPI spec is mounted before auth middleware — always returns 200
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('openapi')
   })
 })
 

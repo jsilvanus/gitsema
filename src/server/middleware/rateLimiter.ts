@@ -26,7 +26,8 @@
  */
 
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
-import type { Request, Response } from 'express'
+import type { Options } from 'express-rate-limit'
+import type { Request, Response, NextFunction } from 'express'
 
 function getRpm(): number {
   const raw = process.env.GITSEMA_RATE_LIMIT_RPM
@@ -64,8 +65,12 @@ export function buildRateLimiter() {
       }
       return ipKeyGenerator(req.ip ?? '')
     },
-    handler(_req: Request, res: Response): void {
-      const retryAfter = Math.ceil(windowMs / 1000)
+    handler(req: Request, res: Response, _next: NextFunction, _options: Options): void {
+      // Use the actual window reset time so clients get an accurate Retry-After
+      const resetTime = (req as any).rateLimit?.resetTime as Date | undefined
+      const retryAfter = resetTime
+        ? Math.max(1, Math.ceil((resetTime.getTime() - Date.now()) / 1000))
+        : Math.ceil(windowMs / 1000)
       res.setHeader('Retry-After', String(retryAfter))
       res.status(429).json({
         error: 'Too Many Requests',
