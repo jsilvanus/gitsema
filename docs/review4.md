@@ -28,9 +28,9 @@ Top themes:
 
 In `/home/runner/work/gitsema/gitsema/src/core/search/vectorSearch.ts`, `vectorSearch()` still loads candidate rows into memory and scores in JS (`.all()` queries + in-process loops, sorting, dedup):
 
-- `filteredQuery.all()` at line ~163
-- chunk/symbol/module expansions at lines ~191/~228/~256
-- full scoring loop + sort/dedup at lines ~324–359
+- base candidate materialization via `filteredQuery.all()`
+- chunk/symbol/module candidate expansion via `.all()` query paths
+- full in-process scoring loop + sort/dedup before final top-k selection
 
 This is effective at moderate scale, but at large scale the hot costs become:
 
@@ -42,7 +42,7 @@ This is effective at moderate scale, but at large scale the hot costs become:
 
 ## 2.2 Batch indexing path is throughput-helpful but still sequential in structure
 
-`/home/runner/work/gitsema/gitsema/src/core/indexing/indexer.ts` has a batch path (good improvement), but batch execution is a sequential `for` loop across batches (lines ~374 onward). Within a batch, reads are parallelized, but batches themselves are serialized.
+`/home/runner/work/gitsema/gitsema/src/core/indexing/indexer.ts` has a batch path (good improvement), but batch execution is a sequential `for` loop across batch windows in `indexRepository()`. Within a batch, reads are parallelized, but batches themselves are serialized.
 
 **Impact:** on high-latency embedding backends, total throughput can remain lower than expected because there is no pipelined overlap across batch windows.
 
