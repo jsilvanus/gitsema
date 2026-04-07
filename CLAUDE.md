@@ -7,12 +7,15 @@ These are the three canonical reference documents for this repository. Keep them
 | [`README.md`](README.md) | User-facing overview: installation, quick start, configuration, command reference |
 | [`features.md`](features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
 | [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
+| [`docs/review4.md`](docs/review4.md) | Latest strategic review: bottlenecks, missing features, productization, AI-assisted coding uses |
+| [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md) | AI workflow skill/playbook for operating gitsema in coding tasks |
 
 When implementing a new feature or phase:
 1. Add the feature to **`features.md`** under the relevant group.
 2. Update the command/option tables in **`README.md`** if the feature adds a new command or flag.
 3. Mark the phase as completed in **`docs/PLAN.md`** and note any deviations from the original spec.
-4. Run `npm version minor` (or `patch` for hotfixes) **after each phase** and push the tag.
+4. Keep **`docs/review4.md`** aligned when strategic positioning, bottlenecks, or productization priorities change.
+5. Run `npm version minor` (or `patch` for hotfixes) **after each phase** and push the tag.
 
 ---
 
