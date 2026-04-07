@@ -9,7 +9,21 @@ export interface BlobRecord {
 }
 
 export interface SearchResult {
+  /**
+   * For blob/chunk/symbol results: the Git blob OID (SHA-1 hex).
+   * For module results: an empty string — use `modulePath` as the module identifier.
+   * Never contains synthetic strings like `"module:..."`.
+   */
   blobHash: BlobHash
+  /**
+   * Discriminates the result kind:
+   *   - 'blob'   — whole-file embedding match
+   *   - 'chunk'  — sub-file fixed/function chunk match
+   *   - 'symbol' — named declaration (function/class/etc.) match
+   *   - 'module' — directory-level centroid match (see `modulePath`)
+   * Defaults to 'blob' when not explicitly set (backward compat with older code paths).
+   */
+  kind?: 'blob' | 'chunk' | 'symbol' | 'module'
   paths: string[]
   score: number
   firstCommit?: CommitHash
@@ -28,7 +42,11 @@ export interface SearchResult {
   symbolKind?: string
   /** Detected programming language of the symbol — present for symbol-level results. */
   language?: string
-  /** When present, indicates this result is a module-level (directory) centroid match. */
+  /**
+   * Directory path identifier for module-level results.
+   * This is the canonical identifier for module results — use it instead of `blobHash`
+   * when `kind === 'module'`.
+   */
   modulePath?: string
   /** Cluster label from `cluster_assignments` — populated by `--annotate-clusters` on the search command. */
   clusterLabel?: string

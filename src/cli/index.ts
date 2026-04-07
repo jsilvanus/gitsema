@@ -8,7 +8,7 @@ import {
   configUnsetCommand,
 } from './commands/config.js'
 import { statusCommand } from './commands/status.js'
-import { indexCommand } from './commands/index.js'
+import { indexCommand, indexStartCommand } from './commands/index.js'
 import { searchCommand } from './commands/search.js'
 import { codeSearchCommand } from './commands/codeSearch.js'
 import { reposCommand } from './commands/repos.js'
@@ -366,10 +366,32 @@ program
 
 program
   .command('index')
-  .description('Walk Git history and embed all blobs into the semantic index')
+  .description('Show index coverage (blob counts per model). Run `gitsema index start` to perform indexing.')
+  .addHelpText(
+    'after',
+    '\nShows how many Git-reachable blobs have been embedded, broken down by embedding\n' +
+    'model/config.  This command is read-only and never modifies the database.\n\n' +
+    'To start indexing, run:\n' +
+    '  gitsema index start\n\n' +
+    'To force a full re-index from scratch:\n' +
+    '  gitsema index start --since all\n\n' +
+    'For a quick file status, use: gitsema status'
+  )
+  .action(indexCommand)
+
+// index export / index import — Phase 54 subcommands
+// (export-index and import-index top-level aliases kept for backward compatibility)
+
+const indexSub = program.commands.find((c) => c.name() === 'index')!
+
+// ── `gitsema index start` — performs actual indexing ─────────────────────
+indexSub
+  .command('start')
+  .description('Walk Git history and embed all blobs into the semantic index (starts from HEAD first)')
   .addHelpText(
     'after',
     '\nDefault mode is INCREMENTAL: automatically resumes from the last indexed commit.\n' +
+    'Indexing starts from HEAD first (fastest time-to-first-results), then walks history.\n' +
     'Use --since all to force a full re-index from scratch.\n\n' +
     'Progress output shows: stage (collecting/embedding/commit-mapping), % complete,\n' +
     'throughput (blobs/s), embedding latency (avg + p95), and ETA.\n' +
@@ -445,12 +467,7 @@ program
   .option('--auto-build-vss [threshold]', 'automatically build VSS index after indexing when blob count exceeds threshold (default: 10000)')
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
   .option('--profile <name>', 'apply a preset profile: speed (high concurrency, large batches), balanced (default), quality (deep chunking)')
-  .action(indexCommand)
-
-// index export / index import — Phase 54 subcommands
-// (export-index and import-index top-level aliases kept for backward compatibility)
-
-const indexSub = program.commands.find((c) => c.name() === 'index')!
+  .action(indexStartCommand)
 
 indexSub
   .command('export')

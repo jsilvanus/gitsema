@@ -31,10 +31,13 @@
 
 All indexing is **content-addressed**: a blob (file snapshot) is embedded exactly once per SHA-1 hash, regardless of how many commits or paths reference it.
 
+One database can hold embeddings from **multiple embedding models simultaneously**. Each embedding row is attributed to its embedding config via the `embed_config` table.
+
 | Feature | Flag / command |
 |---|---|
-| Full history index | `gitsema index` |
-| **Incremental** (default when run after prior index) | `--since <ref|date|"all">` |
+| **Index coverage status** (read-only, multi-model aware) | `gitsema index` |
+| **Start indexing** (HEAD-first, then history) | `gitsema index start` |
+| **Incremental** (default when run after prior index) | `gitsema index start --since <ref|date|"all">` |
 | Parallel embedding | `--concurrency <n>` (default 4) |
 | Batch embedding requests | `--embed-batch-size <n>` |
 | Extension filter | `--ext ".ts,.py"` |
@@ -48,6 +51,7 @@ All indexing is **content-addressed**: a blob (file snapshot) is embedded exactl
 | Int8 scalar quantization | `--quantize` |
 | Cap commits per run | `--max-commits <n>` |
 | Mixed-model index guard | `--allow-mixed` |
+| Model override for a run | `--model <name>` |
 | Index bundle export / import | `gitsema index export/import` |
 | Automated hooks (post-commit, post-merge) | `gitsema config set hooks.enabled true` |
 | Module-level embeddings (directory centroids) | `gitsema update-modules` |

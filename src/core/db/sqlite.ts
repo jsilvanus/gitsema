@@ -40,8 +40,13 @@ export interface DbSession {
  *  11 — Added quantization columns to embedding tables (Phase 36)
  * 12 — Added missing performance indexes on paths, symbols, chunks, blob_commits and blob_branches (performance fix)
  * 13 — Added embed_config provenance table and indexing_checkpoints table
+ * 14 — Added repos table for multi-repo registry (Phase 41)
+ * 15 — Added db_path column to repos table (Phase 50)
+ * 16 — Added saved_queries table (Phase 53)
+ * 17 — Added projections table (Phase 55)
+ * 18 — Added last_used_at column to embed_config (multi-model status tracking)
  */
-export const CURRENT_SCHEMA_VERSION = 17
+export const CURRENT_SCHEMA_VERSION = 18
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -401,6 +406,16 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     `)
     version = 17
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('17')
+  }
+
+  // v17 → v18: add last_used_at column to embed_config for multi-model status tracking
+  if (version < 18) {
+    const embedConfigCols = sqlite.prepare('PRAGMA table_info(embed_config)').all() as Array<{ name: string }>
+    if (!embedConfigCols.some((c) => c.name === 'last_used_at')) {
+      sqlite.exec(`ALTER TABLE embed_config ADD COLUMN last_used_at INTEGER`)
+    }
+    version = 18
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('18')
   }
 }
 

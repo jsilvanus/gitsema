@@ -32,14 +32,14 @@ To use without linking, prefix commands with `node dist/cli/index.js` instead of
 ```bash
 cd /path/to/your/git/repo
 
-# 1. Index all blobs (uses Ollama by default)
-gitsema index
+# 1. Start indexing (uses Ollama by default)
+gitsema index start
 
 # 2. Search
 gitsema search "authentication middleware"
 
-# 3. Check index status
-gitsema status
+# 3. Check index coverage (per-model, multi-model aware)
+gitsema index
 ```
 
 ## Configuration (environment variables)
@@ -83,7 +83,7 @@ export GITSEMA_PROVIDER=http
 export GITSEMA_HTTP_URL=https://api.openai.com
 export GITSEMA_MODEL=text-embedding-3-small
 export GITSEMA_API_KEY=sk-...
-gitsema index
+gitsema index start
 ```
 
 ## Commands
@@ -121,9 +121,29 @@ gitsema status
 
 ---
 
-#### `gitsema index [options]`
+#### `gitsema index`
 
-Walk the Git history and embed all blobs into the index. Already-indexed blobs are skipped automatically (content-addressed deduplication).
+Show index coverage status — read-only, no writes. Displays Git-reachable blob counts and per-embedding-model coverage, including file-level, chunk-level, symbol-level and module-level stats.
+
+One database can hold embeddings from multiple models simultaneously; this command reports coverage for each.
+
+```
+Output includes:
+  DB path and schema version
+  Git-reachable blob count (true 100% denominator — all refs)
+  DB blob count (what gitsema has seen)
+  Per embed-config / model:
+    file blobs embedded + coverage %
+    chunks, symbols, modules embedded (where present)
+```
+
+---
+
+#### `gitsema index start [options]`
+
+Walk the Git history and embed all blobs into the index. Starts from HEAD first (fastest time-to-first-results) then walks history. Already-indexed blobs are skipped automatically (content-addressed deduplication).
+
+Uses the currently configured embedding model (`GITSEMA_MODEL` / `gitsema config`) unless overridden by `--model`.
 
 ```
 Options:
@@ -141,6 +161,7 @@ Options:
   --window-size <n>       Chunk size in characters for the fixed chunker (default: 1500)
   --overlap <n>           Overlap between adjacent fixed chunks (default: 200)
   --file <paths...>       Index specific file(s) from HEAD (can supply multiple paths)
+  --model <model>         Override embedding model for this run
   --allow-mixed           Skip embed-config compatibility check (allow mixing different
                           embedding dimensions/configs in the same index)
 ```
@@ -148,17 +169,20 @@ Options:
 Examples:
 
 ```bash
-# Full index
-gitsema index
+# Start full index from HEAD first, then walk history
+gitsema index start
 
 # Only TypeScript files added since a tag
-gitsema index --since v1.2.0 --ext ".ts,.tsx"
+gitsema index start --since v1.2.0 --ext ".ts,.tsx"
 
 # Use function-level chunking with higher concurrency
-gitsema index --chunker function --concurrency 8
+gitsema index start --chunker function --concurrency 8
 
 # Index specific files from HEAD
-gitsema index --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
+gitsema index start --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
+
+# Force full re-index with a different model
+gitsema index start --since all --model text-embedding-3-small
 ```
 
 ---
@@ -718,7 +742,7 @@ Outputs a **provenance citation block** for each result, formatted for injection
 gitsema search "authentication middleware" --explain-llm
 ```
 
-#### `--profile <name>` (on `gitsema index`)
+#### `--profile <name>` (on `gitsema index start`)
 
 Applies a **preset indexing profile** that sets coherent defaults for concurrency, embed batch size, and chunker strategy.
 
@@ -729,8 +753,8 @@ Applies a **preset indexing profile** that sets coherent defaults for concurrenc
 | `quality` | 2 | 4 | function | Deep chunk/symbol indexing |
 
 ```bash
-gitsema index --profile speed
-gitsema index --profile quality
+gitsema index start --profile speed
+gitsema index start --profile quality
 ```
 
 #### `GET /api/v1/capabilities` (HTTP server)
@@ -754,12 +778,12 @@ no manual intervention required.
 
 | Hook | Trigger | Command run |
 |---|---|---|
-| `post-commit` | After every `git commit` | `gitsema index --since HEAD~1` |
-| `post-merge` | After every `git pull` / `git merge` | `gitsema index --since ORIG_HEAD` |
+| `post-commit` | After every `git commit` | `gitsema index start --since HEAD~1` |
+| `post-merge` | After every `git pull` / `git merge` | `gitsema index start --since ORIG_HEAD` |
 
 Both hooks are safe no-ops when:
 - `gitsema` is not on your `PATH`, or
-- the index has not been initialised yet (run `gitsema index` once first).
+- the index has not been initialised yet (run `gitsema index start` once first).
 
 ### Installation (manual)
 
