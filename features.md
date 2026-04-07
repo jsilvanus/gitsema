@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.62.0** · Schema: **v17** · Test suite: **~364 tests**
+> Current version: **v0.70.0** · Schema: **v17** · Test suite: **~364 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -59,6 +59,7 @@ All indexing is **content-addressed**: a blob (file snapshot) is embedded exactl
 | **Post-run maintenance recommendations (Phase 63)** | VSS, FTS backfill, vacuum suggestions after each run |
 | **BatchingProvider sub-batch chunking (Phase 62)** | Transparent sub-batch split + retry wrapper for any provider (`buildBatchingProvider()`) |
 | **Ollama true-batch endpoint (Phase 62)** | `OllamaProvider` uses `/api/embed` (Ollama ≥ 0.1.34) for native `string[]` batch; falls back to serial on 404 |
+| **Pipelined read/embed/store (Phase 69)** | `AsyncQueue`-based overlap of batch stages; activated on the batch path |
 | Per-repo project metadata | `gitsema project` (2D projections) |
 
 **Chunking fallback chain:** whole-file → function boundaries → fixed windows (1500 chars) → fixed windows (800 chars) when a blob exceeds the embedding model's context limit.
@@ -322,16 +323,18 @@ Detailed rationale is documented in [`docs/review4.md`](docs/review4.md). High-v
 
 1. ~~Add `experts` parity to MCP and HTTP (`/analysis/experts` + MCP tool).~~ ✅ Phase 61
 2. ~~Add a machine-readable capabilities manifest across CLI/MCP/HTTP.~~ ✅ Phase 64
-3. Add pipelined batch indexing (overlap read/embed/store stages). *(Phase 62 — external repo)*
+3. ~~Add pipelined batch indexing (overlap read/embed/store stages).~~ ✅ Phase 69 (`AsyncQueue`-based pipeline)
 4. ~~Add speed/quality/balanced search profile presets.~~ ✅ Phase 63
 5. ~~Add top-K early-cut scoring mode for large candidate sets.~~ ✅ Phase 64
 6. ~~Add semantic PR report generation for CI and code review.~~ ✅ Phase 61 (`gitsema pr-report`)
-7. Add incident triage bundles (`bisect` + `change-points` + `first-seen`).
-8. Add concept ownership heatmap and ownership-shift tracking.
-9. Add policy-style CI gates for drift/debt/security thresholds.
+7. ~~Add incident triage bundles (`bisect` + `change-points` + `first-seen`).~~ ✅ Phase 65 (`gitsema triage`)
+8. ~~Add concept ownership heatmap and ownership-shift tracking.~~ ✅ Phase 67 (`gitsema ownership`)
+9. ~~Add policy-style CI gates for drift/debt/security thresholds.~~ ✅ Phase 66 (`gitsema policy check`)
 10. ~~Add AI-oriented provenance explain mode for prompt grounding.~~ ✅ Phase 64 (`--explain-llm`)
-11. Add saved workflow templates (`pr-review`, `incident`, `release-audit`).
+11. ~~Add saved workflow templates (`pr-review`, `incident`, `release-audit`).~~ ✅ Phase 68 (`gitsema workflow run`)
 12. ~~Add retrieval quality evaluation harness for AI workflows.~~ ✅ Phase 64 (`gitsema eval`)
+
+All 12 original productization proposals from review4 are now shipped. See [`docs/review5.md`](docs/review5.md) for the next set of priorities.
 
 ---
 
@@ -339,13 +342,17 @@ Detailed rationale is documented in [`docs/review4.md`](docs/review4.md). High-v
 
 This section is intentionally brief. The canonical roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
 
-Key areas still in progress or planned:
+Key areas still in progress or planned (see [`docs/review5.md`](docs/review5.md) for full analysis):
 
-- **Batch embedding pipeline (Phase 62)**: Being developed in a separate repository. Would add pipelined read/embed/store windows with adaptive backpressure.
+- **HTTP route coverage**: Phase 41–47 and Phases 65–70 analysis commands (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`, `triage`, `policy check`, `ownership`, `workflow`, `eval`) have no HTTP API routes yet. CLI and MCP parity exists; HTTP is the gap.
+- **HNSW for general search**: The VSS/HNSW index (used by clustering) is not yet wired into general `vectorSearch()`. Doing so would cap query latency regardless of index size.
+- **OpenAPI spec**: No OpenAPI spec yet. `GET /api/v1/capabilities` provides a feature list but not a schema. `zod-to-openapi` could generate one from existing Zod schemas.
+- **Observability**: No `/metrics` endpoint. Running as a shared server requires parsing log files for latency and error data.
+- **Rate limiting**: HTTP server has optional auth but no per-token or per-IP rate limiting.
+- **Deployment documentation**: No guide for persistent service deployment (Docker, systemd), index backup, or API key rotation.
+- **LSP completeness**: `gitsema tools lsp` handles hover only; `go-to-definition`, `find-references`, and `document-symbol` are stubs. Not production-ready.
+- **Scale warnings in `gitsema status`**: No guidance when index size will cause slow searches (recommend `--early-cut` or `build-vss`).
+- **Result caching**: Query embedding is cached; search results are not. Short-TTL result cache would reduce load for AI assistant use cases.
 - **GPU-accelerated local embeddings**: Xenova/Transformers.js local-inference provider for offline use without Ollama.
-- **LSP completeness**: current LSP server handles hover only; `go-to-definition`, `find-references`, and document-symbol are stubs.
-- **Multi-repo UX polish**: `repos` registry exists but search UI and cross-repo result ranking need work.
-- **HTTP route coverage**: Phase 41–47 analysis commands (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`) have no HTTP API routes yet.
-- **OpenAPI spec**: No OpenAPI spec yet; the new `GET /api/v1/capabilities` endpoint (Phase 64) provides a machine-readable feature list.
 
 For the full list of planned phases and backlog items, see [`docs/PLAN.md`](docs/PLAN.md).
