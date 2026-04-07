@@ -3,6 +3,7 @@ import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
 import { isIndexed } from './deduper.js'
 import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
+import { resolveEmbedBatchSize } from './adaptiveTuning.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { Embedding } from '../models/types.js'
 import { RoutingProvider } from '../embedding/router.js'
@@ -93,6 +94,12 @@ export interface IndexerOptions {
    * Default: 1 (no batching — backward-compatible).
    */
   embedBatchSize?: number
+  /**
+   * Suggested batch size from a profile preset (used for auto-batch detection
+   * when `embedBatchSize` is not explicitly set by the caller).
+   * @internal Used by the CLI `--profile` flag via `adaptiveTuning.resolveEmbedBatchSize`.
+   */
+  profileBatchSize?: number
   onProgress?: (stats: IndexStats) => void
 }
 
@@ -233,7 +240,12 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     computeModuleEmbedding = true,
     onProgress,
   } = options
-  const { quantize = false, embedBatchSize = 1 } = options
+  const { quantize = false } = options
+  const embedBatchSize = resolveEmbedBatchSize({
+    userValue: options.embedBatchSize,
+    provider,
+    profileBatchSize: options.profileBatchSize,
+  })
 
   // Resolve --since: use provided value, or fall back to the last indexed commit
   // for automatic incremental indexing. The special value 'all' forces a full re-index.

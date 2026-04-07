@@ -15,6 +15,7 @@ import { resolve as pathResolve, relative as pathRelative } from 'node:path'
 import { buildVssCommand } from './buildVss.js'
 import { computeConfigHash, saveEmbedConfig, checkConfigCompatibility, type EmbedConfig } from '../../core/indexing/provenance.js'
 import { getRawDb } from '../../core/db/sqlite.js'
+import { getProfileDefaults, postRunRecommendations } from '../../core/indexing/adaptiveTuning.js'
 
 /**
  * Format a duration in milliseconds as a human-friendly string.
@@ -302,6 +303,8 @@ export interface IndexCommandOptions {
   buildVss?: boolean
   autoBuildVss?: string
   allowMixed?: boolean
+  /** Profile preset: speed | balanced | quality */
+  profile?: string
 }
 
 export async function indexCommand(options: IndexCommandOptions): Promise<void> {
@@ -380,8 +383,31 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   // Only build a separate code provider when the models differ
   const codeProvider = codeModel !== textModel ? buildProviderOrExit(providerType, codeModel) : undefined
 
+  // ── Profile preset resolution ─────────────────────────────────────────────
+  // When --profile is specified, apply its defaults for any option that was not
+  // explicitly set by the user. Explicit flags always win over profile defaults.
+  let profileBatchSize: number | undefined
+  let effectiveOptions = options
+  if (options.profile) {
+    let profile
+    try {
+      profile = getProfileDefaults(options.profile)
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+    profileBatchSize = profile.embedBatchSize
+    // Apply profile concurrency only when user did not set it explicitly
+    const effectiveConcurrency = options.concurrency ?? String(profile.concurrency)
+    // Apply profile chunker only when user did not set it explicitly
+    const effectiveChunker = options.chunker ?? profile.chunker
+    effectiveOptions = { ...options, concurrency: effectiveConcurrency, chunker: effectiveChunker }
+    console.log(`Profile: ${options.profile} (concurrency=${effectiveConcurrency}, batchSize=${profileBatchSize}, chunker=${effectiveChunker})`)
+  }
+  const opts = effectiveOptions
+
   // Parse concurrency
-  const concurrency = options.concurrency !== undefined ? parseInt(options.concurrency, 10) : 4
+  const concurrency = opts.concurrency !== undefined ? parseInt(opts.concurrency, 10) : 4
   if (isNaN(concurrency) || concurrency < 1) {
     console.error('Error: --concurrency must be a positive integer')
     process.exit(1)
@@ -423,12 +449,12 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
 
   // Parse chunker strategy
   let chunkerStrategy: ChunkStrategy = 'file'
-  if (options.chunker !== undefined) {
-    if (options.chunker !== 'file' && options.chunker !== 'function' && options.chunker !== 'fixed') {
+  if (opts.chunker !== undefined) {
+    if (opts.chunker !== 'file' && opts.chunker !== 'function' && opts.chunker !== 'fixed') {
       console.error('Error: --chunker must be one of: file, function, fixed')
       process.exit(1)
     }
-    chunkerStrategy = options.chunker as ChunkStrategy
+    chunkerStrategy = opts.chunker as ChunkStrategy
   }
 
   // Parse chunker options (only relevant for `fixed` strategy)
@@ -548,6 +574,7 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
     },
     quantize: options.quantize,
     embedBatchSize,
+    profileBatchSize,
   })
 
   // Clear progress line
@@ -606,6 +633,20 @@ export async function indexCommand(options: IndexCommandOptions): Promise<void> 
   if (stats.embedLatencyAvgMs > 0) {
     console.log('  Embedding latency:')
     console.log(`    Avg: ${stats.embedLatencyAvgMs}ms   P95: ${stats.embedLatencyP95Ms}ms`)
+  }
+
+  // ── Post-run maintenance recommendations ─────────────────────────────────
+  try {
+    const rawDb = getRawDb()
+    const countRow = rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c: number }
+    const existingBlobCount = Math.max(0, (countRow.c ?? 0) - stats.indexed)
+    const recs = postRunRecommendations({ indexed: stats.indexed, existingBlobCount })
+    if (recs.length > 0) {
+      console.log()
+      for (const r of recs) console.log(r)
+    }
+  } catch {
+    // Non-fatal — skip recommendations on errors
   }
 
   // Optionally build VSS index after indexing

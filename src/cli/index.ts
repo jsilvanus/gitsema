@@ -430,6 +430,7 @@ program
   .option('--build-vss', 'build a usearch HNSW ANN index after indexing completes (requires usearch package)')
   .option('--auto-build-vss [threshold]', 'automatically build VSS index after indexing when blob count exceeds threshold (default: 10000)')
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
+  .option('--profile <name>', 'apply a preset profile: speed (high concurrency, large batches), balanced (default), quality (deep chunking)')
   .action(indexCommand)
 
 // index export / index import — Phase 54 subcommands
