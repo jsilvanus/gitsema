@@ -28,6 +28,13 @@
  *   POST /analysis/security-scan  (Phase 43)
  *   POST /analysis/health         (Phase 44)
  *   POST /analysis/debt           (Phase 45)
+ *   POST /analysis/doc-gap        (Phase 38)
+ *   POST /analysis/contributor-profile (Phase 39)
+ *   POST /analysis/triage         (Phase 65)
+ *   POST /analysis/policy-check   (Phase 66)
+ *   POST /analysis/ownership      (Phase 67)
+ *   POST /analysis/workflow       (Phase 68)
+ *   POST /analysis/eval           (Phase 64)
  */
 
 import express from 'express'
@@ -130,6 +137,13 @@ export function createApp(options: AppOptions): Express {
         'security_scan',
         'health_timeline',
         'debt_score',
+        'doc_gap',
+        'contributor_profile',
+        'triage',
+        'policy_check',
+        'ownership',
+        'workflow',
+        'eval',
         'experts',
         'multi_repo_search',
         'hybrid_search',
