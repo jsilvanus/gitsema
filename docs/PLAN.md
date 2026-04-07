@@ -2475,11 +2475,17 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 62 — Node.js In-Process Embedding Backend + Heavy Batching *(external)*
+### Phase 62 — Heavy Batching for Ollama + HTTP Providers *(completed v0.67.0)*
 
-**Goal:** Improve indexing throughput and operational simplicity by supporting a Node-module embedding backend optimized for aggressive batch execution.
+**Goal:** Improve indexing throughput by adding robust batch embedding support optimised for both Ollama and OpenAI-compatible HTTP providers.
 
-**Status:** ⚠️ being developed in a separate repository. Skipped in this repo intentionally.
+**Implemented scope:**
+
+- **`BatchingProvider`** wrapper (`src/core/embedding/batching.ts`): wraps any `EmbeddingProvider` and adds transparent sub-batch chunking (configurable `maxSubBatchSize`, default 32), per-sub-batch retry with exponential back-off (`retries`, `retryDelayMs`), and automatic per-item fallback (zero-vector on total failure so indexing continues).
+- **OllamaProvider true-batch** (`src/core/embedding/local.ts`): `embedBatch()` now uses Ollama's `/api/embed` endpoint (available since Ollama 0.1.34) which accepts `input: string[]` natively — eliminating N round-trips for a batch. Gracefully falls back to concurrent per-item `/api/embeddings` calls when the server returns 404, and remembers the unavailability so no further probing occurs.
+- **`buildBatchingProvider()`** factory (`src/core/embedding/providerFactory.ts`): convenience function that constructs any provider and wraps it in `BatchingProvider` in one call.
+
+**Status:** ✅ complete.
 
 ---
 

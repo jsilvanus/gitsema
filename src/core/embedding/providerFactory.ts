@@ -11,6 +11,7 @@
 
 import { OllamaProvider } from './local.js'
 import { HttpProvider } from './http.js'
+import { BatchingProvider } from './batching.js'
 import type { EmbeddingProvider } from './provider.js'
 
 /**
@@ -27,6 +28,25 @@ export function buildProvider(type: string, model: string): EmbeddingProvider {
     return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
   }
   return new OllamaProvider({ model })
+}
+
+/**
+ * Like `buildProvider`, but wraps the result in a `BatchingProvider` that
+ * splits large `embedBatch()` calls into sub-batches and adds per-sub-batch
+ * retry with exponential back-off.
+ *
+ * The `maxSubBatchSize` governs the maximum texts per sub-batch call; when
+ * omitted it defaults to 32.
+ *
+ * @throws {Error} When `type === 'http'` but `GITSEMA_HTTP_URL` is not set.
+ */
+export function buildBatchingProvider(
+  type: string,
+  model: string,
+  maxSubBatchSize?: number,
+): EmbeddingProvider {
+  const inner = buildProvider(type, model)
+  return new BatchingProvider(inner, { maxSubBatchSize })
 }
 
 /**

@@ -57,6 +57,8 @@ All indexing is **content-addressed**: a blob (file snapshot) is embedded exactl
 | **Auto-batch detection (Phase 63)** | Auto-enables `embedBatch()` when provider supports it |
 | **Adaptive batch controller (Phase 63)** | In-flight batch size adjustment based on observed latency |
 | **Post-run maintenance recommendations (Phase 63)** | VSS, FTS backfill, vacuum suggestions after each run |
+| **BatchingProvider sub-batch chunking (Phase 62)** | Transparent sub-batch split + retry wrapper for any provider (`buildBatchingProvider()`) |
+| **Ollama true-batch endpoint (Phase 62)** | `OllamaProvider` uses `/api/embed` (Ollama ≥ 0.1.34) for native `string[]` batch; falls back to serial on 404 |
 | Per-repo project metadata | `gitsema project` (2D projections) |
 
 **Chunking fallback chain:** whole-file → function boundaries → fixed windows (1500 chars) → fixed windows (800 chars) when a blob exceeds the embedding model's context limit.
