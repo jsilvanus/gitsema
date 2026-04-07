@@ -2455,73 +2455,62 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ---
 
-### Phase 61 — MCP/HTTP Parity + Semantic PR Report *(planned)*
+### Phase 61 — MCP/HTTP Parity + Semantic PR Report *(completed v0.64.0)*
 
 **Goal:** Productize current analysis primitives into a single CI/review workflow and close cross-surface parity gaps.
 
-**Planned scope:**
+**Implemented scope:**
 
-- Add `experts` parity outside CLI:
+- Added `experts` parity outside CLI:
   - MCP tool: `experts`
   - HTTP route: `POST /api/v1/analysis/experts`
-- Add `gitsema pr-report` command to compose:
+- Added `gitsema pr-report` command composing:
   - semantic diff summary
   - impacted modules
   - change-point highlights
   - reviewer suggestions (`experts`)
-- Add machine-readable output (`--dump`) for CI/bot ingestion.
+- Machine-readable output (`--dump`) for CI/bot ingestion.
 
-**Status:** not yet implemented.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 62 — Node.js In-Process Embedding Backend + Heavy Batching *(planned)*
+### Phase 62 — Node.js In-Process Embedding Backend + Heavy Batching *(external)*
 
 **Goal:** Improve indexing throughput and operational simplicity by supporting a Node-module embedding backend optimized for aggressive batch execution.
 
-**Planned scope:**
-
-- Add a Node.js in-process embedding provider module implementing `EmbeddingProvider` + robust `embedBatch()`.
-- Introduce a provider-side queue/micro-batch scheduler for local/self-hosted flows.
-- Extend indexer batch path to support pipelined read/embed/store windows (bounded overlap).
-- Add throughput guardrails: retry policy, adaptive backpressure, and provider capability checks.
-
-**Status:** not yet implemented.
+**Status:** ⚠️ being developed in a separate repository. Skipped in this repo intentionally.
 
 ---
 
-### Phase 63 — Indexing Auto-Defaults and Adaptive Tuning *(planned)*
+### Phase 63 — Indexing Auto-Defaults and Adaptive Tuning *(completed v0.65.0)*
 
 **Goal:** Make indexing fast by default without requiring deep manual tuning.
 
-**Planned scope:**
+**Implemented scope:**
 
-- Auto-enable batch mode when provider supports `embedBatch()`.
-- Add adaptive tuning for `embedBatchSize` and concurrency based on:
-  - observed embedding latency
-  - error/throttle rate
-  - memory safety limits
-- Add profile presets (`--profile speed|balanced|quality`) to set coherent indexing/search defaults.
-- Add optional auto-maintenance hooks after indexing runs:
-  - VSS auto-build/update threshold policy
-  - post-run maintenance recommendations (FTS/vacuum)
+- Auto-enabled batch mode when provider supports `embedBatch()` (via `resolveEmbedBatchSize` in `adaptiveTuning.ts`).
+- `AdaptiveBatchController` class for in-flight batch size adjustment based on observed latency and error rate.
+- Profile presets (`--profile speed|balanced|quality`) on `gitsema index` for coherent concurrency/batch/chunker defaults.
+- Post-run maintenance recommendations (`postRunRecommendations`) for VSS/FTS/vacuum.
+- `IndexerOptions.profileBatchSize` field for profile-driven auto-batch.
 
-**Status:** not yet implemented.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 64 — Search Scalability + AI Retrieval Reliability *(planned)*
+### Phase 64 — Search Scalability + AI Retrieval Reliability *(completed v0.66.0)*
 
 **Goal:** Reduce broad-query cost and improve trust for AI-assisted coding workflows.
 
-**Planned scope:**
+**Implemented scope:**
 
-- Add top-k early-cut scoring mode to avoid full candidate materialization on very large pools.
-- Add capabilities manifest endpoint for CLI/MCP/HTTP integration clients.
-- Add provenance-oriented explain output optimized for LLM prompts.
-- Add retrieval evaluation harness (precision/latency tracking across model/ranking settings).
+- Top-k early-cut scoring mode (`--early-cut <n>` on `gitsema search`, `earlyCut` in `VectorSearchOptions`) to avoid full candidate materialization on very large pools.
+- Capabilities manifest endpoint (`GET /api/v1/capabilities`) for CLI/MCP/HTTP integration clients.
+- Provenance-oriented explain output optimized for LLM prompts (`--explain-llm` on `gitsema search`, `formatExplainForLlm` in `explainFormatter.ts`).
+- Retrieval evaluation harness (`gitsema eval <file>`) measuring P@k, R@k, MRR, and latency from a JSONL eval file.
 
-**Status:** not yet implemented.
+**Status:** ✅ complete.
 
 ---
 

@@ -53,6 +53,10 @@ All indexing is **content-addressed**: a blob (file snapshot) is embedded exactl
 | Module-level embeddings (directory centroids) | `gitsema update-modules` |
 | Remote-repo indexing via HTTP server | `gitsema remote-index <url>` |
 | Multi-repo registry | `gitsema repos add/list/remove` |
+| **Profile presets (Phase 63)** | `--profile speed\|balanced\|quality` |
+| **Auto-batch detection (Phase 63)** | Auto-enables `embedBatch()` when provider supports it |
+| **Adaptive batch controller (Phase 63)** | In-flight batch size adjustment based on observed latency |
+| **Post-run maintenance recommendations (Phase 63)** | VSS, FTS backfill, vacuum suggestions after each run |
 | Per-repo project metadata | `gitsema project` (2D projections) |
 
 **Chunking fallback chain:** whole-file → function boundaries → fixed windows (1500 chars) → fixed windows (800 chars) when a blob exceeds the embedding model's context limit.
@@ -84,6 +88,8 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | HNSW approximate-nearest-neighbor search | `--vss` (requires built VSS index) |
 | HTML output | `--html [file]` |
 | Multi-repo search | `gitsema repos` + MCP `multi_repo_search` |
+| **Early-cut (Phase 64)** | `--early-cut <n>` — random-sample candidate pool for speed on large indexes |
+| **LLM provenance citations (Phase 64)** | `--explain-llm` — structured citation block for LLM prompt grounding |
 
 ---
 
@@ -164,6 +170,9 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | Security scan (vulnerability pattern similarity) | `gitsema security-scan` (results are similarity scores, not confirmed CVEs) |
 | Health timeline (churn rate, dead-concept ratio) | `gitsema health` |
 | Technical debt scoring (isolation, age, frequency) | `gitsema debt` |
+| **Experts / reviewer suggestions (Phase 61)** | `gitsema experts` |
+| **Semantic PR report (Phase 61)** | `gitsema pr-report` |
+| **Retrieval evaluation harness (Phase 64)** | `gitsema eval <file.jsonl>` |
 
 ---
 
@@ -212,6 +221,8 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/merge-audit` | Merge audit |
 | `POST /api/v1/analysis/merge-preview` | Merge preview |
 | `POST /api/v1/analysis/branch-summary` | Branch summary |
+| `POST /api/v1/analysis/experts` | Experts / reviewer suggestions (Phase 61) |
+| `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui` flag) |
 
 Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`.
@@ -302,18 +313,18 @@ Environment variables always override config-file values. See [`README.md`](READ
 
 Detailed rationale is documented in [`docs/review4.md`](docs/review4.md). High-value productizations proposed from the current codebase:
 
-1. Add `experts` parity to MCP and HTTP (`/analysis/experts` + MCP tool).
-2. Add a machine-readable capabilities manifest across CLI/MCP/HTTP.
-3. Add pipelined batch indexing (overlap read/embed/store stages).
-4. Add speed/quality/balanced search profile presets.
-5. Add top-K early-cut scoring mode for large candidate sets.
-6. Add semantic PR report generation for CI and code review.
+1. ~~Add `experts` parity to MCP and HTTP (`/analysis/experts` + MCP tool).~~ ✅ Phase 61
+2. ~~Add a machine-readable capabilities manifest across CLI/MCP/HTTP.~~ ✅ Phase 64
+3. Add pipelined batch indexing (overlap read/embed/store stages). *(Phase 62 — external repo)*
+4. ~~Add speed/quality/balanced search profile presets.~~ ✅ Phase 63
+5. ~~Add top-K early-cut scoring mode for large candidate sets.~~ ✅ Phase 64
+6. ~~Add semantic PR report generation for CI and code review.~~ ✅ Phase 61 (`gitsema pr-report`)
 7. Add incident triage bundles (`bisect` + `change-points` + `first-seen`).
 8. Add concept ownership heatmap and ownership-shift tracking.
 9. Add policy-style CI gates for drift/debt/security thresholds.
-10. Add AI-oriented provenance explain mode for prompt grounding.
+10. ~~Add AI-oriented provenance explain mode for prompt grounding.~~ ✅ Phase 64 (`--explain-llm`)
 11. Add saved workflow templates (`pr-review`, `incident`, `release-audit`).
-12. Add retrieval quality evaluation harness for AI workflows.
+12. ~~Add retrieval quality evaluation harness for AI workflows.~~ ✅ Phase 64 (`gitsema eval`)
 
 ---
 
@@ -323,11 +334,11 @@ This section is intentionally brief. The canonical roadmap is in [`docs/PLAN.md`
 
 Key areas still in progress or planned:
 
-- **Batch embedding**: the indexer still sends one blob per request to the embedding backend. A proper batched path (`--embed-batch-size` flag exists but batching support depends on the backend).
+- **Batch embedding pipeline (Phase 62)**: Being developed in a separate repository. Would add pipelined read/embed/store windows with adaptive backpressure.
 - **GPU-accelerated local embeddings**: Xenova/Transformers.js local-inference provider for offline use without Ollama.
 - **LSP completeness**: current LSP server handles hover only; `go-to-definition`, `find-references`, and document-symbol are stubs.
 - **Multi-repo UX polish**: `repos` registry exists but search UI and cross-repo result ranking need work.
 - **HTTP route coverage**: Phase 41–47 analysis commands (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`) have no HTTP API routes yet.
-- **OpenAPI / capabilities endpoint**: no `GET /api/v1/capabilities` or OpenAPI spec; clients must know routes out of band.
+- **OpenAPI spec**: No OpenAPI spec yet; the new `GET /api/v1/capabilities` endpoint (Phase 64) provides a machine-readable feature list.
 
 For the full list of planned phases and backlog items, see [`docs/PLAN.md`](docs/PLAN.md).
