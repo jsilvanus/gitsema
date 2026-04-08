@@ -1,7 +1,7 @@
 import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
-import { isIndexed } from './deduper.js'
+import { isIndexed, filterNewBlobs } from './deduper.js'
 import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
 import { resolveEmbedBatchSize } from './adaptiveTuning.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
@@ -324,6 +324,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   const blobsToProcess: BlobEntry[] = []
   const collectionStart = Date.now()
 
+  interface PendingEntry { entry: BlobEntry; wouldUseModel: string }
+  const pending: PendingEntry[] = []
+
   for await (const entry of stream as AsyncIterable<BlobEntry>) {
     const { blobHash, path } = entry
 
@@ -341,15 +344,38 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       continue
     }
 
-    // Skip blobs already indexed with the model that would be used for this path
+    // Defer deduplication to a batched query after collection to avoid
+    // one SQLite query per blob when streaming large histories.
     const wouldUseModel = router ? router.providerForFile(path).model : provider.model
-    if (isIndexed(blobHash, wouldUseModel)) {
+    pending.push({ entry, wouldUseModel })
+  }
+
+  // Batch deduplication: group pending entries by model and ask the DB which
+  // hashes are *not* yet indexed for that model. This replaces per-blob
+  // `isIndexed()` calls with batched `filterNewBlobs()` queries.
+  const byModel = new Map<string, string[]>()
+  for (const p of pending) {
+    const list = byModel.get(p.wouldUseModel) ?? []
+    list.push(p.entry.blobHash)
+    byModel.set(p.wouldUseModel, list)
+  }
+
+  const newHashSets = new Map<string, Set<string>>()
+  for (const [m, hashes] of byModel) {
+    const newSet = await filterNewBlobs(hashes, m)
+    newHashSets.set(m, newSet)
+  }
+
+  // Build the final blobsToProcess list and update skipped counters for those
+  // that were already present in the DB.
+  for (const p of pending) {
+    const allowed = newHashSets.get(p.wouldUseModel) ?? new Set<string>()
+    if (!allowed.has(p.entry.blobHash)) {
       stats.skipped++
       onProgress?.({ ...stats, elapsed: Date.now() - start })
       continue
     }
-
-    blobsToProcess.push(entry)
+    blobsToProcess.push(p.entry)
   }
 
   // Expose the total work queue so callers can render a progress bar.

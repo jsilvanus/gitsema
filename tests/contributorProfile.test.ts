@@ -31,6 +31,7 @@ describe('computeContributorProfile', () => {
     // top result should reference blob1 in paths or blobHash
     expect(results[0].blobHash || results[0].paths).toBeTruthy()
 
+    session.rawDb.close()
     rmSync(tmpDir, { recursive: true, force: true })
   })
 })

@@ -32,6 +32,7 @@ import {
   type ModelProfile,
   type ConfigScope,
 } from '../../core/config/configManager.js'
+import { ensureModelDownloadedAndOptimized } from '../../core/embedding/embedeer.js'
 
 // ---------------------------------------------------------------------------
 // Shared helper
@@ -390,6 +391,21 @@ export async function modelsAddCommand(
   if (options.setDefault) console.log(`  Set as default model (model + textModel + codeModel).`)
   if (options.setText && !options.setDefault) console.log(`  Set as default text model (textModel).`)
   if (options.setCode && !options.setDefault) console.log(`  Set as default code model (codeModel).`)
+
+  // If the user selected the embedeer provider, attempt to download & optimise the model.
+  if ((options.provider === 'embedeer') || (profile.provider === 'embedeer')) {
+    try {
+      console.log(`embedeer: ensuring model '${modelName}' is downloaded and optimised (this may take a while)...`)
+      // Best-effort: download if missing, then optimise.
+      // Failures are reported but do not prevent the profile from being saved.
+      // eslint-disable-next-line no-await-in-loop
+      await ensureModelDownloadedAndOptimized(modelName, { downloadIfMissing: true, optimize: true })
+      console.log('embedeer: model setup complete.')
+    } catch (err) {
+      console.error(`embedeer: model setup failed: ${err instanceof Error ? err.message : String(err)}`)
+      console.error('You can retry manually after installing the embedeer package: npm install @jsilvanus/embedeer')
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +468,20 @@ export async function modelsUpdateCommand(
   if (options.setDefault) console.log(`  Set as default model (model + textModel + codeModel).`)
   if (options.setText && !options.setDefault) console.log(`  Set as default text model (textModel).`)
   if (options.setCode && !options.setDefault) console.log(`  Set as default code model (codeModel).`)
+
+  // If the effective profile uses embedeer, attempt a best-effort optimiser run.
+  try {
+    const finalProfile = getModelProfile(modelName)
+    if (finalProfile.provider === 'embedeer') {
+      console.log(`embedeer: running optimisation for model '${modelName}' (this may take a while)...`)
+      // eslint-disable-next-line no-await-in-loop
+      await ensureModelDownloadedAndOptimized(modelName, { downloadIfMissing: true, optimize: true })
+      console.log('embedeer: optimisation complete.')
+    }
+  } catch (err) {
+    console.error(`embedeer: optimisation failed: ${err instanceof Error ? err.message : String(err)}`)
+    console.error('You can retry manually after installing the embedeer package: npm install @jsilvanus/embedeer')
+  }
 }
 
 // ---------------------------------------------------------------------------

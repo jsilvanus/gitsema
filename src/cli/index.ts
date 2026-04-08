@@ -431,7 +431,7 @@ modelsSub
 modelsSub
   .command('add <name>')
   .description('Configure provider settings for a model (saved to .gitsema/config.json or global config)')
-  .option('--provider <type>', 'provider type: ollama or http')
+  .option('--provider <type>', 'provider type: ollama, http or embedeer')
   .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
   .option('--key <apikey>', 'API key for HTTP provider')
   .option('--level <level>', 'default indexing/search granularity: file, function, fixed, chunk, symbol, module')
@@ -443,8 +443,8 @@ modelsSub
   .option('--prefix-text <str>', 'prefix for text/prose file document embeddings, e.g. "search_document:"')
   .option('--prefix-query <str>', 'prefix for search query embeddings, e.g. "search_query:"')
   .option('--prefix-other <str>', 'prefix for files in the "other" category (not code or text), e.g. "search_document:"')
-  .option('--prefix-type <role=prefix>', 'user-defined role prefix (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [])
-  .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [])
+  .option('--prefix-type <role=prefix>', 'user-defined role prefix (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
+  .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
   .action(async (
     name: string,
     opts: { provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
@@ -456,7 +456,7 @@ modelsSub
 modelsSub
   .command('update <name>')
   .description('Update provider settings for a model (saved to .gitsema/config.json or global config)')
-  .option('--provider <type>', 'provider type: ollama or http')
+  .option('--provider <type>', 'provider type: ollama, http or embedeer')
   .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
   .option('--key <apikey>', 'API key for HTTP provider')
   .option('--level <level>', 'default indexing/search granularity: file, function, fixed, chunk, symbol, module')
@@ -468,8 +468,8 @@ modelsSub
   .option('--prefix-text <str>', 'prefix for text/prose file document embeddings, e.g. "search_document:"')
   .option('--prefix-query <str>', 'prefix for search query embeddings, e.g. "search_query:"')
   .option('--prefix-other <str>', 'prefix for files in the "other" category (not code or text), e.g. "search_document:"')
-  .option('--prefix-type <role=prefix>', 'user-defined role prefix (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [])
-  .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [])
+  .option('--prefix-type <role=prefix>', 'user-defined role prefix (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
+  .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
   .action(async (
     name: string,
     opts: { provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;

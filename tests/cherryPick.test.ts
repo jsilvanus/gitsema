@@ -30,7 +30,7 @@ describe('suggestCherryPicks', () => {
     const results = await withDbSession(session, async () => suggestCherryPicks(queryEmb as any, { topK: 5, model: 'm' }))
     expect(results.length).toBeGreaterThan(0)
     expect(results[0].commitHash).toBe('commit1')
-
+    session.rawDb.close()
     rmSync(tmpDir, { recursive: true, force: true })
   })
 })

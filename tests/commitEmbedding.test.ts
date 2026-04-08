@@ -111,6 +111,7 @@ describe('storeCommitEmbedding', () => {
     expect(row!.model).toBe('mock-model')
     expect(row!.dimensions).toBe(8)
     expect(row!.vector.byteLength).toBe(8 * 4) // Float32 × 8 dims
+    session.rawDb.close()
   })
 
   it('is idempotent — duplicate inserts are silently ignored', async () => {
@@ -140,6 +141,7 @@ describe('storeCommitEmbedding', () => {
     ).c
 
     expect(count).toBe(1)
+    session.rawDb.close()
   })
 })
 
@@ -215,6 +217,7 @@ describe('indexer — commit message embeddings (integration)', () => {
 
     expect(count).toBeGreaterThan(0)
     expect(count).toBe(stats.commitEmbeddings)
+    session.rawDb.close()
   })
 
   it('searchCommits returns ranked results', async () => {
@@ -247,6 +250,7 @@ describe('indexer — commit message embeddings (integration)', () => {
     for (let i = 1; i < results.length; i++) {
       expect(results[i].score).toBeLessThanOrEqual(results[i - 1].score)
     }
+    session.rawDb.close()
   })
 
   it('searchCommits returns empty array when no commit_embeddings exist', async () => {
@@ -261,6 +265,7 @@ describe('indexer — commit message embeddings (integration)', () => {
     )
 
     expect(results).toEqual([])
+    session.rawDb.close()
   })
 
   it('commit embeddings are not duplicated on re-index', async () => {
@@ -286,5 +291,6 @@ describe('indexer — commit message embeddings (integration)', () => {
     ).c
 
     expect(countAfter).toBe(countBefore)
+    session.rawDb.close()
   })
 })

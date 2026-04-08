@@ -131,6 +131,7 @@ describe('indexer integration', () => {
     // Verify blobs are stored
     const blobRows = session.rawDb.prepare('SELECT COUNT(*) as c FROM blobs').get() as { c: number }
     expect(blobRows.c).toBeGreaterThan(0)
+    session.rawDb.close()
   })
 
   it('populates the FTS5 table for hybrid search', async () => {
@@ -140,6 +141,7 @@ describe('indexer integration', () => {
       .prepare('SELECT COUNT(*) as c FROM blob_fts')
       .get() as { c: number }
     expect(ftsRows.c).toBeGreaterThan(0)
+    session.rawDb.close()
   })
 
   it('records first-seen commit timestamps', async () => {
@@ -155,6 +157,7 @@ describe('indexer integration', () => {
       .prepare('SELECT COUNT(*) as c FROM commits WHERE timestamp <= 0')
       .get() as { c: number }
     expect(badCommits.c).toBe(0)
+    session.rawDb.close()
   })
 
   it('vectorSearch returns results for an embedded query', async () => {
@@ -176,6 +179,7 @@ describe('indexer integration', () => {
       expect(r.blobHash).toBeTruthy()
       expect(r.paths.length).toBeGreaterThan(0)
     }
+    session.rawDb.close()
   })
 
   it('first-seen sort returns results in chronological order', async () => {
@@ -195,6 +199,7 @@ describe('indexer integration', () => {
         expect(r.firstSeen).toBeGreaterThan(0)
       }
     }
+    session.rawDb.close()
   })
 
   it('indexes the same repo twice without double-counting blobs', async () => {
@@ -224,5 +229,6 @@ describe('indexer integration', () => {
     // All blobs should be skipped (already indexed)
     expect(stats.skipped).toBeGreaterThan(0)
     expect(stats.indexed).toBe(0)
+    session.rawDb.close()
   })
 })

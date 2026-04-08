@@ -11,6 +11,7 @@
 
 import { OllamaProvider } from './local.js'
 import { HttpProvider } from './http.js'
+import { EmbedeerProvider } from './embedeer.js'
 import { BatchingProvider } from './batching.js'
 import { PrefixedProvider } from './prefixedProvider.js'
 import type { EmbeddingProvider } from './provider.js'
@@ -30,6 +31,9 @@ export function buildProvider(type: string, model: string): EmbeddingProvider {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
     return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+  }
+  if (type === 'embedeer') {
+    return new EmbedeerProvider({ model })
   }
   return new OllamaProvider({ model })
 }
@@ -56,6 +60,9 @@ export function buildProviderForModel(modelName: string): EmbeddingProvider {
     }
     const apiKey = profile.apiKey ?? process.env.GITSEMA_API_KEY
     return new HttpProvider({ baseUrl, model: modelName, apiKey })
+  }
+  if (type === 'embedeer') {
+    return new EmbedeerProvider({ model: modelName })
   }
   return new OllamaProvider({ model: modelName })
 }
@@ -125,6 +132,8 @@ export function getTextProvider(): EmbeddingProvider {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
     inner = new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+  } else if (type === 'embedeer') {
+    inner = new EmbedeerProvider({ model })
   } else {
     inner = new OllamaProvider({ model })
   }
@@ -157,6 +166,8 @@ export function getCodeProvider(): EmbeddingProvider {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
     inner = new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+  } else if (type === 'embedeer') {
+    inner = new EmbedeerProvider({ model })
   } else {
     inner = new OllamaProvider({ model })
   }

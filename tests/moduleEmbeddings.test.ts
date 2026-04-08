@@ -104,6 +104,7 @@ describe('module embeddings — integration', () => {
       expect(got!.blobCount).toBe(2)
       expect(got!.vector.length).toBe(v.length)
     })
+    session.rawDb.close()
   })
 
   it('indexing with --chunker function also stores whole-file embeddings', async () => {
@@ -116,12 +117,14 @@ describe('module embeddings — integration', () => {
 
     const embCount = session.rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c: number }
     expect(embCount.c).toBeGreaterThan(0)
+    session.rawDb.close()
   })
 
   it('module embeddings exist after indexing', () => {
     const session = openDatabaseAt(dbPath)
     const row = session.rawDb.prepare('SELECT COUNT(*) as c FROM module_embeddings').get() as { c: number }
     expect(row.c).toBeGreaterThan(0)
+    session.rawDb.close()
   })
 
   it('vectorSearch with searchModules:true returns module-level results', async () => {
@@ -136,6 +139,7 @@ describe('module embeddings — integration', () => {
     expect(results.length).toBeGreaterThan(0)
     const moduleResults = results.filter((r) => r.modulePath !== undefined)
     expect(moduleResults.length).toBeGreaterThan(0)
+    session.rawDb.close()
   })
 
   it('deleteAllModuleEmbeddings + recompute yields consistent counts', async () => {
@@ -165,5 +169,6 @@ describe('module embeddings — integration', () => {
       const post = session.rawDb.prepare('SELECT COUNT(*) as c FROM module_embeddings').get() as { c: number }
       expect(post.c).toBeGreaterThan(0)
     })
+    session.rawDb.close()
   })
 })

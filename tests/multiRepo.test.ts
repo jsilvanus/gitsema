@@ -21,6 +21,7 @@ describe('repoRegistry', () => {
     expect(r1).not.toBeNull()
     expect(r1?.name).toBe('Repo One')
 
+    session.rawDb.close()
     rmSync(tmpDir, { recursive: true, force: true })
   })
 })

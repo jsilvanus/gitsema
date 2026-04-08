@@ -409,7 +409,7 @@ export function listConfig(cwd: string = process.cwd()): ConfigEntry[] {
  *   { "models": { "text-embedding-3-small": { "provider": "http", "httpUrl": "...", "apiKey": "..." } } }
  */
 export interface ModelProfile {
-  /** Provider type: "ollama" or "http". */
+  /** Provider type: "ollama", "http", or "embedeer". */
   provider?: string
   /** Base URL for HTTP provider. */
   httpUrl?: string

@@ -290,6 +290,8 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const wTotal = wv + wr + wp || 1
 
   const { db, rawDb } = getActiveSession()
+  // AUTO_CANDIDATE_LIMIT: when auto-capping is active, sample this many rows at SQL level
+  const AUTO_CANDIDATE_LIMIT = 50_000
 
   // Load stored embeddings, optionally filtered to a specific model
   const baseQuery = db.select({
@@ -300,11 +302,19 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     quantScale: embeddings.quantScale,
   }).from(embeddings)
 
-  // Build SQL-level filters for model and branch to avoid loading all rows
+  // Build SQL-level filters for model and branch to avoid loading all rows.
+  // NOTE: before/after time filters compare against first-commit timestamp (via blob_commits),
+  // not indexed_at — so those remain as a JS-level post-filter via filterByTimeRange().
   const conditions: SQL[] = []
   if (model) conditions.push(eq(embeddings.model, model))
   if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
-  const filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
+
+  // Apply SQL-level sampling when using the auto-cap (earlyCut === 0) and
+  // no allowedHashes pre-filter is active. This prevents loading huge tables.
+  let filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
+  if (earlyCut === 0 && !allowedHashes) {
+    filteredQuery = (filteredQuery.orderBy(sql`RANDOM()`).limit(AUTO_CANDIDATE_LIMIT)) as typeof filteredQuery
+  }
   const allRows = filteredQuery.all()
 
   // Optionally include chunk embeddings
@@ -437,7 +447,6 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   // prevent OOM on large indexes — equivalent to making --early-cut opt-out
   // rather than opt-in.  Pass earlyCut: -1 to disable the auto-cap entirely.
   // Memory cost of sampling is O(effectiveCut), not O(pool).
-  const AUTO_CANDIDATE_LIMIT = 50_000
   const effectiveCut = earlyCut > 0 ? earlyCut
     : earlyCut === 0 && filteredPool.length > AUTO_CANDIDATE_LIMIT ? AUTO_CANDIDATE_LIMIT
     : 0

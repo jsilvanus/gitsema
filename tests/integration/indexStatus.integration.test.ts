@@ -126,6 +126,7 @@ describe('computeIndexStatus — integration (real git repo)', () => {
 
     // At least one model should have coverage
     expect(status.configs.length).toBeGreaterThanOrEqual(1)
+    session.rawDb.close()
   })
 })
 
@@ -207,6 +208,7 @@ describe('formatIndexStatus — integration output format', () => {
     expect(out).toContain('DB blobs:')
     // Should suggest next steps
     expect(out).toContain('gitsema index start')
+    session.rawDb.close()
   })
 
   it('produces valid output for an empty DB (no blobs)', () => {

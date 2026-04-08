@@ -16,18 +16,18 @@
  */
 
 import { describe, it, expect, vi, beforeAll } from 'vitest'
-import { openDatabaseAt } from '../src/core/db/sqlite.js'
 
 // ---------------------------------------------------------------------------
 // Stub getActiveSession() so all core functions use our in-memory DB
 // ---------------------------------------------------------------------------
-const inMemorySession = openDatabaseAt(':memory:')
-
 vi.mock('../src/core/db/sqlite.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/core/db/sqlite.js')>()
+  // Create a fresh in-memory session inside the mock factory (hoisted)
+  const inMemorySession = actual.openDatabaseAt(':memory:')
   return {
     ...actual,
     getActiveSession: () => inMemorySession,
+    db: inMemorySession.db,
   }
 })
 

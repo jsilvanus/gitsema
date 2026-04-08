@@ -45,6 +45,7 @@ describe('computeDocGap', () => {
     // codeA has max similarity 0 -> should be first
     expect(results[0].blobHash).toBe('codeA')
 
+    session.rawDb.close()
     rmSync(tmpDir, { recursive: true, force: true })
   })
 })

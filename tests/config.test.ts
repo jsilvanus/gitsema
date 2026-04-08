@@ -173,7 +173,7 @@ describe('coerceValue', () => {
 
 describe('getLocalConfigPath', () => {
   it('returns path under .gitsema/config.json relative to cwd', () => {
-    expect(getLocalConfigPath('/some/repo')).toBe('/some/repo/.gitsema/config.json')
+    expect(getLocalConfigPath('/some/repo')).toBe(join('/some/repo', '.gitsema', 'config.json'))
   })
 })
 

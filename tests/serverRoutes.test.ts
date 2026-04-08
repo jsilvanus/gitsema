@@ -10,9 +10,20 @@
  * Zod validation, response shapes, and error handling.
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import request from 'supertest'
-import { openDatabaseAt } from '../src/core/db/sqlite.js'
+
+// Mock sqlite DB module to return an in-memory session for all imports
+vi.mock('../src/core/db/sqlite.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/db/sqlite.js')>()
+  const session = actual.openDatabaseAt(':memory:')
+  return {
+    ...actual,
+    getActiveSession: () => session,
+    db: session.db,
+  }
+})
+
 import { createApp } from '../src/server/app.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
@@ -31,9 +42,8 @@ const mockProvider: EmbeddingProvider = {
 // App + DB setup — shared across all describe blocks
 // ---------------------------------------------------------------------------
 let app: ReturnType<typeof createApp>
-const session = openDatabaseAt(':memory:')
 
-beforeAll(() => {
+beforeAll(async () => {
   app = createApp({ textProvider: mockProvider })
 })
 

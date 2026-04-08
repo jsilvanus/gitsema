@@ -11,7 +11,7 @@ The latest review is here. Do not edit the review file, but update that file wit
 
 | Document | Purpose |
 |---|---|
-| [`docs/review5.md`](docs/review5.md) | Latest strategic review: bottlenecks, missing features, productization, AI-assisted coding uses |
+| [`docs/review6.md`](docs/review6.md) | Latest strategic review: architecture maturity, scale readiness, test health, remaining gaps |
 
 When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.

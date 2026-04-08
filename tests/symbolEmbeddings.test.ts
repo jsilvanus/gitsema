@@ -331,6 +331,7 @@ describe('indexer — symbol-level embeddings (integration)', () => {
       .prepare('SELECT COUNT(*) as c FROM symbol_embeddings')
       .get() as { c: number }
     expect(symEmbRows.c).toBeGreaterThan(0)
+    session.rawDb.close()
   })
 
   it('stores correct symbol names and kinds', async () => {
@@ -352,6 +353,7 @@ describe('indexer — symbol-level embeddings (integration)', () => {
         expect(row.symbol_kind).toBe('function')
       }
     }
+    session.rawDb.close()
   })
 
   it('vectorSearch returns symbol-level results when searchSymbols is set', async () => {
@@ -376,6 +378,7 @@ describe('indexer — symbol-level embeddings (integration)', () => {
       expect(r.language).toBeTruthy()
       expect(r.startLine).toBeGreaterThan(0)
     }
+    session.rawDb.close()
   })
 
   it('symbol embeddings are not duplicated on re-index', async () => {
@@ -402,5 +405,6 @@ describe('indexer — symbol-level embeddings (integration)', () => {
     ).c
 
     expect(countAfter).toBe(countBefore)
+    session.rawDb.close()
   })
 })

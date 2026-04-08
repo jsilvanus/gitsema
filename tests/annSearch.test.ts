@@ -1,5 +1,14 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+
+// Ensure filesystem checks are mocked so tests run isolated from workspace files
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual, existsSync: vi.fn(() => false) }
+})
+
 import { getVssIndexPaths, annSearch } from '../src/core/search/vectorSearch.js'
+
+afterEach(() => { vi.restoreAllMocks() })
 
 describe('getVssIndexPaths', () => {
   it('returns null when index files do not exist', () => {
