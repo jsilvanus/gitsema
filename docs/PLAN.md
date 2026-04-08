@@ -59,16 +59,16 @@
 |   [Phase 38 — Medium Effort: Documentation Gap Analysis, Semantic Bisect, GC, Boolean Queries](#phase-38-—-medium-effort-documentation-gap-analysis-semantic-bisect-gc-boolean-queries) | 2045 |
 |   [Phase 39 — Analysis Features: Contributor Profiles, Refactoring, Lifecycle, CI Diff](#phase-39-—-analysis-features-contributor-profiles-refactoring-lifecycle-ci-diff) | 2070 |
 |   [Phase 40 — Visualization & Scale: Codebase Map, Temporal Heatmap, Remote Index, Cherry-Pick](#phase-40-—-visualization-scale-codebase-map-temporal-heatmap-remote-index-cherry-pick) | 2095 |
-|   [Phase 41+ — Large Investments (Stubs & Roadmap)](#phase-41-—-large-investments-stubs-roadmap) | 2126 |
-| [Section II - What's weak or underexplored](#section-ii-whats-weak-or-underexplored) | 2149 |
-|   [1. Function chunker is a regex heuristic](#1-function-chunker-is-a-regex-heuristic) | 2151 |
-|   [2. Path relevance scoring is toy-grade](#2-path-relevance-scoring-is-toy-grade) | 2155 |
-|   [3. The evolution/drift features have no UX story](#3-the-evolutiondrift-features-have-no-ux-story) | 2159 |
-|   [4. No test suite](#4-no-test-suite) | 2163 |
-|   [5. Remote job registry leaks memory](#5-remote-job-registry-leaks-memory) | 2167 |
-| [Section III - What you could do with these embeddings](#section-iii-what-you-could-do-with-these-embeddings) | 2173 |
-|   [High value, tractable](#high-value-tractable) | 2177 |
-|   [Higher effort but differentiated](#higher-effort-but-differentiated) | 2199 |
+|   [Phase 41 — Multi-Repo Unified Index](#phase-41-—-multi-repo-unified-index) | 2131 |
+|   [Phase 42 — IDE / LSP Integration](#phase-42-—-ide--lsp-integration) | 2149 |
+|   [Phase 43 — Security Pattern Detection](#phase-43-—-security-pattern-detection) | 2163 |
+|   [Phase 44 — Codebase Health Timeline](#phase-44-—-codebase-health-timeline) | 2177 |
+|   [Phase 45 — Technical Debt Scoring](#phase-45-—-technical-debt-scoring) | 2192 |
+|   [Phase 46 — Evolution Alerts and Commit URL Construction](#phase-46-—-evolution-alerts-and-commit-url-construction) | 2209 |
+|   [Phase 47 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging](#phase-47-—-richer-indexing-progress-embed-latency-stats-and-incremental-by-default-messaging) | 2225 |
+| [Section II - Next?](#section-ii-next) | 2635 |
+|   [Planned Phases (71+)](#planned-phases-71) | 2638 |
+|   [Long-Term Investments](#long-term-investments-phase-71) | 2694 |
 
 ---
 
@@ -2128,6 +2128,100 @@ Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies e
 
 ---
 
+### Phase 41 — Multi-Repo Unified Index *(completed v0.43.0)*
+
+**Goal:** Implement a multi-repository registry so gitsema can track and query across multiple repos. Adds cross-repo provenance to blobs and a CLI surface for managing registered repositories.
+
+**Implemented scope:**
+- Added `repos` table (id, name, url, addedAt) to the SQLite schema (v14) and migration.
+- Implemented a small repo registry: `src/core/indexing/repoRegistry.ts` with `add`, `list`, and `get` helpers.
+- CLI integration: `gitsema repos add|list|remove` via `src/cli/commands/repos.ts`; registered in `src/cli/index.ts`.
+- Unit tests: `tests/multiRepo.test.ts`.
+
+**Deliverables:** `src/core/indexing/repoRegistry.ts`, `src/cli/commands/repos.ts`, `src/cli/index.ts`, `tests/multiRepo.test.ts`.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 42 — IDE / LSP Integration *(completed v0.44.0)*
+
+**Goal:** Expose gitsema's semantic index as an LSP server so IDEs can offer inline semantic search, related-code navigation, and concept-history hover cards.
+
+**Implemented scope:**
+- Minimal JSON-RPC LSP server (stdio framing) implemented in `src/core/lsp/server.ts`.
+- CLI command `src/cli/commands/lsp.ts` to start the server; registered in `src/cli/index.ts`.
+- Helpers for parsing/serialising LSP messages; handlers for `initialize` and `textDocument/hover`.
+- Unit tests: `tests/lsp.test.ts` (framing and initialize handler).
+
+**Deliverables:** `src/core/lsp/server.ts`, `src/cli/commands/lsp.ts`, `src/cli/index.ts`, `tests/lsp.test.ts`.
+
+**Status:** ✅ complete (hover only at this phase; definition/references/workspace-symbol extended in Phase 51).
+
+---
+
+### Phase 43 — Security Pattern Detection *(completed v0.45.0)*
+
+**Goal:** Combine semantic similarity with a curated pattern list to flag code blobs matching known vulnerability patterns (SQL injection, path traversal, insecure deserialization, etc.).
+
+**Implemented scope:**
+- `src/core/search/securityScan.ts` implements `scanForVulnerabilities` using a small curated pattern list and vector search.
+- CLI integration: `gitsema security-scan` via `src/cli/commands/securityScan.ts`; registered in `src/cli/index.ts`.
+- Unit tests: `tests/securityScan.test.ts`.
+
+**Deliverables:** `src/core/search/securityScan.ts`, `src/cli/commands/securityScan.ts`, `src/cli/index.ts`, `tests/securityScan.test.ts`.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 44 — Codebase Health Timeline *(completed v0.46.0)*
+
+**Goal:** Provide a time-series of composite health metrics (semantic churn, coverage proxy, complexity proxy, dead-concept ratio) as a structured CLI export.
+
+**Implemented scope:**
+- `src/core/search/healthTimeline.ts` provides `computeHealthTimeline` producing time-bucketed health snapshots.
+- CLI integration: `gitsema health` via `src/cli/commands/health.ts`; registered in `src/cli/index.ts`.
+- Unit tests: `tests/healthTimeline.test.ts`.
+
+**Deliverables:** `src/core/search/healthTimeline.ts`, `src/cli/commands/health.ts`, `src/cli/index.ts`, `tests/healthTimeline.test.ts`.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 45 — Technical Debt Scoring *(completed v0.47.0)*
+
+**Goal:** Score each blob by how semantically "isolated" it is, how old it is, and how infrequently it changes. High scores indicate candidates for refactoring or removal.
+
+**Implemented scope:**
+- `src/core/search/debtScoring.ts` exposes `scoreDebt` (async) computing a composite debt score over blobs using three signals: age, inverse change-frequency, and isolation.
+- Isolation score uses real computation: HNSW VSS path (O(log N), via usearch index built by `gitsema build-vss`) preferred; cosine scan fallback (O(N²)) when no index file exists; falls back to 0.5 only for blobs with no stored embedding.
+- `computeIsolationCosineScan` is exported and unit-tested (identical vectors → 0, orthogonal → 1, single blob → 0.5).
+- CLI integration: `gitsema debt` via `src/cli/commands/debt.ts`; registered in `src/cli/index.ts`.
+- Unit tests: `tests/debtScoring.test.ts`.
+
+**Deliverables:** `src/core/search/debtScoring.ts`, `src/cli/commands/debt.ts`, `src/cli/index.ts`, `tests/debtScoring.test.ts`.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 46 — Evolution Alerts and Commit URL Construction *(completed v0.48.0)*
+
+**Goal:** Surface actionable alerts from the evolution timeline and produce clickable commit links for GitHub/GitLab/Bitbucket.
+
+**Implemented scope:**
+- `src/core/search/evolution.ts` extended with `buildCommitUrl` (GitHub/GitLab/Bitbucket support) and `extractAlerts` for salient timeline jumps.
+- CLI evolution commands now accept `--alerts`; commit URL resolution via `git remote get-url origin`.
+- Unit tests: `tests/evolutionAlerts.test.ts` (commit URL building and alert extraction).
+
+**Deliverables:** `src/core/search/evolution.ts`, `tests/evolutionAlerts.test.ts`.
+
+**Status:** ✅ complete.
+
+---
+
 ### Phase 47 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging
 
 **Goal:** Make `gitsema index` output far more informative and actionable. Users running long indexing jobs had no visibility into which pipeline stage was running, how fast embeddings were processing, or whether they were in incremental or full-rebuild mode.
@@ -2155,65 +2249,6 @@ Migration rebuilds each table (with `PRAGMA foreign_keys = OFF/ON`) and copies e
 **Version:** 0.49.0
 
 **Deliverables:** `src/cli/commands/index.ts`, `src/cli/index.ts`, `src/core/indexing/indexer.ts`, `tests/indexProgress.test.ts`.
-
----
-
-### Phase 41+ — Large Investments (Stubs & Roadmap)
-
-**Goal:** These phases represent substantial engineering investments (4+ weeks each). Stub interfaces and TODO annotations have been added in `src/core/phase41plus.ts` to scaffold future implementation without introducing runtime behavior or breaking changes.
-
-**Multi-Repo Unified Index**
-Combine multiple repository embeddings into a single unified index with cross-repo canonicalization (same concept in two repos → same or linked embedding) and provenance tracking (which repo, which blob). Requires significant schema work and a new indexer entry point.
-
-**IDE / LSP Integration**
-Expose gitsema's semantic index as an LSP server so IDEs can offer inline semantic search, related-code navigation, and concept-history pop-ups. Requires: LSP wire protocol implementation, daemon mode, incremental re-indexing on file save.
-
-**Security Pattern Detection**
-Combine static analysis with semantic similarity to detect vulnerability patterns (SQL injection, path traversal, insecure deserialization, etc.) by finding code blobs semantically similar to known-vulnerable patterns. Requires a curated vulnerability embedding corpus.
-
-**Codebase Health Timeline**
-Time-series of composite health metrics (semantic churn, coverage proxy, complexity proxy, dead-concept ratio) surfaced as a dashboard or structured JSON export. Requires defining and computing each metric per commit snapshot.
-
-**Technical Debt Scoring**
-Score each blob by how semantically "isolated" it is (low similarity to any other blob), how old it is, and how infrequently it changes. High scores indicate candidates for refactoring or removal. Requires a weighted multi-signal scorer and a calibrated threshold.
-
-**Deliverables (stub only):** `src/core/phase41plus.ts`.
-
-**Status (Phases 41–46 implemented):**
-
-- Phase 41 — Multi-Repo Unified Index (schema v14)
-  - Added `repos` table (id, name, url, addedAt) to the SQLite schema (v14) and migration.
-  - Implemented a small repo registry: `src/core/indexing/repoRegistry.ts` with add/list/get helpers.
-  - CLI integration: `src/cli/commands/repos.ts` and registered in `src/cli/index.ts`.
-  - Unit tests: `tests/multiRepo.test.ts`.
-
-- Phase 42 — IDE / LSP Integration
-  - Minimal JSON-RPC LSP server (stdio framing) implemented in `src/core/lsp/server.ts`.
-  - CLI command `src/cli/commands/lsp.ts` to start the server and registration in `src/cli/index.ts`.
-  - Helpers for parsing/serializing LSP messages and a handler for `initialize` and `textDocument/hover`.
-  - Unit tests: `tests/lsp.test.ts` (framing and initialize handler).
-
-- Phase 43 — Security Pattern Detection
-  - `src/core/search/securityScan.ts` implements `scanForVulnerabilities` using a small curated pattern list and vector search.
-  - CLI integration: `src/cli/commands/securityScan.ts` and registration in `src/cli/index.ts`.
-  - Unit tests: `tests/securityScan.test.ts`.
-
-- Phase 44 — Codebase Health Timeline
-  - `src/core/search/healthTimeline.ts` provides `computeHealthTimeline` producing time-bucketed health snapshots.
-  - CLI integration: `src/cli/commands/health.ts` and registration in `src/cli/index.ts`.
-  - Unit tests: `tests/healthTimeline.test.ts`.
-
-- Phase 45 — Technical Debt Scoring
-  - `src/core/search/debtScoring.ts` exposes `scoreDebt` (async) which computes a composite debt score over blobs using three signals: age, inverse change-frequency, and isolation.
-  - Isolation score uses real computation: HNSW VSS path (O(log N), via usearch index built by `gitsema build-vss`) preferred; cosine scan fallback (O(N²), compares each blob's vector against all others) when no index file exists; falls back to 0.5 only for blobs with no stored embedding.
-  - `computeIsolationCosineScan` is exported and unit-tested (identical vectors → 0, orthogonal → 1, single blob → 0.5).
-  - CLI integration: `src/cli/commands/debt.ts` and registration in `src/cli/index.ts`.
-  - Unit tests: `tests/debtScoring.test.ts`.
-
-- Phase 46 — Evolution Alerts and Commit URL Construction
-  - `src/core/search/evolution.ts` extended with `buildCommitUrl` (GitHub/GitLab/Bitbucket support) and `extractAlerts` for salient timeline jumps.
-  - CLI evolution commands now accept `--alerts` and support commit URL resolution (via `git remote get-url origin`) in the CLI flow.
-  - Unit tests: `tests/evolutionAlerts.test.ts` (commit URL building and alert extraction).
 
 ---
 
@@ -2507,6 +2542,17 @@ Score each blob by how semantically "isolated" it is (low similarity to any othe
 
 ### Phase 64 — Search Scalability + AI Retrieval Reliability *(completed v0.66.0)*
 
+**Goal:** Reduce broad-query cost and improve trust for AI-assisted coding workflows.
+
+**Implemented scope:**
+- Top-k early-cut scoring mode (`--early-cut <n>` on `gitsema search`, `earlyCut` in `VectorSearchOptions`) to avoid full candidate materialisation on very large pools.
+- Capabilities manifest endpoint (`GET /api/v1/capabilities`) for CLI/MCP/HTTP integration clients.
+- Provenance-oriented explain output optimised for LLM prompts (`--explain-llm` on `gitsema search`, `formatExplainForLlm` in `explainFormatter.ts`).
+- Retrieval evaluation harness (`gitsema eval <file>`) measuring P@k, R@k, MRR, and latency from a JSONL eval file.
+
+**Status:** ✅ complete.
+
+---
 
 ### Phase 65 — Incident Triage Bundle *(completed v0.68.0)*
 
@@ -2548,21 +2594,6 @@ Goal: Overlap read/embed/store stages in the indexer via a simple AsyncQueue so 
 
 ---
 
-
-
-**Goal:** Reduce broad-query cost and improve trust for AI-assisted coding workflows.
-
-**Implemented scope:**
-
-- Top-k early-cut scoring mode (`--early-cut <n>` on `gitsema search`, `earlyCut` in `VectorSearchOptions`) to avoid full candidate materialization on very large pools.
-- Capabilities manifest endpoint (`GET /api/v1/capabilities`) for CLI/MCP/HTTP integration clients.
-- Provenance-oriented explain output optimized for LLM prompts (`--explain-llm` on `gitsema search`, `formatExplainForLlm` in `explainFormatter.ts`).
-- Retrieval evaluation harness (`gitsema eval <file>`) measuring P@k, R@k, MRR, and latency from a JSONL eval file.
-
-**Status:** ✅ complete.
-
----
-
 ### Phase 70 — Unified Output System *(completed v0.69.0)*
 
 Goal: Replace the scattered `--dump`, `--html`, `--format` flags with a single composable `--out <spec>` flag that can be repeated to produce multiple outputs simultaneously. Headers, verbose content, and machine-readable formats all flow through the same abstraction.
@@ -2584,29 +2615,110 @@ Goal: Replace the scattered `--dump`, `--html`, `--format` flags with a single c
 
 ---
 
-### Long-Term Investments (Phase 60+) *(not yet implemented)*
+### Planned Phases (71+)
+
+The following phases are derived from the **review5** strategic review (reflecting repository state at v0.70.0). Items already shipped as part of the P0–P2 push (Phases 71–73 implemented alongside Phase 70) are noted inline.
+
+---
+
+### Phase 71 — Operational Readiness: Metrics, Rate Limiting, and OpenAPI *(completed v0.71.0)*
+
+**Goal:** Give shared-server deployments the observability and access-control primitives needed to run gitsema as a reliable service.
+
+**Implemented scope:**
+- `GET /metrics` Prometheus endpoint via `prom-client` — query latency histograms, index size gauge, provider error counter, cache hit ratio (`src/server/middleware/metrics.ts`, `src/utils/metricsCounters.ts`).
+- Rate limiting via `express-rate-limit` with per-token (or per-IP for unauthenticated) caps; `Retry-After` header on 429 responses (`src/server/middleware/rateLimiter.ts`).
+- OpenAPI spec auto-generated from Zod schemas via `zod-to-openapi`; served at `GET /openapi.json` and `GET /docs` (`src/server/routes/openapi.ts`).
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 72 — HTTP Route Parity for All Analysis Commands *(completed v0.72.0)*
+
+**Goal:** Close the HTTP API gap identified in review5 — Phase 41–47 and Phase 65–70 commands (all in CLI and many in MCP) lacked HTTP routes.
+
+**Implemented scope:**
+- `POST /api/v1/analysis/security-scan`, `/health`, `/debt`, `/doc-gap`, `/contributor-profile`, `/triage`, `/policy-check`, `/ownership`, `/workflow`, `/eval` added to `src/server/routes/analysis.ts`.
+- Each route validates the request body with a Zod schema and delegates to the same core function as the CLI command.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 73 — Deployment Guide and Docker Infrastructure
+
+**Goal:** Eliminate the primary adoption barrier for teams that want to self-host gitsema as a shared service.
+
+**Scope:**
+- `Dockerfile` — multi-stage build: compile TypeScript, copy `dist/` + `package.json`, default CMD = `node dist/cli/index.js tools serve`.
+- `docker-compose.yml` — gitsema HTTP server + Ollama sidecar with persistent volume for `.gitsema/`.
+- `docs/deploy.md` — cover systemd unit, Docker Compose, API key rotation, index backup strategy, embedding model upgrade path, and SQLite-vs-VSS guidance.
+
+**Status:** `docs/deploy.md` written. `Dockerfile` and `docker-compose.yml` not yet added.
+
+---
+
+### Phase 74 — `gitsema status` Scale Warnings + Extended `gitsema doctor` Pre-flight
+
+**Goal:** Make the tool self-explaining about scale limits so users don't hit OOM or slow queries without warning.
+
+**Scope:**
+- `gitsema status`: when blob count exceeds a configurable threshold (default 50 000), print a prominent warning recommending `gitsema build-vss` and/or `--early-cut`. Show whether a VSS index exists and is up-to-date.
+- `gitsema doctor --extended` (or make the checks default):
+  - Verify embedding model is reachable (attempt a one-token embed call to the configured provider).
+  - Check index freshness: compare `max(commit_ts)` in `indexed_commits` against `git log -1 --format=%ct HEAD`; warn if more than N commits behind.
+  - Estimate search latency class: `fast` (< 10K blobs or VSS present), `moderate` (10K–50K, no VSS), `slow` (> 50K, no VSS, no early-cut).
+  - Warn when `CURRENT_SCHEMA_VERSION` > the version recorded in the `meta` table.
+- First-slow-query hint: after any search that exceeds a configurable wall-clock threshold (default 5 s), print a one-time suggestion to run `gitsema build-vss`.
+
+**Status:** ⬜ not yet started.
+
+---
+
+### Phase 75 — Per-Repo Access Control on HTTP Server
+
+**Goal:** When multiple repos are registered, allow scoping a `GITSEMA_SERVE_KEY` token to a specific repo ID so different users only see their own repo's results.
+
+**Scope:**
+- Introduce a `repo_tokens` table (or extend `repos`) mapping token → repo ID.
+- Auth middleware reads the token, looks up the allowed repo ID, and injects it as `req.repoId`.
+- All search/analysis routes filter their DB queries by `repoId` when set.
+- `gitsema repos token add <repo-id>` CLI to mint scoped tokens.
+- Document in `docs/deploy.md`.
+
+**Status:** ⬜ not yet started.
+
+---
+
+### Phase 76 — Complete `htmlRenderer.ts` Modularisation
+
+**Goal:** The main `htmlRenderer.ts` is still ~1 400 LOC after the partial split in Phase 70. Finish the modularisation so each visualisation type lives in its own file, is independently unit-testable, and can be tree-shaken.
+
+**Scope:**
+- Extract remaining renderers from `htmlRenderer.ts` into focused modules: `htmlRenderer-evolution.ts`, `htmlRenderer-clusters.ts`, `htmlRenderer-map.ts`.
+- Document the CSS/JS baseline (shared constants in `htmlRenderer-shared.ts`) so contributors can add new visualisations without touching unrelated code.
+- Add per-module unit tests verifying render output structure (not pixel accuracy).
+
+**Status:** ⬜ not yet started.
+
+---
+
+### Long-Term Investments (Phase 71+)
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
-| DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
+| DuckDB / pgvector migration path | High | For corpora >500 K blobs; keep SQLite as default |
 | Cross-repo concept similarity | High | Index two repos; find when concept X first appeared in each |
 | Semantic regression CI gate | High | Flag PRs where key embedding drifts beyond threshold |
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
 | Python model server (Phase 13 revival) | Medium | sentence-transformers in Docker; higher throughput than Ollama for bulk indexing |
 | Semantic code review assistant | Medium | Given a PR diff, find historical analogues and flag regressions |
+| `gitsema repl` interactive query loop | Low | Improve exploratory use without requiring repeated CLI invocations |
+| `gitsema quickstart` guided wizard | Low | Reduce zero-to-result friction for new users |
 
-#### Onboarding maps
+**Scale notes (from review5):**
 
-Cluster embeddings by semantic similarity and produce a concept graph of the codebase. "Here are the 8 semantic regions of this repo and the files that define each."
-
-#### Semantic regression detection
-
-Index CI runs. If a blob's vector moves substantially between two tagged versions, flag it as a semantic change even if the diff looks small (comments, variable renames that change meaning).
-
-#### Cross-repo concept similarity
-
-If you index multiple repos into different databases, a query against both could find when concept X was invented in repo A vs. repo B — useful for tracking where patterns originated.
-
-#### LLM-powered evolution narration
-
-The evolution command gives you the data (timestamps + cosine distances). Feeding those diffs to a language model to produce "between v1.2 and v2.0, the authentication module shifted from session-based to token-based" is a natural next step.
+- **Search memory:** candidate materialisation is proportional to index size. The ANN search path (auto-enabled above `GITSEMA_VSS_THRESHOLD`) caps query time; use `gitsema build-vss` on large repos.
+- **Indexing time:** pipelined batching (Phase 69) overlaps read/embed/store stages, but commit-mapping still runs serially after all batches. For repos with deep history, this phase can dominate wall-clock time on incremental runs.
+- **Chunk/symbol candidate expansion:** when `--chunks` or `--vss` is combined with a large index the candidate pool grows 3–10× before scoring. Monitor RSS when indexing large monorepos with `--chunker function`.
