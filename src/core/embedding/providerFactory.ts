@@ -12,8 +12,11 @@
 import { OllamaProvider } from './local.js'
 import { HttpProvider } from './http.js'
 import { BatchingProvider } from './batching.js'
+import { PrefixedProvider } from './prefixedProvider.js'
 import type { EmbeddingProvider } from './provider.js'
-import { getModelProfile } from '../config/configManager.js'
+import { getModelProfile, type ModelProfile } from '../config/configManager.js'
+import { getFileCategory } from './fileType.js'
+import { extname } from 'node:path'
 
 /**
  * Constructs an EmbeddingProvider from explicit type and model values.
@@ -77,10 +80,36 @@ export function buildBatchingProvider(
 }
 
 /**
+ * Resolves the embedding prefix for a specific file path given a model profile.
+ *
+ * Resolution order:
+ *   1. `profile.extRoles[ext]` → role name → `profile.prefixes[role]`
+ *   2. Built-in file category (`code` | `text` | `other`) → `profile.prefixes[category]`
+ *   3. `undefined` if no prefix is configured for the resolved role/category
+ */
+export function getPrefixForFile(filePath: string, profile: ModelProfile): string | undefined {
+  if (!profile.prefixes) return undefined
+  const ext = extname(filePath).toLowerCase()
+  const role = profile.extRoles?.[ext] ?? getFileCategory(filePath)
+  return profile.prefixes[role]
+}
+
+/**
+ * Wraps `provider` in a `PrefixedProvider` if `prefix` is a non-empty string.
+ * Returns `provider` unchanged when no prefix is needed.
+ */
+function maybePrefix(provider: EmbeddingProvider, prefix: string | undefined): EmbeddingProvider {
+  return prefix ? new PrefixedProvider(provider, prefix) : provider
+}
+
+/**
  * Returns a text-oriented EmbeddingProvider based on environment variables
  * and per-model profile (if configured for the resolved model name).
  *
  * Resolution order: `GITSEMA_TEXT_MODEL` → `GITSEMA_MODEL` → `nomic-embed-text`
+ *
+ * If the model profile configures a "text" prefix, the returned provider
+ * automatically prepends it to every embed call.
  *
  * @throws {Error} When the resolved provider is "http" but no URL is available.
  */
@@ -89,14 +118,17 @@ export function getTextProvider(): EmbeddingProvider {
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const profile = getModelProfile(model)
   const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
+  let inner: EmbeddingProvider
   if (type === 'http') {
     const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
     if (!baseUrl) {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
-    return new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+    inner = new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+  } else {
+    inner = new OllamaProvider({ model })
   }
-  return new OllamaProvider({ model })
+  return maybePrefix(inner, profile.prefixes?.['text'])
 }
 
 /**
@@ -104,6 +136,9 @@ export function getTextProvider(): EmbeddingProvider {
  * and per-model profile (if configured for the resolved model name).
  *
  * Resolution order: `GITSEMA_CODE_MODEL` → `GITSEMA_TEXT_MODEL` → `GITSEMA_MODEL` → `nomic-embed-text`
+ *
+ * If the model profile configures a "code" prefix, the returned provider
+ * automatically prepends it to every embed call.
  *
  * @throws {Error} When the resolved provider is "http" but no URL is available.
  */
@@ -115,14 +150,17 @@ export function getCodeProvider(): EmbeddingProvider {
     'nomic-embed-text'
   const profile = getModelProfile(model)
   const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
+  let inner: EmbeddingProvider
   if (type === 'http') {
     const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
     if (!baseUrl) {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
-    return new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+    inner = new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+  } else {
+    inner = new OllamaProvider({ model })
   }
-  return new OllamaProvider({ model })
+  return maybePrefix(inner, profile.prefixes?.['code'])
 }
 
 /**

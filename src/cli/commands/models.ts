@@ -262,6 +262,77 @@ export interface ModelsAddOptions {
   setText?: boolean
   setCode?: boolean
   global?: boolean
+  /** Prefix for code file document embeddings, e.g. "search_document:" */
+  prefixCode?: string
+  /** Prefix for text/prose file document embeddings, e.g. "search_document:" */
+  prefixText?: string
+  /** Prefix for search query embeddings, e.g. "search_query:" */
+  prefixQuery?: string
+  /** Prefix for files in the "other" category (not code or text), e.g. "search_document:" */
+  prefixOther?: string
+  /**
+   * User-defined role prefixes as "role=prefix" strings.
+   * May be specified multiple times, e.g. ["jupyter=search_document:", "proto=code:"]
+   */
+  prefixType?: string[]
+  /**
+   * Custom extension-to-role mappings as "ext=role" strings.
+   * May be specified multiple times, e.g. [".ipynb=jupyter", ".proto=code"]
+   */
+  extRole?: string[]
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper: build profile fields from prefix/extRole flags
+// ---------------------------------------------------------------------------
+
+function buildPrefixProfile(options: ModelsAddOptions): ModelProfile {
+  const profile: ModelProfile = {}
+
+  const prefixes: Record<string, string> = {}
+  if (options.prefixCode !== undefined) prefixes['code'] = options.prefixCode
+  if (options.prefixText !== undefined) prefixes['text'] = options.prefixText
+  if (options.prefixQuery !== undefined) prefixes['query'] = options.prefixQuery
+  if (options.prefixOther !== undefined) prefixes['other'] = options.prefixOther
+
+  for (const entry of options.prefixType ?? []) {
+    const eqIdx = entry.indexOf('=')
+    if (eqIdx < 1) {
+      console.error(`Error: --prefix-type value must be in "role=prefix" format, got: ${entry}`)
+      process.exit(1)
+    }
+    const role = entry.slice(0, eqIdx).trim()
+    const prefix = entry.slice(eqIdx + 1)
+    prefixes[role] = prefix
+  }
+
+  if (Object.keys(prefixes).length > 0) profile.prefixes = prefixes
+
+  const extRoles: Record<string, string> = {}
+  for (const entry of options.extRole ?? []) {
+    const eqIdx = entry.indexOf('=')
+    if (eqIdx < 1) {
+      console.error(`Error: --ext-role value must be in "ext=role" format, got: ${entry}`)
+      process.exit(1)
+    }
+    let ext = entry.slice(0, eqIdx).trim().toLowerCase()
+    if (!ext.startsWith('.')) ext = `.${ext}`
+    const role = entry.slice(eqIdx + 1).trim()
+    extRoles[ext] = role
+  }
+
+  if (Object.keys(extRoles).length > 0) profile.extRoles = extRoles
+
+  return profile
+}
+
+function printProfile(profile: ModelProfile): void {
+  if (profile.provider !== undefined) console.log(`  provider: ${profile.provider}`)
+  if (profile.httpUrl !== undefined) console.log(`  httpUrl: ${JSON.stringify(profile.httpUrl)}`)
+  if (profile.apiKey !== undefined) console.log(`  apiKey: (hidden)`)
+  if (profile.level !== undefined) console.log(`  level: ${profile.level}`)
+  if (profile.prefixes !== undefined) console.log(`  prefixes: ${JSON.stringify(profile.prefixes)}`)
+  if (profile.extRoles !== undefined) console.log(`  extRoles: ${JSON.stringify(profile.extRoles)}`)
 }
 
 export async function modelsAddCommand(
@@ -273,7 +344,7 @@ export async function modelsAddCommand(
   const scope: ConfigScope = options.global ? 'global' : 'local'
   const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath()
 
-  const profile: ModelProfile = {}
+  const profile: ModelProfile = buildPrefixProfile(options)
   if (options.provider !== undefined) profile.provider = options.provider
   if (options.url !== undefined) profile.httpUrl = options.url
   if (options.key !== undefined) profile.apiKey = options.key
@@ -286,25 +357,25 @@ export async function modelsAddCommand(
     profile.level = options.level
   }
 
-  if (Object.keys(profile).length === 0 && !options.setDefault && !options.setText && !options.setCode) {
-    console.error('Error: at least one of --provider, --url, --key, --level, --set-default, --set-text, or --set-code is required')
-    console.error(`Usage: gitsema models add ${modelName} --provider ollama|http [--url <url>] [--key <apikey>] [--level file|function|fixed]`)
+  const hasProfileFields = Object.keys(profile).length > 0
+  if (!hasProfileFields && !options.setDefault && !options.setText && !options.setCode) {
+    console.error('Error: at least one option is required')
+    console.error(`Usage: gitsema models add ${modelName} --provider ollama|http [--url <url>] [--key <apikey>]`)
+    console.error(`       gitsema models add ${modelName} --prefix-code "search_document:" --prefix-query "search_query:"`)
     process.exit(1)
   }
 
   if (options.provider === 'http' && !options.url) {
-    // Check if a URL is already configured
     const existing = getModelProfile(modelName)
     if (!existing.httpUrl && !process.env.GITSEMA_HTTP_URL) {
       console.error(`Warning: provider=http set but no --url provided. Remember to set it or GITSEMA_HTTP_URL.`)
     }
   }
 
-  if (Object.keys(profile).length > 0) {
+  if (hasProfileFields) {
     setModelProfile(modelName, profile, scope)
   }
 
-  // Optionally set as default / text / code model in config
   if (options.setDefault) {
     setConfigValue('model', modelName, scope)
     setConfigValue('textModel', modelName, scope)
@@ -315,12 +386,69 @@ export async function modelsAddCommand(
   }
 
   console.log(`Saved model profile for '${modelName}' in ${scope} config (${filePath}).`)
-  if (Object.keys(profile).length > 0) {
-    for (const [key, value] of Object.entries(profile)) {
-      const display = key === 'apiKey' ? '(hidden)' : JSON.stringify(value)
-      console.log(`  ${key}: ${display}`)
-    }
+  if (hasProfileFields) printProfile(profile)
+  if (options.setDefault) console.log(`  Set as default model (model + textModel + codeModel).`)
+  if (options.setText && !options.setDefault) console.log(`  Set as default text model (textModel).`)
+  if (options.setCode && !options.setDefault) console.log(`  Set as default code model (codeModel).`)
+}
+
+// ---------------------------------------------------------------------------
+// models update
+// ---------------------------------------------------------------------------
+
+export type ModelsUpdateOptions = ModelsAddOptions
+
+export async function modelsUpdateCommand(
+  modelName: string,
+  options: ModelsUpdateOptions,
+): Promise<void> {
+  validateModelName(modelName)
+
+  const scope: ConfigScope = options.global ? 'global' : 'local'
+  const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath()
+
+  // Warn if no existing profile found in either scope
+  const existing = getModelProfile(modelName)
+  const hasExisting = Object.values(existing).some((v) => v !== undefined)
+  if (!hasExisting) {
+    console.log(`Note: no existing profile found for '${modelName}' — creating one.`)
   }
+
+  const profile: ModelProfile = buildPrefixProfile(options)
+  if (options.provider !== undefined) profile.provider = options.provider
+  if (options.url !== undefined) profile.httpUrl = options.url
+  if (options.key !== undefined) profile.apiKey = options.key
+  if (options.level !== undefined) {
+    const validLevels = ['blob', 'file', 'function', 'fixed', 'chunk', 'symbol', 'module']
+    if (!validLevels.includes(options.level)) {
+      console.error(`Error: --level must be one of: ${validLevels.join(', ')}`)
+      process.exit(1)
+    }
+    profile.level = options.level
+  }
+
+  const hasProfileFields = Object.keys(profile).length > 0
+  if (!hasProfileFields && !options.setDefault && !options.setText && !options.setCode) {
+    console.error('Error: at least one option is required')
+    console.error(`Usage: gitsema models update ${modelName} --prefix-code "search_document:" --prefix-query "search_query:"`)
+    process.exit(1)
+  }
+
+  if (hasProfileFields) {
+    setModelProfile(modelName, profile, scope)
+  }
+
+  if (options.setDefault) {
+    setConfigValue('model', modelName, scope)
+    setConfigValue('textModel', modelName, scope)
+    setConfigValue('codeModel', modelName, scope)
+  } else {
+    if (options.setText) setConfigValue('textModel', modelName, scope)
+    if (options.setCode) setConfigValue('codeModel', modelName, scope)
+  }
+
+  console.log(`Updated model profile for '${modelName}' in ${scope} config (${filePath}).`)
+  if (hasProfileFields) printProfile(profile)
   if (options.setDefault) console.log(`  Set as default model (model + textModel + codeModel).`)
   if (options.setText && !options.setDefault) console.log(`  Set as default text model (textModel).`)
   if (options.setCode && !options.setDefault) console.log(`  Set as default code model (codeModel).`)

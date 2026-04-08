@@ -417,6 +417,25 @@ export interface ModelProfile {
   apiKey?: string
   /** Default indexing/search granularity level for this model. */
   level?: string
+  /**
+   * Per-role embedding prefixes, prepended with a space to every input before
+   * sending to the embedding backend.
+   *
+   * Built-in roles: "code", "text", "query", "other".
+   * User-defined roles: any string — matched via `extRoles` mappings below.
+   *
+   * Example (nomic-embed-text-v1):
+   *   { code: "search_document:", text: "search_document:", query: "search_query:" }
+   */
+  prefixes?: Record<string, string>
+  /**
+   * Custom file-extension → role name mappings.
+   * Extensions (with leading dot, lowercase) listed here override the built-in
+   * code/text/other categorisation and are used to look up a prefix in `prefixes`.
+   *
+   * Example:  { ".ipynb": "jupyter", ".proto": "code" }
+   */
+  extRoles?: Record<string, string>
 }
 
 /**
@@ -428,10 +447,23 @@ export function getModelProfile(modelName: string, cwd: string = process.cwd()):
   const global = loadConfigFile(getGlobalConfigPath())
   const localProfile = getDeep(local, `models.${modelName}`) as ModelProfile | undefined
   const globalProfile = getDeep(global, `models.${modelName}`) as ModelProfile | undefined
+  // For plain scalar fields: local wins over global.
+  // For object fields (prefixes, extRoles): shallow-merge with local keys winning.
+  const prefixes: Record<string, string> | undefined =
+    (globalProfile?.prefixes || localProfile?.prefixes)
+      ? { ...(globalProfile?.prefixes ?? {}), ...(localProfile?.prefixes ?? {}) }
+      : undefined
+  const extRoles: Record<string, string> | undefined =
+    (globalProfile?.extRoles || localProfile?.extRoles)
+      ? { ...(globalProfile?.extRoles ?? {}), ...(localProfile?.extRoles ?? {}) }
+      : undefined
   return {
     provider: localProfile?.provider ?? globalProfile?.provider,
     httpUrl: localProfile?.httpUrl ?? globalProfile?.httpUrl,
     apiKey: localProfile?.apiKey ?? globalProfile?.apiKey,
+    level: localProfile?.level ?? globalProfile?.level,
+    ...(prefixes !== undefined ? { prefixes } : {}),
+    ...(extRoles !== undefined ? { extRoles } : {}),
   }
 }
 
@@ -448,7 +480,13 @@ export function setModelProfile(
   const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath(cwd)
   const data = loadConfigFile(filePath)
   for (const [key, value] of Object.entries(profile)) {
-    if (value !== undefined) {
+    if (value === undefined) continue
+    if (key === 'prefixes' || key === 'extRoles') {
+      // Merge object fields key-by-key so callers can add single entries without
+      // wiping previously stored ones.
+      const existing = (getDeep(data, `models.${modelName}.${key}`) ?? {}) as Record<string, string>
+      setDeep(data, `models.${modelName}.${key}`, { ...existing, ...(value as Record<string, string>) })
+    } else {
       setDeep(data, `models.${modelName}.${key}`, value)
     }
   }

@@ -16,6 +16,7 @@ import { getCachedQueryEmbedding, setCachedQueryEmbedding } from './queryCache.j
 import type { EmbeddingProvider } from './provider.js'
 import type { Embedding } from '../models/types.js'
 import { incQueryCacheHit, incQueryCacheMiss } from '../../utils/metricsCounters.js'
+import { getModelProfile } from '../config/configManager.js'
 
 export interface EmbedQueryOptions {
   /** When true, skip both cache reads and cache writes. Defaults to false. */
@@ -35,8 +36,15 @@ export async function embedQuery(
 ): Promise<Embedding> {
   const noCache = options.noCache ?? false
 
+  // Apply query prefix from the model's profile, if configured.
+  // The prefix is baked into the cache key so the cache correctly stores
+  // prefixed embeddings and invalidates when the prefix changes.
+  const profile = getModelProfile(provider.model)
+  const queryPrefix = profile.prefixes?.['query']
+  const effectiveQuery = queryPrefix ? `${queryPrefix} ${query}` : query
+
   if (!noCache) {
-    const cached = getCachedQueryEmbedding(query, provider.model)
+    const cached = getCachedQueryEmbedding(effectiveQuery, provider.model)
     if (cached) {
       incQueryCacheHit()
       return cached
@@ -44,11 +52,11 @@ export async function embedQuery(
     incQueryCacheMiss()
   }
 
-  const embedding = await provider.embed(query)
+  const embedding = await provider.embed(effectiveQuery)
 
   if (!noCache) {
     try {
-      setCachedQueryEmbedding(query, provider.model, embedding)
+      setCachedQueryEmbedding(effectiveQuery, provider.model, embedding)
     } catch {
       // Cache write failures are non-fatal — the embedding is still returned.
     }
