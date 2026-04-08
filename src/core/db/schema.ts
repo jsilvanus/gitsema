@@ -278,3 +278,10 @@ export const indexingCheckpoints = sqliteTable('indexing_checkpoints', {
   attempts: integer('attempts').notNull().default(0),
   lastAttemptAt: integer('last_attempt_at').notNull(),
 })
+
+export const repoTokens = sqliteTable('repo_tokens', {
+  token: text('token').primaryKey(),
+  repoId: text('repo_id').notNull().references(() => repos.id, { onDelete: 'cascade' }),
+  label: text('label'),
+  createdAt: integer('created_at').notNull(),
+})

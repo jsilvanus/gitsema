@@ -1,9 +1,12 @@
 import { Command } from 'commander'
-import { getActiveSession } from '../../core/db/sqlite.js'
+import { createRequire } from 'node:module'
+import { getActiveSession, getRawDb } from '../../core/db/sqlite.js'
 import { addRepo, listRepos, multiRepoSearch } from '../../core/indexing/repoRegistry.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+
+const require = createRequire(import.meta.url)
 
 export function reposCommand(): Command {
   const cmd = new Command('repos')
@@ -80,6 +83,75 @@ export function reposCommand(): Command {
         console.log(`[${r.repoId}] ${r.score.toFixed(3)}  ${path}`)
       }
     })
+
+  // ── token subcommands for per-repo access control (Phase 75) ─────────────
+
+  const tokenCmd = new Command('token').description('Manage per-repo scoped access tokens')
+
+  tokenCmd
+    .command('add <repo-id> [label]')
+    .description('Mint a new scoped access token for the given repo ID')
+    .action((repoId: string, label?: string) => {
+      const rawDb = getRawDb()
+      // Verify repo exists
+      const repo = rawDb.prepare('SELECT id FROM repos WHERE id = ?').get(repoId)
+      if (!repo) {
+        console.error(`Error: repo '${repoId}' not found. Use: gitsema repos add`)
+        process.exit(1)
+      }
+      const { randomBytes } = require('node:crypto') as typeof import('node:crypto')
+      const token = randomBytes(32).toString('hex')
+      rawDb.prepare('INSERT INTO repo_tokens (token, repo_id, label, created_at) VALUES (?, ?, ?, ?)')
+        .run(token, repoId, label ?? null, Math.floor(Date.now() / 1000))
+      console.log(`Token minted for repo '${repoId}':`)
+      console.log(`  ${token}`)
+      if (label) console.log(`  Label: ${label}`)
+      console.log(`\nAdd Authorization: Bearer ${token} to HTTP requests to scope them to repo '${repoId}'.`)
+    })
+
+  tokenCmd
+    .command('list')
+    .description('List all scoped tokens')
+    .action(() => {
+      const rawDb = getRawDb()
+      const rows = rawDb.prepare('SELECT token, repo_id, label, created_at FROM repo_tokens ORDER BY created_at ASC')
+        .all() as Array<{ token: string; repo_id: string; label: string | null; created_at: number }>
+      if (rows.length === 0) {
+        console.log('No scoped tokens minted. Use: gitsema repos token add <repo-id>')
+        return
+      }
+      console.log(`${'Token (prefix)'.padEnd(16)}  ${'Repo ID'.padEnd(20)}  ${'Label'.padEnd(20)}  Created`)
+      for (const r of rows) {
+        const prefix = r.token.slice(0, 12) + '...'
+        const created = new Date(r.created_at * 1000).toISOString().slice(0, 10)
+        console.log(`${prefix.padEnd(16)}  ${r.repo_id.padEnd(20)}  ${(r.label ?? '-').padEnd(20)}  ${created}`)
+      }
+    })
+
+  tokenCmd
+    .command('revoke <token-prefix>')
+    .description('Revoke a scoped token by its prefix (at least 8 hex chars)')
+    .action((prefix: string) => {
+      if (prefix.length < 8) {
+        console.error('Error: token prefix must be at least 8 characters for safety')
+        process.exit(1)
+      }
+      const rawDb = getRawDb()
+      const rows = rawDb.prepare('SELECT token FROM repo_tokens WHERE token LIKE ?')
+        .all(prefix + '%') as Array<{ token: string }>
+      if (rows.length === 0) {
+        console.log(`No token found with prefix '${prefix}'.`)
+        return
+      }
+      if (rows.length > 1) {
+        console.error(`Ambiguous prefix — ${rows.length} tokens match. Use a longer prefix.`)
+        process.exit(1)
+      }
+      rawDb.prepare('DELETE FROM repo_tokens WHERE token = ?').run(rows[0].token)
+      console.log(`Token revoked: ${rows[0].token.slice(0, 12)}...`)
+    })
+
+  cmd.addCommand(tokenCmd)
 
   return cmd
 }
