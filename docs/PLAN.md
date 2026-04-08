@@ -97,7 +97,8 @@
 |   [Phase 75 — Per-Repo Access Control on HTTP Server](#phase-75-—-per-repo-access-control-on-http-server) | 2727 |
 |   [Phase 76 — Complete `htmlRenderer.ts` Modularisation](#phase-76-—-complete-htmlrendererts-modularisation) | 2742 |
 |   [Phase 77 — Unified Indexing + Search Level Concept](#phase-77-—-unified-indexing-search-level-concept) | 2755 |
-|   [Long-Term Investments (Phase 77+)](#long-term-investments-phase-77) | 2771 |
+|   [Phase 85 — Tier-1 Reliability: Test Isolation, SQL Sampling, Batch Dedup](#phase-85-—-tier-1-reliability-test-isolation-sql-sampling-batch-dedup-completed-v0840) | 2805 |
+|   [Long-Term Investments (Phase 86+)](#long-term-investments-phase-86) | 2860 |
 
 ---
 
@@ -2802,7 +2803,35 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
-### Long-Term Investments (Phase 85+)
+### Phase 85 — Tier-1 Reliability: Test Isolation, SQL Sampling, Batch Dedup *(completed v0.84.0)*
+
+**Goal:** Eliminate all Windows-only test failures, push expensive JS-level operations into SQL, and replace per-blob deduplication queries with batch equivalents.
+
+**Implemented scope:**
+
+*Test fixes:*
+- **EPERM on Windows (9 files):** all `afterAll` and inline cleanup blocks that called `rmSync(tmpDir)` while a `better-sqlite3` file handle remained open now call `session.rawDb.close()` first. Affected: `commitEmbedding`, `moduleEmbeddings`, `symbolEmbeddings`, `integration/indexAndSearch`, `integration/indexStatus`, `cherryPick`, `contributorProfile`, `docGap`, `multiRepo`.
+- **Path-separator assertion** (`config.test.ts`): `getLocalConfigPath` assertion changed from a hardcoded POSIX string to `path.join(...)` so it produces the correct result on both Windows and Linux.
+- **annSearch fixture isolation** (`annSearch.test.ts`): added `vi.mock('node:fs', ...)` to stub `existsSync` to `false`, preventing the tests from reading real `.gitsema/` VSS index files present in the workspace when coverage runs from the repo root.
+- **`vi.mock` hoisting** (`mcpTools.test.ts`, `serverRoutes.test.ts`): session creation moved inside the mock factory so Vitest's static mock-hoisting transform does not reference variables before they are initialised.
+- **CI OS matrix** (`.github/workflows/ci.yml`): added `strategy.matrix.os: [ubuntu-latest, windows-latest]` with `fail-fast: false` so failures on either OS are caught per-PR.
+
+*SQL-level random sampling (`vectorSearch.ts`):*
+- When the auto-cap is active (`earlyCut === 0`) and no `allowedHashes` pre-filter is provided, the main embeddings query now appends `ORDER BY RANDOM() LIMIT 50000` at the SQL level. Previously all rows were loaded into JS memory and then reservoir-sampled in JS — on a 500 K-blob index that wastefully allocated ~2 GB of row objects before discarding 90 % of them. The JS reservoir sample is retained as a safety fallback for chunk/symbol/module candidates appended to the pool after the primary query.
+
+*Batch deduplication (`indexer.ts`):*
+- The collection loop previously called `isIndexed(blobHash, model)` for every blob seen in the `git rev-list` stream — one synchronous SQLite round-trip per blob. For a 100 K-blob history that is 100 K separate queries.
+- The loop now pushes all `(blobHash, model)` pairs into a `pending` list (with only the within-run `seenHashes` check and path filter applied inline). After the stream finishes, `filterNewBlobs()` is called once per distinct model, batching hashes in chunks of 500 using `blob_hash IN (…)`. The resulting `Set<string>` of new hashes filters `blobsToProcess` in a final pass.
+- For a 100 K-blob repo this reduces collection-phase SQLite calls from 100 000 to ≤ 200, with no change in correctness.
+
+*EmbedeerProvider (`src/core/embedding/embedeer.ts`):*
+- Added a new provider type `embedeer` backed by the optional `@jsilvanus/embedeer` package. When selected, `models add --provider embedeer` automatically downloads and optimises the requested model. The provider otherwise falls back gracefully if the package is not installed.
+
+**Status:** ✅ complete.
+
+---
+
+### Long-Term Investments (Phase 86+)
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
