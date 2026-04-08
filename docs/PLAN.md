@@ -2708,7 +2708,7 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
-| DuckDB / pgvector migration path | High | For corpora >500 K blobs; keep SQLite as default |
+| DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
 | Cross-repo concept similarity | High | Index two repos; find when concept X first appeared in each |
 | Semantic regression CI gate | High | Flag PRs where key embedding drifts beyond threshold |
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
