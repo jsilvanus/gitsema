@@ -2832,6 +2832,34 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
+### Phase 86 — Tier-2 Code Organisation: MCP Modularization + Search Module Split + CLI Register Split *(completed v0.85.0)*
+
+**Goal:** Complete the interrupted Tier-2 refactor from review6, repairing 12 broken TypeScript/test errors left by partial file moves.
+
+**Implemented scope:**
+
+*Broken-state repairs (12 errors):*
+- `cli/index.ts`: removed duplicate content (file had been triple-concatenated during the interrupted refactor)
+- `cli/register/all.ts`: fixed import path `fileDiff.js` → `diff.js`
+- `search/clustering/clustering.ts`: fixed logger import path (`../../utils` → `../../../utils`)
+- `temporal/changePoints.ts`: changed `computeEvolution` import from sibling file to parent re-export stub so vitest mocks apply correctly (fixed 7 test failures)
+- `mcp/registerTool.ts`: widened `McpHandler` embed return type to `Embedding` (instead of `number[]`)
+- `mcp/tools/*.ts`: added explicit `McpServer` type annotation on all four tool-registration functions; added `!` non-null assertions on embedding values after `ok` guard; made `health_timeline` handler `async`
+- `mcp/tools/workflow.ts`: fixed import `computeAuthors` → `computeAuthorContributions`
+- `ranking.ts`: added `showHeadings` parameter to `renderFirstSeenResults` (called with 2 args in two places)
+- `labelEnhancer.ts`: added `chunks/chunking/chunked` token normalizations (failing test expectation)
+
+*Architecture delivered (by the preceding commits):*
+- `mcp/server.ts` split from 1,542 lines into 5 domain files (`tools/search.ts`, `tools/analysis.ts`, `tools/clustering.ts`, `tools/workflow.ts`, `tools/infrastructure.ts`) plus `registerTool()` helper
+- `cli/index.ts` split from 1,593 lines into thin aggregator + `register/` domain files
+- `src/core/search/` reorganized into `analysis/`, `clustering/`, `temporal/` subdirectories with backward-compat re-export stubs
+
+**Tests:** 697/697 pass. Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
 ### Long-Term Investments (Phase 86+)
 
 | Feature | Complexity | Notes |
