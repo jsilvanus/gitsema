@@ -6,7 +6,9 @@
 
 ## Table of Contents
 
-| Section | Line |
+> **Note:** Line numbers below are approximate reference points and may drift as the document grows. Use anchor links for navigation.
+
+| Section | Line (approx.) |
 |---|---:|
 | [Table of Contents](#table-of-contents) | 7 |
 | [Vision](#vision) | 70 |
@@ -67,8 +69,18 @@
 |   [Phase 46 — Evolution Alerts and Commit URL Construction](#phase-46-—-evolution-alerts-and-commit-url-construction) | 2209 |
 |   [Phase 47 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging](#phase-47-—-richer-indexing-progress-embed-latency-stats-and-incremental-by-default-messaging) | 2225 |
 | [Section II - Next?](#section-ii-next) | 2635 |
-|   [Planned Phases (71+)](#planned-phases-71) | 2638 |
-|   [Long-Term Investments](#long-term-investments-phase-71) | 2694 |
+|   [Planned Phases (72+)](#planned-phases-72) | 2638 |
+|   [Phase 72 — HTTP Route Parity](#phase-72-—-http-route-parity-for-all-analysis-commands) | 2655 |
+|   [Phase 73 — Docker Infrastructure](#phase-73-—-deployment-guide-and-docker-infrastructure) | 2667 |
+|   [Phase 74 — Scale Warnings + Doctor](#phase-74-—-gitsema-status-scale-warnings--extended-gitsema-doctor-pre-flight) | 2680 |
+|   [Phase 75 — Per-Repo Access Control](#phase-75-—-per-repo-access-control-on-http-server) | 2697 |
+|   [Phase 76 — htmlRenderer Modularisation](#phase-76-—-complete-htmlrendererTs-modularisation) | 2712 |
+|   [Phase 77 — Unified Level Concept](#phase-77-—-unified-indexing--search-level-concept) | 2725 |
+|   [Phase 78 — REPL + Quickstart](#phase-78-—-gitsema-repl--gitsema-quickstart) | — |
+|   [Phase 79 — Semantic Regression CI Gate](#phase-79-—-semantic-regression-ci-gate) | — |
+|   [Phase 80 — Cross-Repo Concept Similarity](#phase-80-—-cross-repo-concept-similarity) | — |
+|   [Phase 81 — Semantic Code Review Assistant](#phase-81-—-semantic-code-review-assistant) | — |
+|   [Long-Term Investments](#long-term-investments-phase-81) | 2741 |
 
 ---
 
@@ -2664,65 +2676,61 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
-### Phase 73 — Deployment Guide and Docker Infrastructure
+### Phase 73 — Deployment Guide and Docker Infrastructure *(completed v0.73.0)*
 
 **Goal:** Eliminate the primary adoption barrier for teams that want to self-host gitsema as a shared service.
 
-**Scope:**
+**Implemented scope:**
 - `Dockerfile` — multi-stage build: compile TypeScript, copy `dist/` + `package.json`, default CMD = `node dist/cli/index.js tools serve`.
 - `docker-compose.yml` — gitsema HTTP server + Ollama sidecar with persistent volume for `.gitsema/`.
-- `docs/deploy.md` — cover systemd unit, Docker Compose, API key rotation, index backup strategy, embedding model upgrade path, and SQLite-vs-VSS guidance.
+- `docs/deploy.md` — covers systemd unit, Docker Compose, API key rotation, index backup strategy, embedding model upgrade path, and SQLite-vs-VSS guidance.
 
-**Status:** `docs/deploy.md` written. `Dockerfile` and `docker-compose.yml` not yet added.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 74 — `gitsema status` Scale Warnings + Extended `gitsema doctor` Pre-flight
+### Phase 74 — `gitsema status` Scale Warnings + Extended `gitsema doctor` Pre-flight *(completed v0.74.0)*
 
 **Goal:** Make the tool self-explaining about scale limits so users don't hit OOM or slow queries without warning.
 
-**Scope:**
-- `gitsema status`: when blob count exceeds a configurable threshold (default 50 000), print a prominent warning recommending `gitsema build-vss` and/or `--early-cut`. Show whether a VSS index exists and is up-to-date.
-- `gitsema doctor --extended` (or make the checks default):
-  - Verify embedding model is reachable (attempt a one-token embed call to the configured provider).
-  - Check index freshness: compare `max(commit_ts)` in `indexed_commits` against `git log -1 --format=%ct HEAD`; warn if more than N commits behind.
-  - Estimate search latency class: `fast` (< 10K blobs or VSS present), `moderate` (10K–50K, no VSS), `slow` (> 50K, no VSS, no early-cut).
-  - Warn when `CURRENT_SCHEMA_VERSION` > the version recorded in the `meta` table.
-- First-slow-query hint: after any search that exceeds a configurable wall-clock threshold (default 5 s), print a one-time suggestion to run `gitsema build-vss`.
+**Implemented scope:**
+- `gitsema status`: when blob count exceeds a configurable threshold (default 50 000), prints a prominent warning recommending `gitsema build-vss` and/or `--early-cut`. Shows whether a VSS index exists.
+- `gitsema index doctor --extended`: checks model reachability (live embed call), index freshness (HEAD commit timestamp vs last indexed), and estimates search latency class (`fast`/`moderate`/`slow`).
+- First-slow-query hint: after any search that exceeds a configurable wall-clock threshold (default 5 s), prints a one-time suggestion to run `gitsema build-vss`.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 75 — Per-Repo Access Control on HTTP Server
+### Phase 75 — Per-Repo Access Control on HTTP Server *(completed v0.75.0)*
 
 **Goal:** When multiple repos are registered, allow scoping a `GITSEMA_SERVE_KEY` token to a specific repo ID so different users only see their own repo's results.
 
-**Scope:**
-- Introduce a `repo_tokens` table (or extend `repos`) mapping token → repo ID.
-- Auth middleware reads the token, looks up the allowed repo ID, and injects it as `req.repoId`.
-- All search/analysis routes filter their DB queries by `repoId` when set.
-- `gitsema repos token add <repo-id>` CLI to mint scoped tokens.
-- Document in `docs/deploy.md`.
+**Implemented scope:**
+- Schema v19: `repo_tokens` table mapping token → repo ID with label and created_at.
+- Auth middleware extended: if bearer token doesn't match global `GITSEMA_SERVE_KEY`, it is looked up in `repo_tokens`; on match, `req.repoId` is set for downstream route filtering.
+- CLI: `gitsema repos token add <repo-id> [label]`, `gitsema repos token list`, `gitsema repos token revoke <prefix>`.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 76 — Complete `htmlRenderer.ts` Modularisation
+### Phase 76 — Complete `htmlRenderer.ts` Modularisation *(completed v0.76.0)*
 
 **Goal:** The main `htmlRenderer.ts` is still ~1 400 LOC after the partial split in Phase 70. Finish the modularisation so each visualisation type lives in its own file, is independently unit-testable, and can be tree-shaken.
 
-**Scope:**
-- Extract remaining renderers from `htmlRenderer.ts` into focused modules: `htmlRenderer-evolution.ts`, `htmlRenderer-clusters.ts`, `htmlRenderer-map.ts`.
-- Document the CSS/JS baseline (shared constants in `htmlRenderer-shared.ts`) so contributors can add new visualisations without touching unrelated code.
-- Add per-module unit tests verifying render output structure (not pixel accuracy).
+**Implemented scope:**
+- Extracted cluster renderers → `htmlRenderer-clusters.ts` (renderClustersHtml, renderClusterDiffHtml, renderClusterTimelineHtml + CLUSTER_SIM_JS constant).
+- Extracted evolution renderers → `htmlRenderer-evolution.ts` (renderConceptEvolutionHtml, renderFileEvolutionHtml + CONCEPT_EVOLUTION_JS constant).
+- Extracted analysis/map renderers → `htmlRenderer-map.ts` (renderConceptChangePointsHtml, renderFileChangePointsHtml, renderClusterChangePointsHtml, renderDeadConceptsHtml, renderMergeAuditHtml, renderBranchSummaryHtml, renderSemanticDiffHtml).
+- Main `htmlRenderer.ts` reduced to a 24-line backward-compatible re-export barrel.
+- All existing imports from `htmlRenderer.js` continue to work unchanged.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete.
 
 ---
 
-### Phase 77 — Unified Indexing + Search Level Concept
+### Phase 77 — Unified Indexing + Search Level Concept *(completed v0.77.0)*
 
 **Background:** Indexing granularity (blob/function/fixed) and search granularity (file/chunk/symbol/module) are currently controlled by separate flags on separate commands (`--chunker` on `index start`, `--level` on `search`). Phase 71 adds a `--level` alias to `index start` to bridge the gap, but the underlying abstractions remain distinct.
 
@@ -2732,24 +2740,82 @@ The following phases are derived from the **review5** strategic review (reflecti
 3. `gitsema index start --level function` stores both whole-file and function-level embeddings in one run (today it's either/or).
 4. A `models add <name> --level function` sets the default indexing granularity for a model.
 
-**Complexity:** Medium. Requires schema changes, config propagation, and backwards-compatible search query routing.
+**Implemented scope:**
+- `StoredEmbedConfig.lastUsedAt` field added to `provenance.ts` (populated from `embed_config.last_used_at`).
+- `gitsema search`: auto-recalls level from the most recently used embed_config when `--level` is not specified (chunker-to-level mapping: `function→chunk`, `fixed→chunk`, `file→file`).
+- `gitsema index start --level multi`: runs a file-level pass then a function-level pass in one invocation.
+- `ModelProfile.level` field added to `configManager.ts`.
+- `gitsema models add <name> --level <level>`: saves preferred granularity to the model profile.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete.
 
 ---
 
-### Long-Term Investments (Phase 77+)
+---
+
+### Phase 78 — `gitsema repl` + `gitsema quickstart` *(completed v0.78.0)*
+
+**Goal:** Reduce friction for both exploratory use (REPL) and first-time setup (quickstart).
+
+**Implemented scope:**
+- `gitsema repl`: interactive readline query loop with shared embedding provider. Supports `:top`, `:level`, `:hybrid`, `:help`, `:quit` meta-commands. Hybrid mode (BM25+vector) can be toggled at runtime.
+- `gitsema quickstart`: guided onboarding wizard that detects the Git repo, probes Ollama availability, selects a model, writes the config, and runs `gitsema index start --since HEAD --max-commits 1` to produce a working index immediately.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 79 — Semantic Regression CI Gate *(completed v0.78.0)*
+
+**Goal:** Enable CI pipelines to catch semantic regressions automatically.
+
+**Implemented scope:**
+- `gitsema regression-gate --base <ref> --head <ref> --query <text>` compares top-k similarity scores for key concept queries between two refs and exits non-zero if cosine drift exceeds a configurable threshold (default 0.15).
+- Accepts a JSON file of multiple queries (`--concepts <file.json>`), each with an optional per-query threshold.
+- Output formats: `text` (default, CI-friendly) or `json` (machine-readable).
+- Exit codes: 0 = all passed, 1 = regressions detected, 2 = tool error.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 80 — Cross-Repo Concept Similarity *(completed v0.78.0)*
+
+**Goal:** Find shared semantic concepts across two separately indexed repositories.
+
+**Implemented scope:**
+- `gitsema cross-repo-similarity <query> --repo-a <db> --repo-b <db>`: opens two SQLite index DBs, runs cosine search in each, and highlights blobs that score strongly in both (above `--threshold`, default 0.7).
+- `vectorSearchWithSession()` helper added to `vectorSearch.ts` for ad-hoc DB searches without changing the active session.
+- Output formats: `text` (default) or `json`.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 81 — Semantic Code Review Assistant *(completed v0.78.0)*
+
+**Goal:** Given a PR diff, find historical analogues for changed code and flag potential regressions.
+
+**Implemented scope:**
+- `gitsema code-review`: accepts a diff via stdin, `--diff-file <patch>`, or `--base`/`--head` git refs. Parses hunks, embeds added lines per file, searches the index for historical analogues, and computes a regression-risk heuristic (`low`/`medium`/`high`) based on similarity of removed lines.
+- Output formats: `text` with risk icons (🟢/🟡/🔴) or `json` for CI integration.
+
+**Status:** ✅ complete.
+
+---
+
+### Long-Term Investments (Phase 82+)
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
 | DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
-| Cross-repo concept similarity | High | Index two repos; find when concept X first appeared in each |
-| Semantic regression CI gate | High | Flag PRs where key embedding drifts beyond threshold |
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
 | Python model server (Phase 13 revival) | Medium | sentence-transformers in Docker; higher throughput than Ollama for bulk indexing |
-| Semantic code review assistant | Medium | Given a PR diff, find historical analogues and flag regressions |
-| `gitsema repl` interactive query loop | Low | Improve exploratory use without requiring repeated CLI invocations |
-| `gitsema quickstart` guided wizard | Low | Reduce zero-to-result friction for new users |
+| ~~Cross-repo concept similarity~~ | ~~High~~ | ✅ shipped Phase 80 |
+| ~~Semantic regression CI gate~~ | ~~High~~ | ✅ shipped Phase 79 |
+| ~~Semantic code review assistant~~ | ~~Medium~~ | ✅ shipped Phase 81 |
+| ~~`gitsema repl` interactive query loop~~ | ~~Low~~ | ✅ shipped Phase 78 |
+| ~~`gitsema quickstart` guided wizard~~ | ~~Low~~ | ✅ shipped Phase 78 |
 
 **Scale notes (from review5):**
 

@@ -1,4 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
+import Database from 'better-sqlite3'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
 import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import type { Embedding, SearchResult, SearchResultKind } from '../models/types.js'
@@ -730,4 +731,46 @@ export function getBranchBlobHashSet(branch: string): Set<string> {
     .prepare('SELECT DISTINCT blob_hash FROM blob_branches WHERE branch_name = ?')
     .all(branch) as Array<{ blob_hash: string }>
   return new Set(rows.map((r) => r.blob_hash))
+}
+
+/**
+ * Run a basic cosine-similarity vector search against a specific rawDb handle
+ * (not the active session). Used by cross-repo search and ad-hoc DB inspection.
+ *
+ * Returns results sorted by descending score.
+ */
+export function vectorSearchWithSession(
+  rawDb: InstanceType<typeof Database>,
+  queryEmbedding: Embedding,
+  opts: { topK?: number; model?: string } = {},
+): SearchResult[] {
+  const topK = opts.topK ?? 10
+  const modelFilter = opts.model
+
+  const rows = rawDb.prepare(`
+    SELECT e.blob_hash, e.vector, e.model, GROUP_CONCAT(p.path, '|||') AS paths
+    FROM embeddings e
+    LEFT JOIN paths p ON p.blob_hash = e.blob_hash
+    ${modelFilter ? 'WHERE e.model = ?' : ''}
+    GROUP BY e.blob_hash, e.model
+    LIMIT 10000
+  `).all(...(modelFilter ? [modelFilter] : [])) as Array<{
+    blob_hash: string; vector: Buffer; model: string; paths: string | null
+  }>
+
+  const scored: SearchResult[] = rows
+    .map((r) => {
+      const stored = new Float32Array(r.vector.buffer, r.vector.byteOffset, r.vector.byteLength / 4)
+      const score = cosineSimilarity(queryEmbedding as number[], Array.from(stored))
+      return {
+        blobHash: r.blob_hash,
+        score,
+        paths: r.paths ? r.paths.split('|||') : [],
+        model: r.model,
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+
+  return scored
 }

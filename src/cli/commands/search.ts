@@ -314,8 +314,10 @@ export async function searchCommand(query: string, options: SearchCommandOptions
         const chunkerToLevel: Record<string, string> = { file: 'file', function: 'chunk', fixed: 'chunk' }
         effectiveLevel = chunkerToLevel[latest.chunker]
       }
-    } catch {
-      // ignore — non-fatal
+    } catch (err) {
+      if (process.env.GITSEMA_VERBOSE) {
+        console.debug(`[gitsema] auto-recall level: could not load embed_config: ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
   }
 

@@ -592,7 +592,3 @@ ${CLUSTER_TIMELINE_JS}
 </body>
 </html>`
 }
-
-// ─── renderConceptEvolutionHtml ───────────────────────────────────────────────
-
-// Static JS for concept evolution timeline (no ${} interpolations in this block)
