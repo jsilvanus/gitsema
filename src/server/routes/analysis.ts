@@ -547,9 +547,9 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   // POST /analysis/policy-check
   // Automated CI gate: check debt, security similarity, and concept drift against thresholds.
   const PolicyCheckBodySchema = z.object({
-    maxDebtScore: z.number().positive().optional(),
-    minSecurityScore: z.number().positive().optional(),
-    maxDrift: z.number().min(0).max(2).optional(),
+    maxDebtScore: z.coerce.number().positive().optional(),
+    minSecurityScore: z.coerce.number().positive().optional(),
+    maxDrift: z.coerce.number().min(0).max(2).optional(),
     query: z.string().optional(),
   })
   router.post('/policy-check', async (req, res) => {

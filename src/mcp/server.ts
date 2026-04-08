@@ -45,6 +45,9 @@ import { computeHealthTimeline } from '../core/search/healthTimeline.js'
 import { scoreDebt } from '../core/search/debtScoring.js'
 import { getActiveSession } from '../core/db/sqlite.js'
 import { multiRepoSearch } from '../core/indexing/repoRegistry.js'
+import { computeDocGap } from '../core/search/docGap.js'
+import { computeContributorProfile } from '../core/search/contributorProfile.js'
+import { computeOwnershipHeatmap } from '../core/search/ownershipHeatmap.js'
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -1220,6 +1223,314 @@ export async function startMcpServer(): Promise<void> {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error: ${msg}` }] }
       }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: doc_gap
+  // -------------------------------------------------------------------------
+  server.tool(
+    'doc_gap',
+    'Find code blobs with insufficient documentation coverage: returns code files with the lowest semantic similarity to any documentation blob in the index.',
+    {
+      top_k: z.number().int().positive().optional().default(20).describe('Number of underdocumented blobs to return'),
+      threshold: z.number().min(0).max(1).optional().describe('Maximum doc-similarity to include (lower = less documented)'),
+      branch: z.string().optional().describe('Restrict to blobs on this branch'),
+    },
+    async ({ top_k, threshold, branch }) => {
+      try {
+        const results = await computeDocGap({ topK: top_k, threshold, branch })
+        if (results.length === 0) {
+          return { content: [{ type: 'text', text: 'No underdocumented blobs found.' }] }
+        }
+        const lines = results.map((r) => {
+          const path = r.paths[0] ?? r.blobHash.slice(0, 8)
+          return `${r.maxDocSimilarity.toFixed(3)}  ${path}`
+        })
+        return { content: [{ type: 'text', text: `Top underdocumented blobs (by doc-similarity):\n${lines.join('\n')}` }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: contributor_profile
+  // -------------------------------------------------------------------------
+  server.tool(
+    'contributor_profile',
+    'Show what a contributor specialises in: returns the top blobs most similar to the semantic centroid of all blobs touched by the author.',
+    {
+      author: z.string().describe('Author name or email (substring match)'),
+      top_k: z.number().int().positive().optional().default(10).describe('Number of blobs to return'),
+      branch: z.string().optional().describe('Restrict to blobs on this branch'),
+    },
+    async ({ author, top_k, branch }) => {
+      try {
+        const results = await computeContributorProfile(author, { topK: top_k, branch })
+        if (results.length === 0) {
+          return { content: [{ type: 'text', text: `No contributions found for author: ${author}` }] }
+        }
+        const lines = results.map((r: any) => {
+          const path = (r.paths?.[0] ?? r.blobHash?.slice(0, 8) ?? '?')
+          const score = typeof r.score === 'number' ? r.score.toFixed(3) : '?'
+          return `${score}  ${path}`
+        })
+        return { content: [{ type: 'text', text: `Contributor profile for ${author}:\n${lines.join('\n')}` }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: triage
+  // -------------------------------------------------------------------------
+  server.tool(
+    'triage',
+    'Incident / issue triage bundle: for a query, returns first-seen blobs, concept change points, optional file evolution, bisect analysis, and expert attribution.',
+    {
+      query: z.string().describe('Natural-language query describing the issue or incident'),
+      top: z.number().int().positive().optional().default(5).describe('Max results per section'),
+      file: z.string().optional().describe('Optional file path for file-level evolution analysis'),
+    },
+    async ({ query, top, file }) => {
+      const provider = getTextProvider()
+      let emb: number[]
+      try {
+        emb = await embedQuery(provider, query) as number[]
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
+      }
+      const sections: Record<string, unknown> = {}
+      try { sections.firstSeen = vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
+      try { sections.changePoints = computeConceptChangePoints(query, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
+      try { sections.experts = computeExperts({ topN: top }) } catch (e) { sections.experts = [] }
+      if (file) {
+        try {
+          const { computeEvolution } = await import('../core/search/evolution.js')
+          sections.fileEvolution = computeEvolution(file)
+        } catch (e) { sections.fileEvolution = [] }
+      }
+      const lines: string[] = [`Triage: "${query}"`]
+      for (const [key, val] of Object.entries(sections)) {
+        lines.push(`\n--- ${key} ---`)
+        lines.push(typeof val === 'string' ? val : JSON.stringify(val, null, 2))
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }] }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: policy_check
+  // -------------------------------------------------------------------------
+  server.tool(
+    'policy_check',
+    'CI policy gate: check index health against thresholds for debt score, security similarity, and concept drift. Returns pass/fail for each gate.',
+    {
+      max_debt_score: z.number().min(0).max(1).optional().describe('Fail if average debt score exceeds this threshold'),
+      min_security_score: z.number().min(0).max(1).optional().describe('Fail if max security similarity exceeds this threshold'),
+      max_drift: z.number().min(0).max(2).optional().describe('Fail if max concept drift distance exceeds this threshold (requires query)'),
+      query: z.string().optional().describe('Query for drift analysis (required when max_drift is set)'),
+    },
+    async ({ max_debt_score, min_security_score, max_drift, query }) => {
+      const provider = getTextProvider()
+      const session = getActiveSession()
+      const results: { passed: boolean; checks: Record<string, { passed: boolean; [k: string]: unknown }> } = { passed: true, checks: {} }
+
+      if (max_debt_score !== undefined) {
+        try {
+          const debtItems = await scoreDebt(session, provider)
+          const avgScore = debtItems.length > 0 ? debtItems.reduce((s, r) => s + r.debtScore, 0) / debtItems.length : 0
+          const passed = avgScore <= max_debt_score
+          results.checks.debt = { avgScore, passed }
+          if (!passed) results.passed = false
+        } catch (err) {
+          results.checks.debt = { passed: false, error: err instanceof Error ? err.message : String(err) }
+          results.passed = false
+        }
+      }
+      if (min_security_score !== undefined) {
+        try {
+          const findings = await scanForVulnerabilities(session, provider)
+          const maxSim = findings.length > 0 ? Math.max(...findings.map((f) => f.score)) : 0
+          const passed = maxSim <= min_security_score
+          results.checks.security = { maxSimilarity: maxSim, passed }
+          if (!passed) results.passed = false
+        } catch (err) {
+          results.checks.security = { passed: false, error: err instanceof Error ? err.message : String(err) }
+          results.passed = false
+        }
+      }
+      if (max_drift !== undefined && query) {
+        try {
+          const emb = await embedQuery(provider, query) as number[]
+          const cps = computeConceptChangePoints(query, emb, { topK: 50 })
+          const maxDist = cps.points.length > 0 ? Math.max(...cps.points.map((c) => c.distance)) : 0
+          const passed = maxDist <= max_drift
+          results.checks.drift = { maxDistance: maxDist, passed }
+          if (!passed) results.passed = false
+        } catch (err) {
+          results.checks.drift = { passed: false, error: err instanceof Error ? err.message : String(err) }
+          results.passed = false
+        }
+      }
+
+      const summary = results.passed ? '✅ All policy checks passed.' : '❌ Policy check FAILED.'
+      const lines = [summary]
+      for (const [gate, info] of Object.entries(results.checks)) {
+        const icon = info.passed ? '✅' : '❌'
+        lines.push(`  ${icon} ${gate}: ${JSON.stringify(info)}`)
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }] }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: ownership
+  // -------------------------------------------------------------------------
+  server.tool(
+    'ownership',
+    'Show ownership heatmap for a semantic concept: for a query, ranks authors by their share of touched blobs in the matching concept area.',
+    {
+      query: z.string().describe('Natural-language concept query'),
+      top: z.number().int().positive().optional().default(5).describe('Number of top owners to return'),
+      window_days: z.number().int().positive().optional().default(90).describe('Time window for recent activity (days)'),
+    },
+    async ({ query, top, window_days }) => {
+      const provider = getTextProvider()
+      let emb: number[]
+      try {
+        emb = await embedQuery(provider, query) as number[]
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error embedding query: ${msg}` }] }
+      }
+      try {
+        const heatmap = computeOwnershipHeatmap({ embedding: emb, topK: top, windowDays: window_days })
+        if (heatmap.length === 0) {
+          return { content: [{ type: 'text', text: 'No ownership data found.' }] }
+        }
+        const lines = heatmap.map((o: any) => `${(o.share ?? 0).toFixed(3)}  ${o.author ?? o.authorEmail ?? '?'}`)
+        return { content: [{ type: 'text', text: `Ownership for "${query}":\n${lines.join('\n')}` }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: workflow_run
+  // -------------------------------------------------------------------------
+  server.tool(
+    'workflow_run',
+    'Run a named workflow template (pr-review | incident | release-audit) and return all sections of the analysis bundle.',
+    {
+      template: z.enum(['pr-review', 'incident', 'release-audit']).describe('Workflow template to run'),
+      query: z.string().optional().describe('Query string (required for incident and release-audit)'),
+      file: z.string().optional().describe('File path (used by pr-review for impact analysis)'),
+      top: z.number().int().positive().optional().default(5).describe('Max results per section'),
+    },
+    async ({ template, query, file, top }) => {
+      const provider = getTextProvider()
+      const sections: Record<string, unknown> = {}
+
+      if (template === 'pr-review') {
+        const q = query ?? file ?? 'code changes'
+        let emb: number[]
+        try { emb = await embedQuery(provider, q) as number[] } catch (err) {
+          return { content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }] }
+        }
+        if (file) {
+          try { sections.impact = await computeImpact(file, provider, { topK: top }) } catch (e) { sections.impact = [] }
+        }
+        try { sections.changePoints = computeConceptChangePoints(q, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
+        try { sections.experts = computeExperts({ topN: top }) } catch (e) { sections.experts = [] }
+      } else if (template === 'incident') {
+        const q = query ?? ''
+        let emb: number[]
+        try { emb = await embedQuery(provider, q) as number[] } catch (err) {
+          return { content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }] }
+        }
+        try { sections.firstSeen = vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
+        try { sections.changePoints = computeConceptChangePoints(q, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
+        try { sections.experts = computeExperts({ topN: top }) } catch (e) { sections.experts = [] }
+      } else {
+        // release-audit
+        const q = query ?? 'architecture changes quality'
+        let emb: number[]
+        try { emb = await embedQuery(provider, q) as number[] } catch (err) {
+          return { content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }] }
+        }
+        try { sections.topChangedConcepts = vectorSearch(emb, { topK: top }) } catch (e) { sections.topChangedConcepts = [] }
+        try { sections.changePoints = computeConceptChangePoints(q, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
+        try { sections.experts = computeExperts({ topN: top }) } catch (e) { sections.experts = [] }
+      }
+
+      const lines: string[] = [`Workflow: ${template}`]
+      for (const [key, val] of Object.entries(sections)) {
+        lines.push(`\n--- ${key} ---`)
+        lines.push(typeof val === 'string' ? val : JSON.stringify(val, null, 2))
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }] }
+    },
+  )
+
+  // -------------------------------------------------------------------------
+  // Tool: eval
+  // -------------------------------------------------------------------------
+  server.tool(
+    'eval',
+    'Retrieval evaluation harness: given a list of (query, expectedPaths) test cases, returns precision@k, recall@k, and MRR metrics for the current index state.',
+    {
+      cases: z.array(z.object({
+        query: z.string().describe('Search query'),
+        expected_paths: z.array(z.string()).describe('Expected file paths in the top-k results'),
+      })).min(1).describe('Evaluation test cases'),
+      top: z.number().int().positive().optional().default(10).describe('k for P@k / R@k'),
+    },
+    async ({ cases, top }) => {
+      const provider = getTextProvider()
+      let sumPrecision = 0
+      let sumRecall = 0
+      let sumMrr = 0
+      const caseResults: Array<{ query: string; precision: number; recall: number; mrr: number }> = []
+
+      for (const c of cases) {
+        let emb: number[]
+        try { emb = await embedQuery(provider, c.query) as number[] } catch (_e) {
+          caseResults.push({ query: c.query, precision: 0, recall: 0, mrr: 0 })
+          continue
+        }
+        const hits = vectorSearch(emb, { topK: top })
+        const topPaths = hits.flatMap((h) => h.paths ?? []).slice(0, top)
+        const expected = new Set(c.expected_paths)
+        const hits_ = topPaths.filter((p) => expected.has(p))
+        const precision = topPaths.length > 0 ? hits_.length / topPaths.length : 0
+        const recall = expected.size > 0 ? hits_.length / expected.size : 1
+        let mrr = 0
+        for (let i = 0; i < topPaths.length; i++) {
+          if (expected.has(topPaths[i])) { mrr = 1 / (i + 1); break }
+        }
+        sumPrecision += precision; sumRecall += recall; sumMrr += mrr
+        caseResults.push({ query: c.query, precision, recall, mrr })
+      }
+
+      const n = cases.length
+      const lines = [
+        `Eval results (n=${n}, top=${top}):`,
+        `  P@${top}: ${(sumPrecision / n).toFixed(3)}`,
+        `  R@${top}: ${(sumRecall / n).toFixed(3)}`,
+        `  MRR:   ${(sumMrr / n).toFixed(3)}`,
+        '',
+        'Per-case:',
+        ...caseResults.map((r) => `  P=${r.precision.toFixed(3)} R=${r.recall.toFixed(3)} MRR=${r.mrr.toFixed(3)}  "${r.query}"`),
+      ]
+      return { content: [{ type: 'text', text: lines.join('\n') }] }
     },
   )
 

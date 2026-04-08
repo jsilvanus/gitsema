@@ -207,7 +207,7 @@ describe('POST /api/v1/analysis/ownership [PARITY GAP]', () => {
 describe('POST /api/v1/analysis/workflow [PARITY GAP]', () => {
   it(
     'returns 200 with workflow output — FAILS until route is implemented',
-    assertRouteExists('post', '/api/v1/analysis/workflow', { template: 'pr-review' }),
+    assertRouteExists('post', '/api/v1/analysis/workflow', { template: 'release-audit' }),
   )
 
   it('returns 400 for unknown template', async () => {
