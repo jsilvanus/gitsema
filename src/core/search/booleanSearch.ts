@@ -1,1 +1,1 @@
-export * from './core/booleanSearch.js'
+export * from './analysis/booleanSearch.js'

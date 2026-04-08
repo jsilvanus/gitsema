@@ -1,1 +1,1 @@
-export * from './core/hybridSearch.js'
+export * from './analysis/hybridSearch.js'

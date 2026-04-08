@@ -11,4 +11,4 @@
  * across worker threads or HTTP server instances.
  */
 
-export * from './core/resultCache.js'
+export * from './analysis/resultCache.js'

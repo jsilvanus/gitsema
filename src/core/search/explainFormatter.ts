@@ -20,4 +20,4 @@
  * attribute quotes to specific files/commits, and reason about result quality.
  */
 
-export * from './core/explainFormatter.js'
+export * from './analysis/explainFormatter.js'
