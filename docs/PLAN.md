@@ -2860,6 +2860,62 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
+### Phase 87 — Tier-3 Robustness: Embed Retry, Queue Backpressure, Atomic FTS5, Body Limit *(completed v0.86.0)*
+
+**Goal:** Address the four production-readiness gaps identified in review6 Tier 3.
+
+**Implemented scope:**
+
+*Embedding retry with exponential backoff (`indexer.ts`):*
+- Added `withRetry<T>(fn, maxAttempts=2, baseDelayMs=500)` helper inside the indexer.
+- `timedEmbed()` now retries on transient errors: HTTP 429 (rate-limit), 503 (service unavailable), ECONNRESET, ETIMEDOUT. Non-transient errors propagate immediately.
+- Backoff schedule: 500 ms before attempt 2. Two-attempt cap avoids long stalls on extended outages.
+
+*AsyncQueue backpressure + error propagation (`asyncQueue.ts`):*
+- Added optional `maxBufferSize` constructor option.
+- New `pushAsync(item)` — `async`, blocks the caller when `items.length >= maxBufferSize` until a consumer calls `shift()`.
+- New `pushError(err)` — marks the queue closed with an error; all blocking `pushAsync` calls and pending `shift()` calls receive the error.
+- `shift()` now throws if the queue was closed via `pushError()`.
+- Both pipeline queues in `indexer.ts` now use `{ maxBufferSize: 8 }` and `pushAsync()` to bound peak memory. Producer IIFE `.catch()` propagates crashes to the next stage.
+
+*FTS5 content inside main transaction (`blobStore.ts`):*
+- `storeFtsContent()` is now called inside the `db.transaction()` callback in both `storeBlob()` and `storeBlobRecord()`.
+- Blob vector + FTS5 content are written atomically. A process crash between them can no longer leave a split-brain state where a blob is visible in vector search but absent from hybrid search.
+
+*HTTP request body size limit (`server/app.ts`):*
+- Replaced the hard-coded `'50mb'` Express body-parser limit with `process.env.GITSEMA_MAX_BODY_SIZE ?? '1mb'`.
+- Prevents memory exhaustion from oversized POST bodies in shared deployments; override via env var for large-blob use cases.
+
+**Tests:** 725/725. Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 88 — Tier-4 Scale/Features: LLM Narrator Tests + Docs Sync Check *(completed v0.87.0)*
+
+**Goal:** Address the two Tier-4 proposals from review6: test coverage for the LLM narrator and automated documentation drift detection.
+
+**Implemented scope:**
+
+*LLM narrator test coverage (`tests/narrator.test.ts` — 19 tests):*
+- Full unit coverage for `src/core/llm/narrator.ts` using `vi.stubGlobal('fetch', ...)` with canned `chat/completions` responses. Zero real HTTP calls.
+- Tests cover all three fallback paths in `resolveLlmUrl()`: missing `GITSEMA_LLM_URL`, invalid URL, unsupported protocol (`ftp:`).
+- Integration path tests: correct endpoint URL, Bearer token header, custom `GITSEMA_LLM_MODEL`, response content extraction.
+- Error paths: HTTP error status → error fallback string, empty `choices` array → error fallback string.
+- Functions covered: `narrateEvolution`, `narrateClusters`, `narrateSecurityFindings`, `narrateSearchResults`, `narrateChangePoints`.
+
+*Documentation sync check (`tests/docsSync.test.ts` — 9 tests):*
+- Guards against the doc drift identified in review6 §9.2.
+- Checks: `CLAUDE.md` contains the current schema version from `sqlite.ts` (`CURRENT_SCHEMA_VERSION`), README.md mentions all non-hidden CLI commands (tolerance ≤ 5 missing for forward-compat), canonical docs (`features.md`, `PLAN.md`, `review6.md`) exist and are non-trivial, `package.json` has a valid semver version at ≥ 0.80.0.
+- `CLAUDE.md` updated: schema version corrected from v17 → v19.
+
+**Tests:** 725/725 (62 files). Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
 ### Long-Term Investments (Phase 86+)
 
 | Feature | Complexity | Notes |
