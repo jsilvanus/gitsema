@@ -12,3 +12,6 @@ modelserver/models/
 
 # Venv 
 .venv/
+
+# Embedeer repo fix
+embedeer-upstream/
