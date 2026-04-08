@@ -811,13 +811,22 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   stats.currentStage = 'commit-mapping'
   const commitMappingStart = Date.now()
 
-  // Phase B: Walk commit history, persist to commits/blobCommits
+  // Phase B: Walk commit history, persist to commits/blobCommits.
+  //
+  // The stream loop now only does synchronous SQLite work (storeCommitWithBlobs,
+  // storeBlobBranches).  Commit-message embedding — previously an awaited call
+  // inside the loop — is collected into `toEmbed` and fanned out in parallel
+  // after the stream finishes.  This converts the serial O(commits × embedLatency)
+  // wall-clock time into O(commits / concurrency × embedLatency).
   const commitStream = streamCommitMap(repoPath, { maxCommits, branch: branchFilter }) as AsyncIterable<CommitMapEvent>
+
+  interface PendingEmbed { commitHash: string; message: string }
+  const toEmbed: PendingEmbed[] = []
 
   let pendingCommit: CommitEntry | null = null
   let pendingBlobHashes: string[] = []
 
-  async function flushPendingCommit(): Promise<void> {
+  function flushPendingCommitSync(): void {
     if (!pendingCommit) return
     const stored = storeCommitWithBlobs(pendingCommit, pendingBlobHashes)
     stats.commits++
@@ -830,26 +839,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       }
     }
 
-    // Embed the commit message using the text provider (natural-language prose).
-    // Failures are non-fatal: we log and count them, then move on.
+    // Collect commits with non-empty messages for parallel embedding below
     if (pendingCommit.message.trim().length > 0) {
-      try {
-        const msgEmbedding = await timedEmbed(provider, pendingCommit.message)
-        storeCommitEmbedding({
-          commitHash: pendingCommit.commitHash,
-          model: provider.model,
-          embedding: msgEmbedding,
-          quantize,
-        })
-        stats.commitEmbeddings++
-      } catch (err) {
-        logger.debug?.(`Failed to embed commit message ${pendingCommit.commitHash}: ${err instanceof Error ? err.message : String(err)}`)
-        stats.commitEmbedFailed++
-      }
+      toEmbed.push({ commitHash: pendingCommit.commitHash, message: pendingCommit.message })
+    } else {
+      // No message to embed — mark indexed immediately
+      markCommitIndexed(pendingCommit.commitHash)
     }
-
-    // Record commit as fully indexed for future incremental runs
-    markCommitIndexed(pendingCommit.commitHash)
 
     pendingCommit = null
     pendingBlobHashes = []
@@ -857,7 +853,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   for await (const event of commitStream) {
     if (event.type === 'commit') {
-      await flushPendingCommit()
+      flushPendingCommitSync()
       pendingCommit = event.data
       pendingBlobHashes = []
     } else if (event.type === 'blob') {
@@ -866,7 +862,25 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     onProgress?.({ ...stats, elapsed: Date.now() - start })
   }
 
-  await flushPendingCommit()
+  flushPendingCommitSync()
+
+  // Fan-out commit-message embeddings in parallel (same concurrency as blob embedding)
+  const embedLimit = createLimiter(concurrency)
+  await Promise.all(
+    toEmbed.map(({ commitHash, message }) =>
+      embedLimit(async () => {
+        try {
+          const msgEmbedding = await timedEmbed(provider, message)
+          storeCommitEmbedding({ commitHash, model: provider.model, embedding: msgEmbedding, quantize })
+          stats.commitEmbeddings++
+        } catch (err) {
+          logger.debug?.(`Failed to embed commit message ${commitHash}: ${err instanceof Error ? err.message : String(err)}`)
+          stats.commitEmbedFailed++
+        }
+        markCommitIndexed(commitHash)
+      }),
+    ),
+  )
 
   // finalize commit mapping timing
   stats.stageTimings.commitMapping = Date.now() - commitMappingStart
