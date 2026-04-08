@@ -206,33 +206,69 @@ export async function ensureModelDownloadedAndOptimized(
 
   // --- Download if missing ---
   if (!present && downloadIfMissing) {
-    const downloadFns = ['downloadModel', 'pullModel', 'download', 'pull', 'installModel', 'ensureModel', 'fetchModel', 'fetch', 'install']
-    const ok = await callAny(downloadFns, [modelName])
-    if (!ok) {
-      // try object-style API: download({ model })
-      if (typeof client.download === 'function') {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          await client.download({ model: modelName })
-        } catch (err) {
-          throw new Error(`Failed to download model '${modelName}' via embedeer.download({model}). Error: ${err instanceof Error ? err.message : String(err)}`)
+    // Prefer the explicit `loadModel` API (common in @jsilvanus/embedeer),
+    // then fall back to a number of other common names.
+    if (typeof client.loadModel === 'function') {
+      // `loadModel` typically downloads and initialises the model if missing.
+      // eslint-disable-next-line no-await-in-loop
+      await client.loadModel(modelName)
+    } else {
+      const downloadFns = ['downloadModel', 'pullModel', 'download', 'pull', 'installModel', 'ensureModel', 'fetchModel', 'fetch', 'install']
+      const ok = await callAny(downloadFns, [modelName])
+      if (!ok) {
+        // try object-style API: download({ model })
+        if (typeof client.download === 'function') {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await client.download({ model: modelName })
+          } catch (err) {
+            throw new Error(`Failed to download model '${modelName}' via embedeer.download({model}). Error: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        } else {
+          throw new Error(`embedeer package found but no recognised download API. Please download model '${modelName}' manually or upgrade @jsilvanus/embedeer.`)
         }
-      } else {
-        throw new Error(`embedeer package found but no recognised download API. Please download model '${modelName}' manually or upgrade embedeer.`)
       }
     }
   }
 
   // --- Optimise ---
   if (optimize) {
-    const optimizeFns = ['optimizeModel', 'optimize', 'quantize', 'compileModel', 'prepareModel', 'build', 'convertModel', 'prepare']
+    const optimizeFns = ['optimizeModel', 'optimize', 'quantize', 'compileModel', 'prepareModel', 'build', 'convertModel', 'prepare', 'applyPerfProfile']
+    // Try top-level APIs first
     const ok = await callAny(optimizeFns, [modelName])
     if (!ok) {
       // Some APIs accept no args and optimise all available models
       const okNoArgs = await callAny(optimizeFns, [])
       if (!okNoArgs) {
-        // Not fatal — optimisation is a best-effort convenience.
-        console.log(`embedeer: optimisation API not found for model '${modelName}'; skipping optimise step.`)
+        // Try nested `Embedder`-style APIs (some releases expose methods under an `Embedder` namespace)
+        const embedderTarget = client && (client.Embedder ?? client.embedder ?? client.default?.Embedder)
+        if (embedderTarget && typeof embedderTarget === 'object') {
+          const callAnyOnTarget = async (names: string[], args: any[] = []) => {
+            for (const n of names) {
+              try {
+                if (typeof embedderTarget[n] === 'function') {
+                  // eslint-disable-next-line no-await-in-loop
+                  await embedderTarget[n](...args)
+                  return true
+                }
+              } catch (err) {
+                throw err
+              }
+            }
+            return false
+          }
+
+          const okNested = await callAnyOnTarget(optimizeFns, [modelName])
+          if (!okNested) {
+            const okNestedNoArgs = await callAnyOnTarget(optimizeFns, [])
+            if (!okNestedNoArgs) {
+              console.log(`embedeer: optimisation API not found for model '${modelName}'; skipping optimise step.`)
+            }
+          }
+        } else {
+          // Not fatal — optimisation is a best-effort convenience.
+          console.log(`embedeer: optimisation API not found for model '${modelName}'; skipping optimise step.`)
+        }
       }
     }
   }

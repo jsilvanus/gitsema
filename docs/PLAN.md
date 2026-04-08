@@ -98,6 +98,7 @@
 |   [Phase 76 — Complete `htmlRenderer.ts` Modularisation](#phase-76-—-complete-htmlrendererts-modularisation) | 2742 |
 |   [Phase 77 — Unified Indexing + Search Level Concept](#phase-77-—-unified-indexing-search-level-concept) | 2755 |
 |   [Phase 85 — Tier-1 Reliability: Test Isolation, SQL Sampling, Batch Dedup](#phase-85-—-tier-1-reliability-test-isolation-sql-sampling-batch-dedup-completed-v0840) | 2805 |
+|   [Phase 86 — Embedeer provider integration](#phase-85-—-embedeer-provider-integration) | 9999 |
 |   [Long-Term Investments (Phase 86+)](#long-term-investments-phase-86) | 2860 |
 
 ---
@@ -2837,15 +2838,15 @@ The following phases are derived from the **review5** strategic review (reflecti
 |---------|:----------:|-------|
 | DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
-| Python model server (GPU Docker) | Medium | sentence-transformers + CUDA; higher throughput than Ollama for bulk indexing |
-| ~~Semantic regression CI gate~~ | ~~High~~ | ✅ shipped Phase 79 |
-| ~~Cross-repo concept similarity~~ | ~~High~~ | ✅ shipped Phase 80 |
-| ~~Semantic code review assistant~~ | ~~Medium~~ | ✅ shipped Phase 81 |
-| ~~`gitsema repl` interactive query loop~~ | ~~Low~~ | ✅ shipped Phase 78 |
-| ~~`gitsema quickstart` guided wizard~~ | ~~Low~~ | ✅ shipped Phase 78 |
 
 **Scale notes (updated for v0.81.0):**
 
 - **Search memory:** auto early-cut (Phase 82) now guards the default search path — reservoir sampling kicks in at 50 K candidates without any flags. ANN path (`gitsema index build-vss`) eliminates the candidate-load entirely for large indexes.
 - **Indexing time:** commit-message embedding is now parallelised (Phase 83). The read/embed/store pipeline (Phase 69) + parallel commit embedding together keep both phases off the critical path. The remaining serial bottleneck is commit-graph walking itself (git rev-list) which is I/O-bound.
 - **Chunk/symbol candidate expansion:** when `--chunks` or `--vss` is combined with a large index the candidate pool grows 3–10× before scoring. Monitor RSS when indexing large monorepos with `--chunker function`.
+
+### Non-goals for now (revisited later)
+
+| Feature | Reasoning | 
+|---------|:----------:|-------|
+| Python model server (GPU Docker) | We already have Node.js embedeer and if we want Docker+python, we can use ollama. |
