@@ -15,6 +15,7 @@
 import { getCachedQueryEmbedding, setCachedQueryEmbedding } from './queryCache.js'
 import type { EmbeddingProvider } from './provider.js'
 import type { Embedding } from '../models/types.js'
+import { incQueryCacheHit, incQueryCacheMiss } from '../../utils/metricsCounters.js'
 
 export interface EmbedQueryOptions {
   /** When true, skip both cache reads and cache writes. Defaults to false. */
@@ -36,7 +37,11 @@ export async function embedQuery(
 
   if (!noCache) {
     const cached = getCachedQueryEmbedding(query, provider.model)
-    if (cached) return cached
+    if (cached) {
+      incQueryCacheHit()
+      return cached
+    }
+    incQueryCacheMiss()
   }
 
   const embedding = await provider.embed(query)

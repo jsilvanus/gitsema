@@ -28,6 +28,16 @@
  *   POST /analysis/security-scan  (Phase 43)
  *   POST /analysis/health         (Phase 44)
  *   POST /analysis/debt           (Phase 45)
+ *   POST /analysis/doc-gap        (Phase 38)
+ *   POST /analysis/contributor-profile (Phase 39)
+ *   POST /analysis/triage         (Phase 65)
+ *   POST /analysis/policy-check   (Phase 66)
+ *   POST /analysis/ownership      (Phase 67)
+ *   POST /analysis/workflow       (Phase 68)
+ *   POST /analysis/eval           (Phase 64)
+ *   GET  /metrics                 (P2 — Prometheus exposition)
+ *   GET  /openapi.json            (P2 — OpenAPI 3.1 spec)
+ *   GET  /docs                    (P2 — Swagger UI)
  */
 
 import express from 'express'
@@ -35,6 +45,8 @@ import type { Express } from 'express'
 import type { EmbeddingProvider } from '../core/embedding/provider.js'
 import type { ChunkStrategy } from '../core/chunking/chunker.js'
 import { authMiddleware } from './middleware/auth.js'
+import { requestTimingMiddleware, metricsRegistry, refreshIndexGauges, syncProcessCounters } from './middleware/metrics.js'
+import { buildRateLimiter } from './middleware/rateLimiter.js'
 import { statusRouter } from './routes/status.js'
 import { blobsRouter } from './routes/blobs.js'
 import { commitsRouter } from './routes/commits.js'
@@ -44,6 +56,8 @@ import { remoteRouter } from './routes/remote.js'
 import { analysisRouter } from './routes/analysis.js'
 import { watchRouter } from './routes/watch.js'
 import { projectionsRouter } from './routes/projections.js'
+import { openapiRouter } from './routes/openapi.js'
+import { getActiveSession } from '../core/db/sqlite.js'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -80,8 +94,48 @@ export function createApp(options: AppOptions): Express {
   const app = express()
   app.use(express.json({ limit: '50mb' }))
 
-  // Optional Bearer-token auth on all routes
+  // P2: request timing (must be before auth so we can measure 401 latency too)
+  app.use(requestTimingMiddleware)
+
+  // P2: rate limiting (applied before auth so 429 is returned for overloaded clients)
+  app.use(buildRateLimiter())
+
+  // P2: OpenAPI spec + Swagger UI — public, registered before auth middleware
+  app.use('/', openapiRouter())
+
+  // P2: Shared /metrics handler (used in both public and auth-gated paths below)
+  async function serveMetrics(_req: import('express').Request, res: import('express').Response): Promise<void> {
+    try {
+      refreshIndexGauges(getActiveSession().rawDb)
+    } catch {
+      // non-fatal — DB might not be open in tests
+    }
+    syncProcessCounters()
+    res.setHeader('Content-Type', metricsRegistry.contentType)
+    res.send(await metricsRegistry.metrics())
+  }
+
+  // P2: /metrics — Prometheus scrape endpoint.
+  // Registered BEFORE the global auth middleware so that GITSEMA_METRICS_PUBLIC=1
+  // can expose metrics to monitoring scrapers without a bearer token.
+  // When GITSEMA_METRICS_PUBLIC is not set, metrics fall through to the auth
+  // middleware below and are protected by GITSEMA_SERVE_KEY like all other routes.
+  app.get('/metrics', async (req, res, next) => {
+    if (!process.env.GITSEMA_METRICS_PUBLIC) {
+      // Defer to the global auth middleware installed below
+      next()
+      return
+    }
+    await serveMetrics(req, res)
+  })
+
+  // When GITSEMA_METRICS_PUBLIC is not set, register the metrics handler again
+  // AFTER auth so it is protected by GITSEMA_SERVE_KEY.
+  // Auth middleware: all routes registered below require a valid Bearer token
+  // when GITSEMA_SERVE_KEY is set.
   app.use(authMiddleware)
+
+  app.get('/metrics', serveMetrics)
 
   const base = '/api/v1'
 
@@ -130,6 +184,13 @@ export function createApp(options: AppOptions): Express {
         'security_scan',
         'health_timeline',
         'debt_score',
+        'doc_gap',
+        'contributor_profile',
+        'triage',
+        'policy_check',
+        'ownership',
+        'workflow',
+        'eval',
         'experts',
         'multi_repo_search',
         'hybrid_search',

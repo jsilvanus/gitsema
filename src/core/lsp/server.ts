@@ -33,6 +33,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
         capabilities: {
           hoverProvider: true,
           definitionProvider: true,
+          referencesProvider: true,
           workspaceSymbolProvider: true,
         },
       },
@@ -103,6 +104,55 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
       }))
       return { jsonrpc: '2.0', id, result: locations }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
+  if (req.method === 'textDocument/references') {
+    const params = req.params ?? {}
+    const rawWord = params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
+    try {
+      // Find all blobs/paths that reference this symbol name
+      const symbolRows = dbSession.rawDb.prepare(
+        `SELECT s.symbol_name, s.symbol_kind, s.start_line, s.end_line, p.path
+         FROM symbols s
+         JOIN paths p ON s.blob_hash = p.blob_hash
+         WHERE LOWER(s.symbol_name) LIKE LOWER(?) LIMIT 20`,
+      ).all(`%${q}%`) as Array<{ symbol_name: string; symbol_kind: string; start_line: number; end_line: number; path: string }>
+
+      if (symbolRows.length > 0) {
+        const locations = symbolRows.map((r) => ({
+          uri: `file://${r.path}`,
+          range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
+        }))
+        return { jsonrpc: '2.0', id, result: locations }
+      }
+
+      // Fall back: FTS5 search for files that mention the term
+      let ftsRows: Array<{ blob_hash: string }> = []
+      try {
+        ftsRows = dbSession.rawDb.prepare(
+          `SELECT blob_hash FROM blob_fts WHERE blob_fts MATCH ? LIMIT 10`,
+        ).all(`"${q.replace(/"/g, '""')}"`) as Array<{ blob_hash: string }>
+      } catch {
+        // FTS not available
+      }
+
+      if (ftsRows.length > 0) {
+        const hashes = ftsRows.map((r) => r.blob_hash)
+        const pathRows = dbSession.rawDb.prepare(
+          `SELECT blob_hash, path FROM paths WHERE blob_hash IN (${hashes.map(() => '?').join(',')}) LIMIT 20`,
+        ).all(...hashes) as Array<{ blob_hash: string; path: string }>
+        const locations = pathRows.map((r) => ({
+          uri: `file://${r.path}`,
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        }))
+        return { jsonrpc: '2.0', id, result: locations }
+      }
+
+      return { jsonrpc: '2.0', id, result: [] }
     } catch (e: any) {
       return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
     }

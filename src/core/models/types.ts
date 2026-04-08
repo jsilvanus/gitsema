@@ -8,22 +8,33 @@ export interface BlobRecord {
   indexedAt: number
 }
 
+/**
+ * Discriminant for SearchResult variants.
+ *
+ * - `'file'`   — whole-file embedding match (the default)
+ * - `'chunk'`  — sub-file chunk match (`chunkId` is set)
+ * - `'symbol'` — named symbol match (`symbolId`, `symbolName`, `symbolKind` are set)
+ * - `'module'` — directory centroid match (`modulePath` is set; `blobHash` is synthetic)
+ */
+export type SearchResultKind = 'file' | 'chunk' | 'symbol' | 'module'
+
 export interface SearchResult {
+  /**
+   * Discriminant field identifying the type of result.
+   * - `'file'`   → whole-file match
+   * - `'chunk'`  → sub-file chunk match
+   * - `'symbol'` → named symbol match
+   * - `'module'` → directory centroid match
+   *
+   * Optional for backward compatibility; set by vectorSearch for all new results.
+   */
+  kind?: SearchResultKind
   /**
    * For blob/chunk/symbol results: the Git blob OID (SHA-1 hex).
    * For module results: an empty string — use `modulePath` as the module identifier.
    * Never contains synthetic strings like `"module:..."`.
    */
   blobHash: BlobHash
-  /**
-   * Discriminates the result kind:
-   *   - 'blob'   — whole-file embedding match
-   *   - 'chunk'  — sub-file fixed/function chunk match
-   *   - 'symbol' — named declaration (function/class/etc.) match
-   *   - 'module' — directory-level centroid match (see `modulePath`)
-   * Defaults to 'blob' when not explicitly set (backward compat with older code paths).
-   */
-  kind?: 'blob' | 'chunk' | 'symbol' | 'module'
   paths: string[]
   score: number
   firstCommit?: CommitHash
