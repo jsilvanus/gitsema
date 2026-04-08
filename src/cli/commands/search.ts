@@ -363,6 +363,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   let results: SearchResult[] | undefined
+  const _searchStartMs = Date.now()
   if (options.vss) {
     // Attempt ANN search via usearch if available and index file exists
     try {
@@ -596,6 +597,13 @@ export async function searchCommand(query: string, options: SearchCommandOptions
       console.log('=== LLM Search Narrative ===')
       const narrative = await narrateSearchResults(query, results)
       console.log(narrative)
+    }
+
+    // First-slow-query hint: warn if this search took longer than threshold
+    const _searchElapsedMs = Date.now() - _searchStartMs
+    const _slowThresholdMs = parseInt(process.env.GITSEMA_SLOW_QUERY_THRESHOLD ?? '5000', 10)
+    if (_searchElapsedMs > _slowThresholdMs) {
+      console.log(`\n⚠  Slow search: ${(_searchElapsedMs / 1000).toFixed(1)}s. Consider running: gitsema index build-vss`)
     }
   }
 }

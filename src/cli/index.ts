@@ -579,7 +579,8 @@ indexSub
   .command('doctor')
   .description('Run integrity checks, schema version/provenance checks, and report index health')
   .option('--lsp', 'only run the LSP startup check')
-  .action(async (opts: { lsp?: boolean }) => {
+  .option('--extended', 'run extended pre-flight checks (model reachability, index freshness, latency class)')
+  .action(async (opts: { lsp?: boolean; extended?: boolean }) => {
     await doctorCommand(opts)
   })
 
@@ -663,7 +664,8 @@ program
   .command('doctor', { hidden: true })
   .description('[deprecated] use `gitsema index doctor`')
   .option('--lsp', 'only run the LSP startup check (gitsema index doctor --lsp)')
-  .action(async (opts: { lsp?: boolean }) => {
+  .option('--extended', 'run extended pre-flight checks')
+  .action(async (opts: { lsp?: boolean; extended?: boolean }) => {
     console.warn('Deprecation notice: `gitsema doctor` is deprecated — use `gitsema index doctor` instead.')
     await doctorCommand(opts)
   })
