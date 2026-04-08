@@ -145,6 +145,35 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   if (commitEmbCount > 0) printKV('Commit embeddings:', commitEmbCount)
   if (moduleEmbCount > 0) printKV('Module embeddings:', moduleEmbCount)
 
+  // ── Scale warnings ──────────────────────────────────────────────────────
+  const VSS_SCALE_THRESHOLD = parseInt(process.env.GITSEMA_VSS_THRESHOLD ?? '50000', 10)
+  const n = embeddingCount.count
+  if (n >= VSS_SCALE_THRESHOLD) {
+    // Check whether a VSS HNSW index file already exists
+    const { getVssIndexPaths } = await import('../../core/search/vectorSearch.js')
+    const vssPaths = getVssIndexPaths(textModel)
+    const { existsSync } = await import('node:fs')
+    const vssReady = vssPaths !== null && existsSync(vssPaths.indexPath)
+
+    console.log('')
+    if (vssReady) {
+      console.log(`ℹ  VSS index: present (${vssPaths!.indexPath}) — ANN search is active.`)
+    } else {
+      console.log(`⚠  Scale warning: ${n.toLocaleString()} embeddings indexed.`)
+      console.log(`   Pure-JS cosine search may be slow. Run: gitsema index build-vss`)
+      console.log(`   to build an HNSW approximate-nearest-neighbor index.`)
+    }
+  } else if (n >= 10000) {
+    // Moderate size — suggest early-cut
+    const { getVssIndexPaths } = await import('../../core/search/vectorSearch.js')
+    const vssPaths = getVssIndexPaths(textModel)
+    const { existsSync } = await import('node:fs')
+    const vssReady = vssPaths !== null && existsSync(vssPaths.indexPath)
+    if (!vssReady) {
+      console.log(`\nℹ  ${n.toLocaleString()} embeddings indexed. Consider --early-cut <n> to limit candidate pool for faster searches.`)
+    }
+  }
+
   if (filePath) {
     // Resolve blob at HEAD (try as-given first)
     let blob = await resolveBlobAtRef('HEAD', filePath)

@@ -65,6 +65,11 @@ import { triageCommand } from './commands/triage.js'
 import { policyCheckCommand } from './commands/policyCheck.js'
 import { ownershipCommand } from './commands/ownership.js'
 import { workflowCommand } from './commands/workflow.js'
+import { replCommand } from './commands/repl.js'
+import { quickstartCommand } from './commands/quickstart.js'
+import { regressionGateCommand } from './commands/regressionGate.js'
+import { crossRepoSimilarityCommand } from './commands/crossRepoSimilarity.js'
+import { codeReviewCommand } from './commands/codeReview.js'
 import {
   modelsListCommand,
   modelsInfoCommand,
@@ -404,13 +409,14 @@ modelsSub
   .option('--provider <type>', 'provider type: ollama or http')
   .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
   .option('--key <apikey>', 'API key for HTTP provider')
+  .option('--level <level>', 'default indexing/search granularity: file, function, fixed, chunk, symbol, module')
   .option('--set-default', 'also set this model as the default (model + textModel + codeModel in config)')
   .option('--set-text', 'also set this as the default text embedding model (textModel in config)')
   .option('--set-code', 'also set this as the default code embedding model (codeModel in config)')
   .option('--global', 'save to global config (~/.config/gitsema/config.json) instead of local')
   .action(async (
     name: string,
-    opts: { provider?: string; url?: string; key?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean },
+    opts: { provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean },
   ) => {
     await modelsAddCommand(name, opts)
   })
@@ -579,7 +585,8 @@ indexSub
   .command('doctor')
   .description('Run integrity checks, schema version/provenance checks, and report index health')
   .option('--lsp', 'only run the LSP startup check')
-  .action(async (opts: { lsp?: boolean }) => {
+  .option('--extended', 'run extended pre-flight checks (model reachability, index freshness, latency class)')
+  .action(async (opts: { lsp?: boolean; extended?: boolean }) => {
     await doctorCommand(opts)
   })
 
@@ -663,7 +670,8 @@ program
   .command('doctor', { hidden: true })
   .description('[deprecated] use `gitsema index doctor`')
   .option('--lsp', 'only run the LSP startup check (gitsema index doctor --lsp)')
-  .action(async (opts: { lsp?: boolean }) => {
+  .option('--extended', 'run extended pre-flight checks')
+  .action(async (opts: { lsp?: boolean; extended?: boolean }) => {
     console.warn('Deprecation notice: `gitsema doctor` is deprecated — use `gitsema index doctor` instead.')
     await doctorCommand(opts)
   })
@@ -1450,6 +1458,78 @@ program
   .option('--dump [file]', 'write full JSON results to <file> (or stdout if no file given)')
   .action(async (file: string, opts: { top?: string; dump?: string | boolean }) => {
     await evalCommand({ file, ...opts })
+  })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 78: gitsema repl — interactive semantic query loop
+// ─────────────────────────────────────────────────────────────────────────────
+program
+  .command('repl')
+  .description('Start an interactive semantic search session (query loop with shared embedding provider)')
+  .option('-k, --top <n>', 'number of results per query (default: 10)')
+  .option('--level <level>', 'search level: file, chunk, symbol, module (default: file)')
+  .option('--hybrid', 'enable hybrid (BM25+vector) search mode')
+  .option('--model <model>', 'embedding model to use')
+  .action(async (opts: { top?: string; level?: string; hybrid?: boolean; model?: string }) => {
+    await replCommand(opts)
+  })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 78: gitsema quickstart — guided onboarding wizard
+// ─────────────────────────────────────────────────────────────────────────────
+program
+  .command('quickstart')
+  .description('Guided onboarding wizard: detect provider, configure model, and index HEAD in one step')
+  .action(async () => {
+    await quickstartCommand()
+  })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 79: gitsema regression-gate — semantic CI regression gate
+// ─────────────────────────────────────────────────────────────────────────────
+program
+  .command('regression-gate')
+  .description('CI gate: fail if key concepts drift beyond threshold between two refs')
+  .option('--base <ref>', 'base ref to compare from (default: main)')
+  .option('--head <ref>', 'head ref to compare to (default: HEAD)')
+  .option('--query <text>', 'single concept query to check')
+  .option('--concepts <file>', 'JSON file with list of concept queries to check')
+  .option('--threshold <n>', 'max allowed cosine drift (default: 0.15)')
+  .option('--top <n>', 'top-k results to compare (default: 10)')
+  .option('--format <fmt>', 'output format: text (default) or json')
+  .action(async (opts: { base?: string; head?: string; query?: string; concepts?: string; threshold?: string; top?: string; format?: string }) => {
+    await regressionGateCommand(opts)
+  })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 80: gitsema cross-repo-similarity — cross-repo concept comparison
+// ─────────────────────────────────────────────────────────────────────────────
+program
+  .command('cross-repo-similarity <query>')
+  .description('Compare semantic similarity of a concept across two separately indexed repos')
+  .option('--repo-a <db>', 'path to repo A .gitsema/index.db')
+  .option('--repo-b <db>', 'path to repo B .gitsema/index.db')
+  .option('--top <n>', 'top results per repo (default: 5)')
+  .option('--threshold <n>', 'similarity threshold for shared-concept match (default: 0.7)')
+  .option('--format <fmt>', 'output format: text (default) or json')
+  .action(async (query: string, opts: { repoA?: string; repoB?: string; top?: string; threshold?: string; format?: string }) => {
+    await crossRepoSimilarityCommand(query, opts)
+  })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 81: gitsema code-review — semantic code review assistant
+// ─────────────────────────────────────────────────────────────────────────────
+program
+  .command('code-review')
+  .description('Semantic code review: find historical analogues for changed code and flag regressions')
+  .option('--base <ref>', 'base git ref (e.g. main)')
+  .option('--head <ref>', 'head git ref (e.g. HEAD)')
+  .option('--diff-file <file>', 'read diff from a patch file instead of git')
+  .option('--top <n>', 'top analogues per file (default: 5)')
+  .option('--threshold <n>', 'minimum similarity score (default: 0.75)')
+  .option('--format <fmt>', 'output format: text (default) or json')
+  .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string }) => {
+    await codeReviewCommand(opts)
   })
 
 program.parse()

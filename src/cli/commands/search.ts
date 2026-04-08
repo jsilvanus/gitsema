@@ -300,8 +300,29 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   let searchChunksFlag = options.chunks ?? false
   let searchSymbolsFlag = false
   let searchModulesFlag = false
-  if (options.level) {
-    switch (options.level) {
+
+  // Phase 77: auto-recall level from active embed_config when --level is not specified
+  let effectiveLevel = options.level
+  if (!effectiveLevel) {
+    try {
+      const { loadEmbedConfigs } = await import('../../core/indexing/provenance.js')
+      const { getRawDb } = await import('../../core/db/sqlite.js')
+      const configs = loadEmbedConfigs(getRawDb())
+      if (configs.length > 0) {
+        // Use the most recently used config
+        const latest = configs.reduce((a, b) => ((b.lastUsedAt ?? 0) >= (a.lastUsedAt ?? 0) ? b : a))
+        const chunkerToLevel: Record<string, string> = { file: 'file', function: 'chunk', fixed: 'chunk' }
+        effectiveLevel = chunkerToLevel[latest.chunker]
+      }
+    } catch (err) {
+      if (process.env.GITSEMA_VERBOSE) {
+        console.debug(`[gitsema] auto-recall level: could not load embed_config: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+  }
+
+  if (effectiveLevel) {
+    switch (effectiveLevel) {
       case 'file': break
       case 'chunk': searchChunksFlag = true; break
       case 'symbol': searchSymbolsFlag = true; break
@@ -363,6 +384,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   let results: SearchResult[] | undefined
+  const _searchStartMs = Date.now()
   if (options.vss) {
     // Attempt ANN search via usearch if available and index file exists
     try {
@@ -596,6 +618,13 @@ export async function searchCommand(query: string, options: SearchCommandOptions
       console.log('=== LLM Search Narrative ===')
       const narrative = await narrateSearchResults(query, results)
       console.log(narrative)
+    }
+
+    // First-slow-query hint: warn if this search took longer than threshold
+    const _searchElapsedMs = Date.now() - _searchStartMs
+    const _slowThresholdMs = parseInt(process.env.GITSEMA_SLOW_QUERY_THRESHOLD ?? '5000', 10)
+    if (_searchElapsedMs > _slowThresholdMs) {
+      console.log(`\n⚠  Slow search: ${(_searchElapsedMs / 1000).toFixed(1)}s. Consider running: gitsema index build-vss`)
     }
   }
 }

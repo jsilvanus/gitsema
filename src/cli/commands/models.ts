@@ -257,6 +257,7 @@ export interface ModelsAddOptions {
   provider?: string
   url?: string
   key?: string
+  level?: string
   setDefault?: boolean
   setText?: boolean
   setCode?: boolean
@@ -276,10 +277,18 @@ export async function modelsAddCommand(
   if (options.provider !== undefined) profile.provider = options.provider
   if (options.url !== undefined) profile.httpUrl = options.url
   if (options.key !== undefined) profile.apiKey = options.key
+  if (options.level !== undefined) {
+    const validLevels = ['blob', 'file', 'function', 'fixed', 'chunk', 'symbol', 'module']
+    if (!validLevels.includes(options.level)) {
+      console.error(`Error: --level must be one of: ${validLevels.join(', ')}`)
+      process.exit(1)
+    }
+    profile.level = options.level
+  }
 
   if (Object.keys(profile).length === 0 && !options.setDefault && !options.setText && !options.setCode) {
-    console.error('Error: at least one of --provider, --url, --key, --set-default, --set-text, or --set-code is required')
-    console.error(`Usage: gitsema models add ${modelName} --provider ollama|http [--url <url>] [--key <apikey>]`)
+    console.error('Error: at least one of --provider, --url, --key, --level, --set-default, --set-text, or --set-code is required')
+    console.error(`Usage: gitsema models add ${modelName} --provider ollama|http [--url <url>] [--key <apikey>] [--level file|function|fixed]`)
     process.exit(1)
   }
 

@@ -415,6 +415,8 @@ export interface ModelProfile {
   httpUrl?: string
   /** API key for HTTP provider. */
   apiKey?: string
+  /** Default indexing/search granularity level for this model. */
+  level?: string
 }
 
 /**

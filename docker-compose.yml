@@ -1,0 +1,67 @@
+version: "3.9"
+
+# docker-compose.yml — gitsema HTTP server + Ollama embedding sidecar
+#
+# Prerequisites:
+#   1. Copy .env.example to .env and set GITSEMA_SERVE_KEY
+#   2. Edit the `volumes` section of the `gitsema` service to mount your repo
+#   3. docker compose up -d
+#   4. First-time index:
+#        docker compose exec gitsema node /app/dist/cli/index.js index start
+#
+# OpenAPI docs: http://localhost:4242/docs
+# Prometheus metrics: http://localhost:4242/metrics (requires bearer token)
+
+services:
+  # --------------------------------------------------------------------------
+  # Ollama — local embedding server
+  # Remove this service if you supply GITSEMA_PROVIDER=http pointing to a
+  # remote OpenAI-compatible API.
+  # --------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    # Pull the embedding model on first start then keep serving
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ollama serve &
+        until curl -sf http://localhost:11434; do sleep 2; done
+        ollama pull nomic-embed-text
+        wait
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------------------
+  # gitsema HTTP server
+  # --------------------------------------------------------------------------
+  gitsema:
+    build: .
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      # Mount your Git repository here (read-write so gitsema can write .gitsema/)
+      - /path/to/your/repo:/repo
+      # Persist the semantic index across container restarts
+      - gitsema_index:/repo/.gitsema
+    environment:
+      GITSEMA_PROVIDER: ollama
+      GITSEMA_MODEL: nomic-embed-text
+      GITSEMA_HTTP_URL: http://ollama:11434
+      GITSEMA_SERVE_PORT: "4242"
+      GITSEMA_RATE_LIMIT_RPM: "300"
+      # Set GITSEMA_SERVE_KEY in your .env file (never commit the value)
+      GITSEMA_SERVE_KEY: "${GITSEMA_SERVE_KEY}"
+    ports:
+      - "4242:4242"
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+  gitsema_index:

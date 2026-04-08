@@ -45,8 +45,9 @@ export interface DbSession {
  * 16 — Added saved_queries table (Phase 53)
  * 17 — Added projections table (Phase 55)
  * 18 — Added last_used_at column to embed_config (multi-model status tracking)
+ * 19 — Added repo_tokens table (Phase 75 per-repo access control)
  */
-export const CURRENT_SCHEMA_VERSION = 18
+export const CURRENT_SCHEMA_VERSION = 19
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -417,6 +418,20 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 18
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('18')
   }
+
+  // v18 → v19: add repo_tokens table for per-repo access control (Phase 75)
+  if (version < 19) {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS repo_tokens (
+        token TEXT PRIMARY KEY,
+        repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+        label TEXT,
+        created_at INTEGER NOT NULL
+      )
+    `)
+    version = 19
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('19')
+  }
 }
 
 
@@ -618,6 +633,14 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       url TEXT,
       db_path TEXT,
       added_at INTEGER NOT NULL
+    );
+
+    -- Per-repo access control tokens (Phase 75 / v19)
+    CREATE TABLE IF NOT EXISTS repo_tokens (
+      token TEXT PRIMARY KEY,
+      repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      label TEXT,
+      created_at INTEGER NOT NULL
     );
 
     -- Saved search queries / watch-mode entries (Phase 53 / v16)
