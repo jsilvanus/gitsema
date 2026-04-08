@@ -65,6 +65,12 @@ import { triageCommand } from './commands/triage.js'
 import { policyCheckCommand } from './commands/policyCheck.js'
 import { ownershipCommand } from './commands/ownership.js'
 import { workflowCommand } from './commands/workflow.js'
+import {
+  modelsListCommand,
+  modelsInfoCommand,
+  modelsAddCommand,
+  modelsRemoveCommand,
+} from './commands/models.js'
 import { collectOut } from '../utils/outputSink.js'
 
 const program = new Command()
@@ -127,6 +133,7 @@ const COMMAND_GROUPS: Record<string, string> = {
   config:         'Setup & Infrastructure',
   status:         'Setup & Infrastructure',
   index:          'Setup & Infrastructure',
+  models:         'Setup & Infrastructure',
   'remote-index': 'Setup & Infrastructure',
   // Protocol Servers (new group — preferred entry point is `gitsema tools`)
   // serve/mcp/lsp are hidden from top-level help; use `gitsema tools` instead
@@ -355,6 +362,72 @@ program
   .option('--remote <url>', 'remote server URL (overrides GITSEMA_REMOTE)')
   .action(statusCommand)
 
+// ── `gitsema models` — model management ───────────────────────────────────
+
+const modelsSub = program
+  .command('models')
+  .description('Manage embedding model configurations (list, add, remove, info)')
+  .addHelpText(
+    'after',
+    '\nModel profiles store per-model provider settings so different models can use\n' +
+    'different providers, URLs, or API keys. Profiles are saved in .gitsema/config.json.\n\n' +
+    'Examples:\n' +
+    '  gitsema models list\n' +
+    '  gitsema models add nomic-embed-text --provider ollama\n' +
+    '  gitsema models add text-embedding-3-small --provider http --url https://api.openai.com --key sk-...\n' +
+    '  gitsema models info text-embedding-3-small\n' +
+    '  gitsema models remove text-embedding-3-small\n',
+  )
+  .action(async () => {
+    // Default action: show the list (same as `models list`)
+    await modelsListCommand({})
+  })
+
+modelsSub
+  .command('list')
+  .description('List all configured model profiles and indexed models')
+  .option('--json', 'output as JSON')
+  .action(async (opts: { json?: boolean }) => {
+    await modelsListCommand(opts)
+  })
+
+modelsSub
+  .command('info <name>')
+  .description('Show detailed configuration and index stats for a model')
+  .action(async (name: string) => {
+    await modelsInfoCommand(name)
+  })
+
+modelsSub
+  .command('add <name>')
+  .description('Configure provider settings for a model (saved to .gitsema/config.json or global config)')
+  .option('--provider <type>', 'provider type: ollama or http')
+  .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
+  .option('--key <apikey>', 'API key for HTTP provider')
+  .option('--set-default', 'also set this model as the default (model + textModel + codeModel in config)')
+  .option('--set-text', 'also set this as the default text embedding model (textModel in config)')
+  .option('--set-code', 'also set this as the default code embedding model (codeModel in config)')
+  .option('--global', 'save to global config (~/.config/gitsema/config.json) instead of local')
+  .action(async (
+    name: string,
+    opts: { provider?: string; url?: string; key?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean },
+  ) => {
+    await modelsAddCommand(name, opts)
+  })
+
+modelsSub
+  .command('remove <name>')
+  .description('Remove a model profile from config (does not delete index data unless --purge-index)')
+  .option('--purge-index', 'also delete all stored embeddings for this model from the index')
+  .option('-y, --yes', 'skip confirmation when purging index data')
+  .option('--global', 'remove from global config instead of local')
+  .action(async (
+    name: string,
+    opts: { purgeIndex?: boolean; yes?: boolean; global?: boolean },
+  ) => {
+    await modelsRemoveCommand(name, opts)
+  })
+
 program
   .command('index')
   .description('Show index coverage (blob counts per model). Run `gitsema index start` to perform indexing.')
@@ -458,6 +531,10 @@ indexSub
   .option('--auto-build-vss [threshold]', 'automatically build VSS index after indexing when blob count exceeds threshold (default: 10000)')
   .option('--allow-mixed', 'allow indexing with a different embed config than previously used (skip compatibility check)')
   .option('--profile <name>', 'apply a preset profile: speed (high concurrency, large batches), balanced (default), quality (deep chunking)')
+  .option(
+    '--level <level>',
+    'indexing granularity: blob (one embedding per file, same as --chunker file), function (function/class boundaries, same as --chunker function), fixed (fixed-size windows). Alias for --chunker.',
+  )
   .action(indexStartCommand)
 
 indexSub

@@ -305,6 +305,36 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 
 ---
 
+## Model Management
+
+Model profiles allow different models to use different providers, base URLs, and API keys. Profiles are stored in `.gitsema/config.json` (local) or `~/.config/gitsema/config.json` (global, `--global`).
+
+Per-model settings override the global `GITSEMA_PROVIDER` / `GITSEMA_HTTP_URL` / `GITSEMA_API_KEY` environment variables, so Ollama and OpenAI models can coexist in the same index.
+
+| Feature | Command |
+|---|---|
+| List configured profiles + indexed models | `gitsema models list [--json]` |
+| Show model info (config + index stats) | `gitsema models info <name>` |
+| Configure a model's provider settings | `gitsema models add <name> [--provider] [--url] [--key]` |
+| Set as default / text / code model | `gitsema models add <name> --set-default` (or `--set-text`, `--set-code`) |
+| Remove a model profile | `gitsema models remove <name>` |
+| Remove profile + purge index data | `gitsema models remove <name> --purge-index` |
+
+**Example:**
+```bash
+# Add OpenAI model with dedicated API key
+gitsema models add text-embedding-3-small \
+  --provider http --url https://api.openai.com --key sk-... --set-text
+
+# Use Ollama for code, OpenAI for prose
+gitsema models add nomic-embed-text --provider ollama --set-code
+
+# Then index — the right provider is chosen per model automatically
+gitsema index start
+```
+
+---
+
 ## Configuration
 
 Persistent configuration lives in `.gitsema/config.json` (repo-level) or `~/.config/gitsema/config.json` (global, `--global`).

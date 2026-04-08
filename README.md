@@ -284,6 +284,67 @@ gitsema index build-vss --model text-embedding-3-small
 
 ---
 
+#### `gitsema models`
+
+Manage embedding model configurations. Different models can use different providers, base URLs, and API keys. Model profiles are stored in `.gitsema/config.json` (local) or `~/.config/gitsema/config.json` (global, `--global`).
+
+**Subcommands:**
+
+| Subcommand | Description |
+|---|---|
+| `gitsema models list` | List all configured profiles and indexed models |
+| `gitsema models info <name>` | Show provider config + index stats for a model |
+| `gitsema models add <name>` | Configure provider settings for a model |
+| `gitsema models remove <name>` | Remove a model profile from config |
+
+```bash
+# List all models (from index + config profiles)
+gitsema models list
+
+# Show detailed info for a model
+gitsema models info text-embedding-3-small
+
+# Add an OpenAI model with its own provider config
+gitsema models add text-embedding-3-small \
+  --provider http \
+  --url https://api.openai.com \
+  --key sk-... \
+  --set-text                        # also set as default text model
+
+# Add a local Ollama model
+gitsema models add nomic-embed-text --provider ollama --set-default
+
+# Remove a profile (keep index data)
+gitsema models remove text-embedding-3-small
+
+# Remove a profile AND purge all its embeddings from the index
+gitsema models remove text-embedding-3-small --purge-index
+```
+
+Per-model provider settings override global `GITSEMA_PROVIDER` / `GITSEMA_HTTP_URL` / `GITSEMA_API_KEY` environment variables, so you can use Ollama for one model and OpenAI for another in the same repo.
+
+---
+
+#### `gitsema index start --level <level>`
+
+The `--level` flag on `gitsema index start` is a convenience alias for `--chunker`:
+
+| `--level` | `--chunker` equivalent | Description |
+|---|---|---|
+| `blob` or `file` | `file` (default) | One embedding per file |
+| `function` | `function` | Function and class boundaries |
+| `fixed` | `fixed` | Fixed-size sliding windows |
+
+```bash
+gitsema index start --level function     # embed at function granularity
+gitsema index start --level blob         # one embedding per file (default)
+gitsema search "auth middleware" --level function  # search function-level embeddings
+```
+
+> **Tip:** Use `--level function` on `index start` and `--level function` on `search` together for function-granularity semantic search.
+
+---
+
 #### `gitsema tools mcp`
 
 Start the gitsema MCP server over stdio. Allows AI assistants (Claude, VS Code Copilot, etc.) to query the semantic index via the Model Context Protocol.

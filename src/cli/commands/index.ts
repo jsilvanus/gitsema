@@ -18,6 +18,14 @@ import { getRawDb, DB_PATH } from '../../core/db/sqlite.js'
 import { getProfileDefaults, postRunRecommendations } from '../../core/indexing/adaptiveTuning.js'
 import { computeIndexStatus, formatIndexStatus } from '../../core/indexing/indexStatus.js'
 
+/** Maps `--level` values to the corresponding `--chunker` strategy string. */
+const LEVEL_TO_CHUNKER: Record<string, string> = {
+  blob: 'file',
+  file: 'file',
+  function: 'function',
+  fixed: 'fixed',
+}
+
 /**
  * Format a duration in milliseconds as a human-friendly string.
  * Examples:
@@ -306,6 +314,8 @@ export interface IndexCommandOptions {
   allowMixed?: boolean
   /** Profile preset: speed | balanced | quality */
   profile?: string
+  /** Indexing granularity alias: blob | function | fixed (maps to --chunker). */
+  level?: string
 }
 
 /**
@@ -360,6 +370,23 @@ export async function indexCommand(_options: IndexCommandOptions): Promise<void>
  * This function contains the original indexing logic.
  */
 export async function indexStartCommand(options: IndexCommandOptions): Promise<void> {
+  // Resolve --level as an alias for --chunker
+  if (options.level) {
+    const mapped = LEVEL_TO_CHUNKER[options.level]
+    if (!mapped) {
+      console.error(
+        `Error: --level must be one of: blob, file, function, fixed\n` +
+        `  blob/file   → one embedding per file (--chunker file, default)\n` +
+        `  function    → function/class boundaries (--chunker function)\n` +
+        `  fixed       → fixed-size sliding windows (--chunker fixed)`,
+      )
+      process.exit(1)
+    }
+    if (!options.chunker) {
+      options = { ...options, chunker: mapped }
+    }
+  }
+
   // Apply CLI model overrides so provider factories pick them up
   applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
 
