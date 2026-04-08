@@ -243,8 +243,19 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui` flag) |
+| `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
+| `GET /openapi.json` | OpenAPI 3.1 JSON specification (P2) |
+| `GET /docs` | Swagger UI (P2) |
 
 Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`.
+
+### Operational features (P2)
+
+- **Prometheus metrics** (`GET /metrics`): exposes HTTP latency histograms, index size gauges, embedding error counters, query cache hit/miss counters, and Node.js default metrics. Protected by auth by default; set `GITSEMA_METRICS_PUBLIC=1` to allow unauthenticated scraping.
+- **Rate limiting**: per-token when auth is enabled, per-IP otherwise. Returns `429 Too Many Requests` with `Retry-After` header. Configure via `GITSEMA_RATE_LIMIT_RPM` (default 300) and `GITSEMA_RATE_LIMIT_BURST`.
+- **OpenAPI spec** (`GET /openapi.json`): machine-readable OpenAPI 3.1 spec generated from Zod route schemas.
+- **Swagger UI** (`GET /docs`): interactive API explorer loaded from CDN.
+- **Deployment guide**: [`docs/deploy.md`](docs/deploy.md) covers systemd, Docker/Ollama sidecar, secrets, backups, model rotation, and recommended settings.
 
 ---
 
@@ -357,10 +368,10 @@ Key areas still in progress or planned (see [`docs/review5.md`](docs/review5.md)
 
 - **HTTP route coverage**: ✅ All Phase 41–47 and Phase 65–70 analysis commands now have HTTP routes (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`, `triage`, `policy-check`, `ownership`, `workflow`, `eval`, `multi-repo-search`). CLI ↔ MCP ↔ HTTP parity is complete for these commands.
 - **HNSW for general search**: The VSS/HNSW index (used by clustering) is not yet wired into general `vectorSearch()`. Doing so would cap query latency regardless of index size.
-- **OpenAPI spec**: No OpenAPI spec yet. `GET /api/v1/capabilities` provides a feature list but not a schema. `zod-to-openapi` could generate one from existing Zod schemas.
-- **Observability**: No `/metrics` endpoint. Running as a shared server requires parsing log files for latency and error data.
-- **Rate limiting**: HTTP server has optional auth but no per-token or per-IP rate limiting.
-- **Deployment documentation**: No guide for persistent service deployment (Docker, systemd), index backup, or API key rotation.
+- ~~**OpenAPI spec**: No OpenAPI spec yet.~~ ✅ **Done (P2)**: `GET /openapi.json` (OpenAPI 3.1) and `GET /docs` (Swagger UI) are now live.
+- ~~**Observability**: No `/metrics` endpoint.~~ ✅ **Done (P2)**: Prometheus metrics at `GET /metrics` with histograms, gauges, and counters.
+- ~~**Rate limiting**: HTTP server has optional auth but no per-token or per-IP rate limiting.~~ ✅ **Done (P2)**: `express-rate-limit` with per-token or per-IP windowing; `GITSEMA_RATE_LIMIT_RPM` env var.
+- ~~**Deployment documentation**: No guide for persistent service deployment.~~ ✅ **Done (P2)**: See [`docs/deploy.md`](docs/deploy.md) — systemd, Docker/Ollama, secrets, backups, model rotation.
 - **LSP completeness**: `gitsema tools lsp` handles hover only; `go-to-definition`, `find-references`, and `document-symbol` are stubs. Not production-ready.
 - **Scale warnings in `gitsema status`**: No guidance when index size will cause slow searches (recommend `--early-cut` or `build-vss`).
 - **Result caching**: Query embedding is cached; search results are not. Short-TTL result cache would reduce load for AI assistant use cases.
