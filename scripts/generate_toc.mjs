@@ -21,6 +21,7 @@ for(let i=0;i<lines.length;i++){
   if(m){
     const level = m[1].length; // 2 or 3
     const title = m[2].trim();
+    if(title === 'Table of Contents') continue;
     const anchor = slugify(title);
     entries.push({line:i+1, level, title, anchor});
   }
