@@ -267,6 +267,8 @@ export const embedConfig = sqliteTable('embed_config', {
   windowSize: integer('window_size'),
   overlap: integer('overlap'),
   createdAt: integer('created_at').notNull(),
+  /** Timestamp of the last indexing run that used this config (updated by indexStartCommand). */
+  lastUsedAt: integer('last_used_at'),
 })
 
 export const indexingCheckpoints = sqliteTable('indexing_checkpoints', {

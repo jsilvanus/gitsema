@@ -20,10 +20,10 @@ export async function doctorCommand(opts: { lsp?: boolean } = {}): Promise<void>
   console.log(`Embeddings stored: ${report.embeddingCount}`)
   console.log(`FTS rows:          ${report.ftsCount}`)
   if (report.ftsMissingCount > 0) {
-    console.log(`FTS missing:       ${report.ftsMissingCount} (run: gitsema backfill-fts)`)
+    console.log(`FTS missing:       ${report.ftsMissingCount} (run: gitsema index backfill-fts)`)
   }
   if (report.orphanEmbeddings > 0) {
-    console.log(`Orphan embeddings: ${report.orphanEmbeddings} (run: gitsema gc)`)
+    console.log(`Orphan embeddings: ${report.orphanEmbeddings} (run: gitsema index gc)`)
   }
   console.log(`Integrity check:   ${report.integrityCheckPassed ? 'passed ✓' : 'FAILED ✗'}`)
   if (report.integrityErrors.length > 0) {

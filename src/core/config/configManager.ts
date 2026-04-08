@@ -397,6 +397,109 @@ export function listConfig(cwd: string = process.cwd()): ConfigEntry[] {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Per-model provider profiles
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-model provider configuration stored under `models.<name>` in config.
+ * Allows different models to use different providers, URLs, and API keys.
+ *
+ * Example config.json entry:
+ *   { "models": { "text-embedding-3-small": { "provider": "http", "httpUrl": "...", "apiKey": "..." } } }
+ */
+export interface ModelProfile {
+  /** Provider type: "ollama" or "http". */
+  provider?: string
+  /** Base URL for HTTP provider. */
+  httpUrl?: string
+  /** API key for HTTP provider. */
+  apiKey?: string
+}
+
+/**
+ * Returns the model profile for `modelName`, merging local (wins) over global config.
+ * Returns an empty object when no profile is configured.
+ */
+export function getModelProfile(modelName: string, cwd: string = process.cwd()): ModelProfile {
+  const local = loadConfigFile(getLocalConfigPath(cwd))
+  const global = loadConfigFile(getGlobalConfigPath())
+  const localProfile = getDeep(local, `models.${modelName}`) as ModelProfile | undefined
+  const globalProfile = getDeep(global, `models.${modelName}`) as ModelProfile | undefined
+  return {
+    provider: localProfile?.provider ?? globalProfile?.provider,
+    httpUrl: localProfile?.httpUrl ?? globalProfile?.httpUrl,
+    apiKey: localProfile?.apiKey ?? globalProfile?.apiKey,
+  }
+}
+
+/**
+ * Saves (or updates) the model profile for `modelName` in the chosen config scope.
+ * Only non-undefined fields from `profile` are written; others are left unchanged.
+ */
+export function setModelProfile(
+  modelName: string,
+  profile: ModelProfile,
+  scope: ConfigScope,
+  cwd: string = process.cwd(),
+): void {
+  const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath(cwd)
+  const data = loadConfigFile(filePath)
+  for (const [key, value] of Object.entries(profile)) {
+    if (value !== undefined) {
+      setDeep(data, `models.${modelName}.${key}`, value)
+    }
+  }
+  saveConfigFile(filePath, data)
+}
+
+/**
+ * Removes the full model profile for `modelName` from the chosen config scope.
+ * Returns true if the profile existed.
+ */
+export function unsetModelProfile(
+  modelName: string,
+  scope: ConfigScope,
+  cwd: string = process.cwd(),
+): boolean {
+  const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath(cwd)
+  const data = loadConfigFile(filePath)
+  const existed = unsetDeep(data, `models.${modelName}`)
+  if (existed) saveConfigFile(filePath, data)
+  return existed
+}
+
+/**
+ * Lists all configured model profiles from both config scopes.
+ * Local entries override global ones when the same model name appears in both.
+ */
+export function listModelProfiles(cwd: string = process.cwd()): Array<{
+  name: string
+  profile: ModelProfile
+  scope: 'local' | 'global'
+}> {
+  const local = loadConfigFile(getLocalConfigPath(cwd))
+  const global = loadConfigFile(getGlobalConfigPath())
+  const localModels = (getDeep(local, 'models') ?? {}) as Record<string, ModelProfile>
+  const globalModels = (getDeep(global, 'models') ?? {}) as Record<string, ModelProfile>
+
+  const seen = new Map<string, { profile: ModelProfile; scope: 'local' | 'global' }>()
+  for (const [name, profile] of Object.entries(globalModels)) {
+    if (profile && typeof profile === 'object') {
+      seen.set(name, { profile: profile as ModelProfile, scope: 'global' })
+    }
+  }
+  for (const [name, profile] of Object.entries(localModels)) {
+    if (profile && typeof profile === 'object') {
+      seen.set(name, { profile: profile as ModelProfile, scope: 'local' })
+    }
+  }
+  return Array.from(seen.entries(), ([name, { profile, scope }]) => ({ name, profile, scope }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Applies all config file values to `process.env` so that commands that read
  * env vars directly pick up file-based defaults.

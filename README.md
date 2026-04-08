@@ -32,14 +32,14 @@ To use without linking, prefix commands with `node dist/cli/index.js` instead of
 ```bash
 cd /path/to/your/git/repo
 
-# 1. Index all blobs (uses Ollama by default)
-gitsema index
+# 1. Start indexing (uses Ollama by default)
+gitsema index start
 
 # 2. Search
 gitsema search "authentication middleware"
 
-# 3. Check index status
-gitsema status
+# 3. Check index coverage (per-model, multi-model aware)
+gitsema index
 ```
 
 ## Configuration (environment variables)
@@ -83,7 +83,7 @@ export GITSEMA_PROVIDER=http
 export GITSEMA_HTTP_URL=https://api.openai.com
 export GITSEMA_MODEL=text-embedding-3-small
 export GITSEMA_API_KEY=sk-...
-gitsema index
+gitsema index start
 ```
 
 ## Commands
@@ -92,7 +92,7 @@ Commands are organised into groups. See [`features.md`](features.md) for the ful
 
 | Group | Commands |
 |---|---|
-| **Indexing** | `index` (+ `export`/`import` subcommands), `status`, `remote-index`, `update-modules`, `watch` |
+| **Indexing** | `index` (status), `index start`, `index export`, `index import`, `index doctor`, `index vacuum`, `index backfill-fts`, `index rebuild-fts`, `index gc`, `index clear-model`, `index update-modules`, `index build-vss`, `remote-index`, `watch` |
 | **Protocol Servers** | `tools mcp`, `tools serve`, `tools lsp` |
 | **Search & Discovery** | `search`, `code-search`, `first-seen`, `dead-concepts` |
 | **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
@@ -102,10 +102,9 @@ Commands are organised into groups. See [`features.md`](features.md) for the ful
 | **Branch / Merge** | `branch-summary`, `merge-audit`, `merge-preview`, `cherry-pick-suggest`, `ci-diff` |
 | **Analysis** | `author`, `impact`, `refactor-candidates`, `doc-gap`, `contributor-profile`, `security-scan`, `health`, `debt` |
 | **Visualization** | `map`, `heatmap` |
-| **DB Maintenance** | `doctor`, `vacuum`, `rebuild-fts`, `backfill-fts`, `gc`, `build-vss`, `clear-model` |
-| **Configuration** | `config`, `repos`, `project` |
+| **Configuration** | `config`, `status`, `repos`, `project` |
 
-> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`, `gitsema mcp` / `gitsema serve` / `gitsema lsp` → use `gitsema tools mcp` / `gitsema tools serve` / `gitsema tools lsp` instead (old names still work but emit a deprecation notice).
+> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`, `gitsema mcp` / `gitsema serve` / `gitsema lsp` → use `gitsema tools mcp` / `gitsema tools serve` / `gitsema tools lsp` instead. The old DB maintenance commands (`gitsema doctor`, `gitsema vacuum`, `gitsema gc`, `gitsema backfill-fts`, `gitsema rebuild-fts`, `gitsema update-modules`, `gitsema build-vss`, `gitsema clear-model`) still work as hidden deprecated aliases and print a migration hint — use the `gitsema index <subcommand>` forms instead.
 
 ---
 
@@ -121,9 +120,29 @@ gitsema status
 
 ---
 
-#### `gitsema index [options]`
+#### `gitsema index`
 
-Walk the Git history and embed all blobs into the index. Already-indexed blobs are skipped automatically (content-addressed deduplication).
+Show index coverage status — read-only, no writes. Displays Git-reachable blob counts and per-embedding-model coverage, including file-level, chunk-level, symbol-level and module-level stats.
+
+One database can hold embeddings from multiple models simultaneously; this command reports coverage for each.
+
+```
+Output includes:
+  DB path and schema version
+  Git-reachable blob count (true 100% denominator — all refs)
+  DB blob count (what gitsema has seen)
+  Per embed-config / model:
+    file blobs embedded + coverage %
+    chunks, symbols, modules embedded (where present)
+```
+
+---
+
+#### `gitsema index start [options]`
+
+Walk the Git history and embed all blobs into the index. Starts from HEAD first (fastest time-to-first-results) then walks history. Already-indexed blobs are skipped automatically (content-addressed deduplication).
+
+Uses the currently configured embedding model (`GITSEMA_MODEL` / `gitsema config`) unless overridden by `--model`.
 
 ```
 Options:
@@ -141,6 +160,7 @@ Options:
   --window-size <n>       Chunk size in characters for the fixed chunker (default: 1500)
   --overlap <n>           Overlap between adjacent fixed chunks (default: 200)
   --file <paths...>       Index specific file(s) from HEAD (can supply multiple paths)
+  --model <model>         Override embedding model for this run
   --allow-mixed           Skip embed-config compatibility check (allow mixing different
                           embedding dimensions/configs in the same index)
 ```
@@ -148,17 +168,20 @@ Options:
 Examples:
 
 ```bash
-# Full index
-gitsema index
+# Start full index from HEAD first, then walk history
+gitsema index start
 
 # Only TypeScript files added since a tag
-gitsema index --since v1.2.0 --ext ".ts,.tsx"
+gitsema index start --since v1.2.0 --ext ".ts,.tsx"
 
 # Use function-level chunking with higher concurrency
-gitsema index --chunker function --concurrency 8
+gitsema index start --chunker function --concurrency 8
 
 # Index specific files from HEAD
-gitsema index --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
+gitsema index start --file docs/PLAN.md src/cli/commands/index.ts --concurrency 2
+
+# Force full re-index with a different model
+gitsema index start --since all --model text-embedding-3-small
 ```
 
 ---
@@ -169,25 +192,25 @@ Ask a remote `gitsema tools serve` instance to clone and index a Git repository.
 
 ---
 
-#### `gitsema backfill-fts`
+#### `gitsema index backfill-fts`
 
 Populate FTS5 content for blobs indexed before Phase 11. Required to use `--hybrid` search on older index entries.
 
 ---
 
-#### `gitsema doctor`
+#### `gitsema index doctor`
 
 Run integrity checks and report the health of the index database.
 
 ```bash
-gitsema doctor
+gitsema index doctor
 ```
 
 Checks performed:
 - Schema version vs expected version
 - Blob / embedding / FTS row counts
-- Missing FTS rows (suggests `backfill-fts`)
-- Orphan embeddings (suggests `gc`)
+- Missing FTS rows (suggests `gitsema index backfill-fts`)
+- Orphan embeddings (suggests `gitsema index gc`)
 - SQLite integrity check (`PRAGMA integrity_check`)
 - Stored embed config provenance (provider, model, dimensions, chunker)
 
@@ -195,24 +218,130 @@ Exits with code 1 if critical issues (integrity failures or schema mismatch) are
 
 ---
 
-#### `gitsema vacuum`
+#### `gitsema index vacuum`
 
 Run `VACUUM` and `ANALYZE` on the SQLite index database. Compacts the file and refreshes query planner statistics. Safe to run at any time.
 
 ```bash
-gitsema vacuum
+gitsema index vacuum
 ```
 
 ---
 
-#### `gitsema rebuild-fts`
+#### `gitsema index rebuild-fts`
 
 Rebuild the FTS5 full-text search index from stored data. Use after bulk deletions or if hybrid search returns stale results.
 
 ```bash
-gitsema rebuild-fts        # prompts for confirmation
-gitsema rebuild-fts --yes  # skip confirmation
+gitsema index rebuild-fts        # prompts for confirmation
+gitsema index rebuild-fts --yes  # skip confirmation
 ```
+
+---
+
+#### `gitsema index gc`
+
+Garbage collect unreachable blob records from the DB (blobs not reachable from any Git ref).
+
+```bash
+gitsema index gc
+gitsema index gc --dry-run  # preview what would be removed
+```
+
+---
+
+#### `gitsema index clear-model <model>`
+
+Delete all stored embeddings and cache entries for a specific model.
+
+```bash
+gitsema index clear-model nomic-embed-text
+gitsema index clear-model text-embedding-3-small --yes
+```
+
+---
+
+#### `gitsema index update-modules`
+
+Recalculate module (directory) centroid embeddings from stored whole-file embeddings.
+
+```bash
+gitsema index update-modules
+```
+
+---
+
+#### `gitsema index build-vss`
+
+Build a usearch HNSW ANN index from stored embeddings for fast approximate search. Requires the `usearch` optional package.
+
+```bash
+gitsema index build-vss
+gitsema index build-vss --model text-embedding-3-small
+```
+
+> **Note:** The old top-level forms (`gitsema doctor`, `gitsema vacuum`, `gitsema backfill-fts`, etc.) still work as deprecated aliases and will print a migration hint.
+
+---
+
+#### `gitsema models`
+
+Manage embedding model configurations. Different models can use different providers, base URLs, and API keys. Model profiles are stored in `.gitsema/config.json` (local) or `~/.config/gitsema/config.json` (global, `--global`).
+
+**Subcommands:**
+
+| Subcommand | Description |
+|---|---|
+| `gitsema models list` | List all configured profiles and indexed models |
+| `gitsema models info <name>` | Show provider config + index stats for a model |
+| `gitsema models add <name>` | Configure provider settings for a model |
+| `gitsema models remove <name>` | Remove a model profile from config |
+
+```bash
+# List all models (from index + config profiles)
+gitsema models list
+
+# Show detailed info for a model
+gitsema models info text-embedding-3-small
+
+# Add an OpenAI model with its own provider config
+gitsema models add text-embedding-3-small \
+  --provider http \
+  --url https://api.openai.com \
+  --key sk-... \
+  --set-text                        # also set as default text model
+
+# Add a local Ollama model
+gitsema models add nomic-embed-text --provider ollama --set-default
+
+# Remove a profile (keep index data)
+gitsema models remove text-embedding-3-small
+
+# Remove a profile AND purge all its embeddings from the index
+gitsema models remove text-embedding-3-small --purge-index
+```
+
+Per-model provider settings override global `GITSEMA_PROVIDER` / `GITSEMA_HTTP_URL` / `GITSEMA_API_KEY` environment variables, so you can use Ollama for one model and OpenAI for another in the same repo.
+
+---
+
+#### `gitsema index start --level <level>`
+
+The `--level` flag on `gitsema index start` is a convenience alias for `--chunker`:
+
+| `--level` | `--chunker` equivalent | Description |
+|---|---|---|
+| `blob` or `file` | `file` (default) | One embedding per file |
+| `function` | `function` | Function and class boundaries |
+| `fixed` | `fixed` | Fixed-size sliding windows |
+
+```bash
+gitsema index start --level function     # embed at function granularity
+gitsema index start --level blob         # one embedding per file (default)
+gitsema search "auth middleware" --level function  # search function-level embeddings
+```
+
+> **Tip:** Use `--level function` on `index start` and `--level function` on `search` together for function-granularity semantic search.
 
 ---
 
@@ -736,7 +865,7 @@ Outputs a **provenance citation block** for each result, formatted for injection
 gitsema search "authentication middleware" --explain-llm
 ```
 
-#### `--profile <name>` (on `gitsema index`)
+#### `--profile <name>` (on `gitsema index start`)
 
 Applies a **preset indexing profile** that sets coherent defaults for concurrency, embed batch size, and chunker strategy.
 
@@ -747,8 +876,8 @@ Applies a **preset indexing profile** that sets coherent defaults for concurrenc
 | `quality` | 2 | 4 | function | Deep chunk/symbol indexing |
 
 ```bash
-gitsema index --profile speed
-gitsema index --profile quality
+gitsema index start --profile speed
+gitsema index start --profile quality
 ```
 
 #### `GET /api/v1/capabilities` (HTTP server)
@@ -805,12 +934,12 @@ no manual intervention required.
 
 | Hook | Trigger | Command run |
 |---|---|---|
-| `post-commit` | After every `git commit` | `gitsema index --since HEAD~1` |
-| `post-merge` | After every `git pull` / `git merge` | `gitsema index --since ORIG_HEAD` |
+| `post-commit` | After every `git commit` | `gitsema index start --since HEAD~1` |
+| `post-merge` | After every `git pull` / `git merge` | `gitsema index start --since ORIG_HEAD` |
 
 Both hooks are safe no-ops when:
 - `gitsema` is not on your `PATH`, or
-- the index has not been initialised yet (run `gitsema index` once first).
+- the index has not been initialised yet (run `gitsema index start` once first).
 
 ### Installation (manual)
 

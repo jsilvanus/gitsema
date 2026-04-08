@@ -42,9 +42,11 @@ export function computeConfigHash(config: EmbedConfig): string {
 
 /**
  * Upsert an embed config row into the database. Returns the config hash.
+ * Also updates `last_used_at` to the current timestamp on each call.
  */
 export function saveEmbedConfig(rawDb: InstanceType<typeof Database>, config: EmbedConfig): string {
   const configHash = computeConfigHash(config)
+  const now = Math.floor(Date.now() / 1000)
   rawDb.prepare(`
     INSERT OR IGNORE INTO embed_config
       (config_hash, provider, model, code_model, dimensions, chunker, window_size, overlap, created_at)
@@ -58,8 +60,14 @@ export function saveEmbedConfig(rawDb: InstanceType<typeof Database>, config: Em
     config.chunker,
     config.windowSize ?? null,
     config.overlap ?? null,
-    Math.floor(Date.now() / 1000),
+    now,
   )
+  // Update last_used_at on every successful call (column may not exist on old DBs — guard with try)
+  try {
+    rawDb.prepare(`UPDATE embed_config SET last_used_at = ? WHERE config_hash = ?`).run(now, configHash)
+  } catch {
+    // last_used_at column not yet present — harmless, migration will add it on next open
+  }
   return configHash
 }
 
@@ -114,7 +122,7 @@ export function checkConfigCompatibility(
   if (conflicting) {
     return {
       compatible: false,
-      reason: `Model "${conflicting.model}" was previously indexed with ${conflicting.dimensions} dimensions, but the current run produces ${currentConfig.dimensions} dimensions. This would corrupt cosine comparisons for that model. Use --allow-mixed to override, or run: gitsema clear-model ${conflicting.model}`,
+      reason: `Model "${conflicting.model}" was previously indexed with ${conflicting.dimensions} dimensions, but the current run produces ${currentConfig.dimensions} dimensions. This would corrupt cosine comparisons for that model. Use --allow-mixed to override, or run: gitsema index clear-model ${conflicting.model}`,
       existingConfigs: existing,
     }
   }

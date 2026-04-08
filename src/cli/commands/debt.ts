@@ -36,7 +36,7 @@ export function debtCommand(): Command {
         console.warn(
           'Warning: No HNSW vector index found. Isolation scores will use an O(N²) cosine scan\n' +
           '  which can be very slow for repos with >10K blobs.\n' +
-          '  Run `gitsema build-vss` first to build the HNSW index for fast isolation scoring.',
+          '  Run `gitsema index build-vss` first to build the HNSW index for fast isolation scoring.',
         )
       }
 

@@ -31,10 +31,13 @@
 
 All indexing is **content-addressed**: a blob (file snapshot) is embedded exactly once per SHA-1 hash, regardless of how many commits or paths reference it.
 
+One database can hold embeddings from **multiple embedding models simultaneously**. Each embedding row is attributed to its embedding config via the `embed_config` table.
+
 | Feature | Flag / command |
 |---|---|
-| Full history index | `gitsema index` |
-| **Incremental** (default when run after prior index) | `--since <ref|date|"all">` |
+| **Index coverage status** (read-only, multi-model aware) | `gitsema index` |
+| **Start indexing** (HEAD-first, then history) | `gitsema index start` |
+| **Incremental** (default when run after prior index) | `gitsema index start --since <ref|date|"all">` |
 | Parallel embedding | `--concurrency <n>` (default 4) |
 | Batch embedding requests | `--embed-batch-size <n>` |
 | Extension filter | `--ext ".ts,.py"` |
@@ -48,9 +51,10 @@ All indexing is **content-addressed**: a blob (file snapshot) is embedded exactl
 | Int8 scalar quantization | `--quantize` |
 | Cap commits per run | `--max-commits <n>` |
 | Mixed-model index guard | `--allow-mixed` |
+| Model override for a run | `--model <name>` |
 | Index bundle export / import | `gitsema index export/import` |
 | Automated hooks (post-commit, post-merge) | `gitsema config set hooks.enabled true` |
-| Module-level embeddings (directory centroids) | `gitsema update-modules` |
+| Module-level embeddings (directory centroids) | `gitsema index update-modules` |
 | Remote-repo indexing via HTTP server | `gitsema remote-index <url>` |
 | Multi-repo registry | `gitsema repos add/list/remove` |
 | **Profile presets (Phase 63)** | `--profile speed\|balanced\|quality` |
@@ -309,17 +313,47 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | Feature | Command |
 |---|---|
 | Index statistics | `gitsema status [file]` |
-| DB integrity check | `gitsema doctor` |
-| SQLite VACUUM + ANALYZE | `gitsema vacuum` |
-| Garbage-collect orphan embeddings | `gitsema gc` |
-| Rebuild FTS5 index | `gitsema rebuild-fts` |
-| Backfill FTS5 content for pre-Phase-11 blobs | `gitsema backfill-fts` |
-| Build / rebuild HNSW VSS index | `gitsema build-vss` |
-| Remove embeddings for a specific model | `gitsema clear-model <model>` |
-| Recalculate module-level embeddings | `gitsema update-modules` |
+| DB integrity check | `gitsema index doctor` |
+| SQLite VACUUM + ANALYZE | `gitsema index vacuum` |
+| Garbage-collect orphan embeddings | `gitsema index gc` |
+| Rebuild FTS5 index | `gitsema index rebuild-fts` |
+| Backfill FTS5 content for pre-Phase-11 blobs | `gitsema index backfill-fts` |
+| Build / rebuild HNSW VSS index | `gitsema index build-vss` |
+| Remove embeddings for a specific model | `gitsema index clear-model <model>` |
+| Recalculate module-level embeddings | `gitsema index update-modules` |
 | Export index bundle (tar.gz) | `gitsema index export` |
 | Import index bundle | `gitsema index import` |
 | Saved semantic watches | `gitsema watch add/list/remove/run` |
+
+---
+
+## Model Management
+
+Model profiles allow different models to use different providers, base URLs, and API keys. Profiles are stored in `.gitsema/config.json` (local) or `~/.config/gitsema/config.json` (global, `--global`).
+
+Per-model settings override the global `GITSEMA_PROVIDER` / `GITSEMA_HTTP_URL` / `GITSEMA_API_KEY` environment variables, so Ollama and OpenAI models can coexist in the same index.
+
+| Feature | Command |
+|---|---|
+| List configured profiles + indexed models | `gitsema models list [--json]` |
+| Show model info (config + index stats) | `gitsema models info <name>` |
+| Configure a model's provider settings | `gitsema models add <name> [--provider] [--url] [--key]` |
+| Set as default / text / code model | `gitsema models add <name> --set-default` (or `--set-text`, `--set-code`) |
+| Remove a model profile | `gitsema models remove <name>` |
+| Remove profile + purge index data | `gitsema models remove <name> --purge-index` |
+
+**Example:**
+```bash
+# Add OpenAI model with dedicated API key
+gitsema models add text-embedding-3-small \
+  --provider http --url https://api.openai.com --key sk-... --set-text
+
+# Use Ollama for code, OpenAI for prose
+gitsema models add nomic-embed-text --provider ollama --set-code
+
+# Then index — the right provider is chosen per model automatically
+gitsema index start
+```
 
 ---
 

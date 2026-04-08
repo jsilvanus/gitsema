@@ -1,7 +1,7 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings } from '../db/schema.js'
 import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
-import type { Embedding, SearchResult } from '../models/types.js'
+import type { Embedding, SearchResult, SearchResultKind } from '../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from './timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../embedding/quantize.js'
 import { getCachedResults, setCachedResults, buildCacheKey, embeddingFingerprint } from './resultCache.js'
@@ -407,21 +407,25 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
 
     for (const row of modRows) {
       candidatePool.push({
-        blobHash: `module:${row.modulePath}`,
+        // Module results use a NUL-prefixed internal key for dedup in the candidate pool.
+        // The NUL prefix is stripped in the result-mapping phase (see below: blobHash set to '').
+        blobHash: `\0module:${row.modulePath}`,
         vector: row.vector as Buffer,
         modulePath: row.modulePath,
       })
     }
   }
 
-  // Apply time-range filter on the candidate set before scoring
-  const allHashes = [...new Set(candidatePool.map((r) => r.blobHash))]
+  // Apply time-range filter only on real Git blob hashes (module pseudo-entries are excluded).
+  const allHashes = [...new Set(
+    candidatePool.filter((r) => !r.blobHash.startsWith('\0module:')).map((r) => r.blobHash),
+  )]
   const filteredHashes = (before !== undefined || after !== undefined)
     ? new Set(filterByTimeRange(allHashes, before, after))
     : null   // null means no filter — include all
 
   const filteredPool = filteredHashes
-    ? candidatePool.filter((r) => filteredHashes.has(r.blobHash))
+    ? candidatePool.filter((r) => r.blobHash.startsWith('\0module:') || filteredHashes.has(r.blobHash))
     : candidatePool
 
   if (filteredPool.length === 0) return []
@@ -444,7 +448,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const needRecency = recent || useThreeSignal
   let recencyScores: Map<string, number> | null = null
   if (needRecency) {
-    const candidateHashes = [...new Set(scoringPool.map((r) => r.blobHash))]
+    const candidateHashes = [...new Set(
+      scoringPool.filter((r) => !r.blobHash.startsWith('\0module:')).map((r) => r.blobHash),
+    )]
     const firstSeenMap = getFirstSeenMap(candidateHashes)
     recencyScores = computeRecencyScores(firstSeenMap)
   }
@@ -452,7 +458,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   // Resolve paths for path-relevance scoring (only when using three-signal ranking)
   let pathsByBlob: Map<string, string[]> | null = null
   if (useThreeSignal) {
-    const hashes = [...new Set(scoringPool.map((r) => r.blobHash))]
+    const hashes = [...new Set(
+      scoringPool.filter((r) => !r.blobHash.startsWith('\0module:')).map((r) => r.blobHash),
+    )]
     const pathRows = db.select({ blobHash: paths.blobHash, path: paths.path })
       .from(paths)
       .where(inArray(paths.blobHash, hashes))
@@ -520,7 +528,10 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   if (topEntries.length === 0) return []
 
   // Resolve file paths for the result set (reuse if already loaded)
-  const blobHashes = [...new Set(topEntries.map((b) => b.blobHash))]
+  // Exclude module pseudo-entries from path resolution (they have no DB blobs row).
+  const blobHashes = [...new Set(
+    topEntries.filter((b) => !b.blobHash.startsWith('\0module:')).map((b) => b.blobHash),
+  )]
   if (!pathsByBlob) {
     const pathRows = db.select({
       blobHash: paths.blobHash,
@@ -535,18 +546,17 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     }
   }
 
-  // Resolve firstCommit / firstSeen for the result set
+  // Resolve firstCommit / firstSeen for the result set (real blobs only)
   const firstSeenMap = getFirstSeenMap(blobHashes)
 
   const results = topEntries.map((b) => {
     const firstSeen = firstSeenMap.get(b.blobHash)
-    // Module results use a synthetic blobHash `module:<path>` and do not have
-    // entries in the paths table. Map them to modulePath and expose a single
-    // path equal to the modulePath for display purposes.
+    // Module results: `modulePath` is the canonical identifier.
+    // `blobHash` is set to '' (empty) — never a synthetic "module:..." string.
     if (b.modulePath !== undefined) {
-      const base: any = {
+      const base: SearchResult = {
+        blobHash: '',
         kind: 'module',
-        blobHash: b.blobHash,
         paths: [b.modulePath],
         score: b.score,
         modulePath: b.modulePath,
@@ -558,13 +568,12 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     }
 
     // Determine kind from available fields
-    let kind: 'file' | 'chunk' | 'symbol' = 'file'
-    if (b.symbolId !== undefined) kind = 'symbol'
-    else if (b.chunkId !== undefined) kind = 'chunk'
-
-    const base: any = {
-      kind,
+    const kind: SearchResultKind = b.symbolId !== undefined ? 'symbol'
+      : b.chunkId !== undefined ? 'chunk'
+      : 'file'
+    const base: SearchResult = {
       blobHash: b.blobHash,
+      kind,
       paths: pathsByBlob!.get(b.blobHash) ?? [],
       score: b.score,
       firstCommit: firstSeen?.commitHash,
@@ -693,13 +702,17 @@ export function mergeSearchResults(
   topK: number,
 ): SearchResult[] {
   const best = new Map<string, SearchResult>()
+  // Use modulePath as dedup key for module results; blobHash for everything else.
+  const dedupeKey = (r: SearchResult) => r.kind === 'module' && r.modulePath ? `\0module:${r.modulePath}` : r.blobHash
   for (const r of a) {
-    const existing = best.get(r.blobHash)
-    if (!existing || r.score > existing.score) best.set(r.blobHash, r)
+    const key = dedupeKey(r)
+    const existing = best.get(key)
+    if (!existing || r.score > existing.score) best.set(key, r)
   }
   for (const r of b) {
-    const existing = best.get(r.blobHash)
-    if (!existing || r.score > existing.score) best.set(r.blobHash, r)
+    const key = dedupeKey(r)
+    const existing = best.get(key)
+    if (!existing || r.score > existing.score) best.set(key, r)
   }
   return Array.from(best.values())
     .sort((x, y) => y.score - x.score)

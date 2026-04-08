@@ -14,8 +14,17 @@ import { execSync } from 'node:child_process'
 import { resolve as pathResolve, relative as pathRelative } from 'node:path'
 import { buildVssCommand } from './buildVss.js'
 import { computeConfigHash, saveEmbedConfig, checkConfigCompatibility, type EmbedConfig } from '../../core/indexing/provenance.js'
-import { getRawDb } from '../../core/db/sqlite.js'
+import { getRawDb, DB_PATH } from '../../core/db/sqlite.js'
 import { getProfileDefaults, postRunRecommendations } from '../../core/indexing/adaptiveTuning.js'
+import { computeIndexStatus, formatIndexStatus } from '../../core/indexing/indexStatus.js'
+
+/** Maps `--level` values to the corresponding `--chunker` strategy string. */
+const LEVEL_TO_CHUNKER: Record<string, string> = {
+  blob: 'file',
+  file: 'file',
+  function: 'function',
+  fixed: 'fixed',
+}
 
 /**
  * Format a duration in milliseconds as a human-friendly string.
@@ -305,9 +314,79 @@ export interface IndexCommandOptions {
   allowMixed?: boolean
   /** Profile preset: speed | balanced | quality */
   profile?: string
+  /** Indexing granularity alias: blob | function | fixed (maps to --chunker). */
+  level?: string
 }
 
-export async function indexCommand(options: IndexCommandOptions): Promise<void> {
+/**
+ * `gitsema index` — read-only coverage report.
+ *
+ * Shows how many blobs are reachable in Git and how many have been embedded,
+ * broken down by embed config / model.  Does NOT write to the database.
+ * To start indexing, use `gitsema index start`.
+ */
+export async function indexCommand(_options: IndexCommandOptions): Promise<void> {
+  // If the user passed flags that look like they intended to run indexing,
+  // print a helpful migration message so existing scripts don't silently break.
+  const opts = _options as Record<string, unknown>
+  const indexingFlags = [
+    'since', 'maxCommits', 'concurrency', 'ext', 'maxSize', 'exclude', 'chunker',
+    'windowSize', 'overlap', 'embedBatchSize', 'file', 'remote', 'branch',
+    'model', 'textModel', 'codeModel', 'quantize', 'buildVss', 'autoBuildVss',
+    'allowMixed', 'profile', 'includeGlob',
+  ]
+  const passedIndexingFlag = indexingFlags.find((f) => opts[f] !== undefined)
+  if (passedIndexingFlag) {
+    console.error(
+      `Error: \`gitsema index\` now shows index status rather than running indexing.\n` +
+      `To start indexing, use: gitsema index start\n\n` +
+      `Example: gitsema index start --since all\n` +
+      `         gitsema index start --ext .ts,.js\n`,
+    )
+    process.exit(1)
+  }
+
+  try {
+    const rawDb = getRawDb()
+    const status = computeIndexStatus(rawDb, DB_PATH, '.')
+    console.log(formatIndexStatus(status))
+  } catch (err) {
+    // DB may not exist yet
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/no such file|ENOENT|unable to open/i.test(msg)) {
+      console.log('No index found at .gitsema/index.db')
+      console.log('Run `gitsema index start` to create the index.')
+    } else {
+      console.error(`Error reading index: ${msg}`)
+      process.exit(1)
+    }
+  }
+}
+
+/**
+ * `gitsema index start` — performs actual indexing.
+ *
+ * All the options that previously belonged to `gitsema index` now live here.
+ * This function contains the original indexing logic.
+ */
+export async function indexStartCommand(options: IndexCommandOptions): Promise<void> {
+  // Resolve --level as an alias for --chunker
+  if (options.level) {
+    const mapped = LEVEL_TO_CHUNKER[options.level]
+    if (!mapped) {
+      console.error(
+        `Error: --level must be one of: blob, file, function, fixed\n` +
+        `  blob/file   → one embedding per file (--chunker file, default)\n` +
+        `  function    → function/class boundaries (--chunker function)\n` +
+        `  fixed       → fixed-size sliding windows (--chunker fixed)`,
+      )
+      process.exit(1)
+    }
+    if (!options.chunker) {
+      options = { ...options, chunker: mapped }
+    }
+  }
+
   // Apply CLI model overrides so provider factories pick them up
   applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
 

@@ -2611,13 +2611,31 @@ Goal: Replace the scattered `--dump`, `--html`, `--format` flags with a single c
 
 ---
 
-## Section II - Next?
+### Phase 71 — Index Status Dashboard + Model Management *(completed v0.71.0)*
+
+Goal: Make `gitsema index` a read-only coverage dashboard, add explicit `gitsema index start`, consolidate all DB/index maintenance commands as subcommands of `gitsema index`, and add `gitsema models` for per-model provider management.
+
+**Implemented scope:**
+
+- `gitsema index` — read-only coverage report (Git-reachable blobs vs. indexed blobs per model)
+- `gitsema index start [options]` — explicit indexing entry point (all former `gitsema index` flags moved here)
+- All maintenance commands consolidated under `gitsema index`:
+  `doctor`, `vacuum`, `rebuild-fts`, `backfill-fts`, `gc`, `clear-model`, `update-modules`, `build-vss`
+- Old top-level forms kept as hidden deprecated aliases with migration hints
+- `gitsema models` command group (`list`, `info`, `add`, `remove`) for per-model provider configuration
+- Per-model provider profiles stored under `models.<name>` in config files; override global `GITSEMA_PROVIDER` / `GITSEMA_HTTP_URL` / `GITSEMA_API_KEY`
+- `buildProviderForModel()` in `providerFactory.ts` — resolves per-model config before falling back to env vars
+- `getTextProvider()` and `getCodeProvider()` updated to look up per-model profile for the resolved model name
+- Schema **v18**: `last_used_at INTEGER` on `embed_config`, updated by `saveEmbedConfig()` on each indexing run
+- `--level <level>` alias on `gitsema index start`: `blob`/`file` → `--chunker file`, `function` → `--chunker function`, `fixed` → `--chunker fixed`
+
+**Status:** ✅ complete.
 
 ---
 
-### Planned Phases (71+)
+### Planned Phases (72+)
 
-The following phases are derived from the **review5** strategic review (reflecting repository state at v0.70.0). Items already shipped as part of the P0–P2 push (Phases 71–73 implemented alongside Phase 70) are noted inline.
+The following phases are derived from the **review5** strategic review (reflecting repository state at v0.70.0). Items already shipped are noted inline.
 
 ---
 
@@ -2704,7 +2722,23 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
-### Long-Term Investments (Phase 71+)
+### Phase 77 — Unified Indexing + Search Level Concept
+
+**Background:** Indexing granularity (blob/function/fixed) and search granularity (file/chunk/symbol/module) are currently controlled by separate flags on separate commands (`--chunker` on `index start`, `--level` on `search`). Phase 71 adds a `--level` alias to `index start` to bridge the gap, but the underlying abstractions remain distinct.
+
+**Goal:** Unify the "level" concept so that:
+1. A configured level (`blob` / `function` / `fixed`) is remembered in `embed_config` and auto-applied to subsequent searches.
+2. `gitsema search --level function` automatically restricts results to the chunk/symbol tables (no need for separate `--chunks` / `--symbols` flags).
+3. `gitsema index start --level function` stores both whole-file and function-level embeddings in one run (today it's either/or).
+4. A `models add <name> --level function` sets the default indexing granularity for a model.
+
+**Complexity:** Medium. Requires schema changes, config propagation, and backwards-compatible search query routing.
+
+**Status:** ⬜ not yet started.
+
+---
+
+### Long-Term Investments (Phase 77+)
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|

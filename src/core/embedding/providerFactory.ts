@@ -13,6 +13,7 @@ import { OllamaProvider } from './local.js'
 import { HttpProvider } from './http.js'
 import { BatchingProvider } from './batching.js'
 import type { EmbeddingProvider } from './provider.js'
+import { getModelProfile } from '../config/configManager.js'
 
 /**
  * Constructs an EmbeddingProvider from explicit type and model values.
@@ -28,6 +29,32 @@ export function buildProvider(type: string, model: string): EmbeddingProvider {
     return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
   }
   return new OllamaProvider({ model })
+}
+
+/**
+ * Constructs an EmbeddingProvider for a named model, respecting per-model
+ * provider profiles (set via `gitsema models add <name>`).
+ *
+ * Resolution order for each setting:
+ *   per-model config (local) > per-model config (global) > env vars > defaults
+ *
+ * @throws {Error} When the resolved provider is "http" but no URL is available.
+ */
+export function buildProviderForModel(modelName: string): EmbeddingProvider {
+  const profile = getModelProfile(modelName)
+  const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
+  if (type === 'http') {
+    const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
+    if (!baseUrl) {
+      throw new Error(
+        `HTTP URL required for model '${modelName}'. ` +
+        `Set it with: gitsema models add ${modelName} --provider http --url <url>`,
+      )
+    }
+    const apiKey = profile.apiKey ?? process.env.GITSEMA_API_KEY
+    return new HttpProvider({ baseUrl, model: modelName, apiKey })
+  }
+  return new OllamaProvider({ model: modelName })
 }
 
 /**
@@ -50,34 +77,52 @@ export function buildBatchingProvider(
 }
 
 /**
- * Returns a text-oriented EmbeddingProvider based on environment variables.
+ * Returns a text-oriented EmbeddingProvider based on environment variables
+ * and per-model profile (if configured for the resolved model name).
  *
  * Resolution order: `GITSEMA_TEXT_MODEL` → `GITSEMA_MODEL` → `nomic-embed-text`
  *
- * @throws {Error} When `GITSEMA_PROVIDER=http` but `GITSEMA_HTTP_URL` is not set.
+ * @throws {Error} When the resolved provider is "http" but no URL is available.
  */
 export function getTextProvider(): EmbeddingProvider {
-  const type = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model =
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  return buildProvider(type, model)
+  const profile = getModelProfile(model)
+  const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
+  if (type === 'http') {
+    const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
+    if (!baseUrl) {
+      throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
+    }
+    return new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+  }
+  return new OllamaProvider({ model })
 }
 
 /**
- * Returns a code-oriented EmbeddingProvider based on environment variables.
+ * Returns a code-oriented EmbeddingProvider based on environment variables
+ * and per-model profile (if configured for the resolved model name).
  *
  * Resolution order: `GITSEMA_CODE_MODEL` → `GITSEMA_TEXT_MODEL` → `GITSEMA_MODEL` → `nomic-embed-text`
  *
- * @throws {Error} When `GITSEMA_PROVIDER=http` but `GITSEMA_HTTP_URL` is not set.
+ * @throws {Error} When the resolved provider is "http" but no URL is available.
  */
 export function getCodeProvider(): EmbeddingProvider {
-  const type = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model =
     process.env.GITSEMA_CODE_MODEL ??
     process.env.GITSEMA_TEXT_MODEL ??
     process.env.GITSEMA_MODEL ??
     'nomic-embed-text'
-  return buildProvider(type, model)
+  const profile = getModelProfile(model)
+  const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
+  if (type === 'http') {
+    const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
+    if (!baseUrl) {
+      throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
+    }
+    return new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+  }
+  return new OllamaProvider({ model })
 }
 
 /**
