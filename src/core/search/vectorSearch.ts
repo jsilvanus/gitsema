@@ -432,11 +432,17 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   if (filteredPool.length === 0) return []
 
   // ── Early-cut: reservoir sampling when pool is very large ─────────────────
-  // When earlyCut > 0 and the pool exceeds that size, use reservoir sampling
-  // (Knuth Algorithm R) to pick `earlyCut` items without cloning the full pool.
-  // Memory cost is O(earlyCut), not O(pool).
-  const scoringPool = (earlyCut > 0 && filteredPool.length > earlyCut)
-    ? reservoirSample(filteredPool, earlyCut)
+  // When earlyCut > 0 the caller asked for an explicit cap.
+  // When earlyCut === 0 (the default) we auto-cap at AUTO_CANDIDATE_LIMIT to
+  // prevent OOM on large indexes — equivalent to making --early-cut opt-out
+  // rather than opt-in.  Pass earlyCut: -1 to disable the auto-cap entirely.
+  // Memory cost of sampling is O(effectiveCut), not O(pool).
+  const AUTO_CANDIDATE_LIMIT = 50_000
+  const effectiveCut = earlyCut > 0 ? earlyCut
+    : earlyCut === 0 && filteredPool.length > AUTO_CANDIDATE_LIMIT ? AUTO_CANDIDATE_LIMIT
+    : 0
+  const scoringPool = effectiveCut > 0
+    ? reservoirSample(filteredPool, effectiveCut)
     : filteredPool
 
   // Pre-compute query norm once (H8 optimization — avoids recomputing it for every candidate)
