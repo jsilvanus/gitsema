@@ -197,6 +197,30 @@ const COMMAND_GROUPS: Record<string, string> = {
   map:     'Visualization',
   heatmap: 'Visualization',
   project: 'Visualization',
+  // Maintenance / hidden aliases
+  'backfill-fts': 'Maintenance',
+  'rebuild-fts': 'Maintenance',
+  vacuum: 'Maintenance',
+  gc: 'Maintenance',
+  'update-modules': 'Maintenance',
+  'clear-model': 'Maintenance',
+  'export-index': 'Maintenance',
+  'import-index': 'Maintenance',
+  // Protocol Servers (hidden commands)
+  serve: 'Protocol Servers',
+  mcp: 'Protocol Servers',
+  lsp: 'Protocol Servers',
+  // Workflow & CI additions
+  'pr-report': 'Workflow & CI',
+  'regression-gate': 'Workflow & CI',
+  // Repo Insights / cross-repo tools
+  'cross-repo-similarity': 'Repo Insights',
+  // Code Quality / review tools
+  'code-review': 'Code Quality',
+  // Evaluation & interactive tools
+  eval: 'Analysis',
+  repl: 'Search & Discovery',
+  quickstart: 'Setup & Infrastructure',
 }
 
 program.configureHelp({
