@@ -2702,7 +2702,7 @@ The following phases are derived from the **review5** strategic review (reflecti
 - `docker-compose.yml` — gitsema HTTP server + Ollama sidecar with persistent volume for `.gitsema/`.
 - `docs/deploy.md` — cover systemd unit, Docker Compose, API key rotation, index backup strategy, embedding model upgrade path, and SQLite-vs-VSS guidance.
 
-**Status:** `docs/deploy.md` written. `Dockerfile` and `docker-compose.yml` not yet added.
+**Status:** ✅ complete (`docs/deploy.md`, `Dockerfile`, `docker-compose.yml` all shipped).
 
 ---
 
@@ -2742,12 +2742,12 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 **Goal:** The main `htmlRenderer.ts` is still ~1 400 LOC after the partial split in Phase 70. Finish the modularisation so each visualisation type lives in its own file, is independently unit-testable, and can be tree-shaken.
 
-**Scope:**
-- Extract remaining renderers from `htmlRenderer.ts` into focused modules: `htmlRenderer-evolution.ts`, `htmlRenderer-clusters.ts`, `htmlRenderer-map.ts`.
-- Document the CSS/JS baseline (shared constants in `htmlRenderer-shared.ts`) so contributors can add new visualisations without touching unrelated code.
-- Add per-module unit tests verifying render output structure (not pixel accuracy).
+**Implemented scope:**
+- `htmlRenderer-evolution.ts`, `htmlRenderer-clusters.ts`, `htmlRenderer-map.ts` extracted from the monolith.
+- `htmlRenderer-shared.ts` holds the CSS/JS baseline shared across all renderers.
+- `htmlRenderer.ts` now re-exports the split modules and is ~100 LOC of glue.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete.
 
 ---
 
@@ -2767,18 +2767,61 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
-### Long-Term Investments (Phase 77+)
+### Phase 82 — Auto-cap Search Memory *(completed v0.79.0)*
+
+**Goal:** Make search safe by default on large indexes without requiring users to know about `--early-cut` or `build-vss`.
+
+**Implemented scope:**
+- `vectorSearch()`: when `earlyCut` is not explicitly set (default 0), automatically reservoir-samples the candidate pool at 50 000 entries when the pool exceeds that threshold. Pass `earlyCut: -1` to disable the auto-cap. Explicit positive values continue to override.
+- `search.ts`: replaced ~80-line manual usearch block with `vectorSearchWithAnn()`, which already handles HNSW threshold routing, fallback, and caching. Dual-model path also routes through `vectorSearchWithAnn()`. The `--vss` flag and auto-detect block continue to work — they simply pass `useVss: true` to the unified function.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 83 — Parallel Commit-Message Embedding *(completed v0.80.0)*
+
+**Goal:** Eliminate the serial O(commits × embedLatency) bottleneck in the commit-mapping phase.
+
+**Implemented scope:**
+- The commit-stream loop in `indexer.ts` now only performs synchronous SQLite work (`storeCommitWithBlobs`, `storeBlobBranches`). The blocking `await timedEmbed()` call has been removed from inside the loop.
+- Commits needing message embedding are collected into a `toEmbed` queue during the stream pass.
+- After the stream completes, all commit messages are embedded in parallel using the same `createLimiter(concurrency)` as blob embedding, converting serial wall-clock time to O(commits / concurrency × embedLatency).
+- `markCommitIndexed()` is called per commit after its embedding completes (or fails) so incremental resume semantics are preserved.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 84 — LSP: documentSymbol + Improved definition/references *(completed v0.81.0)*
+
+**Goal:** Replace the LSP stubs with working implementations backed by the symbol index and vector search.
+
+**Implemented scope:**
+- `textDocument/definition`: four-tier lookup — (1) exact symbol name match, (2) substring LIKE match, (3) vector cosine over `symbolEmbeddings` table (up to 2 000 candidates), (4) file-level vector search fallback. Returns symbol name, kind, and precise line range.
+- `textDocument/references`: merges (1) symbol-table hits by name (exact + LIKE) with (2) FTS5 blobs re-joined to the symbol index for line precision. FTS5 blobs without matching symbols fall back to file-level locations. Deduplicates by URI + line before returning.
+- `textDocument/documentSymbol`: new handler — resolves file URI to the most-recent blob hash via paths + commits join, returns all symbols ordered by line as LSP `DocumentSymbol` objects with correct `SymbolKind` numbers.
+- `initialize` response now advertises `documentSymbolProvider: true`.
+
+**Status:** ✅ complete.
+
+---
+
+### Long-Term Investments (Phase 85+)
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
 | DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
-| Semantic regression CI gate | High | Flag PRs where key embedding drifts beyond threshold |
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
-| `gitsema repl` interactive query loop | Low | Improve exploratory use without requiring repeated CLI invocations |
-| `gitsema quickstart` guided wizard | Low | Reduce zero-to-result friction for new users |
+| Python model server (GPU Docker) | Medium | sentence-transformers + CUDA; higher throughput than Ollama for bulk indexing |
+| ~~Semantic regression CI gate~~ | ~~High~~ | ✅ shipped Phase 79 |
+| ~~Cross-repo concept similarity~~ | ~~High~~ | ✅ shipped Phase 80 |
+| ~~Semantic code review assistant~~ | ~~Medium~~ | ✅ shipped Phase 81 |
+| ~~`gitsema repl` interactive query loop~~ | ~~Low~~ | ✅ shipped Phase 78 |
+| ~~`gitsema quickstart` guided wizard~~ | ~~Low~~ | ✅ shipped Phase 78 |
 
-**Scale notes (from review5):**
+**Scale notes (updated for v0.81.0):**
 
-- **Search memory:** candidate materialisation is proportional to index size. The ANN search path (auto-enabled above `GITSEMA_VSS_THRESHOLD`) caps query time; use `gitsema build-vss` on large repos.
-- **Indexing time:** pipelined batching (Phase 69) overlaps read/embed/store stages, but commit-mapping still runs serially after all batches. For repos with deep history, this phase can dominate wall-clock time on incremental runs.
+- **Search memory:** auto early-cut (Phase 82) now guards the default search path — reservoir sampling kicks in at 50 K candidates without any flags. ANN path (`gitsema index build-vss`) eliminates the candidate-load entirely for large indexes.
+- **Indexing time:** commit-message embedding is now parallelised (Phase 83). The read/embed/store pipeline (Phase 69) + parallel commit embedding together keep both phases off the critical path. The remaining serial bottleneck is commit-graph walking itself (git rev-list) which is I/O-bound.
 - **Chunk/symbol candidate expansion:** when `--chunks` or `--vss` is combined with a large index the candidate pool grows 3–10× before scoring. Monitor RSS when indexing large monorepos with `--chunker function`.
