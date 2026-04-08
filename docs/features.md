@@ -246,7 +246,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
-| `GET /ui` | Embedded 2D codebase map UI (requires `--ui` flag) |
+| `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
 | `GET /openapi.json` | OpenAPI 3.1 JSON specification (P2) |
 | `GET /docs` | Swagger UI (P2) |
@@ -397,18 +397,3 @@ All 12 original productization proposals from review4 are now shipped. See [`doc
 ## Planned / In Progress
 
 This section is intentionally brief. The canonical roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
-
-Key areas still in progress or planned (see [`docs/review5.md`](docs/review5.md) for full analysis):
-
-- **HTTP route coverage**: ✅ All Phase 41–47 and Phase 65–70 analysis commands now have HTTP routes (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`, `triage`, `policy-check`, `ownership`, `workflow`, `eval`, `multi-repo-search`). CLI ↔ MCP ↔ HTTP parity is complete for these commands.
-- **HNSW for general search**: The VSS/HNSW index (used by clustering) is not yet wired into general `vectorSearch()`. Doing so would cap query latency regardless of index size.
-- ~~**OpenAPI spec**: No OpenAPI spec yet.~~ ✅ **Done (P2)**: `GET /openapi.json` (OpenAPI 3.1) and `GET /docs` (Swagger UI) are now live.
-- ~~**Observability**: No `/metrics` endpoint.~~ ✅ **Done (P2)**: Prometheus metrics at `GET /metrics` with histograms, gauges, and counters.
-- ~~**Rate limiting**: HTTP server has optional auth but no per-token or per-IP rate limiting.~~ ✅ **Done (P2)**: `express-rate-limit` with per-token or per-IP windowing; `GITSEMA_RATE_LIMIT_RPM` env var.
-- ~~**Deployment documentation**: No guide for persistent service deployment.~~ ✅ **Done (P2)**: See [`docs/deploy.md`](docs/deploy.md) — systemd, Docker/Ollama, secrets, backups, model rotation.
-- **LSP completeness**: `gitsema tools lsp` handles hover only; `go-to-definition`, `find-references`, and `document-symbol` are stubs. Not production-ready.
-- **Scale warnings in `gitsema status`**: No guidance when index size will cause slow searches (recommend `--early-cut` or `build-vss`).
-- **Result caching**: Query embedding is cached; search results are not. Short-TTL result cache would reduce load for AI assistant use cases.
-- **GPU-accelerated local embeddings**: Xenova/Transformers.js local-inference provider for offline use without Ollama.
-
-For the full list of planned phases and backlog items, see [`docs/PLAN.md`](docs/PLAN.md).

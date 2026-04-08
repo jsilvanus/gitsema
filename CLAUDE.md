@@ -1,20 +1,23 @@
 ## Canonical documentation
 
-These are the three canonical reference documents for this repository. Keep them accurate and up-to-date.
+These are the four canonical reference documents for this repository. Keep them accurate and up-to-date. 
+
+| [`README.md`](README.md) | User-facing overview: installation, quick start, configuration, command reference |
+| [`docs/features.md`](docs/features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
+| [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
+| [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md) | AI workflow skill/playbook for operating gitsema in coding tasks |
+
+The latest review is here. Do not edit the review file, but update that file with new review file after a review.
 
 | Document | Purpose |
 |---|---|
-| [`README.md`](README.md) | User-facing overview: installation, quick start, configuration, command reference |
-| [`features.md`](features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
-| [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
 | [`docs/review5.md`](docs/review5.md) | Latest strategic review: bottlenecks, missing features, productization, AI-assisted coding uses |
-| [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md) | AI workflow skill/playbook for operating gitsema in coding tasks |
 
 When implementing a new feature or phase:
-1. Add the feature to **`features.md`** under the relevant group.
+1. Add the feature to **`docs/features.md`** under the relevant group.
 2. Update the command/option tables in **`README.md`** if the feature adds a new command or flag.
 3. Mark the phase as completed in **`docs/PLAN.md`** and note any deviations from the original spec.
-4. Keep **`docs/review5.md`** aligned when strategic positioning, bottlenecks, or productization priorities change.
+4. Use latest review when starting the next iteration of development.
 5. Run `npm version minor` (or `patch` for hotfixes) **after each phase** and push the tag.
 
 ---
@@ -394,13 +397,8 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 
 ## Known gaps & future phases
 
-For the full list of gaps and planned work, see [`docs/PLAN.md`](docs/PLAN.md) and [`features.md`](features.md#planned--in-progress).
+For the full list of gaps and planned work, see [`docs/PLAN.md`](docs/PLAN.md) and [`docs/features.md`](docs/features.md#planned--in-progress).
 
 | Gap | Notes |
 |---|---|
-| **Batch embedding** | Indexer sends one blob per HTTP round-trip by default (`--embed-batch-size` exists but backend must support batching) |
-| **Test coverage** | Unit and integration tests cover core modules. Full end-to-end coverage of all CLI commands is still incomplete. |
-| **LSP completeness** | Current LSP server handles hover only; `go-to-definition`, `find-references`, and document-symbol are stubs. |
-| **HTTP route gaps** | Phase 41–47 analysis commands (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`) have no HTTP API routes yet. |
-| **Python model server** | `modelserver/` is scaffolded (FastAPI + sentence-transformers) but blocked on Windows — `tokenizers` requires a Rust toolchain. A Docker image would solve this. |
-| **Cosine at scale** | Pure-JS cosine works to ~500K blobs. Build the HNSW index with `gitsema build-vss` for large repos. |
+| **Python model server** | Docker image and Dockerfile provided to avoid local Rust/wheel issues on Windows; use Docker to run the modelserver. |

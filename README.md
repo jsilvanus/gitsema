@@ -88,7 +88,7 @@ gitsema index start
 
 ## Commands
 
-Commands are organised into groups. See [`features.md`](features.md) for the full feature catalog.
+Commands are organised into groups. See [`docs/features.md`](docs/features.md) for the full feature catalog.
 
 | Group | Commands |
 |---|---|
@@ -992,7 +992,7 @@ The index is stored in `.gitsema/index.db` (SQLite) in the root of the repositor
 
 ## Feature catalog
 
-See [`features.md`](features.md) for the complete, grouped catalog of implemented features including indexing options, all search flags, history/temporal commands, clustering, branch/merge tools, the HTTP API route list, and all MCP tools.
+See [`docs/features.md`](docs/features.md) for the complete, grouped catalog of implemented features including indexing options, all search flags, history/temporal commands, clustering, branch/merge tools, the HTTP API route list, and all MCP tools.
 
 ---
 
