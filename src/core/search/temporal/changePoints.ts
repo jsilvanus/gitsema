@@ -1,6 +1,6 @@
 import { getActiveSession } from '../../db/sqlite.js'
 import { cosineSimilarity, getBranchBlobHashSet } from '../core/vectorSearch.js'
-import { computeEvolution } from './evolution.js'
+import { computeEvolution } from '../evolution.js'
 import type { Embedding } from '../../models/types.js'
 
 function bufferToEmbedding(buf: Buffer): Float32Array {

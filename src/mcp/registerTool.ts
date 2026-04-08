@@ -14,7 +14,9 @@ export function serializeSearchResults(results: any[]): string {
     .join('\n')
 }
 
-type McpHandler = (args: any, helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<{ ok: boolean; embedding?: number[]; resp?: any }>; serializeSearchResults: (r: any[]) => string }) => Promise<any>
+import type { Embedding } from '../core/models/types.js'
+
+type McpHandler = (args: any, helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<{ ok: boolean; embedding?: Embedding; resp?: any }>; serializeSearchResults: (r: any[]) => string }) => Promise<any> | any
 
 export function registerTool(server: any, name: string, description: string, schema: any, handler: McpHandler): void {
   server.tool(name, description, schema, async (args: any) => {
