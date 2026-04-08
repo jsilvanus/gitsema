@@ -404,13 +404,14 @@ modelsSub
   .option('--provider <type>', 'provider type: ollama or http')
   .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
   .option('--key <apikey>', 'API key for HTTP provider')
+  .option('--level <level>', 'default indexing/search granularity: file, function, fixed, chunk, symbol, module')
   .option('--set-default', 'also set this model as the default (model + textModel + codeModel in config)')
   .option('--set-text', 'also set this as the default text embedding model (textModel in config)')
   .option('--set-code', 'also set this as the default code embedding model (codeModel in config)')
   .option('--global', 'save to global config (~/.config/gitsema/config.json) instead of local')
   .action(async (
     name: string,
-    opts: { provider?: string; url?: string; key?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean },
+    opts: { provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean },
   ) => {
     await modelsAddCommand(name, opts)
   })

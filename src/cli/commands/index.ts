@@ -24,6 +24,8 @@ const LEVEL_TO_CHUNKER: Record<string, string> = {
   file: 'file',
   function: 'function',
   fixed: 'fixed',
+  /** 'multi' runs both file-level and function-level indexing in sequence */
+  multi: 'file',
 }
 
 /**
@@ -370,15 +372,17 @@ export async function indexCommand(_options: IndexCommandOptions): Promise<void>
  * This function contains the original indexing logic.
  */
 export async function indexStartCommand(options: IndexCommandOptions): Promise<void> {
-  // Resolve --level as an alias for --chunker
+  // Resolve --level as an alias for --chunker; 'multi' runs file then function in sequence
+  const isMultiLevel = options.level === 'multi'
   if (options.level) {
     const mapped = LEVEL_TO_CHUNKER[options.level]
     if (!mapped) {
       console.error(
-        `Error: --level must be one of: blob, file, function, fixed\n` +
+        `Error: --level must be one of: blob, file, function, fixed, multi\n` +
         `  blob/file   → one embedding per file (--chunker file, default)\n` +
         `  function    → function/class boundaries (--chunker function)\n` +
-        `  fixed       → fixed-size sliding windows (--chunker fixed)`,
+        `  fixed       → fixed-size sliding windows (--chunker fixed)\n` +
+        `  multi       → whole-file AND function-level embeddings in one run`,
       )
       process.exit(1)
     }
@@ -771,5 +775,11 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
     } else {
       console.log(`Auto-VSS skipped: ${countRow.c} blobs < threshold ${threshold}`)
     }
+  }
+
+  // Phase 77: multi-level indexing — after file-level pass, run function-level pass
+  if (isMultiLevel) {
+    console.log('\n── Multi-level pass: now indexing function-level embeddings ──')
+    await indexStartCommand({ ...options, level: 'function', chunker: 'function' })
   }
 }

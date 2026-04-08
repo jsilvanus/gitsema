@@ -14,6 +14,7 @@ export interface EmbedConfig {
 export interface StoredEmbedConfig extends EmbedConfig {
   configHash: string
   createdAt: number
+  lastUsedAt?: number
 }
 
 export interface CompatibilityResult {
@@ -81,7 +82,7 @@ export function loadEmbedConfigs(rawDb: InstanceType<typeof Database>): StoredEm
 
   return (rawDb.prepare(`SELECT * FROM embed_config ORDER BY created_at ASC`).all() as Array<{
     config_hash: string; provider: string; model: string; code_model: string | null
-    dimensions: number; chunker: string; window_size: number | null; overlap: number | null; created_at: number
+    dimensions: number; chunker: string; window_size: number | null; overlap: number | null; created_at: number; last_used_at: number | null
   }>).map((r) => ({
     configHash: r.config_hash,
     provider: r.provider,
@@ -92,6 +93,7 @@ export function loadEmbedConfigs(rawDb: InstanceType<typeof Database>): StoredEm
     windowSize: r.window_size ?? undefined,
     overlap: r.overlap ?? undefined,
     createdAt: r.created_at,
+    lastUsedAt: r.last_used_at ?? undefined,
   }))
 }
 

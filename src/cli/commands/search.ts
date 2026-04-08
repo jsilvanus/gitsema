@@ -300,8 +300,27 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   let searchChunksFlag = options.chunks ?? false
   let searchSymbolsFlag = false
   let searchModulesFlag = false
-  if (options.level) {
-    switch (options.level) {
+
+  // Phase 77: auto-recall level from active embed_config when --level is not specified
+  let effectiveLevel = options.level
+  if (!effectiveLevel) {
+    try {
+      const { loadEmbedConfigs } = await import('../../core/indexing/provenance.js')
+      const { getRawDb } = await import('../../core/db/sqlite.js')
+      const configs = loadEmbedConfigs(getRawDb())
+      if (configs.length > 0) {
+        // Use the most recently used config
+        const latest = configs.reduce((a, b) => ((b.lastUsedAt ?? 0) >= (a.lastUsedAt ?? 0) ? b : a))
+        const chunkerToLevel: Record<string, string> = { file: 'file', function: 'chunk', fixed: 'chunk' }
+        effectiveLevel = chunkerToLevel[latest.chunker]
+      }
+    } catch {
+      // ignore — non-fatal
+    }
+  }
+
+  if (effectiveLevel) {
+    switch (effectiveLevel) {
       case 'file': break
       case 'chunk': searchChunksFlag = true; break
       case 'symbol': searchSymbolsFlag = true; break
