@@ -54,7 +54,7 @@ One database can hold embeddings from **multiple embedding models simultaneously
 | Model override for a run | `--model <name>` |
 | Index bundle export / import | `gitsema index export/import` |
 | Automated hooks (post-commit, post-merge) | `gitsema config set hooks.enabled true` |
-| Module-level embeddings (directory centroids) | `gitsema update-modules` |
+| Module-level embeddings (directory centroids) | `gitsema index update-modules` |
 | Remote-repo indexing via HTTP server | `gitsema remote-index <url>` |
 | Multi-repo registry | `gitsema repos add/list/remove` |
 | **Profile presets (Phase 63)** | `--profile speed\|balanced\|quality` |
@@ -291,14 +291,14 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | Feature | Command |
 |---|---|
 | Index statistics | `gitsema status [file]` |
-| DB integrity check | `gitsema doctor` |
-| SQLite VACUUM + ANALYZE | `gitsema vacuum` |
-| Garbage-collect orphan embeddings | `gitsema gc` |
-| Rebuild FTS5 index | `gitsema rebuild-fts` |
-| Backfill FTS5 content for pre-Phase-11 blobs | `gitsema backfill-fts` |
-| Build / rebuild HNSW VSS index | `gitsema build-vss` |
-| Remove embeddings for a specific model | `gitsema clear-model <model>` |
-| Recalculate module-level embeddings | `gitsema update-modules` |
+| DB integrity check | `gitsema index doctor` |
+| SQLite VACUUM + ANALYZE | `gitsema index vacuum` |
+| Garbage-collect orphan embeddings | `gitsema index gc` |
+| Rebuild FTS5 index | `gitsema index rebuild-fts` |
+| Backfill FTS5 content for pre-Phase-11 blobs | `gitsema index backfill-fts` |
+| Build / rebuild HNSW VSS index | `gitsema index build-vss` |
+| Remove embeddings for a specific model | `gitsema index clear-model <model>` |
+| Recalculate module-level embeddings | `gitsema index update-modules` |
 | Export index bundle (tar.gz) | `gitsema index export` |
 | Import index bundle | `gitsema index import` |
 | Saved semantic watches | `gitsema watch add/list/remove/run` |

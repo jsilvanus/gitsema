@@ -92,7 +92,7 @@ Commands are organised into groups. See [`features.md`](features.md) for the ful
 
 | Group | Commands |
 |---|---|
-| **Indexing** | `index` (+ `export`/`import` subcommands), `status`, `remote-index`, `update-modules`, `watch` |
+| **Indexing** | `index` (status), `index start`, `index export`, `index import`, `index doctor`, `index vacuum`, `index backfill-fts`, `index rebuild-fts`, `index gc`, `index clear-model`, `index update-modules`, `index build-vss`, `remote-index`, `watch` |
 | **Protocol Servers** | `tools mcp`, `tools serve`, `tools lsp` |
 | **Search & Discovery** | `search`, `code-search`, `first-seen`, `dead-concepts` |
 | **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
@@ -102,10 +102,9 @@ Commands are organised into groups. See [`features.md`](features.md) for the ful
 | **Branch / Merge** | `branch-summary`, `merge-audit`, `merge-preview`, `cherry-pick-suggest`, `ci-diff` |
 | **Analysis** | `author`, `impact`, `refactor-candidates`, `doc-gap`, `contributor-profile`, `security-scan`, `health`, `debt` |
 | **Visualization** | `map`, `heatmap` |
-| **DB Maintenance** | `doctor`, `vacuum`, `rebuild-fts`, `backfill-fts`, `gc`, `build-vss`, `clear-model` |
-| **Configuration** | `config`, `repos`, `project` |
+| **Configuration** | `config`, `status`, `repos`, `project` |
 
-> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`, `gitsema mcp` / `gitsema serve` / `gitsema lsp` → use `gitsema tools mcp` / `gitsema tools serve` / `gitsema tools lsp` instead (old names still work but emit a deprecation notice).
+> **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`, `gitsema mcp` / `gitsema serve` / `gitsema lsp` → use `gitsema tools mcp` / `gitsema tools serve` / `gitsema tools lsp` instead. The old DB maintenance commands (`gitsema doctor`, `gitsema vacuum`, `gitsema gc`, `gitsema backfill-fts`, `gitsema rebuild-fts`, `gitsema update-modules`, `gitsema build-vss`, `gitsema clear-model`) still work as hidden deprecated aliases and print a migration hint — use the `gitsema index <subcommand>` forms instead.
 
 ---
 
@@ -193,25 +192,25 @@ Ask a remote `gitsema tools serve` instance to clone and index a Git repository.
 
 ---
 
-#### `gitsema backfill-fts`
+#### `gitsema index backfill-fts`
 
 Populate FTS5 content for blobs indexed before Phase 11. Required to use `--hybrid` search on older index entries.
 
 ---
 
-#### `gitsema doctor`
+#### `gitsema index doctor`
 
 Run integrity checks and report the health of the index database.
 
 ```bash
-gitsema doctor
+gitsema index doctor
 ```
 
 Checks performed:
 - Schema version vs expected version
 - Blob / embedding / FTS row counts
-- Missing FTS rows (suggests `backfill-fts`)
-- Orphan embeddings (suggests `gc`)
+- Missing FTS rows (suggests `gitsema index backfill-fts`)
+- Orphan embeddings (suggests `gitsema index gc`)
 - SQLite integrity check (`PRAGMA integrity_check`)
 - Stored embed config provenance (provider, model, dimensions, chunker)
 
@@ -219,24 +218,69 @@ Exits with code 1 if critical issues (integrity failures or schema mismatch) are
 
 ---
 
-#### `gitsema vacuum`
+#### `gitsema index vacuum`
 
 Run `VACUUM` and `ANALYZE` on the SQLite index database. Compacts the file and refreshes query planner statistics. Safe to run at any time.
 
 ```bash
-gitsema vacuum
+gitsema index vacuum
 ```
 
 ---
 
-#### `gitsema rebuild-fts`
+#### `gitsema index rebuild-fts`
 
 Rebuild the FTS5 full-text search index from stored data. Use after bulk deletions or if hybrid search returns stale results.
 
 ```bash
-gitsema rebuild-fts        # prompts for confirmation
-gitsema rebuild-fts --yes  # skip confirmation
+gitsema index rebuild-fts        # prompts for confirmation
+gitsema index rebuild-fts --yes  # skip confirmation
 ```
+
+---
+
+#### `gitsema index gc`
+
+Garbage collect unreachable blob records from the DB (blobs not reachable from any Git ref).
+
+```bash
+gitsema index gc
+gitsema index gc --dry-run  # preview what would be removed
+```
+
+---
+
+#### `gitsema index clear-model <model>`
+
+Delete all stored embeddings and cache entries for a specific model.
+
+```bash
+gitsema index clear-model nomic-embed-text
+gitsema index clear-model text-embedding-3-small --yes
+```
+
+---
+
+#### `gitsema index update-modules`
+
+Recalculate module (directory) centroid embeddings from stored whole-file embeddings.
+
+```bash
+gitsema index update-modules
+```
+
+---
+
+#### `gitsema index build-vss`
+
+Build a usearch HNSW ANN index from stored embeddings for fast approximate search. Requires the `usearch` optional package.
+
+```bash
+gitsema index build-vss
+gitsema index build-vss --model text-embedding-3-small
+```
+
+> **Note:** The old top-level forms (`gitsema doctor`, `gitsema vacuum`, `gitsema backfill-fts`, etc.) still work as deprecated aliases and will print a migration hint.
 
 ---
 

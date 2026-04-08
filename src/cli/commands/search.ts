@@ -409,7 +409,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
 
             // If index seems stale, warn but continue (we can still return top results)
             if (idToHash.length < (((await import('../../core/db/sqlite.js')) as any).getRawDb().prepare('SELECT COUNT(*) as c FROM embeddings WHERE model = ?').get(modelToUse).c)) {
-              console.warn('VSS index appears stale (fewer entries than DB). Consider rebuilding with `gitsema build-vss`.')
+              console.warn('VSS index appears stale (fewer entries than DB). Consider rebuilding with `gitsema index build-vss`.')
             }
 
             // Map results to SearchResult format and fetch paths

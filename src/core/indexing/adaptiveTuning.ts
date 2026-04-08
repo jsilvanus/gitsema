@@ -174,7 +174,7 @@ export interface PostRunContext {
   indexed: number
   /** Total blobs already in the database (seen - indexed - failed). */
   existingBlobCount: number
-  /** True when the user has never run `gitsema backfill-fts`. */
+  /** True when the user has never run `gitsema index backfill-fts`. */
   hasFtsGap?: boolean
 }
 
@@ -188,19 +188,19 @@ export function postRunRecommendations(ctx: PostRunContext): string[] {
 
   if (totalBlobs >= 10_000) {
     recommendations.push(
-      `ℹ  ${totalBlobs.toLocaleString()} blobs indexed — run \`gitsema build-vss\` for HNSW-accelerated search.`,
+      `ℹ  ${totalBlobs.toLocaleString()} blobs indexed — run \`gitsema index build-vss\` for HNSW-accelerated search.`,
     )
   }
 
   if (ctx.hasFtsGap) {
     recommendations.push(
-      `ℹ  Some blobs may be missing FTS5 content — run \`gitsema backfill-fts\` to enable --hybrid search on all blobs.`,
+      `ℹ  Some blobs may be missing FTS5 content — run \`gitsema index backfill-fts\` to enable --hybrid search on all blobs.`,
     )
   }
 
   if (totalBlobs >= 50_000) {
     recommendations.push(
-      `ℹ  Large index (${totalBlobs.toLocaleString()} blobs) — run \`gitsema vacuum\` periodically to reclaim disk space.`,
+      `ℹ  Large index (${totalBlobs.toLocaleString()} blobs) — run \`gitsema index vacuum\` periodically to reclaim disk space.`,
     )
   }
 

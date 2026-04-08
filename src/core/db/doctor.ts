@@ -48,16 +48,16 @@ export function runDoctor(rawDb: InstanceType<typeof Database>): DoctorReport {
     `).get() as { c: number })?.c ?? 0
   } catch {
     ftsMissingCount = blobCount
-    warnings.push('FTS table missing or not initialized. Run: gitsema backfill-fts')
+    warnings.push('FTS table missing or not initialized. Run: gitsema index backfill-fts')
   }
-  if (ftsMissingCount > 0) warnings.push(`${ftsMissingCount} blobs have no FTS row. Run: gitsema backfill-fts`)
+  if (ftsMissingCount > 0) warnings.push(`${ftsMissingCount} blobs have no FTS row. Run: gitsema index backfill-fts`)
 
   // Orphan embeddings (embeddings without corresponding blob)
   const orphanEmbeddings = (rawDb.prepare(`
     SELECT COUNT(*) AS c FROM embeddings e
     WHERE NOT EXISTS (SELECT 1 FROM blobs b WHERE b.blob_hash = e.blob_hash)
   `).get() as { c: number })?.c ?? 0
-  if (orphanEmbeddings > 0) warnings.push(`${orphanEmbeddings} orphan embeddings detected. Run: gitsema gc`)
+  if (orphanEmbeddings > 0) warnings.push(`${orphanEmbeddings} orphan embeddings detected. Run: gitsema index gc`)
 
   // Integrity check
   const integrityErrors: string[] = []

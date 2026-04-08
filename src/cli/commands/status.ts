@@ -107,7 +107,7 @@ export async function statusCommand(filePath: string | undefined, options: Statu
     if (missing.length > 0) {
       console.warn(`\nWarning: ${missing.join(' and ')} ${missing.length > 1 ? 'have' : 'has'} no embeddings in DB.`)
       console.warn(`  DB model(s): ${dbModels.join(', ')}`)
-      console.warn(`  Re-index with the current model, or run: gitsema clear-model <old-model>`)
+      console.warn(`  Re-index with the current model, or run: gitsema index clear-model <old-model>`)
     }
   }
 

@@ -124,13 +124,10 @@ const GROUPS = [
 
 const COMMAND_GROUPS: Record<string, string> = {
   // Setup & Infrastructure
-  config:           'Setup & Infrastructure',
-  status:           'Setup & Infrastructure',
-  index:            'Setup & Infrastructure',
-  'remote-index':   'Setup & Infrastructure',
-  'backfill-fts':   'Setup & Infrastructure',
-  'update-modules': 'Setup & Infrastructure',
-  'build-vss':      'Setup & Infrastructure',
+  config:         'Setup & Infrastructure',
+  status:         'Setup & Infrastructure',
+  index:          'Setup & Infrastructure',
+  'remote-index': 'Setup & Infrastructure',
   // Protocol Servers (new group — preferred entry point is `gitsema tools`)
   // serve/mcp/lsp are hidden from top-level help; use `gitsema tools` instead
   tools:            'Protocol Servers',
@@ -187,12 +184,6 @@ const COMMAND_GROUPS: Record<string, string> = {
   map:     'Visualization',
   heatmap: 'Visualization',
   project: 'Visualization',
-  // Maintenance
-  doctor:        'Maintenance',
-  vacuum:        'Maintenance',
-  'rebuild-fts': 'Maintenance',
-  gc:            'Maintenance',
-  'clear-model': 'Maintenance',
 }
 
 program.configureHelp({
@@ -506,27 +497,173 @@ program
     await importIndex(opts)
   })
 
-program
+// ── `gitsema index doctor` ────────────────────────────────────────────────
+indexSub
   .command('doctor')
   .description('Run integrity checks, schema version/provenance checks, and report index health')
-  .option('--lsp', 'only run the LSP startup check (gitsema doctor --lsp)')
+  .option('--lsp', 'only run the LSP startup check')
   .action(async (opts: { lsp?: boolean }) => {
     await doctorCommand(opts)
   })
 
-program
+// ── `gitsema index vacuum` ────────────────────────────────────────────────
+indexSub
   .command('vacuum')
   .description('VACUUM and ANALYZE the SQLite index database to reduce size and improve performance')
   .action(async () => {
     await vacuumCommand()
   })
 
-program
+// ── `gitsema index rebuild-fts` ───────────────────────────────────────────
+indexSub
   .command('rebuild-fts')
   .description('Rebuild the FTS5 full-text search index from stored data')
   .option('-y, --yes', 'skip confirmation prompt')
   .action(async (opts: { yes?: boolean }) => {
     await rebuildFtsCliCommand({ yes: opts.yes })
+  })
+
+// ── `gitsema index backfill-fts` ──────────────────────────────────────────
+indexSub
+  .command('backfill-fts')
+  .description('Populate FTS5 content for blobs indexed before Phase 11 (enables hybrid search)')
+  .action(async () => {
+    await backfillFtsCommand()
+  })
+
+// ── `gitsema index update-modules` ────────────────────────────────────────
+indexSub
+  .command('update-modules')
+  .description('Recalculate module (directory) centroid embeddings from stored whole-file embeddings')
+  .option('--verbose', 'enable verbose output')
+  .action(async (opts: { verbose?: boolean }) => {
+    await updateModulesCommand({ verbose: opts.verbose })
+  })
+
+// ── `gitsema index gc` ────────────────────────────────────────────────────
+indexSub
+  .command('gc')
+  .description('Garbage collect unreachable blob records from the DB')
+  .option('--dry-run', 'only report what would be removed')
+  .option('--verbose', 'print verbose output')
+  .action(async (opts: { dryRun?: boolean; verbose?: boolean }) => {
+    try {
+      const stats = await runGarbageCollection({ dryRun: !!opts.dryRun })
+      console.log(`Total blobs: ${stats.total}; unreachable: ${stats.removed}`)
+      if (!opts.dryRun) console.log(`Removed ${stats.removed} unreachable blobs`)
+    } catch (err) {
+      console.error(`GC failed: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+  })
+
+// ── `gitsema index clear-model <model>` ───────────────────────────────────
+indexSub
+  .command('clear-model <model>')
+  .description('Delete all stored embeddings and cache entries for a specific model')
+  .option('-y, --yes', 'skip confirmation prompt')
+  .action(async (model: string, opts: { yes?: boolean }) => {
+    await clearModelCommand(model, { yes: opts.yes })
+  })
+
+// ── `gitsema index build-vss` ─────────────────────────────────────────────
+indexSub
+  .command('build-vss')
+  .description('Build a usearch HNSW ANN index from stored embeddings for fast approximate search (requires usearch package)')
+  .option('--model <model>', 'build index for this model (default: configured text model)')
+  .option('--ef-construction <n>', 'HNSW ef_construction parameter — higher = better recall, slower build (default 200)')
+  .option('--M <n>', 'HNSW M parameter — number of connections per layer (default 16)')
+  .action(async (opts: { model?: string; efConstruction?: string; M?: string }) => {
+    await buildVssCommand({
+      model: opts.model,
+      efConstruction: opts.efConstruction,
+      M: opts.M,
+    })
+  })
+
+// ── Top-level deprecated aliases (hidden; kept for backward compat) ────────
+program
+  .command('doctor', { hidden: true })
+  .description('[deprecated] use `gitsema index doctor`')
+  .option('--lsp', 'only run the LSP startup check (gitsema index doctor --lsp)')
+  .action(async (opts: { lsp?: boolean }) => {
+    console.warn('Deprecation notice: `gitsema doctor` is deprecated — use `gitsema index doctor` instead.')
+    await doctorCommand(opts)
+  })
+
+program
+  .command('vacuum', { hidden: true })
+  .description('[deprecated] use `gitsema index vacuum`')
+  .action(async () => {
+    console.warn('Deprecation notice: `gitsema vacuum` is deprecated — use `gitsema index vacuum` instead.')
+    await vacuumCommand()
+  })
+
+program
+  .command('rebuild-fts', { hidden: true })
+  .description('[deprecated] use `gitsema index rebuild-fts`')
+  .option('-y, --yes', 'skip confirmation prompt')
+  .action(async (opts: { yes?: boolean }) => {
+    console.warn('Deprecation notice: `gitsema rebuild-fts` is deprecated — use `gitsema index rebuild-fts` instead.')
+    await rebuildFtsCliCommand({ yes: opts.yes })
+  })
+
+program
+  .command('backfill-fts', { hidden: true })
+  .description('[deprecated] use `gitsema index backfill-fts`')
+  .action(async () => {
+    console.warn('Deprecation notice: `gitsema backfill-fts` is deprecated — use `gitsema index backfill-fts` instead.')
+    await backfillFtsCommand()
+  })
+
+program
+  .command('update-modules', { hidden: true })
+  .description('[deprecated] use `gitsema index update-modules`')
+  .option('--verbose', 'enable verbose output')
+  .action(async (opts: { verbose?: boolean }) => {
+    console.warn('Deprecation notice: `gitsema update-modules` is deprecated — use `gitsema index update-modules` instead.')
+    await updateModulesCommand({ verbose: opts.verbose })
+  })
+
+program
+  .command('gc', { hidden: true })
+  .description('[deprecated] use `gitsema index gc`')
+  .option('--dry-run', 'only report what would be removed')
+  .option('--verbose', 'print verbose output')
+  .action(async (opts: { dryRun?: boolean; verbose?: boolean }) => {
+    console.warn('Deprecation notice: `gitsema gc` is deprecated — use `gitsema index gc` instead.')
+    try {
+      const stats = await runGarbageCollection({ dryRun: !!opts.dryRun })
+      console.log(`Total blobs: ${stats.total}; unreachable: ${stats.removed}`)
+      if (!opts.dryRun) console.log(`Removed ${stats.removed} unreachable blobs`)
+    } catch (err) {
+      console.error(`GC failed: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+  })
+
+program
+  .command('clear-model <model>', { hidden: true })
+  .description('[deprecated] use `gitsema index clear-model`')
+  .option('-y, --yes', 'skip confirmation prompt')
+  .action(async (model: string, opts: { yes?: boolean }) => {
+    console.warn('Deprecation notice: `gitsema clear-model` is deprecated — use `gitsema index clear-model` instead.')
+    await clearModelCommand(model, { yes: opts.yes })
+  })
+
+program
+  .command('build-vss', { hidden: true })
+  .description('[deprecated] use `gitsema index build-vss`')
+  .option('--model <model>', 'build index for this model (default: configured text model)')
+  .option('--ef-construction <n>', 'HNSW ef_construction parameter (default 200)')
+  .option('--M <n>', 'HNSW M parameter (default 16)')
+  .action(async (opts: { model?: string; efConstruction?: string; M?: string }) => {
+    console.warn('Deprecation notice: `gitsema build-vss` is deprecated — use `gitsema index build-vss` instead.')
+    await buildVssCommand({
+      model: opts.model,
+      efConstruction: opts.efConstruction,
+      M: opts.M,
+    })
   })
 
 program
@@ -662,7 +799,6 @@ program
   .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
   .option('--narrate', 'generate an LLM summary of concept evolution results (requires GITSEMA_LLM_URL)')
   .option('--no-headings', "don't print column header row")
-  .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
   .action(conceptEvolutionCommand)
 
 program
@@ -1149,59 +1285,6 @@ program
   .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
   .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
   .action(mergePreviewCommand)
-
-program
-  .command('backfill-fts')
-  .description('Populate FTS5 content for blobs indexed before Phase 11 (enables hybrid search and --include-content)')
-  .action(async () => {
-    await backfillFtsCommand()
-  })
-
-program
-  .command('update-modules')
-  .description('Recalculate module (directory) centroid embeddings from stored whole-file embeddings')
-  .option('--verbose', 'enable verbose output')
-  .action(async (opts) => {
-    await updateModulesCommand({ verbose: opts.verbose })
-  })
-
-program
-  .command('gc')
-  .description('Garbage collect unreachable blob records from the DB')
-  .option('--dry-run', 'only report what would be removed')
-  .option('--verbose', 'print verbose output')
-  .action(async (opts: { dryRun?: boolean; verbose?: boolean }) => {
-    try {
-      const stats = await runGarbageCollection({ dryRun: !!opts.dryRun })
-      console.log(`Total blobs: ${stats.total}; unreachable: ${stats.removed}`)
-      if (!opts.dryRun) console.log(`Removed ${stats.removed} unreachable blobs`)
-    } catch (err) {
-      console.error(`GC failed: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
-    }
-  })
-
-program
-  .command('clear-model <model>')
-  .description('Delete all stored embeddings and cache entries for a specific model')
-  .option('-y, --yes', 'skip confirmation prompt')
-  .action(async (model, opts) => {
-    await clearModelCommand(model, { yes: opts.yes })
-  })
-
-program
-  .command('build-vss', { hidden: true })
-  .description('Build a usearch HNSW ANN index from stored embeddings for fast approximate search (requires usearch package)')
-  .option('--model <model>', 'build index for this model (default: configured text model)')
-  .option('--ef-construction <n>', 'HNSW ef_construction parameter — higher = better recall, slower build (default 200)')
-  .option('--M <n>', 'HNSW M parameter — number of connections per layer (default 16)')
-  .action(async (opts) => {
-    await buildVssCommand({
-      model: opts.model,
-      efConstruction: opts.efConstruction,
-      M: opts.M,
-    })
-  })
 
 program
   .command('mcp', { hidden: true })

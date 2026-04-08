@@ -122,7 +122,7 @@ export function checkConfigCompatibility(
   if (conflicting) {
     return {
       compatible: false,
-      reason: `Model "${conflicting.model}" was previously indexed with ${conflicting.dimensions} dimensions, but the current run produces ${currentConfig.dimensions} dimensions. This would corrupt cosine comparisons for that model. Use --allow-mixed to override, or run: gitsema clear-model ${conflicting.model}`,
+      reason: `Model "${conflicting.model}" was previously indexed with ${conflicting.dimensions} dimensions, but the current run produces ${currentConfig.dimensions} dimensions. This would corrupt cosine comparisons for that model. Use --allow-mixed to override, or run: gitsema index clear-model ${conflicting.model}`,
       existingConfigs: existing,
     }
   }
