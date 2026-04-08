@@ -759,6 +759,39 @@ Returns a machine-readable JSON manifest of all features supported by the runnin
 curl http://localhost:4242/api/v1/capabilities
 ```
 
+#### HTTP Analysis Routes (`POST /api/v1/analysis/...`)
+
+All analysis commands available in the CLI are also exposed over HTTP. Authentication via `GITSEMA_SERVE_KEY` applies to all routes.
+
+| Route | Description | Key request fields |
+|---|---|---|
+| `POST /analysis/clusters` | K-means cluster snapshot | `k`, `topKeywords`, `branch` |
+| `POST /analysis/change-points` | Concept change-point detection | `query`, `topK`, `threshold` |
+| `POST /analysis/author` | Author attribution for a concept | `query`, `topK`, `topAuthors` |
+| `POST /analysis/impact` | Cross-module coupling for a file | `file`, `topK` |
+| `POST /analysis/semantic-diff` | Semantic diff between two refs | `ref1`, `ref2`, `query` |
+| `POST /analysis/semantic-blame` | Semantic origin of code blocks | `filePath`, `content`, `topK` |
+| `POST /analysis/dead-concepts` | Deleted semantic blobs | `topK`, `since` |
+| `POST /analysis/merge-audit` | Semantic collision detection before merge | `branchA`, `branchB`, `threshold` |
+| `POST /analysis/merge-preview` | Merge semantic impact preview | `branch`, `into` |
+| `POST /analysis/branch-summary` | Branch semantic summary vs base | `branch`, `baseBranch` |
+| `POST /analysis/experts` | Reviewer / expert suggestions | `topN`, `since`, `until` |
+| `POST /analysis/security-scan` | Vulnerability pattern similarity scan | `top` |
+| `POST /analysis/health` | Time-bucketed codebase health timeline | `buckets`, `branch` |
+| `POST /analysis/debt` | Technical debt scoring | `top`, `branch` |
+| `POST /analysis/doc-gap` | Documentation gap analysis | `top`, `threshold`, `branch` |
+| `POST /analysis/contributor-profile` | Contributor semantic profile | `author`, `top`, `branch` |
+| `POST /analysis/triage` | Incident triage bundle (first-seen + change-points + bisect + experts) | `query`, `top`, `ref1`, `ref2`, `file` |
+| `POST /analysis/policy-check` | Automated CI gate (debt / security / drift thresholds) | `maxDebtScore`, `minSecurityScore`, `maxDrift`, `query` |
+| `POST /analysis/ownership` | Ownership heatmap by concept | `query`, `top`, `windowDays` |
+| `POST /analysis/workflow` | Workflow template runner | `template` (`pr-review\|incident\|release-audit`), `query`, `file`, `top` |
+| `POST /analysis/eval` | Inline retrieval evaluation (P@k, R@k, MRR) | `cases` (array of `{query, expectedPaths}`), `top` |
+| `POST /analysis/multi-repo-search` | Search across multiple registered repos | `query`, `repoIds`, `topK` |
+
+> **Note on `security-scan`:** Results are semantic similarity scores, not confirmed vulnerabilities. Always perform manual review.
+
+> **Note on `policy-check`:** Returns HTTP 200 when all gates pass, 422 when any gate fails — convenient for CI integration.
+
 ---
 
 ## Automated Indexing (Git Hooks)

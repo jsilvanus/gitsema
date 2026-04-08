@@ -230,6 +230,17 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/merge-preview` | Merge preview |
 | `POST /api/v1/analysis/branch-summary` | Branch summary |
 | `POST /api/v1/analysis/experts` | Experts / reviewer suggestions (Phase 61) |
+| `POST /api/v1/analysis/security-scan` | Vulnerability pattern similarity scan (Phase 43) |
+| `POST /api/v1/analysis/health` | Time-bucketed health timeline (Phase 44) |
+| `POST /api/v1/analysis/debt` | Technical debt scoring (Phase 45) |
+| `POST /api/v1/analysis/doc-gap` | Documentation gap analysis (Phase 38) |
+| `POST /api/v1/analysis/contributor-profile` | Contributor semantic profile (Phase 39) |
+| `POST /api/v1/analysis/triage` | Incident triage bundle (Phase 65) |
+| `POST /api/v1/analysis/policy-check` | Automated CI gate checks (Phase 66) |
+| `POST /api/v1/analysis/ownership` | Ownership heatmap by concept (Phase 67) |
+| `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68) |
+| `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
+| `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui` flag) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
@@ -355,7 +366,7 @@ This section is intentionally brief. The canonical roadmap is in [`docs/PLAN.md`
 
 Key areas still in progress or planned (see [`docs/review5.md`](docs/review5.md) for full analysis):
 
-- **HTTP route coverage**: Phase 41–47 and Phases 65–70 analysis commands (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`, `triage`, `policy check`, `ownership`, `workflow`, `eval`) have no HTTP API routes yet. CLI and MCP parity exists; HTTP is the gap.
+- **HTTP route coverage**: ✅ All Phase 41–47 and Phase 65–70 analysis commands now have HTTP routes (`security-scan`, `health`, `debt`, `doc-gap`, `contributor-profile`, `triage`, `policy-check`, `ownership`, `workflow`, `eval`, `multi-repo-search`). CLI ↔ MCP ↔ HTTP parity is complete for these commands.
 - **HNSW for general search**: The VSS/HNSW index (used by clustering) is not yet wired into general `vectorSearch()`. Doing so would cap query latency regardless of index size.
 - ~~**OpenAPI spec**: No OpenAPI spec yet.~~ ✅ **Done (P2)**: `GET /openapi.json` (OpenAPI 3.1) and `GET /docs` (Swagger UI) are now live.
 - ~~**Observability**: No `/metrics` endpoint.~~ ✅ **Done (P2)**: Prometheus metrics at `GET /metrics` with histograms, gauges, and counters.
