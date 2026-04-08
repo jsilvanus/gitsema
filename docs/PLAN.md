@@ -2710,16 +2710,12 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 **Goal:** Make the tool self-explaining about scale limits so users don't hit OOM or slow queries without warning.
 
-**Scope:**
-- `gitsema status`: when blob count exceeds a configurable threshold (default 50 000), print a prominent warning recommending `gitsema build-vss` and/or `--early-cut`. Show whether a VSS index exists and is up-to-date.
-- `gitsema doctor --extended` (or make the checks default):
-  - Verify embedding model is reachable (attempt a one-token embed call to the configured provider).
-  - Check index freshness: compare `max(commit_ts)` in `indexed_commits` against `git log -1 --format=%ct HEAD`; warn if more than N commits behind.
-  - Estimate search latency class: `fast` (< 10K blobs or VSS present), `moderate` (10K–50K, no VSS), `slow` (> 50K, no VSS, no early-cut).
-  - Warn when `CURRENT_SCHEMA_VERSION` > the version recorded in the `meta` table.
-- First-slow-query hint: after any search that exceeds a configurable wall-clock threshold (default 5 s), print a one-time suggestion to run `gitsema build-vss`.
+**Implemented scope:**
+- `gitsema status`: prints scale warning when blob count exceeds threshold; shows VSS index presence and staleness.
+- `gitsema doctor --extended`: verifies provider reachability, checks index freshness vs HEAD, estimates latency class (`fast`/`moderate`/`slow`), warns on schema version mismatch.
+- First-slow-query hint wired into search path.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete.
 
 ---
 
@@ -2727,14 +2723,13 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 **Goal:** When multiple repos are registered, allow scoping a `GITSEMA_SERVE_KEY` token to a specific repo ID so different users only see their own repo's results.
 
-**Scope:**
-- Introduce a `repo_tokens` table (or extend `repos`) mapping token → repo ID.
-- Auth middleware reads the token, looks up the allowed repo ID, and injects it as `req.repoId`.
-- All search/analysis routes filter their DB queries by `repoId` when set.
+**Implemented scope:**
+- `repo_tokens` table mapping token → repo ID.
+- Auth middleware resolves token to `repoId`; all search/analysis routes filter by it.
 - `gitsema repos token add <repo-id>` CLI to mint scoped tokens.
-- Document in `docs/deploy.md`.
+- Documented in `docs/deploy.md`.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete.
 
 ---
 

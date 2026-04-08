@@ -108,23 +108,20 @@ export function hybridSearch(
     ...bm25Rows.map((r) => r.blob_hash),
   ])
 
-  // Resolve paths for any BM25-only blobs not already in vectorResults
+  // Resolve paths for BM25-only blobs not already covered by vectorResults.
+  // FTS5 results are bounded by LIMIT so a single IN (...) covers all of them.
   const missingHashes = [...allHashes].filter((h) => !vectorMap.has(h))
   const pathsByBlob = new Map<string, string[]>()
   if (missingHashes.length > 0) {
-    const BATCH = 500
-    for (let i = 0; i < missingHashes.length; i += BATCH) {
-      const batch = missingHashes.slice(i, i + BATCH)
-      const rows = db
-        .select({ blobHash: paths.blobHash, path: paths.path })
-        .from(paths)
-        .where(inArray(paths.blobHash, batch))
-        .all()
-      for (const row of rows) {
-        const list = pathsByBlob.get(row.blobHash) ?? []
-        list.push(row.path)
-        pathsByBlob.set(row.blobHash, list)
-      }
+    const rows = db
+      .select({ blobHash: paths.blobHash, path: paths.path })
+      .from(paths)
+      .where(inArray(paths.blobHash, missingHashes))
+      .all()
+    for (const row of rows) {
+      const list = pathsByBlob.get(row.blobHash) ?? []
+      list.push(row.path)
+      pathsByBlob.set(row.blobHash, list)
     }
   }
 
