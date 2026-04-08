@@ -388,10 +388,27 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   // Process blobs concurrently up to the configured limit.
   const embeddingStart = Date.now()
 
+  // Retry helper for transient embedding provider errors (429, 503, ECONNRESET)
+  async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 2, baseDelayMs = 500): Promise<T> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn()
+      } catch (err) {
+        if (attempt === maxAttempts) throw err
+        const msg = err instanceof Error ? err.message : String(err)
+        const isTransient = /429|503|ECONNRESET|ETIMEDOUT|ECONNREFUSED/.test(msg)
+        if (!isTransient) throw err
+        logger.debug?.(`Transient embed error (attempt ${attempt}/${maxAttempts}): ${msg}`)
+        await new Promise(r => setTimeout(r, baseDelayMs * (2 ** (attempt - 1))))
+      }
+    }
+    throw new Error('unreachable')
+  }
+
   // helper to time embedding calls and update rolling window
   async function timedEmbed(provider: EmbeddingProvider, input: string) {
     const t0 = Date.now()
-    const res = await provider.embed(input)
+    const res = await withRetry(() => provider.embed(input))
     const lat = Date.now() - t0
     pushLatency(lat)
     return res
@@ -411,8 +428,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   if (useBatchPath) {
     // Pipelined batching: overlap read -> embed -> store using AsyncQueue
-    const readQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer }>>()
-    const embedQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer; embedding: Embedding | null }>>()
+    // maxBufferSize=8 bounds memory: producer blocks when 8 batches are queued ahead of the embedder
+    const readQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer }>>({ maxBufferSize: 8 })
+    const embedQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer; embedding: Embedding | null }>>({ maxBufferSize: 8 })
 
     // Producer: read batches and push readable items to readQueue
     const producer = (async () => {
@@ -442,11 +460,11 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           }
         }
 
-        if (readable.length > 0) readQueue.push(readable)
+        if (readable.length > 0) await readQueue.pushAsync(readable)
         reportProgress()
       }
       readQueue.close()
-    })()
+    })().catch((err) => readQueue.pushError(err instanceof Error ? err : new Error(String(err))))
 
     // Embedder: consume readQueue, produce embeddings and push to embedQueue
     const embedder = (async () => {
@@ -474,10 +492,10 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         }
 
         const items = readable.map((r, i) => ({ entry: r.entry, content: r.content, embedding: embeddings[i] }))
-        embedQueue.push(items)
+        await embedQueue.pushAsync(items)
       }
       embedQueue.close()
-    })()
+    })().catch((err) => embedQueue.pushError(err instanceof Error ? err : new Error(String(err))))
 
     // Storer: consume embedQueue and store results
     for (;;) {
