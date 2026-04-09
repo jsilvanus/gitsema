@@ -3052,6 +3052,51 @@ embedding provider (Ollama, OpenAI-compatible HTTP, embedeer). This enables:
 
 ---
 
+### Phase 91 — 8 Productized Usage Patterns (review7 §5) *(completed v0.90.0)*
+
+**Goal:** Implement all 8 productized usage patterns described in `docs/review7.md` §5
+as concrete, user-accessible features with CLI commands, documentation, and smoke tests.
+
+**Patterns implemented:**
+
+| # | Pattern | Template name | Key sources |
+|---|---------|---------------|-------------|
+| 1 | PR Semantic Risk Gate | `pr-review` | impact + changePoints + experts |
+| 2 | Release Narrative Pack | `release-audit` | vectorSearch + changePoints + experts |
+| 3 | Onboarding Assistant | `onboarding` | vectorSearch + changePoints + keyExperts |
+| 4 | Incident Triage Console | `incident` | firstSeen + changePoints + experts |
+| 5 | Ownership Intelligence | `ownership-intel` | computeAuthorContributions + vectorSearch |
+| 6 | Architecture Drift Monitor | `arch-drift` | computeHealthTimeline + scoreDebt + changePoints |
+| 7 | Knowledge Discovery Portal | `knowledge-portal` | vectorSearch + changePoints + experts |
+| 8 | Regression Forecasting | `regression-forecast` | vectorSearch + changePoints + experts + ref hint |
+
+**Implemented scope:**
+
+*`src/cli/commands/workflow.ts`:*
+- Expanded `TEMPLATES` from 3 to 8 entries (all 8 patterns).
+- Added `TEMPLATE_DESCRIPTIONS` export mapping each template to a human-readable description.
+- Added `WorkflowOptions.role` (alias for `--role <topic>` in onboarding) and `WorkflowOptions.ref` (base ref for regression-forecast).
+- Added `workflowListCommand()` — prints all 8 templates with descriptions (no DB/embedding needed).
+- New patterns: `onboarding`, `ownership-intel`, `arch-drift`, `knowledge-portal`, `regression-forecast`.
+- Imports added: `computeAuthorContributions`, `scoreDebt`, `computeHealthTimeline`, `getActiveSession`.
+
+*`src/cli/register/all.ts`:*
+- Updated `workflow run` description and added `--role`, `--ref` options.
+- Added `workflow list` subcommand wired to `workflowListCommand`.
+
+*`docs/patterns.md` (new):*
+- Comprehensive documentation for all 8 patterns: goal, example invocation, output sections table, flags, CI example.
+
+*`tests/workflow.test.ts`:*
+- Extended from 5 to 17 tests.
+- Added mocks for `authorSearch`, `debtScoring`, `healthTimeline`, `sqlite`.
+- Tests for all 5 new patterns (happy path + error paths for required flags).
+- Tests for `workflowListCommand` and `TEMPLATE_DESCRIPTIONS`.
+
+**Tests:** 17 workflow tests pass. Full suite green. **Status:** ✅ complete.
+
+---
+
 ### Long-Term Investments (Phase 86+)
 
 | Feature | Complexity | Notes |

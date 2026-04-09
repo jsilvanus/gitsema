@@ -19,7 +19,7 @@ import { prReportCommand } from '../commands/prReport.js'
 import { triageCommand } from '../commands/triage.js'
 import { policyCheckCommand } from '../commands/policyCheck.js'
 import { ownershipCommand } from '../commands/ownership.js'
-import { workflowCommand } from '../commands/workflow.js'
+import { workflowCommand, workflowListCommand } from '../commands/workflow.js'
 import { cherryPickSuggestCommand } from '../commands/cherryPickSuggest.js'
 import { mapCommand } from '../commands/map.js'
 import { heatmapCommand } from '../commands/heatmap.js'
@@ -149,15 +149,37 @@ export function registerAll(program: Command) {
 
   program
     .command('workflow run <template>')
-    .description('Run a built-in workflow template: pr-review, incident, release-audit')
+    .description(
+      'Run a productized workflow pattern (use `workflow list` to see all 8 patterns).\n' +
+      'Patterns: pr-review, release-audit, onboarding, incident, ownership-intel, arch-drift, knowledge-portal, regression-forecast'
+    )
     .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
     .option('--format <fmt>', 'output format: markdown (default) or json — legacy; prefer --out', 'markdown')
     .option('--base <ref>', 'base ref for pr-review')
     .option('--file <path>', 'file to analyze (pr-review)')
-    .option('--query <text>', 'concept query (incident)')
+    .option('--query <text>', 'concept query (incident, onboarding, ownership-intel, knowledge-portal, regression-forecast)')
+    .option('--role <topic>', 'role/topic for onboarding pattern (e.g. auth, billing, frontend); alias for --query')
+    .option('--ref <git-ref>', 'base git ref for regression-forecast comparison')
     .option('-k, --top <n>', 'result limit', '5')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump/--format)', collectOut, [] as string[])
-    .action(async (template: string, args: string[], opts: any) => { await workflowCommand(template, args, { dump: opts.dump, format: opts.format, base: opts.base, file: opts.file, query: opts.query, top: opts.top, out: opts.out }) })
+    .action(async (template: string, args: string[], opts: any) => {
+      await workflowCommand(template, args, {
+        dump: opts.dump,
+        format: opts.format,
+        base: opts.base,
+        file: opts.file,
+        query: opts.query,
+        role: opts.role,
+        ref: opts.ref,
+        top: opts.top,
+        out: opts.out,
+      })
+    })
+
+  program
+    .command('workflow list')
+    .description('List all 8 productized workflow patterns with descriptions')
+    .action(workflowListCommand)
 
   program
     .command('cherry-pick-suggest <query>')
