@@ -1,12 +1,8 @@
 import { getActiveSession } from '../../db/sqlite.js'
 import { cosineSimilarity, getBranchBlobHashSet } from '../core/vectorSearch.js'
 import { computeEvolution } from '../evolution.js'
+import { bufferToFloat32 as bufferToEmbedding } from '../../../utils/embedding.js'
 import type { Embedding } from '../../models/types.js'
-
-function bufferToEmbedding(buf: Buffer): Float32Array {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return f32
-}
 
 function cosineDistance(a: Embedding, b: Embedding): number {
   return 1 - cosineSimilarity(a, b)

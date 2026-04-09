@@ -2916,6 +2916,86 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
+### Phase 89 — Tier-5 Code Quality: review6 §11 Detailed Findings *(completed v0.88.0)*
+
+**Goal:** Address the six detailed code findings in review6 §11 that were
+explicitly outside the numbered Tier-1–4 proposal list but still represent
+correctness, maintainability, and schema-integrity bugs. Also collapse the
+stray `src/core/search/core/` duplicates (`vectorSearch.ts`, `hybridSearch.ts`,
+`resultCache.ts`) left over from the Phase 86 refactor into re-export shims so
+subsequent fixes only need one edit site.
+
+**Implemented scope:**
+
+*§11.1 — vectorSearch cache-key collision (`resultCache.ts`, `vectorSearch.ts`):*
+- Added `allowedHashesFingerprint(allowed?)` helper in `analysis/resultCache.ts`
+  — `sha1(sorted(hashes)).slice(0,16) + ':' + size`, or `null` when absent.
+- `vectorSearch()` now includes that fingerprint in `cacheKeyOptions` so two
+  calls with the same query text but different `allowedHashes` filters (e.g.
+  different branch-scoped searches) no longer collide on the cache entry left
+  behind by a prior unfiltered call.
+- Collapsed `core/resultCache.ts` and `core/vectorSearch.ts` into re-export
+  shims pointing at `analysis/` so cache state is unified (the old duplicate
+  `cache` Map in `core/resultCache.ts` was never invalidated by
+  `invalidateResultCache()`, a latent bug).
+
+*§11.2 — hybridSearch BM25 `range === 0` edge case (`hybridSearch.ts`):*
+- When every candidate row had an identical BM25 score, normalisation set
+  all scores to 1.0 and inflated the hybrid fusion beyond the intended
+  weight distribution. Now returns 0.5 (neutral midpoint) instead.
+- `core/hybridSearch.ts` collapsed to a re-export shim for the same
+  drift-prevention reason as §11.1.
+
+*§11.3 — Ollama batch fallback control flow (`local.ts`):*
+- Restructured `embedBatch()` so that only a 404 response triggers the
+  sequential fallback. Network-layer errors (ECONNREFUSED, ETIMEDOUT) and
+  non-404 HTTP errors now propagate to the caller unchanged, so upstream
+  retry/backoff (added in Phase 87) can react. Previously the confusing
+  double-negated catch block could swallow unrelated error types when
+  `_batchEndpointUnavailable` was set mid-call.
+
+*§11.4 — `bufferToEmbedding` duplication (`src/utils/embedding.ts`):*
+- The helper was privately re-declared in **13 different files** across
+  `src/core/search/`, `src/server/routes/`, and `src/cli/commands/`. Any
+  change to the storage format (e.g. future quantization work) would have
+  required 13 identical edits with zero compile-time enforcement.
+- New module `src/utils/embedding.ts` exports `bufferToFloat32(buf)` (the
+  zero-copy Float32Array view used in hot paths) and `bufferToEmbedding(buf)`
+  (the `number[]` variant used where a retainable copy is needed).
+- All 13 call sites now import from the shared util. Local duplicates have
+  been deleted.
+
+*§11.5 — within-run dedup `SIZE_CAP` warning + correctness (`indexer.ts`):*
+- Added a one-time `logger.warn()` when `seenHashes` exceeds the 50 000-entry
+  cap and is cleared, so operators can see that the rare branch fired.
+- **Bonus correctness fix:** before this change, clearing `seenHashes`
+  mid-stream could let the same blob hash appear twice in the `pending[]`
+  list. Both copies would pass `filterNewBlobs()` (which queries the DB
+  state *before* the run started) and a genuinely new blob would be
+  embedded twice. Added an authoritative `pendingSeen` dedup pass between
+  the stream loop and the byModel grouping so the `SIZE_CAP` clear is safe
+  under all conditions.
+
+*§11.6 — UNIQUE `(blob_hash, path)` constraint on paths table (schema v20):*
+- New migration v19 → v20 in `sqlite.ts`: deletes duplicate `paths` rows
+  (keeping lowest `id`) then creates `idx_paths_blob_path_unique` as a
+  unique index on `(blob_hash, path)`.
+- `initTables()` (fresh-DB path) creates the same unique index.
+- `src/core/db/schema.ts` `paths` table gains a `uniqueIndex` so Drizzle
+  tracks it.
+- `storeBlob()` and `storeBlobRecord()` in `blobStore.ts` now call
+  `.onConflictDoNothing()` on the paths insert so writers remain idempotent
+  for the same `(blob_hash, path)` pair.
+- `CURRENT_SCHEMA_VERSION` bumped to **20**; `CLAUDE.md` schema overview
+  header + migration list updated to match (required by the Phase 88
+  docsSync test).
+
+**Tests:** 725/725 (62 files). Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
 ### Long-Term Investments (Phase 86+)
 
 | Feature | Complexity | Notes |

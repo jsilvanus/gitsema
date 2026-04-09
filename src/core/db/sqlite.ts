@@ -47,7 +47,7 @@ export interface DbSession {
  * 18 — Added last_used_at column to embed_config (multi-model status tracking)
  * 19 — Added repo_tokens table (Phase 75 per-repo access control)
  */
-export const CURRENT_SCHEMA_VERSION = 19
+export const CURRENT_SCHEMA_VERSION = 20
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -432,6 +432,25 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 19
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('19')
   }
+
+  // v19 → v20: enforce uniqueness of (blob_hash, path) in the paths table
+  // (review6 §11.6). Prior to this migration, direct `storeBlobRecord()`
+  // callers (e.g. the HTTP blob upload route) could insert duplicate rows
+  // for the same blob+path because the in-memory `seenHashes` dedup in the
+  // indexer only covered the Git-walk path. We first delete any existing
+  // duplicates, keeping the lowest-id row, then create a unique index.
+  if (version < 20) {
+    sqlite.exec(`
+      DELETE FROM paths
+       WHERE id NOT IN (
+         SELECT MIN(id) FROM paths GROUP BY blob_hash, path
+       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_paths_blob_path_unique
+        ON paths(blob_hash, path);
+    `)
+    version = 20
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('20')
+  }
 }
 
 
@@ -474,6 +493,9 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
       path TEXT NOT NULL
     );
+    -- Enforce (blob_hash, path) uniqueness (review6 §11.6, schema v20).
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_paths_blob_path_unique
+      ON paths(blob_hash, path);
 
     CREATE TABLE IF NOT EXISTS commits (
       commit_hash TEXT PRIMARY KEY,

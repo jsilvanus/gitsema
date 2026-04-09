@@ -2,6 +2,7 @@ import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
+import { bufferToFloat32 as bufferToEmbedding } from '../../utils/embedding.js'
 import type { Embedding } from '../models/types.js'
 
 /**
@@ -46,11 +47,6 @@ export interface AuthorSearchOptions {
    * scoring step is skipped and these scores are used directly.
    */
   candidateBlobs?: Array<{ blobHash: string; score: number }>
-}
-
-/** Deserializes a Float32Array stored as a Buffer. */
-function bufferToEmbedding(buf: Buffer): Float32Array {
-  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
 }
 
 /**

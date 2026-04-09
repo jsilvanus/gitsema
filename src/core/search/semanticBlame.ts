@@ -5,6 +5,7 @@ import { embeddings, paths, commits, symbols, symbolEmbeddings } from '../db/sch
 import { inArray, eq } from 'drizzle-orm'
 import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
+import { bufferToEmbedding } from '../../utils/embedding.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { Embedding } from '../models/types.js'
 import { FunctionChunker } from '../chunking/functionChunker.js'
@@ -53,12 +54,6 @@ export interface SemanticBlameEntry {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Deserializes a Float32Array stored as a Buffer back to a number[]. */
-function bufferToEmbedding(buf: Buffer): number[] {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
-}
 
 /**
  * Extracts a concise human-readable label from the first non-empty line of a
