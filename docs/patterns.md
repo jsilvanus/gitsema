@@ -258,8 +258,10 @@ jobs:
           GITSEMA_HTTP_URL: ${{ secrets.GITSEMA_HTTP_URL }}
           GITSEMA_API_KEY:  ${{ secrets.GITSEMA_API_KEY }}
         run: |
+          # Get the primary changed file in this PR (adjust as needed)
+          CHANGED_FILE=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | head -1)
           gitsema workflow run pr-review \
-            --file "${{ github.event.pull_request.head.sha }}" \
+            --file "$CHANGED_FILE" \
             --out json:pr-risk.json
       - uses: actions/upload-artifact@v4
         with:

@@ -165,8 +165,22 @@ describe('workflowCommand', () => {
 })
 
 describe('workflowListCommand', () => {
-  it('prints all 8 pattern descriptions without throwing', () => {
-    expect(() => workflowListCommand()).not.toThrow()
+  it('prints all 8 pattern names to stdout', () => {
+    const logged: string[] = []
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logged.push(args.join(' '))
+    })
+    workflowListCommand()
+    consoleSpy.mockRestore()
+    const output = logged.join('\n')
+    expect(output).toContain('pr-review')
+    expect(output).toContain('release-audit')
+    expect(output).toContain('onboarding')
+    expect(output).toContain('incident')
+    expect(output).toContain('ownership-intel')
+    expect(output).toContain('arch-drift')
+    expect(output).toContain('knowledge-portal')
+    expect(output).toContain('regression-forecast')
   })
 
   it('TEMPLATE_DESCRIPTIONS covers all 8 patterns', () => {

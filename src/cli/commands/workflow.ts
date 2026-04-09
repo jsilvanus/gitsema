@@ -24,7 +24,7 @@ export interface WorkflowOptions {
   model?: string
   textModel?: string
   codeModel?: string
-  /** Role hint for onboarding pattern (e.g. auth, billing, frontend) */
+  /** Role/domain topic for onboarding pattern (e.g. auth, billing, frontend); treated as a concept query. Alias for --query. */
   role?: string
   /** For regression-forecast: ref to compare against HEAD */
   ref?: string
