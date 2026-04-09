@@ -49,6 +49,8 @@ import { quickstartCommand } from '../commands/quickstart.js'
 import { regressionGateCommand } from '../commands/regressionGate.js'
 import { crossRepoSimilarityCommand } from '../commands/crossRepoSimilarity.js'
 import { codeReviewCommand } from '../commands/codeReview.js'
+import { registerNarratorCommands } from '../commands/narrate.js'
+import { registerGuideCommand } from '../commands/guide.js'
 
 export function registerAll(program: Command) {
   // Preserve per-domain registration modules
@@ -559,6 +561,12 @@ export function registerAll(program: Command) {
     .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string }) => {
       await codeReviewCommand(opts)
     })
+
+  // Narrator commands: narrate + explain (LLM-powered, DB-backed model config)
+  registerNarratorCommands(program)
+
+  // Guide command: interactive LLM chat with gitsema tool access
+  registerGuideCommand(program)
 }
 
 export default registerAll

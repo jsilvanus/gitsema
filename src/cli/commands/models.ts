@@ -560,3 +560,196 @@ export async function modelsRemoveCommand(
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Narrator / Guide model management (kind-aware, DB-backed)
+// ---------------------------------------------------------------------------
+
+/** Default provider for narrator/guide model configs (LLM chat completions). */
+const DEFAULT_NARRATOR_PROVIDER = 'chattydeer'
+
+type NarratorKind = 'narrator' | 'guide'
+
+/** Helper that resolves imports and DB for narrator/guide operations. */
+async function getNarratorDb() {
+  const { getRawDb } = await import('../../core/db/sqlite.js')
+  const rawDb = getRawDb()
+  const resolver = await import('../../core/narrator/resolveNarrator.js')
+  return { rawDb, resolver }
+}
+
+// ---------------------------------------------------------------------------
+// models list --narrator / --guide
+// ---------------------------------------------------------------------------
+
+export async function modelsKindListCommand(kind: NarratorKind, opts: { json?: boolean } = {}): Promise<void> {
+  try {
+    const { rawDb, resolver } = await getNarratorDb()
+    const configs = kind === 'narrator' ? resolver.listNarratorConfigs(rawDb) : resolver.listGuideConfigs(rawDb)
+    const activeId = kind === 'narrator'
+      ? resolver.getActiveNarratorConfigId(rawDb)
+      : resolver.getActiveGuideConfigId(rawDb)
+
+    if (opts.json) {
+      console.log(JSON.stringify(configs.map((c) => ({ ...c, active: c.id === activeId })), null, 2))
+      return
+    }
+
+    if (configs.length === 0) {
+      console.log(`No ${kind} model configs found.`)
+      console.log('')
+      console.log(`Add one:  gitsema models add <name> --${kind} --http-url <url> [--key <token>]`)
+      return
+    }
+
+    console.log(`${'ID'.padEnd(4)}  ${'Name'.padEnd(30)}  ${'Provider'.padEnd(12)}  Active   HTTP URL`)
+    console.log('-'.repeat(80))
+    for (const c of configs) {
+      const active = c.id === activeId ? '✓' : ' '
+      const url = c.params.httpUrl || '(not set)'
+      console.log(`${String(c.id).padEnd(4)}  ${c.name.padEnd(30)}  ${c.provider.padEnd(12)}  ${active.padEnd(7)}  ${url}`)
+    }
+    console.log('')
+    console.log(`${configs.length} ${kind} model(s). Active ID: ${activeId ?? '(none)'}`)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+/** @deprecated Use `modelsKindListCommand('narrator')` instead. */
+export async function modelsNarratorListCommand(opts: { json?: boolean } = {}): Promise<void> {
+  return modelsKindListCommand('narrator', opts)
+}
+
+// ---------------------------------------------------------------------------
+// models add <name> --narrator / --guide
+// ---------------------------------------------------------------------------
+
+export interface ModelsNarratorAddOptions {
+  httpUrl: string
+  key?: string
+  maxTokens?: string
+  temperature?: string
+  activate?: boolean
+}
+
+export async function modelsKindAddCommand(
+  name: string,
+  kind: NarratorKind,
+  opts: ModelsNarratorAddOptions,
+): Promise<void> {
+  if (!name || !name.trim()) {
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
+  if (!opts.httpUrl) {
+    console.error(`Error: --http-url is required for ${kind} models`)
+    process.exit(1)
+  }
+
+  try {
+    const { rawDb, resolver } = await getNarratorDb()
+
+    const params = {
+      httpUrl: opts.httpUrl,
+      ...(opts.key ? { apiKey: opts.key } : {}),
+      ...(opts.maxTokens ? { maxTokens: parseInt(opts.maxTokens, 10) } : {}),
+      ...(opts.temperature ? { temperature: parseFloat(opts.temperature) } : {}),
+    }
+
+    const saveFn = kind === 'narrator' ? resolver.saveNarratorConfig : resolver.saveGuideConfig
+    const activateFn = kind === 'narrator' ? resolver.setActiveNarratorConfig : resolver.setActiveGuideConfig
+    const id = saveFn(rawDb, name.trim(), DEFAULT_NARRATOR_PROVIDER, params)
+
+    console.log(`Saved ${kind} model config '${name}' (id=${id}).`)
+    console.log(`  Provider:  ${DEFAULT_NARRATOR_PROVIDER}`)
+    console.log(`  HTTP URL:  ${opts.httpUrl}`)
+    if (opts.key) console.log(`  API key:   (set)`)
+
+    if (opts.activate) {
+      activateFn(rawDb, id)
+      console.log(`  Activated as default ${kind} (id=${id}).`)
+    } else {
+      console.log(`  To activate: gitsema models activate ${name} --${kind}`)
+    }
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+/** @deprecated Use `modelsKindAddCommand(name, 'narrator', opts)` instead. */
+export async function modelsNarratorAddCommand(name: string, opts: ModelsNarratorAddOptions): Promise<void> {
+  return modelsKindAddCommand(name, 'narrator', opts)
+}
+
+// ---------------------------------------------------------------------------
+// models activate <name> --narrator / --guide
+// ---------------------------------------------------------------------------
+
+export async function modelsKindActivateCommand(name: string, kind: NarratorKind): Promise<void> {
+  if (!name || !name.trim()) {
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
+  try {
+    const { rawDb, resolver } = await getNarratorDb()
+    const getByName = kind === 'narrator' ? resolver.getNarratorConfigByName : resolver.getGuideConfigByName
+    const activateFn = kind === 'narrator' ? resolver.setActiveNarratorConfig : resolver.setActiveGuideConfig
+    const config = getByName(rawDb, name.trim())
+    if (!config) {
+      console.error(`Error: no ${kind} model config found for '${name}'.`)
+      console.error(`Run: gitsema models list --${kind}`)
+      process.exit(1)
+    }
+    activateFn(rawDb, config.id)
+    console.log(`${kind.charAt(0).toUpperCase() + kind.slice(1)} model '${name}' (id=${config.id}) is now active.`)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+/** @deprecated Use `modelsKindActivateCommand(name, 'narrator')` instead. */
+export async function modelsNarratorActivateCommand(name: string): Promise<void> {
+  return modelsKindActivateCommand(name, 'narrator')
+}
+
+// ---------------------------------------------------------------------------
+// models remove <name> --narrator / --guide
+// ---------------------------------------------------------------------------
+
+export async function modelsKindRemoveCommand(name: string, kind: NarratorKind): Promise<void> {
+  if (!name || !name.trim()) {
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
+  try {
+    const { rawDb, resolver } = await getNarratorDb()
+    const getActive = kind === 'narrator' ? resolver.getActiveNarratorConfig : resolver.getActiveGuideConfig
+    const deleteFn = kind === 'narrator' ? resolver.deleteNarratorConfig : resolver.deleteGuideConfig
+    const clearFn = kind === 'narrator' ? resolver.clearActiveNarratorConfig : resolver.clearActiveGuideConfig
+
+    const active = getActive(rawDb)
+    const removed = deleteFn(rawDb, name.trim())
+    if (removed) {
+      if (active?.name === name.trim()) {
+        clearFn(rawDb)
+        console.log(`Removed ${kind} model config '${name}' (was active — selection cleared).`)
+      } else {
+        console.log(`Removed ${kind} model config '${name}'.`)
+      }
+    } else {
+      console.log(`No ${kind} model config found for '${name}'.`)
+    }
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+/** @deprecated Use `modelsKindRemoveCommand(name, 'narrator')` instead. */
+export async function modelsNarratorRemoveCommand(name: string): Promise<void> {
+  return modelsKindRemoveCommand(name, 'narrator')
+}
