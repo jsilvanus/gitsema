@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool, serializeSearchResults } from '../registerTool.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
@@ -9,7 +10,7 @@ import { groupResults, renderResults } from '../../core/search/ranking.js'
 import { multiRepoSearch } from '../../core/indexing/repoRegistry.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 
-export function registerSearchTools(server) {
+export function registerSearchTools(server: McpServer) {
   // semantic_search
   registerTool(
     server,
@@ -34,7 +35,7 @@ export function registerSearchTools(server) {
       const provider = getTextProvider()
       const qRes = await embed(provider, query, 'Error embedding query')
       if (!qRes.ok) return qRes.resp
-      const queryEmbedding = qRes.embedding
+      const queryEmbedding = qRes.embedding!
 
       let beforeTs: number | undefined
       let afterTs: number | undefined
@@ -99,7 +100,7 @@ export function registerSearchTools(server) {
       const provider = getCodeProvider()
       const eRes = await embed(provider, snippet, 'Error embedding snippet')
       if (!eRes.ok) return eRes.resp
-      const embedding = eRes.embedding
+      const embedding = eRes.embedding!
 
       const results = vectorSearch(embedding, {
         topK: top_k,
@@ -130,7 +131,7 @@ export function registerSearchTools(server) {
       const provider = getTextProvider()
       const qRes = await embed(provider, query, 'Error embedding query')
       if (!qRes.ok) return qRes.resp
-      const queryEmbedding = qRes.embedding
+      const queryEmbedding = qRes.embedding!
 
       let beforeTs: number | undefined
       let afterTs: number | undefined
@@ -181,7 +182,7 @@ export function registerSearchTools(server) {
       const provider = getTextProvider()
       const qRes = await embed(provider, query, 'Error embedding query')
       if (!qRes.ok) return qRes.resp
-      const queryEmbedding = qRes.embedding
+      const queryEmbedding = qRes.embedding!
 
       let results
       if (hybrid) {
@@ -239,11 +240,11 @@ export function registerSearchTools(server) {
       const provider = getTextProvider()
       const eRes = await embed(provider, query, 'Error embedding query')
       if (!eRes.ok) return eRes.resp
-      const embedding = eRes.embedding
+      const embedding = eRes.embedding!
 
       try {
         const session = getActiveSession()
-        const results = await multiRepoSearch(session, embedding, { repoIds: repo_ids, topK: top_k, model })
+        const results = await multiRepoSearch(session, Array.from(embedding), { repoIds: repo_ids, topK: top_k, model })
         if (results.length === 0) {
           return { content: [{ type: 'text', text: 'No results found across registered repos.' }] }
         }

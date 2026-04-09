@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
 import { computeEvolution, computeConceptEvolution } from '../../core/search/evolution.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
@@ -23,7 +24,7 @@ import { computeOwnershipHeatmap } from '../../core/search/ownershipHeatmap.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 
-export function registerAnalysisTools(server) {
+export function registerAnalysisTools(server: McpServer) {
   // evolution
   registerTool(
     server,
@@ -112,7 +113,7 @@ export function registerAnalysisTools(server) {
       const provider = getTextProvider()
       const qRes = await embed(provider, query, 'Error embedding query')
       if (!qRes.ok) return qRes.resp
-      const queryEmbedding = qRes.embedding
+      const queryEmbedding = qRes.embedding!
 
       const entries = computeConceptEvolution(queryEmbedding, top_k)
 
@@ -364,7 +365,7 @@ export function registerAnalysisTools(server) {
         const provider = getTextProvider()
         const qRes = await embed(provider, query, 'Error embedding query')
         if (!qRes.ok) return qRes.resp
-        const queryEmbedding = qRes.embedding
+        const queryEmbedding = qRes.embedding!
         const report = computeConceptChangePoints(query, queryEmbedding, { topK: top_k, threshold, topPoints: top_points, branch })
         if (report.points.length === 0) {
           return { content: [{ type: 'text', text: 'No change points found above threshold.' }] }
@@ -430,7 +431,7 @@ export function registerAnalysisTools(server) {
         const provider = getTextProvider()
         const qRes = await embed(provider, query, 'Error embedding query')
         if (!qRes.ok) return qRes.resp
-        const qEmb = qRes.embedding
+        const qEmb = qRes.embedding!
         const result = computeSemanticDiff(qEmb, query, ref1, ref2, top_k, branch)
         const lines: string[] = []
         lines.push(`Semantic diff: "${result.topic}"`)
@@ -542,7 +543,7 @@ export function registerAnalysisTools(server) {
         const provider = getTextProvider()
         const qRes = await embed(provider, query, 'Error embedding query')
         if (!qRes.ok) return qRes.resp
-        const queryEmbedding = qRes.embedding
+        const queryEmbedding = qRes.embedding!
         const contributions = await computeAuthorContributions(queryEmbedding, { topK: top_k, topAuthors: top_authors, branch })
         if (contributions.length === 0) {
           return { content: [{ type: 'text', text: 'No author contributions found.' }] }
@@ -657,7 +658,7 @@ export function registerAnalysisTools(server) {
       buckets: z.number().int().positive().optional().default(12).describe('Number of time buckets'),
       branch: z.string().optional().describe('Restrict to commits on this branch'),
     },
-    ({ buckets, branch }) => {
+    async ({ buckets, branch }) => {
       try {
         const session = getActiveSession()
         const snaps = computeHealthTimeline(session, { buckets, branch })
@@ -780,7 +781,7 @@ export function registerAnalysisTools(server) {
       const provider = getTextProvider()
       const eRes = await embed(provider, query, 'Error embedding query')
       if (!eRes.ok) return eRes.resp
-      const emb = eRes.embedding
+      const emb = eRes.embedding!
       try {
         const heatmap = computeOwnershipHeatmap({ embedding: emb, topK: top, windowDays: window_days })
         if (heatmap.length === 0) {
@@ -815,13 +816,12 @@ export function registerAnalysisTools(server) {
       const caseResults: Array<{ query: string; precision: number; recall: number; mrr: number }> = []
 
       for (const c of cases) {
-        let emb: number[]
         const eRes = await embed(provider, c.query, 'Error embedding query')
         if (!eRes.ok) {
           caseResults.push({ query: c.query, precision: 0, recall: 0, mrr: 0 })
           continue
         }
-        emb = eRes.embedding
+        const emb = eRes.embedding!
         const hits = vectorSearch(emb, { topK: top })
         const topPaths = hits.flatMap((h) => h.paths ?? []).slice(0, top)
         const expected = new Set(c.expected_paths)

@@ -49,7 +49,7 @@ export interface StoreBlobArgs {
  */
 export function storeBlob(args: StoreBlobArgs): void {
   const { blobHash, size, path, model, embedding, fileType, content } = args
-  const { db, rawDb } = getActiveSession()
+  const { db } = getActiveSession()
 
   const { vector, quantized: qFlag, quantMin: qMin, quantScale: qScale } = serializeEmbedding(embedding, args.quantize)
 
@@ -67,12 +67,12 @@ export function storeBlob(args: StoreBlobArgs): void {
     tx.insert(paths)
       .values({ blobHash, path })
       .run()
-  })
 
-  // Upsert into FTS5 table (outside Drizzle transaction — FTS5 does not participate in them)
-  if (content !== undefined) {
-    storeFtsContent(blobHash, content)
-  }
+    // FTS5 inside the same transaction so blob + FTS5 content are always atomic
+    if (content !== undefined) {
+      storeFtsContent(blobHash, content)
+    }
+  })
 
   invalidateResultCache()
 }
@@ -105,11 +105,12 @@ export function storeBlobRecord(args: StoreBlobRecordArgs): void {
     tx.insert(paths)
       .values({ blobHash, path })
       .run()
-  })
 
-  if (content !== undefined) {
-    storeFtsContent(blobHash, content)
-  }
+    // FTS5 inside the same transaction so blob + FTS5 content are always atomic
+    if (content !== undefined) {
+      storeFtsContent(blobHash, content)
+    }
+  })
 }
 
 /**

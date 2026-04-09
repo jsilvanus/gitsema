@@ -92,7 +92,9 @@ export function createApp(options: AppOptions): Express {
   } = options
 
   const app = express()
-  app.use(express.json({ limit: '50mb' }))
+  // Configurable body size limit (default 1mb); override via GITSEMA_MAX_BODY_SIZE env var
+  const bodyLimit = process.env.GITSEMA_MAX_BODY_SIZE ?? '1mb'
+  app.use(express.json({ limit: bodyLimit }))
 
   // P2: request timing (must be before auth so we can measure 401 latency too)
   app.use(requestTimingMiddleware)
