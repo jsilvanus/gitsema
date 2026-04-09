@@ -10,15 +10,11 @@ import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
+import { bufferToEmbedding } from '../../utils/embedding.js'
 
 function embeddingToBuffer(vec: number[] | Float32Array): Buffer {
   const f32 = Float32Array.from(vec)
   return Buffer.from(f32.buffer)
-}
-
-function bufferToEmbedding(buf: Buffer): number[] {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
 }
 
 export interface WatchRouterDeps {

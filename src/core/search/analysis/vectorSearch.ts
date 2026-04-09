@@ -5,7 +5,8 @@ import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import type { Embedding, SearchResult, SearchResultKind } from '../../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from '../temporal/timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../../embedding/quantize.js'
-import { getCachedResults, setCachedResults, buildCacheKey, embeddingFingerprint } from './resultCache.js'
+import { getCachedResults, setCachedResults, buildCacheKey, embeddingFingerprint, allowedHashesFingerprint } from './resultCache.js'
+import { bufferToFloat32 } from '../../../utils/embedding.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -123,11 +124,6 @@ export function cosineSimilarityPrecomputed(a: Embedding, aMag: number, b: Embed
   return denom === 0 ? 0 : dot / denom
 }
 
-function bufferToEmbedding(buf: Buffer): Float32Array {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return f32
-}
-
 type CandidateRow = {
   blobHash: string; vector: Buffer
   quantized?: number | null; quantMin?: number | null; quantScale?: number | null
@@ -141,7 +137,7 @@ function rowToEmbedding(row: CandidateRow): Float32Array {
     const q = deserializeQuantized(row.vector, row.quantMin, row.quantScale)
     return dequantizeVector(q)
   }
-  return bufferToEmbedding(row.vector)
+  return bufferToFloat32(row.vector)
 }
 
 export function pathRelevanceScore(query: string, filePath: string): number {
@@ -191,6 +187,10 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     weightVector, weightRecency, weightPath, query,
     searchChunks, searchSymbols, searchModules, branch,
     negativeLambda, explain, earlyCut,
+    // §11.1 — include a deterministic fingerprint of allowedHashes so that
+    // two calls with the same query but different filter sets (e.g. different
+    // branch scopes) don't collide on the same cache entry.
+    allowedHashes: allowedHashesFingerprint(allowedHashes),
   }
   const cacheKey = buildCacheKey(
     queryText ?? embeddingFingerprint(queryEmbedding),

@@ -54,7 +54,11 @@ export function hybridSearch(
     const range = maxScore - minScore
 
     for (const row of bm25Rows) {
-      const normalised = range === 0 ? 1.0 : (-row.bm25_score - minScore) / range
+      // §11.2 — when all candidates share an identical BM25 score (common
+      // with small hit sets), `range === 0` used to set every normalised
+      // score to 1.0, which inflated hybrid scores beyond the intended
+      // weight distribution. 0.5 is the neutral midpoint.
+      const normalised = range === 0 ? 0.5 : (-row.bm25_score - minScore) / range
       bm25Map.set(row.blob_hash, normalised)
     }
   }
