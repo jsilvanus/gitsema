@@ -11,7 +11,7 @@ The latest review is here. Do not edit the review file, but update that file wit
 
 | Document | Purpose |
 |---|---|
-| [`docs/review6.md`](docs/review6.md) | Latest strategic review: architecture maturity, scale readiness, test health, remaining gaps |
+| [`docs/review7.md`](docs/review7.md) | Latest strategic review: security, scale/OOM risk, accessibility, and product readiness |
 
 When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.

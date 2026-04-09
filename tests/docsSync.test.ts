@@ -1,7 +1,7 @@
 /**
  * Documentation sync checks — ensures canonical docs stay aligned with the codebase.
  *
- * These tests guard against the drift documented in review6 §9.2:
+ * These tests guard against documentation drift identified in recent strategic reviews.
  *   1. package.json version appears in CLAUDE.md
  *   2. Current schema version in sqlite.ts matches CLAUDE.md
  *   3. README.md contains all top-level CLI commands registered in cli/index.ts
@@ -89,7 +89,7 @@ describe('README.md command coverage', () => {
 // 3. features.md and PLAN.md exist and are non-trivial
 // ---------------------------------------------------------------------------
 describe('canonical docs exist', () => {
-  for (const doc of ['docs/features.md', 'docs/PLAN.md', 'docs/review6.md']) {
+  for (const doc of ['docs/features.md', 'docs/PLAN.md', 'docs/review7.md']) {
     it(`${doc} exists and has content`, () => {
       const path = join(ROOT, doc)
       expect(existsSync(path), `${doc} should exist`).toBe(true)
