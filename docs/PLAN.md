@@ -3114,3 +3114,64 @@ embedding provider (Ollama, OpenAI-compatible HTTP, embedeer). This enables:
 **Documentation:** `CLAUDE.md` schema overview updated to v21 + migration v20→v21 entry added. `docs/deploy.md` table of contents updated with §11.
 
 **Status:** ✅ complete.
+
+---
+
+## Phase 91 — LLM Narrator/Explainer via chattydeer (DB-backed config)
+
+**Status:** ✅ complete.
+
+**Goals:**
+- Add LLM-powered `gitsema narrate` and `gitsema explain` commands.
+- Use `@jsilvanus/chattydeer` (split-out from embedeer) for LLM narration.
+- Store narrator model configs in the DB (embed_config table, `kind='narrator'`).
+- Manage narrator models via the existing `gitsema models` system.
+- HTTP parity: `POST /api/v1/narrate`, `POST /api/v1/explain`.
+- MCP parity: `narrate_repo`, `explain_issue_or_error`.
+- Safe-by-default: no remote calls unless configured; redaction before every LLM call.
+- Auditable output with commit hash citations.
+
+**Schema changes (v22):**
+- `embed_config.kind TEXT DEFAULT 'embedding'` — distinguishes embedding vs narrator configs.
+- `embed_config.params_json TEXT` — narrator-specific params (httpUrl, apiKey, maxTokens, temperature).
+- `settings` table — key-value table for persistent settings (`active_narrator_model_config_id`).
+- `CURRENT_SCHEMA_VERSION` bumped to **22**.
+
+**New packages:**
+- `@jsilvanus/chattydeer@^0.2.0` — added (LLM explainer/narrator, split from embedeer).
+- `@jsilvanus/embedeer@^1.3.2` — updated to latest.
+
+**New modules:**
+- `src/core/narrator/types.ts` — NarratorProvider interface, NarratorModelConfig, etc.
+- `src/core/narrator/redact.ts` — secret-pattern redaction (10 patterns).
+- `src/core/narrator/audit.ts` — structured audit logging per narration call.
+- `src/core/narrator/chattydeerProvider.ts` — ChattydeerNarratorProvider adapter.
+- `src/core/narrator/resolveNarrator.ts` — DB-backed config CRUD + active narrator resolution.
+- `src/core/narrator/narrator.ts` — git log parsing, event classification, map-reduce summarisation.
+- `src/core/narrator/index.ts` — barrel exports.
+
+**New CLI commands:**
+- `gitsema narrate [--since] [--until] [--range] [--focus] [--format] [--max-commits] [--narrator-model-id] [--model]`
+- `gitsema explain <topic> [--since] [--until] [--log] [--format] [--narrator-model-id] [--model]`
+- `gitsema models narrator-list [--json]`
+- `gitsema models narrator-add <name> --http-url <url> [--key] [--max-tokens] [--temperature] [--activate]`
+- `gitsema models narrator-activate <name>`
+- `gitsema models narrator-remove <name>`
+
+**New HTTP routes (under /api/v1/):**
+- `POST /narrate`
+- `POST /explain`
+
+**New MCP tools:**
+- `narrate_repo`
+- `explain_issue_or_error`
+
+**Tests:**
+- `tests/narratorRedact.test.ts` — 19 tests (redaction patterns).
+- `tests/narratorConfig.test.ts` — 15 tests (DB-backed config CRUD, active selection).
+- `tests/narratorSmoke.test.ts` — 9 tests (CLI handler shape invariants).
+- All 787 tests pass.
+
+**Documentation:**
+- `docs/plan_LLM.md` — full implementation plan (goals, API surface, pipeline, security, tests, schema).
+- `CLAUDE.md` schema overview updated to v22 + migration v21→v22 entry added.

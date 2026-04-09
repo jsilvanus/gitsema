@@ -282,7 +282,7 @@ gitsema index
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
 
-**Schema overview (current schema v21):**
+**Schema overview (current schema v22):**
 
 | Table | Purpose |
 |---|---|
@@ -304,8 +304,9 @@ gitsema index
 | `blob_clusters` | K-means cluster assignments |
 | `cluster_assignments` | Cluster snapshot entries per ref |
 | `module_embeddings` | Directory centroid running-mean embeddings (Phase 33) |
-| `embed_config` | Recorded embedding provenance (model, dimensions, chunker) |
+| `embed_config` | Recorded embedding provenance (model, dimensions, chunker); `kind` column distinguishes `'embedding'` vs `'narrator'` configs |
 | `indexing_checkpoints` | Resume markers for interrupted indexing runs |
+| `settings` | Key-value table for persistent settings (e.g. `active_narrator_model_config_id`) |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
@@ -320,7 +321,8 @@ gitsema index
 - v18 → v19: Added `embed_config` table for embedding provenance (Phase 80+)
 - v19 → v20: Added `UNIQUE (blob_hash, path)` index on `paths` table (review6 §11.6 / Phase 89)
 - v20 → v21: Hashed repo tokens at rest — `token_hash` + `token_prefix` replace plaintext `token` in `repo_tokens` (review7 §4.1)
-- **Current version: 21**
+- v21 → v22: Added `kind` + `params_json` columns to `embed_config`; added `settings` table (narrator model config)
+- **Current version: 22**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

@@ -11,6 +11,7 @@ import { registerAnalysisTools } from './tools/analysis.js'
 import { registerClusteringTools } from './tools/clustering.js'
 import { registerWorkflowTools } from './tools/workflow.js'
 import { registerInfrastructureTools } from './tools/infrastructure.js'
+import { registerNarratorTools } from './tools/narrator.js'
 
 export async function startMcpServer(): Promise<void> {
   const server = new McpServer({
@@ -24,6 +25,7 @@ export async function startMcpServer(): Promise<void> {
   registerClusteringTools(server)
   registerWorkflowTools(server)
   registerInfrastructureTools(server)
+  registerNarratorTools(server)
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
@@ -74,5 +76,7 @@ server.tool('policy_check', ...)
 server.tool('ownership', ...)
 server.tool('workflow_run', ...)
 server.tool('eval', ...)
+server.tool('narrate_repo', ...)
+server.tool('explain_issue_or_error', ...)
 */
 

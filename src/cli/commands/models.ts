@@ -560,3 +560,157 @@ export async function modelsRemoveCommand(
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// models narrator-list  — list narrator model configs (kind='narrator' in embed_config)
+// ---------------------------------------------------------------------------
+
+export async function modelsNarratorListCommand(opts: { json?: boolean } = {}): Promise<void> {
+  try {
+    const { getRawDb } = await import('../../core/db/sqlite.js')
+    const rawDb = getRawDb()
+    const { listNarratorConfigs, getActiveNarratorConfigId } = await import('../../core/narrator/resolveNarrator.js')
+    const configs = listNarratorConfigs(rawDb)
+    const activeId = getActiveNarratorConfigId(rawDb)
+
+    if (opts.json) {
+      console.log(JSON.stringify(configs.map((c) => ({ ...c, active: c.id === activeId })), null, 2))
+      return
+    }
+
+    if (configs.length === 0) {
+      console.log('No narrator model configs found.')
+      console.log('')
+      console.log('Add one:  gitsema models narrator-add <name> --http-url <url> [--key <token>]')
+      return
+    }
+
+    console.log(`${'ID'.padEnd(4)}  ${'Name'.padEnd(30)}  ${'Provider'.padEnd(12)}  Active   HTTP URL`)
+    console.log('-'.repeat(80))
+    for (const c of configs) {
+      const active = c.id === activeId ? '✓' : ' '
+      const url = c.params.httpUrl || '(not set)'
+      console.log(`${String(c.id).padEnd(4)}  ${c.name.padEnd(30)}  ${c.provider.padEnd(12)}  ${active.padEnd(7)}  ${url}`)
+    }
+    console.log('')
+    console.log(`${configs.length} narrator model(s). Active ID: ${activeId ?? '(none)'}`)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// models narrator-add  — add / update a narrator model config
+// ---------------------------------------------------------------------------
+
+export interface ModelsNarratorAddOptions {
+  httpUrl: string
+  key?: string
+  maxTokens?: string
+  temperature?: string
+  activate?: boolean
+}
+
+export async function modelsNarratorAddCommand(
+  name: string,
+  opts: ModelsNarratorAddOptions,
+): Promise<void> {
+  if (!name || !name.trim()) {
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
+  if (!opts.httpUrl) {
+    console.error('Error: --http-url is required for narrator models')
+    process.exit(1)
+  }
+
+  try {
+    const { getRawDb } = await import('../../core/db/sqlite.js')
+    const rawDb = getRawDb()
+    const { saveNarratorConfig, setActiveNarratorConfig } = await import('../../core/narrator/resolveNarrator.js')
+
+    const params = {
+      httpUrl: opts.httpUrl,
+      ...(opts.key ? { apiKey: opts.key } : {}),
+      ...(opts.maxTokens ? { maxTokens: parseInt(opts.maxTokens, 10) } : {}),
+      ...(opts.temperature ? { temperature: parseFloat(opts.temperature) } : {}),
+    }
+
+    const id = saveNarratorConfig(rawDb, name.trim(), 'chattydeer', params)
+    console.log(`Saved narrator model config '${name}' (id=${id}).`)
+    console.log(`  Provider:  chattydeer`)
+    console.log(`  HTTP URL:  ${opts.httpUrl}`)
+    if (opts.key) console.log(`  API key:   (set)`)
+
+    if (opts.activate) {
+      setActiveNarratorConfig(rawDb, id)
+      console.log(`  Activated as default narrator (id=${id}).`)
+    } else {
+      console.log(`  To activate: gitsema models narrator-activate ${name}`)
+    }
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// models narrator-activate  — set the active narrator model
+// ---------------------------------------------------------------------------
+
+export async function modelsNarratorActivateCommand(name: string): Promise<void> {
+  if (!name || !name.trim()) {
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
+  try {
+    const { getRawDb } = await import('../../core/db/sqlite.js')
+    const rawDb = getRawDb()
+    const { getNarratorConfigByName, setActiveNarratorConfig } = await import('../../core/narrator/resolveNarrator.js')
+    const config = getNarratorConfigByName(rawDb, name.trim())
+    if (!config) {
+      console.error(`Error: no narrator model config found for '${name}'.`)
+      console.error(`Run: gitsema models narrator-list`)
+      process.exit(1)
+    }
+    setActiveNarratorConfig(rawDb, config.id)
+    console.log(`Narrator model '${name}' (id=${config.id}) is now active.`)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// models narrator-remove  — remove a narrator model config
+// ---------------------------------------------------------------------------
+
+export async function modelsNarratorRemoveCommand(name: string): Promise<void> {
+  if (!name || !name.trim()) {
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
+  try {
+    const { getRawDb } = await import('../../core/db/sqlite.js')
+    const rawDb = getRawDb()
+    const { deleteNarratorConfig, getActiveNarratorConfig, clearActiveNarratorConfig } = await import('../../core/narrator/resolveNarrator.js')
+
+    // Check if it's the active narrator — clear if so
+    const active = getActiveNarratorConfig(rawDb)
+    const removed = deleteNarratorConfig(rawDb, name.trim())
+    if (removed) {
+      if (active?.name === name.trim()) {
+        clearActiveNarratorConfig(rawDb)
+        console.log(`Removed narrator model config '${name}' (was active — selection cleared).`)
+      } else {
+        console.log(`Removed narrator model config '${name}'.`)
+      }
+    } else {
+      console.log(`No narrator model config found for '${name}'.`)
+    }
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}

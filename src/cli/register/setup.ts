@@ -12,6 +12,10 @@ import {
   modelsAddCommand,
   modelsRemoveCommand,
   modelsUpdateCommand,
+  modelsNarratorListCommand,
+  modelsNarratorAddCommand,
+  modelsNarratorActivateCommand,
+  modelsNarratorRemoveCommand,
 } from '../commands/models.js'
 import { collectOut } from '../../utils/outputSink.js'
 
@@ -201,5 +205,46 @@ Examples:
       opts: { purgeIndex?: boolean; yes?: boolean; global?: boolean },
     ) => {
       await modelsRemoveCommand(name, opts)
+    })
+
+  // ---------------------------------------------------------------------------
+  // Narrator model management subcommands (DB-backed, kind='narrator')
+  // ---------------------------------------------------------------------------
+
+  modelsSub
+    .command('narrator-list')
+    .description('List narrator model configs (stored in DB with kind=narrator)')
+    .option('--json', 'output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      await modelsNarratorListCommand(opts)
+    })
+
+  modelsSub
+    .command('narrator-add <name>')
+    .description('Add or update a narrator model config (stored in DB, backed by chattydeer)')
+    .option('--http-url <url>', 'OpenAI-compatible base URL for chat completions (required)')
+    .option('--key <token>', 'API key / Bearer token')
+    .option('--max-tokens <n>', 'max tokens per narration call (default: 512)')
+    .option('--temperature <n>', 'temperature (default: 0.3)')
+    .option('--activate', 'set this as the active narrator model immediately')
+    .action(async (
+      name: string,
+      opts: { httpUrl?: string; key?: string; maxTokens?: string; temperature?: string; activate?: boolean },
+    ) => {
+      await modelsNarratorAddCommand(name, { httpUrl: opts.httpUrl ?? '', key: opts.key, maxTokens: opts.maxTokens, temperature: opts.temperature, activate: opts.activate })
+    })
+
+  modelsSub
+    .command('narrator-activate <name>')
+    .description('Set a narrator model as the active default (resolved by gitsema narrate / gitsema explain)')
+    .action(async (name: string) => {
+      await modelsNarratorActivateCommand(name)
+    })
+
+  modelsSub
+    .command('narrator-remove <name>')
+    .description('Remove a narrator model config from the DB')
+    .action(async (name: string) => {
+      await modelsNarratorRemoveCommand(name)
     })
 }
