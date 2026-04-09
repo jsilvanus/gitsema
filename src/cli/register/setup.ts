@@ -108,9 +108,12 @@ Examples:
       'after',
       '\nModel profiles store per-model provider settings so different models can use\n' +
       'different providers, URLs, or API keys. Profiles are saved in .gitsema/config.json.\n\n' +
+      'Use --global-name to assign a remote model identifier to a local shorthand name.\n' +
+      'The shorthand is used in gitsema arguments; the global name is sent to the provider.\n\n' +
       'Examples:\n' +
       '  gitsema models list\n' +
       '  gitsema models add nomic-embed-text --provider ollama\n' +
+      '  gitsema models add my-embed --global-name hf.co/org/model:latest --provider ollama\n' +
       '  gitsema models add text-embedding-3-small --provider http --url https://api.openai.com --key sk-...\n' +
       '  gitsema models info text-embedding-3-small\n' +
       '  gitsema models remove text-embedding-3-small\n',
@@ -138,6 +141,7 @@ Examples:
   modelsSub
     .command('add <name>')
     .description('Configure provider settings for a model (saved to .gitsema/config.json or global config)')
+    .option('--global-name <name>', 'remote model identifier sent to the provider (local name is the shorthand used in gitsema arguments)')
     .option('--provider <type>', 'provider type: ollama, http or embedeer')
     .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
     .option('--key <apikey>', 'API key for HTTP provider')
@@ -154,7 +158,7 @@ Examples:
     .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
     .action(async (
       name: string,
-      opts: { provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
+      opts: { globalName?: string; provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
         prefixCode?: string; prefixText?: string; prefixQuery?: string; prefixOther?: string; prefixType?: string[]; extRole?: string[] },
     ) => {
       await modelsAddCommand(name, opts)
@@ -163,6 +167,7 @@ Examples:
   modelsSub
     .command('update <name>')
     .description('Update provider settings for a model (saved to .gitsema/config.json or global config)')
+    .option('--global-name <name>', 'remote model identifier sent to the provider (local name is the shorthand used in gitsema arguments)')
     .option('--provider <type>', 'provider type: ollama, http or embedeer')
     .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
     .option('--key <apikey>', 'API key for HTTP provider')
@@ -179,7 +184,7 @@ Examples:
     .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
     .action(async (
       name: string,
-      opts: { provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
+      opts: { globalName?: string; provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
         prefixCode?: string; prefixText?: string; prefixQuery?: string; prefixOther?: string; prefixType?: string[]; extRole?: string[] },
     ) => {
       await modelsUpdateCommand(name, opts)

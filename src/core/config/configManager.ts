@@ -409,6 +409,17 @@ export function listConfig(cwd: string = process.cwd()): ConfigEntry[] {
  *   { "models": { "text-embedding-3-small": { "provider": "http", "httpUrl": "...", "apiKey": "..." } } }
  */
 export interface ModelProfile {
+  /**
+   * Local shorthand name resolved to this profile.
+   * The key under `models.<localName>` in config is the local name; this
+   * field is the *remote* (global) model identifier sent to the provider.
+   * When absent, the local name itself is sent to the provider.
+   *
+   * Example: local name "my-embed" with globalName "hf.co/org/model:latest"
+   * lets you run `gitsema index --model my-embed` while Ollama/HTTP
+   * receives "hf.co/org/model:latest".
+   */
+  globalName?: string
   /** Provider type: "ollama", "http", or "embedeer". */
   provider?: string
   /** Base URL for HTTP provider. */
@@ -458,6 +469,7 @@ export function getModelProfile(modelName: string, cwd: string = process.cwd()):
       ? { ...(globalProfile?.extRoles ?? {}), ...(localProfile?.extRoles ?? {}) }
       : undefined
   return {
+    globalName: localProfile?.globalName ?? globalProfile?.globalName,
     provider: localProfile?.provider ?? globalProfile?.provider,
     httpUrl: localProfile?.httpUrl ?? globalProfile?.httpUrl,
     apiKey: localProfile?.apiKey ?? globalProfile?.apiKey,
