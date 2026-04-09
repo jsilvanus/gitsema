@@ -279,9 +279,9 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     if (model) chunkConditions.push(eq(chunkEmbeddings.model, model))
     if (branch) chunkConditions.push(sql`${chunks.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
     // Apply SQL-level cap before JS materialization (review7 §4.4).
-    const chunkQuerWithCap = (chunkConditions.length > 0 ? chunkQuery.where(and(...chunkConditions)) : chunkQuery)
+    const chunkQueryWithCap = (chunkConditions.length > 0 ? chunkQuery.where(and(...chunkConditions)) : chunkQuery)
       .limit(CHUNK_CAP)
-    const chunkRows = chunkQuerWithCap.all()
+    const chunkRows = chunkQueryWithCap.all()
     if (chunkRows.length >= CHUNK_CAP) {
       logger.warn(`[vectorSearch] chunk candidate pool hit cap (${CHUNK_CAP}); results may be incomplete. Set GITSEMA_CHUNK_CAP to raise the limit.`)
     }
