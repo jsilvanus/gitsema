@@ -136,26 +136,16 @@ export async function modelsListCommand(options: ModelsListOptions = {}): Promis
 
   const nameWidth = Math.max(5, ...allNames.map((n) => n.length))
   const provWidth = 8
-  // Compute the max width for the "→ global" column (empty string when no alias)
-  const globalNameWidth = Math.max(
-    0,
-    ...allNames.map((n) => {
-      const gn = profileMap.get(n)?.profile?.globalName
-      return gn ? gn.length + 2 : 0 // "+2" for "→ " prefix
-    }),
-  )
-  const showGlobalCol = globalNameWidth > 0
 
-  const header = `${'Model'.padEnd(nameWidth)}  ${showGlobalCol ? `${'→ Global name'.padEnd(globalNameWidth)}  ` : ''}${'Provider'.padEnd(provWidth)}  Dims   Chunker   Blobs indexed  Scope   Last used`
-  console.log(header)
-  const sepWidth = nameWidth + 2 + (showGlobalCol ? globalNameWidth + 2 : 0) + provWidth + 2 + 6 + 2 + 9 + 2 + 15 + 2 + 7 + 2 + 10
-  console.log('-'.repeat(sepWidth))
+  console.log(
+    `${'Model'.padEnd(nameWidth)}  ${'Provider'.padEnd(provWidth)}  Dims   Chunker   Blobs indexed  Scope   Last used`,
+  )
+  console.log('-'.repeat(nameWidth + 2 + provWidth + 2 + 6 + 2 + 9 + 2 + 15 + 2 + 7 + 2 + 10))
 
   for (const name of allNames) {
     const p = profileMap.get(name)
     const idx = indexedMap.get(name)
 
-    const globalName = p?.profile?.globalName
     const provider = p?.profile?.provider ?? idx?.provider ?? '(default)'
     const dims = idx ? String(idx.dimensions) : '—'
     const chunker = idx?.chunker ?? '—'
@@ -165,19 +155,9 @@ export async function modelsListCommand(options: ModelsListOptions = {}): Promis
       ? new Date(idx.lastUsedAt * 1000).toISOString().slice(0, 10)
       : '—'
 
-    const globalCol = showGlobalCol
-      ? `${(globalName ? `→ ${globalName}` : '').padEnd(globalNameWidth)}  `
-      : ''
-    const row =
-      name.padEnd(nameWidth) + '  ' +
-      globalCol +
-      provider.padEnd(provWidth) + '  ' +
-      dims.padStart(4) + '   ' +
-      chunker.padEnd(9) + ' ' +
-      blobs.padStart(14) + '  ' +
-      scope.padEnd(6) + '  ' +
-      lastUsed
-    console.log(row)
+    console.log(
+      `${name.padEnd(nameWidth)}  ${provider.padEnd(provWidth)}  ${dims.padStart(4)}   ${chunker.padEnd(9)} ${blobs.padStart(14)}  ${scope.padEnd(6)}  ${lastUsed}`,
+    )
   }
   console.log('')
   console.log(`${allNames.length} model(s) total.`)
@@ -195,9 +175,6 @@ export async function modelsInfoCommand(modelName: string): Promise<void> {
   const profileEntries = Object.entries(profile).filter(([, v]) => v !== undefined)
 
   console.log(`Model: ${modelName}`)
-  if (profile.globalName !== undefined) {
-    console.log(`  (shorthand for: ${profile.globalName})`)
-  }
   console.log('')
 
   if (profileEntries.length > 0) {
@@ -278,7 +255,6 @@ export async function modelsInfoCommand(modelName: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export interface ModelsAddOptions {
-  globalName?: string
   provider?: string
   url?: string
   key?: string
@@ -352,7 +328,6 @@ function buildPrefixProfile(options: ModelsAddOptions): ModelProfile {
 }
 
 function printProfile(profile: ModelProfile): void {
-  if (profile.globalName !== undefined) console.log(`  globalName: ${JSON.stringify(profile.globalName)}`)
   if (profile.provider !== undefined) console.log(`  provider: ${profile.provider}`)
   if (profile.httpUrl !== undefined) console.log(`  httpUrl: ${JSON.stringify(profile.httpUrl)}`)
   if (profile.apiKey !== undefined) console.log(`  apiKey: (hidden)`)
@@ -371,7 +346,6 @@ export async function modelsAddCommand(
   const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath()
 
   const profile: ModelProfile = buildPrefixProfile(options)
-  if (options.globalName !== undefined) profile.globalName = options.globalName
   if (options.provider !== undefined) profile.provider = options.provider
   if (options.url !== undefined) profile.httpUrl = options.url
   if (options.key !== undefined) profile.apiKey = options.key
@@ -388,7 +362,6 @@ export async function modelsAddCommand(
   if (!hasProfileFields && !options.setDefault && !options.setText && !options.setCode) {
     console.error('Error: at least one option is required')
     console.error(`Usage: gitsema models add ${modelName} --provider ollama|http [--url <url>] [--key <apikey>]`)
-    console.error(`       gitsema models add ${modelName} --global-name <remote-model-id>`)
     console.error(`       gitsema models add ${modelName} --prefix-code "search_document:" --prefix-query "search_query:"`)
     process.exit(1)
   }
@@ -458,7 +431,6 @@ export async function modelsUpdateCommand(
   }
 
   const profile: ModelProfile = buildPrefixProfile(options)
-  if (options.globalName !== undefined) profile.globalName = options.globalName
   if (options.provider !== undefined) profile.provider = options.provider
   if (options.url !== undefined) profile.httpUrl = options.url
   if (options.key !== undefined) profile.apiKey = options.key
@@ -474,8 +446,7 @@ export async function modelsUpdateCommand(
   const hasProfileFields = Object.keys(profile).length > 0
   if (!hasProfileFields && !options.setDefault && !options.setText && !options.setCode) {
     console.error('Error: at least one option is required')
-    console.error(`Usage: gitsema models update ${modelName} --global-name <remote-model-id>`)
-    console.error(`       gitsema models update ${modelName} --prefix-code "search_document:" --prefix-query "search_query:"`)
+    console.error(`Usage: gitsema models update ${modelName} --prefix-code "search_document:" --prefix-query "search_query:"`)
     process.exit(1)
   }
 

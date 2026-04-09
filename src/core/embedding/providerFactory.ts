@@ -49,9 +49,6 @@ export function buildProvider(type: string, model: string): EmbeddingProvider {
  */
 export function buildProviderForModel(modelName: string): EmbeddingProvider {
   const profile = getModelProfile(modelName)
-  // Use globalName (the remote model identifier) when provided; otherwise
-  // fall back to the local name which doubles as the model identifier.
-  const resolvedModel = profile.globalName ?? modelName
   const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
   if (type === 'http') {
     const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
@@ -62,12 +59,12 @@ export function buildProviderForModel(modelName: string): EmbeddingProvider {
       )
     }
     const apiKey = profile.apiKey ?? process.env.GITSEMA_API_KEY
-    return new HttpProvider({ baseUrl, model: resolvedModel, apiKey })
+    return new HttpProvider({ baseUrl, model: modelName, apiKey })
   }
   if (type === 'embedeer') {
-    return new EmbedeerProvider({ model: resolvedModel })
+    return new EmbedeerProvider({ model: modelName })
   }
-  return new OllamaProvider({ model: resolvedModel })
+  return new OllamaProvider({ model: modelName })
 }
 
 /**
@@ -127,7 +124,6 @@ export function getTextProvider(): EmbeddingProvider {
   const model =
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const profile = getModelProfile(model)
-  const resolvedModel = profile.globalName ?? model
   const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
   let inner: EmbeddingProvider
   if (type === 'http') {
@@ -135,11 +131,11 @@ export function getTextProvider(): EmbeddingProvider {
     if (!baseUrl) {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
-    inner = new HttpProvider({ baseUrl, model: resolvedModel, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+    inner = new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
   } else if (type === 'embedeer') {
-    inner = new EmbedeerProvider({ model: resolvedModel })
+    inner = new EmbedeerProvider({ model })
   } else {
-    inner = new OllamaProvider({ model: resolvedModel })
+    inner = new OllamaProvider({ model })
   }
   return maybePrefix(inner, profile.prefixes?.['text'])
 }
@@ -162,7 +158,6 @@ export function getCodeProvider(): EmbeddingProvider {
     process.env.GITSEMA_MODEL ??
     'nomic-embed-text'
   const profile = getModelProfile(model)
-  const resolvedModel = profile.globalName ?? model
   const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
   let inner: EmbeddingProvider
   if (type === 'http') {
@@ -170,11 +165,11 @@ export function getCodeProvider(): EmbeddingProvider {
     if (!baseUrl) {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
-    inner = new HttpProvider({ baseUrl, model: resolvedModel, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
+    inner = new HttpProvider({ baseUrl, model, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
   } else if (type === 'embedeer') {
-    inner = new EmbedeerProvider({ model: resolvedModel })
+    inner = new EmbedeerProvider({ model })
   } else {
-    inner = new OllamaProvider({ model: resolvedModel })
+    inner = new OllamaProvider({ model })
   }
   return maybePrefix(inner, profile.prefixes?.['code'])
 }

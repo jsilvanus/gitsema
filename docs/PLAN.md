@@ -99,7 +99,6 @@
 |   [Phase 77 — Unified Indexing + Search Level Concept](#phase-77-—-unified-indexing-search-level-concept) | 2755 |
 |   [Phase 85 — Tier-1 Reliability: Test Isolation, SQL Sampling, Batch Dedup](#phase-85-—-tier-1-reliability-test-isolation-sql-sampling-batch-dedup-completed-v0840) | 2805 |
 |   [Phase 86 — Embedeer provider integration](#phase-85-—-embedeer-provider-integration) | 9999 |
-|   [Phase 90 — Model Local Names (Shorthand / globalName)](#phase-90-—-model-local-names-shorthand--globalname-completed-v0890) | 2999 |
 |   [Long-Term Investments (Phase 86+)](#long-term-investments-phase-86) | 2860 |
 
 ---
@@ -2994,61 +2993,6 @@ subsequent fixes only need one edit site.
 **Tests:** 725/725 (62 files). Build: clean.
 
 **Status:** ✅ complete.
-
----
-
-### Phase 90 — Model Local Names (Shorthand / globalName) *(completed v0.89.0)*
-
-**Goal:** Allow users to register a gitsema model under a short local name
-(shorthand) while keeping a separate *global name* that is sent verbatim to the
-embedding provider (Ollama, OpenAI-compatible HTTP, embedeer). This enables:
-
-- Convenient CLI usage with short names (`my-embed`) while the provider
-  receives the full remote identifier (`hf.co/org/model:latest`).
-- Multiple local aliases for the same remote model, each with distinct prefix
-  or level settings.
-- Multi-provider setups where the same conceptual model lives under different
-  names on different backends.
-
-**Implemented scope:**
-
-*`ModelProfile.globalName` field (`src/core/config/configManager.ts`):*
-- Added `globalName?: string` to `ModelProfile` interface.
-- The config key `models.<localName>` is the shorthand used everywhere in
-  gitsema CLI arguments; `globalName` is the model identifier forwarded to
-  the provider.
-- When absent, the local name is used as-is (fully backward-compatible).
-- `getModelProfile()` merges `globalName` with standard local-wins-over-global
-  precedence alongside all other profile fields.
-
-*Provider resolution (`src/core/embedding/providerFactory.ts`):*
-- `buildProviderForModel()`, `getTextProvider()`, and `getCodeProvider()` all
-  resolve `profile.globalName ?? localName` before constructing the
-  `OllamaProvider`, `HttpProvider`, or `EmbedeerProvider` instance.
-- No changes to any call site — resolution is fully transparent.
-
-*CLI commands (`src/cli/commands/models.ts`):*
-- `ModelsAddOptions` gains `globalName?: string`.
-- `modelsAddCommand()` and `modelsUpdateCommand()` write `globalName` to the
-  profile when `--global-name <name>` is supplied.
-- `printProfile()` displays `globalName` when set.
-- `modelsInfoCommand()` shows `(shorthand for: <globalName>)` below the model
-  name when a globalName is configured.
-- `modelsListCommand()` adds a `→ Global name` column to the tabular output
-  (only rendered when at least one model has a `globalName` configured, so the
-  table is unchanged for setups that don't use the feature).
-
-*CLI registration (`src/cli/register/setup.ts`):*
-- `--global-name <name>` option added to both `models add` and `models update`
-  subcommands with a clear description.
-- Help text extended with a usage example.
-
-*Tests (`tests/modelGlobalName.test.ts`):*
-- 11 new tests covering: storage/retrieval, independent updates, last-write
-  wins, coexistence with prefixes/extRoles, provider resolution for Ollama,
-  HTTP, and fallback to local name.
-
-**Tests:** build clean, existing suite passes. **Status:** ✅ complete.
 
 ---
 
