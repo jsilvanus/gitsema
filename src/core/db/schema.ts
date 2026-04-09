@@ -283,7 +283,8 @@ export const indexingCheckpoints = sqliteTable('indexing_checkpoints', {
 })
 
 export const repoTokens = sqliteTable('repo_tokens', {
-  token: text('token').primaryKey(),
+  tokenHash: text('token_hash').primaryKey(),
+  tokenPrefix: text('token_prefix').notNull(),
   repoId: text('repo_id').notNull().references(() => repos.id, { onDelete: 'cascade' }),
   label: text('label'),
   createdAt: integer('created_at').notNull(),

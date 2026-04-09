@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { createHash } from 'node:crypto'
 import * as schema from './schema.js'
 
 const DB_DIR = '.gitsema'
@@ -46,8 +47,10 @@ export interface DbSession {
  * 17 — Added projections table (Phase 55)
  * 18 — Added last_used_at column to embed_config (multi-model status tracking)
  * 19 — Added repo_tokens table (Phase 75 per-repo access control)
+ * 20 — Enforce uniqueness of (blob_hash, path) in paths table (review6 §11.6)
+ * 21 — Hash repo tokens at rest: token_hash + token_prefix replace plaintext token (review7 §4.1)
  */
-export const CURRENT_SCHEMA_VERSION = 20
+export const CURRENT_SCHEMA_VERSION = 21
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -451,6 +454,49 @@ function applyMigrations(sqlite: InstanceType<typeof Database>): void {
     version = 20
     sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('20')
   }
+
+  // v20 → v21: hash repo tokens at rest (review7 §4.1).
+  // Replace plaintext token primary key with SHA-256 hash + 8-char prefix for display.
+  // Existing plaintext tokens are hashed in place so that valid tokens remain usable
+  // provided operators re-configure clients with the same token value they already hold.
+  if (version < 21) {
+    const tokenCols = sqlite.prepare('PRAGMA table_info(repo_tokens)').all() as Array<{ name: string }>
+    const hasTokenHash = tokenCols.some((c) => c.name === 'token_hash')
+    if (!hasTokenHash) {
+      // Fetch existing plaintext tokens before restructuring the table.
+      const existing = sqlite.prepare('SELECT token, repo_id, label, created_at FROM repo_tokens').all() as Array<{
+        token: string; repo_id: string; label: string | null; created_at: number
+      }>
+
+      sqlite.pragma('foreign_keys = OFF')
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS repo_tokens_v21 (
+          token_hash  TEXT PRIMARY KEY,
+          token_prefix TEXT NOT NULL,
+          repo_id     TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+          label       TEXT,
+          created_at  INTEGER NOT NULL
+        );
+      `)
+
+      const insert = sqlite.prepare(
+        'INSERT OR IGNORE INTO repo_tokens_v21 (token_hash, token_prefix, repo_id, label, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      for (const row of existing) {
+        const hash = createHash('sha256').update(row.token).digest('hex')
+        const prefix = row.token.slice(0, 8)
+        insert.run(hash, prefix, row.repo_id, row.label, row.created_at)
+      }
+
+      sqlite.exec(`
+        DROP TABLE repo_tokens;
+        ALTER TABLE repo_tokens_v21 RENAME TO repo_tokens;
+      `)
+      sqlite.pragma('foreign_keys = ON')
+    }
+    version = 21
+    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('21')
+  }
 }
 
 
@@ -657,12 +703,14 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       added_at INTEGER NOT NULL
     );
 
-    -- Per-repo access control tokens (Phase 75 / v19)
+    -- Per-repo access control tokens (review7 §4.1 / v21): token is stored as SHA-256 hash.
+    -- token_prefix stores the first 8 chars of the original token for display/revoke lookup.
     CREATE TABLE IF NOT EXISTS repo_tokens (
-      token TEXT PRIMARY KEY,
-      repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-      label TEXT,
-      created_at INTEGER NOT NULL
+      token_hash  TEXT PRIMARY KEY,
+      token_prefix TEXT NOT NULL,
+      repo_id     TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      label       TEXT,
+      created_at  INTEGER NOT NULL
     );
 
     -- Saved search queries / watch-mode entries (Phase 53 / v16)
