@@ -203,10 +203,8 @@ export async function runNarrate(
 
   // 4. Final narrative
   const finalPrompt = buildFinalNarrativePrompt(batchSummaries, events, focus)
-  const { text: redactedFinal, firedPatterns } = (() => {
-    const r = redactAll([finalPrompt])
-    return { text: r.texts[0], firedPatterns: r.firedPatterns }
-  })()
+  const { texts: finalTexts, firedPatterns } = redactAll([finalPrompt])
+  const redactedFinal = finalTexts[0]
   for (const p of firedPatterns) { if (!allRedacted.includes(p)) allRedacted.push(p) }
 
   const finalRes = await provider.narrate({
@@ -274,10 +272,8 @@ export async function runExplain(
     `\nPlease provide:\n1. A timeline of when this issue appeared.\n2. Likely introduction commit(s) with hashes.\n3. Any fix attempts with commit hashes.\n4. Current status (resolved / ongoing).\nLabel inferences clearly. Cite commit hashes in square brackets.`,
   ].filter(Boolean).join('\n')
 
-  const { text: redactedPrompt, firedPatterns } = redactAll([userPrompt]).texts.reduce(
-    (acc, t, i) => ({ text: t, firedPatterns: redactAll([userPrompt]).firedPatterns }),
-    { text: userPrompt, firedPatterns: [] as string[] },
-  )
+  const { texts: explainTexts, firedPatterns } = redactAll([userPrompt])
+  const redactedPrompt = explainTexts[0]
 
   const res = await provider.narrate({
     systemPrompt: 'You are a software incident analyst. Be factual and cite commit hashes for every claim.',

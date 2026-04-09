@@ -562,6 +562,13 @@ export async function modelsRemoveCommand(
 }
 
 // ---------------------------------------------------------------------------
+// Narrator model management subcommands
+// ---------------------------------------------------------------------------
+
+/** Default provider family for narrator model configs. */
+const DEFAULT_NARRATOR_PROVIDER = 'chattydeer'
+
+// ---------------------------------------------------------------------------
 // models narrator-list  — list narrator model configs (kind='narrator' in embed_config)
 // ---------------------------------------------------------------------------
 

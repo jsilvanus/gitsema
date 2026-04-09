@@ -126,7 +126,7 @@ export class ChattydeerNarratorProvider implements NarratorProvider {
           maxTokens,
         })
 
-        const prose = result.explanation === 'INSUFFICIENT_EVIDENCE'
+        const prose = result.explanation === INSUFFICIENT_EVIDENCE_SENTINEL
           ? '(narrator: insufficient evidence — no meaningful content to summarise)'
           : result.explanation
 
@@ -192,9 +192,9 @@ function buildHttpGenerateFn(params: NarratorModelParams) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Factory helpers
-// ---------------------------------------------------------------------------
+const INSUFFICIENT_EVIDENCE_SENTINEL = 'INSUFFICIENT_EVIDENCE'
+
+
 
 /**
  * Create a disabled-mode provider (safe-by-default, no network calls).
