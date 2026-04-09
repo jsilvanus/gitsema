@@ -33,7 +33,7 @@ Core value delivered:
 
 ### Security and reliability concerns
 
-1. **Repo scoped tokens are stored in plaintext** (`repo_tokens.token` primary key in `src/core/db/schema.ts`). If DB leaks, tokens are immediately reusable.
+1. **Repo-scoped tokens are stored in plaintext** (`repo_tokens.token` primary key in `src/core/db/schema.ts`). If DB leaks, tokens are immediately reusable.
 2. **LLM narrator has no explicit timeout/retry/circuit-breaker** (`src/core/llm/narrator.ts`), so external model stalls can hang UX paths.
 3. **`annSearch` swallows all errors and silently falls back** (`src/core/search/analysis/vectorSearch.ts`), which may hide index corruption or disk issues.
 4. **Global key constant-time compare is strong, but scoped token lookup is direct DB equality** (acceptable, but weaker defense depth than hashed-token verification).
@@ -51,7 +51,7 @@ Core value delivered:
 Accessibility here means **how easy features are to discover, learn, and operate safely**:
 
 - **Strong:** rich CLI + MCP + HTTP parity, OpenAPI route docs, robust command surface.
-- **Needs work:** command surface is broad and increasingly hard to discover quickly; README command coverage currently allows limited drift (test passes if ≤5 commands are missing in `tests/docsSync.test.ts`).
+- **Needs work:** command surface is broad and increasingly hard to discover quickly; README command coverage currently allows limited drift (test passes if ≤5 commands are missing in `tests/docsSync.test.ts`). This tolerance is practical for forward-compat, but should be tightened as command churn slows.
 - **Strong:** good defaults for many flows (`index`, `search`, recency/hybrid options).
 - **Needs work:** advanced options (ANN, clustering, narrator, workflow templates) need tighter guided “recipes” by user role (solo dev, reviewer, incident responder, manager).
 
@@ -72,7 +72,7 @@ Accessibility here means **how easy features are to discover, learn, and operate
 
 ## 5) 8 productized usage patterns for code production/review/discovery
 
-1. **PR Semantic Risk Gate**: run `policy` + `change-points` + `security-scan` per PR.
+1. **PR Semantic Risk Gate**: run `policy` + `change-points` + `security-scan` in a per-PR check pipeline.
 2. **Release Narrative Pack**: generate cluster diff + concept evolution + narrator summary for release notes.
 3. **Onboarding Assistant**: role-focused semantic tours (“where auth works”, “where billing logic evolved”).
 4. **Incident Triage Console**: semantic blame + first-seen + workflow templates for fast root-cause analysis.
