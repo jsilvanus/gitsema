@@ -286,3 +286,64 @@ describe('narrateChangePoints', () => {
     expect(result).toBe('One major shift in auth detected.')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Timeout and retry (review7 §4.2)
+// ---------------------------------------------------------------------------
+
+describe('narrator timeout and retry', () => {
+  it('returns degraded-mode message when fetch times out and no retries left', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    process.env.GITSEMA_LLM_TIMEOUT = '1' // 1 second timeout
+    process.env.GITSEMA_LLM_RETRIES = '0'
+
+    // Simulate AbortError (timeout)
+    const abortErr = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortErr))
+
+    const result = await narrateEvolution('src/auth.ts', minimalEvolutionEntries(), 0.3)
+    expect(result).toContain('LLM narration failed')
+    expect(result).toContain('timed out')
+
+    delete process.env.GITSEMA_LLM_TIMEOUT
+    delete process.env.GITSEMA_LLM_RETRIES
+  })
+
+  it('retries once on timeout and succeeds on second attempt', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    process.env.GITSEMA_LLM_TIMEOUT = '1'
+    process.env.GITSEMA_LLM_RETRIES = '1'
+
+    const abortErr = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
+    // First call times out; second succeeds
+    vi.stubGlobal('fetch', vi.fn()
+      .mockRejectedValueOnce(abortErr)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: vi.fn().mockResolvedValue('ok'),
+        json: vi.fn().mockResolvedValue(cannedCompletion('Retry succeeded.')),
+      }),
+    )
+
+    const result = await narrateEvolution('src/auth.ts', minimalEvolutionEntries(), 0.3)
+    expect(result).toBe('Retry succeeded.')
+
+    delete process.env.GITSEMA_LLM_TIMEOUT
+    delete process.env.GITSEMA_LLM_RETRIES
+  })
+
+  it('uses GITSEMA_LLM_TIMEOUT env var for timeout duration', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    process.env.GITSEMA_LLM_TIMEOUT = '30' // 30 second timeout
+
+    // Normal successful response should not be affected by timeout setting
+    mockFetch(cannedCompletion('Success with timeout configured.'))
+
+    const result = await narrateEvolution('src/auth.ts', minimalEvolutionEntries(), 0.3)
+    expect(result).toBe('Success with timeout configured.')
+
+    delete process.env.GITSEMA_LLM_TIMEOUT
+  })
+})
+

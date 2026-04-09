@@ -3070,3 +3070,47 @@ embedding provider (Ollama, OpenAI-compatible HTTP, embedeer). This enables:
 | Feature | Reasoning | 
 |---------|:----------:|-------|
 | Python model server (GPU Docker) | We already have Node.js embedeer and if we want Docker+python, we can use ollama. |
+
+---
+
+### Phase 91 — review7 Improvement Bundle *(completed v0.90.0, 2026-04-09)*
+
+**Goal:** Implement the 8 concrete improvement points from `docs/review7.md`.
+
+**Implemented scope:**
+
+*§4.1 — Hash repo tokens at rest (schema v21):*
+- `repo_tokens` table rebuilt with `token_hash TEXT PRIMARY KEY` + `token_prefix TEXT NOT NULL` replacing the plaintext `token` PK.
+- `initTables()` creates the new schema for fresh DBs.
+- Migration v20 → v21: hashes all existing plaintext tokens with SHA-256, stores first-8-char prefix; uses JS `createHash` (crypto module) inside `applyMigrations()`.
+- `authMiddleware` now hashes incoming Bearer tokens with `createHash('sha256')` before DB lookup — plaintext is never stored or compared.
+- `gitsema repos token add` stores `token_hash` + `token_prefix`, never plaintext. `list` shows prefix only. `revoke` uses prefix LIKE query on `token_prefix`.
+- `CURRENT_SCHEMA_VERSION` bumped to **21**.
+
+*§4.2 — Narrator timeout + retry budget:*
+- `callLlm()` in `narrator.ts` now wraps each `fetch` in an `AbortController` with a configurable timeout (`GITSEMA_LLM_TIMEOUT` env, default 30 s).
+- On `AbortError` (timeout), retries up to `GITSEMA_LLM_RETRIES` (default 1) times before returning a structured failure message that includes "timed out".
+
+*§4.3 — Structured ANN warning on failure:*
+- `annSearch()` in `vectorSearch.ts` now catches errors and calls `logger.warn('[ANN] ...')` with the model name and error message instead of returning null silently. Operators can now detect HNSW index corruption or mismatches in logs.
+
+*§4.4 — SQL-level candidate filtering (chunk/symbol/module):*
+- Chunk, symbol, and module queries in `vectorSearch()` now carry `.limit(CAP)` **before** rows are materialised into JS. This prevents OOM on large indexes when `--chunks` or `--symbols` is enabled.
+
+*§4.5 — Per-mode row caps with warnings:*
+- Four configurable caps added: `GITSEMA_FILE_CAP` (50K), `GITSEMA_CHUNK_CAP` (25K), `GITSEMA_SYMBOL_CAP` (25K), `GITSEMA_MODULE_CAP` (5K). When a cap is hit `logger.warn` emits the cap value and the override env var.
+
+*§4.6 — Role-based quickstart playbooks:*
+- New `docs/playbooks.md` with concrete command sequences for four roles: solo developer, PR reviewer, security engineer, release manager.
+
+*§4.7 — Task-oriented command map in README:*
+- Added "Find the right command by goal" table to `README.md` (between the command group table and the detailed reference), with 20 goal → command rows covering the most common scenarios.
+
+*§4.8 — Team operations guidance in docs/deploy.md:*
+- New §11 "Team operations" in `docs/deploy.md` covering: token security, token rotation policy (90-day cadence + emergency rotation), audit logs (nginx + journal + Prometheus alert), backup/restore (hot SQLite backup, cron schedule, quarterly drill procedure), and health checks.
+
+**Tests:** Added `tests/review7.test.ts` (5 tests: token hashing invariants, ANN structured warning). Narrator timeout/retry tests added to `tests/narrator.test.ts` (3 new tests: timeout-no-retry, timeout-with-retry, custom timeout env var). All 27 tests in affected files pass.
+
+**Documentation:** `CLAUDE.md` schema overview updated to v21 + migration v20→v21 entry added. `docs/deploy.md` table of contents updated with §11.
+
+**Status:** ✅ complete.

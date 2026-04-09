@@ -18,6 +18,7 @@ keys, backing up the index, and tuning recommendations for different repo sizes.
 8. [Observability](#observability)
 9. [Rate limiting](#rate-limiting)
 10. [Multi-repo deployments](#multi-repo-deployments)
+11. [Team operations](#team-operations)
 
 ---
 
@@ -395,3 +396,162 @@ location /api/repo-b/ {
 Each instance is completely isolated — it has its own `.gitsema/index.db`.
 
 For cross-repo search, use the `gitsema repos` command to register repos and the `multi_repo_search` MCP tool or `POST /api/v1/analysis/multi-repo-search`.
+
+---
+
+## Team operations
+
+This section covers shared-server best practices for teams: token rotation, audit logging, and backup / restore drills.
+
+### Token security (review7 §4.1)
+
+Scoped repo tokens are stored as **SHA-256 hashes** in the database — the plaintext is never persisted. Only the first 8 characters (the prefix) are stored for identification.
+
+**Minting a token:**
+
+```bash
+gitsema repos token add <repo-id> "ci-pipeline"
+# Output:
+#   Token minted for repo 'my-repo':
+#     a1b2c3d4e5f6...
+#   Copy this token now — it cannot be recovered.
+```
+
+Copy the full token immediately and store it in your secrets manager (AWS Secrets Manager, Vault, GitHub Actions secrets, etc.). **It cannot be recovered from the DB after this point.**
+
+**Listing tokens (shows only prefix):**
+
+```bash
+gitsema repos token list
+# Token (prefix)    Repo ID               Label                 Created
+# a1b2c3d4...       my-repo               ci-pipeline           2025-01-15
+```
+
+**Revoking a token:**
+
+```bash
+gitsema repos token revoke a1b2c3d4
+# Token revoked: a1b2c3d4...
+```
+
+### Token rotation policy
+
+1. **Rotate every 90 days** for long-lived service tokens (or per your org's rotation policy).
+2. Rotation procedure:
+   - Mint a new token: `gitsema repos token add <repo-id> "<label>-new"`
+   - Update the secret in your CI/CD system or secrets manager.
+   - Verify the new token works: `curl -H "Authorization: Bearer <new-token>" http://host:4242/health`
+   - Revoke the old token: `gitsema repos token revoke <old-prefix>`
+3. **Emergency rotation** (suspected token leak):
+   - Revoke immediately: `gitsema repos token revoke <prefix>`
+   - Mint a replacement and update all consumers within the incident window.
+   - Rotate `GITSEMA_SERVE_KEY` (the global key) by restarting the server with a new value.
+
+### Audit logs
+
+gitsema does not currently emit a dedicated audit trail, but you can construct one from the access log:
+
+**Using nginx access logs:**
+
+```nginx
+log_format gitsema_audit '$time_iso8601 $request_method $uri $status '
+                          '$request_length $bytes_sent '
+                          '"$http_authorization"';
+access_log /var/log/nginx/gitsema_audit.log gitsema_audit;
+```
+
+**Using systemd journal filtering:**
+
+```bash
+# All 401/403 responses (unauthorized access attempts)
+journalctl -u gitsema --since "1 hour ago" | grep '"status":40[13]'
+
+# All index-write operations
+journalctl -u gitsema | grep '"method":"POST".*index'
+```
+
+**Recommended Prometheus alert for repeated 401s:**
+
+```promql
+rate(http_requests_total{app="gitsema",status="401"}[5m]) > 1
+```
+
+Set up this alert to page on-call when there are more than 1 unauthorized request per second (possible brute-force or misconfigured client).
+
+### Backup and restore
+
+The entire index is a single SQLite file at `.gitsema/index.db`. Git history is the source of truth — the index can always be rebuilt from scratch with `gitsema index start`.
+
+**Incremental hot backup (online, no downtime):**
+
+```bash
+# SQLite's .backup pragma creates a consistent snapshot even while the server is running
+sqlite3 /path/to/repo/.gitsema/index.db ".backup '/backup/gitsema-$(date +%Y%m%d).db'"
+```
+
+**Scheduled backup (cron):**
+
+```cron
+# Daily backup at 02:00, keeping 7 days
+0 2 * * * sqlite3 /var/lib/gitsema/index.db ".backup '/backups/gitsema-$(date +\%Y\%m\%d).db'" \
+  && find /backups -name 'gitsema-*.db' -mtime +7 -delete
+```
+
+**Restore drill (run quarterly):**
+
+```bash
+# 1. Copy backup to a temporary location
+cp /backups/gitsema-20250115.db /tmp/gitsema-restore-test.db
+
+# 2. Verify the backup is not corrupt
+sqlite3 /tmp/gitsema-restore-test.db "PRAGMA integrity_check;"
+# Should return: ok
+
+# 3. Check record counts match original
+sqlite3 /tmp/gitsema-restore-test.db "SELECT COUNT(*) FROM blobs;"
+sqlite3 /var/lib/gitsema/index.db       "SELECT COUNT(*) FROM blobs;"
+
+# 4. Test a search against the backup
+GITSEMA_DB_PATH=/tmp/gitsema-restore-test.db \
+  gitsema search "authentication middleware" --top 3
+
+# 5. If restore to production is needed:
+systemctl stop gitsema
+cp /backups/gitsema-20250115.db /var/lib/gitsema/index.db
+systemctl start gitsema
+```
+
+**Full re-index from Git (no backup needed):**
+
+```bash
+# If the DB is lost or corrupt, rebuild from Git history.
+rm -f .gitsema/index.db
+gitsema index start
+# This re-embeds everything — time depends on repo size and embedding speed.
+```
+
+### Health checks
+
+Add a health check to your load balancer or monitoring system:
+
+```bash
+# Basic liveness
+curl -sf http://localhost:4242/health && echo "OK"
+
+# With auth
+curl -sf -H "Authorization: Bearer $GITSEMA_SERVE_KEY" http://localhost:4242/health
+
+# Readiness (check DB is accessible)
+curl -sf http://localhost:4242/api/v1/status | jq '.blobCount'
+```
+
+**Docker healthcheck:**
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-sf", "http://localhost:4242/health"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 10s
+```
