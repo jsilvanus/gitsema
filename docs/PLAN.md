@@ -2908,7 +2908,7 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 *Documentation sync check (`tests/docsSync.test.ts` — 9 tests):*
 - Guards against the doc drift identified in review6 §9.2.
-- Checks: `CLAUDE.md` contains the current schema version from `sqlite.ts` (`CURRENT_SCHEMA_VERSION`), README.md mentions all non-hidden CLI commands (tolerance ≤ 5 missing for forward-compat), canonical docs (`features.md`, `PLAN.md`, `review6.md`) exist and are non-trivial, `package.json` has a valid semver version at ≥ 0.80.0.
+- Checks: `CLAUDE.md` contains the current schema version from `sqlite.ts` (`CURRENT_SCHEMA_VERSION`), README.md mentions all non-hidden CLI commands (tolerance ≤ 5 missing for forward-compat), canonical docs (`features.md`, `PLAN.md`, latest `review*.md`) exist and are non-trivial, `package.json` has a valid semver version at ≥ 0.80.0.
 - `CLAUDE.md` updated: schema version corrected from v17 → v19.
 
 **Tests:** 725/725 (62 files). Build: clean.
