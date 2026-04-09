@@ -74,39 +74,33 @@ export class OllamaProvider implements EmbeddingProvider {
   async embedBatch(texts: string[]): Promise<Embedding[]> {
     if (texts.length === 0) return []
 
+    // §11.3 — explicit control flow: only a 404 response triggers the
+    // sequential fallback. Network errors and non-404 HTTP errors propagate
+    // to the caller so upstream retry/backoff can react appropriately.
     if (!this._batchEndpointUnavailable) {
-      try {
-        const res = await fetch(`${this.baseUrl}/api/embed`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: this.model, input: texts }),
-        })
+      const res = await fetch(`${this.baseUrl}/api/embed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: this.model, input: texts }),
+      })
 
-        if (res.status === 404) {
-          // Endpoint not available on this Ollama version — remember and fall through
-          this._batchEndpointUnavailable = true
-        } else if (!res.ok) {
-          const body = await res.text()
-          throw new Error(`Ollama batch embed failed (${res.status}): ${body}`)
-        } else {
-          const data = (await res.json()) as OllamaEmbedBatchResponse
-          if (this._dimensions === 0 && data.embeddings.length > 0) {
-            this._dimensions = data.embeddings[0].length
-          }
-          return data.embeddings
+      if (res.status === 404) {
+        // Endpoint not available on this Ollama version — remember and fall
+        // through to the per-item fallback below.
+        this._batchEndpointUnavailable = true
+      } else if (!res.ok) {
+        const body = await res.text()
+        throw new Error(`Ollama batch embed failed (${res.status}): ${body}`)
+      } else {
+        const data = (await res.json()) as OllamaEmbedBatchResponse
+        if (this._dimensions === 0 && data.embeddings.length > 0) {
+          this._dimensions = data.embeddings[0].length
         }
-      } catch (err) {
-        // Re-throw non-fetch errors (e.g. connection refused); only swallow 404
-        if (!(err instanceof Error && err.message.includes('Ollama batch embed failed'))) {
-          // Check if this is a 404 we already handled above
-          if (!this._batchEndpointUnavailable) throw err
-        } else {
-          throw err
-        }
+        return data.embeddings
       }
     }
 
-    // Fallback: per-item embeds in parallel (same as before)
+    // Fallback: per-item embeds in parallel (older Ollama w/o /api/embed).
     return Promise.all(texts.map((t) => this.embed(t)))
   }
 }

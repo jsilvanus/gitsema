@@ -282,7 +282,7 @@ gitsema index
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
 
-**Schema overview (current schema v19):**
+**Schema overview (current schema v20):**
 
 | Table | Purpose |
 |---|---|
@@ -318,7 +318,8 @@ gitsema index
 - v14 → v17: Added `projections`, `saved_queries`, and related tables (Phases 53–55)
 - v17 → v18: Added `repo_tokens` table for per-repo access control (Phase 75)
 - v18 → v19: Added `embed_config` table for embedding provenance (Phase 80+)
-- **Current version: 19**
+- v19 → v20: Added `UNIQUE (blob_hash, path)` index on `paths` table (review6 §11.6 / Phase 89)
+- **Current version: 20**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

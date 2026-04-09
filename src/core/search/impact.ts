@@ -3,6 +3,7 @@ import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings } from '../db/schema.js'
 import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
+import { bufferToFloat32 } from '../../utils/embedding.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
 // ---------------------------------------------------------------------------
@@ -71,11 +72,6 @@ export interface ImpactReport {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Deserializes a Float32Array stored as a Buffer back to Float32Array. */
-function bufferToEmbedding(buf: Buffer): Float32Array {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return f32
-}
 
 /**
  * Returns the directory component of a path string, or `'.'` when there is no
@@ -289,7 +285,7 @@ export async function computeImpact(
   type ScoredCandidate = CandidateRow & { score: number }
   const scored: ScoredCandidate[] = candidates.map((c) => ({
     ...c,
-    score: cosineSimilarityPrecomputed(targetEmbedding, targetNorm, bufferToEmbedding(c.vector)),
+    score: cosineSimilarityPrecomputed(targetEmbedding, targetNorm, bufferToFloat32(c.vector)),
   }))
 
   // Sort descending, deduplicate by blobHash (keep best score per blob unless chunk/symbol-level)

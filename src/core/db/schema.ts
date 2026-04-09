@@ -80,7 +80,10 @@ export const paths = sqliteTable('paths', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
   path: text('path').notNull(),
-})
+}, (table) => ({
+  // review6 §11.6 / schema v20 — prevent duplicate (blob_hash, path) rows.
+  uniq: uniqueIndex('idx_paths_blob_path_unique').on(table.blobHash, table.path),
+}))
 
 export const commits = sqliteTable('commits', {
   commitHash: text('commit_hash').primaryKey(),
