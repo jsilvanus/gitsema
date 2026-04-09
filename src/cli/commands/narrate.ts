@@ -17,6 +17,11 @@ import type { NarrateFocus, NarrateFormat, NarrationResult } from '../../core/na
 // ---------------------------------------------------------------------------
 
 function formatResult(result: NarrationResult): string {
+  // Evidence-only mode: just print the JSON (commits)
+  if (result.evidence !== undefined) {
+    return result.prose // already JSON-serialised by runNarrate/runExplain
+  }
+
   const { prose, commitCount, citations, llmEnabled, format } = result
 
   if (!llmEnabled) {
@@ -83,8 +88,12 @@ export async function narrateCommand(
     maxCommits?: string
     narratorModelId?: string
     model?: string
+    narrate?: boolean
+    evidenceOnly?: boolean
   },
 ): Promise<void> {
+  // --narrate is shorthand for --no-evidence-only; default is evidence-only
+  const evidenceOnly = opts.narrate ? false : (opts.evidenceOnly !== false)
   const narratorModelId = opts.narratorModelId !== undefined ? parseInt(opts.narratorModelId, 10) : undefined
   const provider = resolveNarratorProvider({
     narratorModelId,
@@ -100,6 +109,7 @@ export async function narrateCommand(
       focus: (opts.focus as NarrateFocus) ?? 'all',
       format: (opts.format as NarrateFormat) ?? 'md',
       maxCommits: opts.maxCommits ? parseInt(opts.maxCommits, 10) : undefined,
+      evidenceOnly,
     })
   } finally {
     await provider.destroy()
@@ -122,8 +132,12 @@ export async function explainCommand(
     format?: string
     narratorModelId?: string
     model?: string
+    narrate?: boolean
+    evidenceOnly?: boolean
   },
 ): Promise<void> {
+  // --narrate is shorthand for --no-evidence-only; default is evidence-only
+  const evidenceOnly = opts.narrate ? false : (opts.evidenceOnly !== false)
   const narratorModelId = opts.narratorModelId !== undefined ? parseInt(opts.narratorModelId, 10) : undefined
   const provider = resolveNarratorProvider({
     narratorModelId,
@@ -138,6 +152,7 @@ export async function explainCommand(
       log: opts.log,
       files: opts.files,
       format: (opts.format as NarrateFormat) ?? 'md',
+      evidenceOnly,
     })
   } finally {
     await provider.destroy()
@@ -153,7 +168,7 @@ export async function explainCommand(
 export function registerNarratorCommands(program: Command): void {
   program
     .command('narrate')
-    .description('Generate a human-readable narrative of repository development history using an LLM narrator model.')
+    .description('Return commit evidence (default) or an LLM-generated narrative of repository development history.')
     .option('--since <ref|date>', 'only include commits after this ref or date')
     .option('--until <ref|date>', 'only include commits before this ref or date')
     .option('--range <rev-range>', 'git revision range (e.g. v1.0..HEAD)')
@@ -162,21 +177,25 @@ export function registerNarratorCommands(program: Command): void {
       'filter commits by area: bugs, features, ops, security, deps, performance, all (default: all)',
       'all',
     )
-    .option('--format <fmt>', 'output format: md, text, json (default: md)', 'md')
+    .option('--format <fmt>', 'output format when narrating: md, text, json (default: md)', 'md')
     .option('--max-commits <n>', 'maximum commits to analyse (default: 500)')
     .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
     .option('--model <name>', 'narrator model name to use (overrides active selection)')
+    .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
+    .option('--evidence-only', 'return raw commit evidence without calling the LLM (this is the default)')
     .action(narrateCommand)
 
   program
     .command('explain <topic>')
-    .description('Explain a bug, error, or topic by tracing it through git history using an LLM narrator model.')
+    .description('Return matching commits (default) or an LLM-generated timeline for a bug, error, or topic.')
     .option('--since <ref|date>', 'only include commits after this ref or date')
     .option('--until <ref|date>', 'only include commits before this ref or date')
     .option('--log <path>', 'path to an error log or stack trace file to include as context')
     .option('--files <glob>', 'restrict search to files matching this glob')
-    .option('--format <fmt>', 'output format: md, text, json (default: md)', 'md')
+    .option('--format <fmt>', 'output format when narrating: md, text, json (default: md)', 'md')
     .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
     .option('--model <name>', 'narrator model name to use (overrides active selection)')
+    .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
+    .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)')
     .action(explainCommand)
 }

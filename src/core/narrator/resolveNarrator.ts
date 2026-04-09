@@ -203,3 +203,104 @@ export function resolveNarratorProvider(opts: {
 
   return createChattydeerProvider(config.name, config.params)
 }
+
+// ---------------------------------------------------------------------------
+// Guide model config (kind='guide') — same infrastructure as narrator
+// ---------------------------------------------------------------------------
+
+const ACTIVE_GUIDE_KEY = 'active_guide_model_config_id'
+
+/** List all guide model configs (kind='guide'). */
+export function listGuideConfigs(rawDb: InstanceType<typeof Database>): NarratorModelConfig[] {
+  const tables = rawDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='embed_config'`).all() as Array<{ name: string }>
+  if (tables.length === 0) return []
+  const rows = rawDb.prepare(`SELECT id, config_hash, provider, model, params_json, created_at, last_used_at FROM embed_config WHERE kind = 'guide' ORDER BY created_at ASC`).all() as NarratorRow[]
+  return rows.map(rowToConfig)
+}
+
+/** Get the active guide config ID from settings. */
+export function getActiveGuideConfigId(rawDb: InstanceType<typeof Database>): number | null {
+  const val = getSetting(rawDb, ACTIVE_GUIDE_KEY)
+  if (val === null) return null
+  const n = parseInt(val, 10)
+  return Number.isFinite(n) ? n : null
+}
+
+/** Get the active guide config object. */
+export function getActiveGuideConfig(rawDb: InstanceType<typeof Database>): NarratorModelConfig | null {
+  const id = getActiveGuideConfigId(rawDb)
+  if (id === null) return null
+  return getNarratorConfigById(rawDb, id)
+}
+
+/** Set the active guide config by embed_config.id. */
+export function setActiveGuideConfig(rawDb: InstanceType<typeof Database>, id: number): void {
+  setSetting(rawDb, ACTIVE_GUIDE_KEY, String(id))
+}
+
+/** Clear the active guide config selection. */
+export function clearActiveGuideConfig(rawDb: InstanceType<typeof Database>): void {
+  deleteSetting(rawDb, ACTIVE_GUIDE_KEY)
+}
+
+/** Get a guide config by name. */
+export function getGuideConfigByName(rawDb: InstanceType<typeof Database>, name: string): NarratorModelConfig | null {
+  const row = rawDb.prepare(`SELECT id, config_hash, provider, model, params_json, created_at, last_used_at FROM embed_config WHERE model = ? AND kind = 'guide'`).get(name) as NarratorRow | undefined
+  return row ? rowToConfig(row) : null
+}
+
+/** Save a guide model config. Returns embed_config.id. */
+export function saveGuideConfig(
+  rawDb: InstanceType<typeof Database>,
+  name: string,
+  provider: string,
+  params: NarratorModelParams,
+): number {
+  const hashInput = JSON.stringify({ kind: 'guide', name, provider, params })
+  const configHash = createHash('sha256').update(hashInput).digest('hex')
+  const now = Math.floor(Date.now() / 1000)
+  const paramsJson = JSON.stringify(params)
+
+  rawDb.prepare(`
+    INSERT OR IGNORE INTO embed_config
+      (config_hash, provider, model, code_model, dimensions, chunker, window_size, overlap, created_at, kind, params_json)
+    VALUES (?, ?, ?, NULL, 0, 'none', NULL, NULL, ?, 'guide', ?)
+  `).run(configHash, provider, name, now, paramsJson)
+
+  rawDb.prepare(`UPDATE embed_config SET params_json = ?, last_used_at = ? WHERE config_hash = ?`)
+    .run(paramsJson, now, configHash)
+
+  const row = rawDb.prepare(`SELECT id FROM embed_config WHERE config_hash = ?`).get(configHash) as { id: number }
+  return row.id
+}
+
+/** Delete a guide config by name. Returns true if deleted. */
+export function deleteGuideConfig(rawDb: InstanceType<typeof Database>, name: string): boolean {
+  const res = rawDb.prepare(`DELETE FROM embed_config WHERE model = ? AND kind = 'guide'`).run(name)
+  return res.changes > 0
+}
+
+/** Resolve the active guide NarratorProvider from the DB. Falls back to narrator config, then disabled. */
+export function resolveGuideProvider(opts: {
+  guideModelId?: number
+  modelName?: string
+} = {}): ChattydeerNarratorProvider {
+  const { rawDb } = getActiveSession()
+
+  let config: NarratorModelConfig | null = null
+
+  if (opts.guideModelId !== undefined) {
+    config = getNarratorConfigById(rawDb, opts.guideModelId)
+  } else if (opts.modelName) {
+    config = getGuideConfigByName(rawDb, opts.modelName) ?? getNarratorConfigByName(rawDb, opts.modelName)
+  } else {
+    // Prefer guide config; fall back to narrator config
+    config = getActiveGuideConfig(rawDb) ?? getActiveNarratorConfig(rawDb)
+  }
+
+  if (!config) {
+    return createDisabledProvider()
+  }
+
+  return createChattydeerProvider(config.name, config.params)
+}

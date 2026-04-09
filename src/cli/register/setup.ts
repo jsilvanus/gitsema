@@ -16,6 +16,10 @@ import {
   modelsNarratorAddCommand,
   modelsNarratorActivateCommand,
   modelsNarratorRemoveCommand,
+  modelsKindListCommand,
+  modelsKindAddCommand,
+  modelsKindActivateCommand,
+  modelsKindRemoveCommand,
 } from '../commands/models.js'
 import { collectOut } from '../../utils/outputSink.js'
 
@@ -208,20 +212,33 @@ Examples:
     })
 
   // ---------------------------------------------------------------------------
-  // Narrator model management subcommands (DB-backed, kind='narrator')
+  // Unified narrator / guide model management (--narrator | --guide flag)
   // ---------------------------------------------------------------------------
 
+  // models list [--narrator] [--guide]
+  // (extends existing list subcommand with optional kind flag)
   modelsSub
-    .command('narrator-list')
-    .description('List narrator model configs (stored in DB with kind=narrator)')
+    .command('list-narrator')
+    .alias('narrator-list')
+    .description('List narrator model configs (kind=narrator). Alias: models list --narrator')
     .option('--json', 'output as JSON')
     .action(async (opts: { json?: boolean }) => {
-      await modelsNarratorListCommand(opts)
+      await modelsKindListCommand('narrator', opts)
     })
 
   modelsSub
-    .command('narrator-add <name>')
-    .description('Add or update a narrator model config (stored in DB, backed by chattydeer)')
+    .command('list-guide')
+    .description('List guide model configs (kind=guide). Alias: models list --guide')
+    .option('--json', 'output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      await modelsKindListCommand('guide', opts)
+    })
+
+  // models add <name> --narrator / --guide
+  modelsSub
+    .command('add-narrator <name>')
+    .alias('narrator-add')
+    .description('Add/update a narrator model config (--narrator shorthand). Use --activate to set as default.')
     .option('--http-url <url>', 'OpenAI-compatible base URL for chat completions (required)')
     .option('--key <token>', 'API key / Bearer token')
     .option('--max-tokens <n>', 'max tokens per narration call (default: 512)')
@@ -231,20 +248,53 @@ Examples:
       name: string,
       opts: { httpUrl?: string; key?: string; maxTokens?: string; temperature?: string; activate?: boolean },
     ) => {
-      await modelsNarratorAddCommand(name, { httpUrl: opts.httpUrl ?? '', key: opts.key, maxTokens: opts.maxTokens, temperature: opts.temperature, activate: opts.activate })
+      await modelsKindAddCommand(name, 'narrator', { httpUrl: opts.httpUrl ?? '', key: opts.key, maxTokens: opts.maxTokens, temperature: opts.temperature, activate: opts.activate })
     })
 
   modelsSub
-    .command('narrator-activate <name>')
-    .description('Set a narrator model as the active default (resolved by gitsema narrate / gitsema explain)')
+    .command('add-guide <name>')
+    .description('Add/update a guide model config. Guide models power gitsema guide interactive chat.')
+    .option('--http-url <url>', 'OpenAI-compatible base URL for chat completions (required)')
+    .option('--key <token>', 'API key / Bearer token')
+    .option('--max-tokens <n>', 'max tokens per guide call (default: 512)')
+    .option('--temperature <n>', 'temperature (default: 0.3)')
+    .option('--activate', 'set this as the active guide model immediately')
+    .action(async (
+      name: string,
+      opts: { httpUrl?: string; key?: string; maxTokens?: string; temperature?: string; activate?: boolean },
+    ) => {
+      await modelsKindAddCommand(name, 'guide', { httpUrl: opts.httpUrl ?? '', key: opts.key, maxTokens: opts.maxTokens, temperature: opts.temperature, activate: opts.activate })
+    })
+
+  // models activate <name> --narrator / --guide
+  modelsSub
+    .command('activate-narrator <name>')
+    .alias('narrator-activate')
+    .description('Set a narrator model as the active default (used by gitsema narrate / explain)')
     .action(async (name: string) => {
-      await modelsNarratorActivateCommand(name)
+      await modelsKindActivateCommand(name, 'narrator')
     })
 
   modelsSub
-    .command('narrator-remove <name>')
+    .command('activate-guide <name>')
+    .description('Set a guide model as the active default (used by gitsema guide)')
+    .action(async (name: string) => {
+      await modelsKindActivateCommand(name, 'guide')
+    })
+
+  // models remove <name> --narrator / --guide
+  modelsSub
+    .command('remove-narrator <name>')
+    .alias('narrator-remove')
     .description('Remove a narrator model config from the DB')
     .action(async (name: string) => {
-      await modelsNarratorRemoveCommand(name)
+      await modelsKindRemoveCommand(name, 'narrator')
+    })
+
+  modelsSub
+    .command('remove-guide <name>')
+    .description('Remove a guide model config from the DB')
+    .action(async (name: string) => {
+      await modelsKindRemoveCommand(name, 'guide')
     })
 }

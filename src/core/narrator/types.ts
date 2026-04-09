@@ -86,6 +86,12 @@ export interface NarrateCommandOptions {
   narratorModelId?: number
   /** Raw CLI model override (name, looked up in embed_config by name). */
   model?: string
+  /**
+   * When true (the default), skip the LLM call and return the raw commit
+   * evidence so the caller (or an MCP agent) can narrate/filter itself.
+   * Set to false (or pass --narrate on CLI) to call the configured LLM.
+   */
+  evidenceOnly?: boolean
 }
 
 export interface ExplainCommandOptions {
@@ -96,6 +102,8 @@ export interface ExplainCommandOptions {
   format?: NarrateFormat
   narratorModelId?: number
   model?: string
+  /** Same semantics as in NarrateCommandOptions. Default true. */
+  evidenceOnly?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -123,4 +131,9 @@ export interface NarrationResult {
   redactedFields: string[]
   llmEnabled: boolean
   format: NarrateFormat
+  /**
+   * Raw evidence (commit events) returned when evidenceOnly=true.
+   * Undefined when LLM narration was performed.
+   */
+  evidence?: CommitEvent[]
 }

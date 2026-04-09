@@ -58,6 +58,7 @@ import { watchRouter } from './routes/watch.js'
 import { projectionsRouter } from './routes/projections.js'
 import { openapiRouter } from './routes/openapi.js'
 import { narratorRouter } from './routes/narrator.js'
+import guideRouter from './routes/guide.js'
 import { getActiveSession } from '../core/db/sqlite.js'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -168,6 +169,9 @@ export function createApp(options: AppOptions): Express {
 
   // Narrator routes (LLM-powered narrative generation)
   app.use(`${base}`, narratorRouter)
+
+  // Guide routes (interactive LLM chat with gitsema tool access)
+  app.use(`${base}/guide`, guideRouter)
 
   // Phase 64: Capabilities manifest — machine-readable list of server capabilities
   app.get(`${base}/capabilities`, (_req, res) => {

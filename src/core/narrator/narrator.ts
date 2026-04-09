@@ -164,6 +164,7 @@ export async function runNarrate(
 ): Promise<NarrationResult> {
   const focus = opts.focus ?? 'all'
   const format = opts.format ?? 'md'
+  const evidenceOnly = opts.evidenceOnly !== false // default true
 
   // 1. Fetch commits
   const allEvents = fetchCommitEvents({
@@ -184,10 +185,24 @@ export async function runNarrate(
       redactedFields: [],
       llmEnabled: false,
       format,
+      evidence: [],
     }
   }
 
-  // 3. Batch + map-reduce
+  // 3. Evidence-only: return raw commits without calling LLM
+  if (evidenceOnly) {
+    return {
+      prose: JSON.stringify(events, null, 2),
+      commitCount: events.length,
+      citations: events.slice(0, 20).map((e) => e.hash),
+      redactedFields: [],
+      llmEnabled: false,
+      format,
+      evidence: events,
+    }
+  }
+
+  // 4. Batch + map-reduce (LLM path)
   const batches: CommitEvent[][] = []
   for (let i = 0; i < events.length; i += BATCH_SIZE) {
     batches.push(events.slice(i, i + BATCH_SIZE))
@@ -201,7 +216,7 @@ export async function runNarrate(
     batchSummaries.push(summary)
   }
 
-  // 4. Final narrative
+  // 5. Final narrative
   const finalPrompt = buildFinalNarrativePrompt(batchSummaries, events, focus)
   const { texts: finalTexts, firedPatterns } = redactAll([finalPrompt])
   const redactedFinal = finalTexts[0]
@@ -235,6 +250,7 @@ export async function runExplain(
   opts: ExplainCommandOptions,
 ): Promise<NarrationResult> {
   const format = opts.format ?? 'md'
+  const evidenceOnly = opts.evidenceOnly !== false // default true
 
   // 1. Fetch commits
   const allEvents = fetchCommitEvents({
@@ -260,7 +276,28 @@ export async function runExplain(
     }
   }
 
-  // 4. Build explain prompt
+  const citations = relevant.slice(0, 20).map((e) => e.hash)
+
+  // 4. Evidence-only: return raw matched commits without calling LLM
+  if (evidenceOnly) {
+    const evidenceObj = {
+      topic,
+      relevantCommits: relevant.slice(0, 30),
+      totalSearched: allEvents.length,
+      logContentIncluded: logContent.length > 0,
+    }
+    return {
+      prose: JSON.stringify(evidenceObj, null, 2),
+      commitCount: relevant.length,
+      citations,
+      redactedFields: [],
+      llmEnabled: false,
+      format,
+      evidence: relevant.slice(0, 30),
+    }
+  }
+
+  // 5. Build explain prompt (LLM path)
   const commitLines = relevant.slice(0, 30).map((e) =>
     `[${e.hash.slice(0, 8)}] ${e.date.slice(0, 10)} ${e.subject}`,
   )
@@ -280,8 +317,6 @@ export async function runExplain(
     userPrompt: redactedPrompt,
     maxTokens: 512,
   })
-
-  const citations = relevant.slice(0, 20).map((e) => e.hash)
 
   return {
     prose: res.prose,
