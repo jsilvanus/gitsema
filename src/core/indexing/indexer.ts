@@ -287,6 +287,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   const start = Date.now()
   const SIZE_CAP = 50_000
   const seenHashes = new Set<string>()
+  let sizeCapWarned = false
   let lastProgressTime = 0
 
   // Latency rolling window for embedding calls (last 200 samples)
@@ -330,12 +331,26 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   for await (const entry of stream as AsyncIterable<BlobEntry>) {
     const { blobHash, path } = entry
 
-    // Deduplicate within this run (same blob at multiple paths)
+    // Deduplicate within this run (same blob at multiple paths).
+    // The in-memory Set is a best-effort optimization — we still dedupe
+    // `pending` below by blob hash so correctness does not depend on it.
     if (seenHashes.has(blobHash)) continue
     seenHashes.add(blobHash)
     stats.seen++
-    // Prevent seenHashes from growing unbounded — clear periodically (within-run dedup is best-effort)
-    if (seenHashes.size > SIZE_CAP) seenHashes.clear()
+    // Prevent seenHashes from growing unbounded — clear periodically
+    // (within-run dedup is best-effort; authoritative dedup happens in the
+    // pending pass below so clearing here is safe for correctness). §11.5:
+    // log once per run so operators can see that this rare branch fired.
+    if (seenHashes.size > SIZE_CAP) {
+      seenHashes.clear()
+      if (!sizeCapWarned) {
+        logger.warn(
+          `indexer: within-run dedup cache exceeded ${SIZE_CAP} entries — ` +
+          `clearing. Duplicates are still removed by the pending-batch pass.`,
+        )
+        sizeCapWarned = true
+      }
+    }
 
     // Path-based filter (applied before any I/O)
     if (isFiltered(path, filter)) {
@@ -350,11 +365,24 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     pending.push({ entry, wouldUseModel })
   }
 
+  // §11.5: authoritative within-run dedup. `seenHashes` above may have been
+  // cleared if the stream exceeded `SIZE_CAP`, so `pending` can legitimately
+  // contain the same blob twice. Left untreated, both copies would pass
+  // `filterNewBlobs()` and cause duplicate embedding work for a genuinely
+  // new blob. Dedup by blob hash here before the batched DB filter.
+  const dedupedPending: PendingEntry[] = []
+  const pendingSeen = new Set<string>()
+  for (const p of pending) {
+    if (pendingSeen.has(p.entry.blobHash)) continue
+    pendingSeen.add(p.entry.blobHash)
+    dedupedPending.push(p)
+  }
+
   // Batch deduplication: group pending entries by model and ask the DB which
   // hashes are *not* yet indexed for that model. This replaces per-blob
   // `isIndexed()` calls with batched `filterNewBlobs()` queries.
   const byModel = new Map<string, string[]>()
-  for (const p of pending) {
+  for (const p of dedupedPending) {
     const list = byModel.get(p.wouldUseModel) ?? []
     list.push(p.entry.blobHash)
     byModel.set(p.wouldUseModel, list)
@@ -368,7 +396,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   // Build the final blobsToProcess list and update skipped counters for those
   // that were already present in the DB.
-  for (const p of pending) {
+  for (const p of dedupedPending) {
     const allowed = newHashSets.get(p.wouldUseModel) ?? new Set<string>()
     if (!allowed.has(p.entry.blobHash)) {
       stats.skipped++
@@ -388,10 +416,27 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   // Process blobs concurrently up to the configured limit.
   const embeddingStart = Date.now()
 
+  // Retry helper for transient embedding provider errors (429, 503, ECONNRESET)
+  async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 2, baseDelayMs = 500): Promise<T> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn()
+      } catch (err) {
+        if (attempt === maxAttempts) throw err
+        const msg = err instanceof Error ? err.message : String(err)
+        const isTransient = /429|503|ECONNRESET|ETIMEDOUT|ECONNREFUSED/.test(msg)
+        if (!isTransient) throw err
+        logger.debug?.(`Transient embed error (attempt ${attempt}/${maxAttempts}): ${msg}`)
+        await new Promise(r => setTimeout(r, baseDelayMs * (2 ** (attempt - 1))))
+      }
+    }
+    throw new Error('unreachable')
+  }
+
   // helper to time embedding calls and update rolling window
   async function timedEmbed(provider: EmbeddingProvider, input: string) {
     const t0 = Date.now()
-    const res = await provider.embed(input)
+    const res = await withRetry(() => provider.embed(input))
     const lat = Date.now() - t0
     pushLatency(lat)
     return res
@@ -411,8 +456,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   if (useBatchPath) {
     // Pipelined batching: overlap read -> embed -> store using AsyncQueue
-    const readQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer }>>()
-    const embedQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer; embedding: Embedding | null }>>()
+    // maxBufferSize=8 bounds memory: producer blocks when 8 batches are queued ahead of the embedder
+    const readQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer }>>({ maxBufferSize: 8 })
+    const embedQueue = new AsyncQueue<Array<{ entry: typeof blobsToProcess[0]; content: Buffer; embedding: Embedding | null }>>({ maxBufferSize: 8 })
 
     // Producer: read batches and push readable items to readQueue
     const producer = (async () => {
@@ -442,11 +488,11 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           }
         }
 
-        if (readable.length > 0) readQueue.push(readable)
+        if (readable.length > 0) await readQueue.pushAsync(readable)
         reportProgress()
       }
       readQueue.close()
-    })()
+    })().catch((err) => readQueue.pushError(err instanceof Error ? err : new Error(String(err))))
 
     // Embedder: consume readQueue, produce embeddings and push to embedQueue
     const embedder = (async () => {
@@ -474,10 +520,10 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         }
 
         const items = readable.map((r, i) => ({ entry: r.entry, content: r.content, embedding: embeddings[i] }))
-        embedQueue.push(items)
+        await embedQueue.pushAsync(items)
       }
       embedQueue.close()
-    })()
+    })().catch((err) => embedQueue.pushError(err instanceof Error ? err : new Error(String(err))))
 
     // Storer: consume embedQueue and store results
     for (;;) {

@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import { getActiveSession } from '../../db/sqlite.js'
 import { embeddings, paths } from '../../db/schema.js'
 import { logger } from '../../../utils/logger.js'
+import { bufferToEmbedding } from '../../../utils/embedding.js'
 import { cosineSimilarity } from '../vectorSearch.js'
 import { enhanceClusters, type EnhancedLabelOptions, type ClusterEnhancerInput } from './labelEnhancer.js'
 
@@ -147,11 +148,6 @@ export interface ClusterTimelineReport {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-function bufferToEmbedding(buf: Buffer): number[] {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
-}
 
 function embeddingToBuffer(vec: number[]): Buffer {
   const f32 = new Float32Array(vec)

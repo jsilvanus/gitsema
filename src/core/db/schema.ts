@@ -80,7 +80,10 @@ export const paths = sqliteTable('paths', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
   path: text('path').notNull(),
-})
+}, (table) => ({
+  // review6 §11.6 / schema v20 — prevent duplicate (blob_hash, path) rows.
+  uniq: uniqueIndex('idx_paths_blob_path_unique').on(table.blobHash, table.path),
+}))
 
 export const commits = sqliteTable('commits', {
   commitHash: text('commit_hash').primaryKey(),
@@ -280,7 +283,8 @@ export const indexingCheckpoints = sqliteTable('indexing_checkpoints', {
 })
 
 export const repoTokens = sqliteTable('repo_tokens', {
-  token: text('token').primaryKey(),
+  tokenHash: text('token_hash').primaryKey(),
+  tokenPrefix: text('token_prefix').notNull(),
   repoId: text('repo_id').notNull().references(() => repos.id, { onDelete: 'cascade' }),
   label: text('label'),
   createdAt: integer('created_at').notNull(),

@@ -1,5 +1,6 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { cosineSimilarity } from './vectorSearch.js'
+import { bufferToEmbedding } from '../../utils/embedding.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../git/branchDiff.js'
 import { computeEvolution } from './evolution.js'
 
@@ -37,11 +38,6 @@ export interface BranchSummaryResult {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-function bufferToEmbedding(buf: Buffer): number[] {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
-}
 
 function meanCentroid(vectors: number[][]): number[] {
   if (vectors.length === 0) return []

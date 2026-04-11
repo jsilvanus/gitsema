@@ -251,7 +251,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `GET /openapi.json` | OpenAPI 3.1 JSON specification (P2) |
 | `GET /docs` | Swagger UI (P2) |
 
-Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`.
+Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`. Per-repo scoped tokens can be minted with `gitsema repos token add <repo-id>` and are stored as **SHA-256 hashes** at rest (review7 §4.1) — the plaintext is never persisted in the database.
 
 ### Operational features (P2)
 
@@ -259,7 +259,8 @@ Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`.
 - **Rate limiting**: per-token when auth is enabled, per-IP otherwise. Returns `429 Too Many Requests` with `Retry-After` header. Configure via `GITSEMA_RATE_LIMIT_RPM` (default 300) and `GITSEMA_RATE_LIMIT_BURST`.
 - **OpenAPI spec** (`GET /openapi.json`): machine-readable OpenAPI 3.1 spec generated from Zod route schemas.
 - **Swagger UI** (`GET /docs`): interactive API explorer loaded from CDN.
-- **Deployment guide**: [`docs/deploy.md`](docs/deploy.md) covers systemd, Docker/Ollama sidecar, secrets, backups, model rotation, and recommended settings.
+- **Deployment guide**: [`docs/deploy.md`](docs/deploy.md) covers systemd, Docker/Ollama sidecar, secrets, backups, model rotation, recommended settings, and team operations (token rotation, audit logging, backup/restore drills).
+- **Playbooks**: [`docs/playbooks.md`](docs/playbooks.md) provides role-based quickstart recipes for solo developers, PR reviewers, security engineers, and release managers.
 
 ---
 

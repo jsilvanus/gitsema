@@ -108,6 +108,37 @@ Commands are organised into groups. See [`docs/features.md`](docs/features.md) f
 
 ---
 
+### Find the right command by goal
+
+Not sure which command to use? Search by what you want to accomplish:
+
+| I want to… | Command(s) |
+|---|---|
+| **Get started — index and search** | `gitsema index start`, `gitsema search "query"` |
+| **See what's indexed / coverage** | `gitsema index`, `gitsema status` |
+| **Find where a concept first appeared** | `gitsema first-seen "query"` |
+| **Track how a file changed semantically over time** | `gitsema file-evolution path/to/file` |
+| **Compare two versions of a file** | `gitsema diff <ref1> <ref2> path/to/file` |
+| **Understand how a concept evolved** | `gitsema evolution "query"` |
+| **Find functions or classes by meaning** | `gitsema code-search "query"` |
+| **Detect when major semantic shifts happened** | `gitsema change-points "query"` |
+| **See which commits diverged most semantically** | `gitsema cluster-diff <ref1> <ref2>` |
+| **Understand who "owns" a concept** | `gitsema author "query"` |
+| **Find stale or dead concepts** | `gitsema dead-concepts` |
+| **Assess code health over time** | `gitsema health`, `gitsema debt` |
+| **Find security-pattern matches** | `gitsema security-scan` |
+| **Review a PR semantically** | `gitsema branch-summary`, `gitsema merge-audit` |
+| **Find refactor candidates** | `gitsema refactor-candidates` |
+| **Find doc coverage gaps** | `gitsema doc-gap` |
+| **Set up a team server** | `gitsema tools serve --port 4242 --key <token>` |
+| **Expose to Claude / AI assistants** | `gitsema tools mcp` |
+| **Search across multiple repos** | `gitsema repos search "query"` |
+| **Add narrated summaries to any output** | Append `--narrate` to most commands |
+
+See [`docs/playbooks.md`](docs/playbooks.md) for role-based recipes (solo dev, PR reviewer, security engineer, release manager).
+
+---
+
 ### Setup & Infrastructure
 
 #### `gitsema status`

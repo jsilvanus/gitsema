@@ -1,5 +1,6 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { cosineSimilarity } from './vectorSearch.js'
+import { bufferToEmbedding } from '../../utils/embedding.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../git/branchDiff.js'
 import {
   computeClusterSnapshot,
@@ -63,11 +64,6 @@ export interface SemanticCollisionReport {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-function bufferToEmbedding(buf: Buffer): number[] {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return Array.from(f32)
-}
 
 /** Computes the unweighted mean centroid of a list of embedding vectors. */
 export function meanCentroid(vectors: number[][]): number[] {

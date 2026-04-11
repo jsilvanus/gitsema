@@ -49,7 +49,7 @@ export interface StoreBlobArgs {
  */
 export function storeBlob(args: StoreBlobArgs): void {
   const { blobHash, size, path, model, embedding, fileType, content } = args
-  const { db, rawDb } = getActiveSession()
+  const { db } = getActiveSession()
 
   const { vector, quantized: qFlag, quantMin: qMin, quantScale: qScale } = serializeEmbedding(embedding, args.quantize)
 
@@ -64,15 +64,18 @@ export function storeBlob(args: StoreBlobArgs): void {
       .onConflictDoNothing()
       .run()
 
+    // §11.6 / schema v20 — (blob_hash, path) is now UNIQUE, so writers can
+    // be called idempotently for the same pair without duplicate rows.
     tx.insert(paths)
       .values({ blobHash, path })
+      .onConflictDoNothing()
       .run()
-  })
 
-  // Upsert into FTS5 table (outside Drizzle transaction — FTS5 does not participate in them)
-  if (content !== undefined) {
-    storeFtsContent(blobHash, content)
-  }
+    // FTS5 inside the same transaction so blob + FTS5 content are always atomic
+    if (content !== undefined) {
+      storeFtsContent(blobHash, content)
+    }
+  })
 
   invalidateResultCache()
 }
@@ -102,14 +105,17 @@ export function storeBlobRecord(args: StoreBlobRecordArgs): void {
       .onConflictDoNothing()
       .run()
 
+    // §11.6 / schema v20 — (blob_hash, path) is UNIQUE; make this call idempotent.
     tx.insert(paths)
       .values({ blobHash, path })
+      .onConflictDoNothing()
       .run()
-  })
 
-  if (content !== undefined) {
-    storeFtsContent(blobHash, content)
-  }
+    // FTS5 inside the same transaction so blob + FTS5 content are always atomic
+    if (content !== undefined) {
+      storeFtsContent(blobHash, content)
+    }
+  })
 }
 
 /**

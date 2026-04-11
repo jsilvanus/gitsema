@@ -5,9 +5,11 @@ import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import type { Embedding, SearchResult, SearchResultKind } from '../../models/types.js'
 import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from '../temporal/timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../../embedding/quantize.js'
-import { getCachedResults, setCachedResults, buildCacheKey, embeddingFingerprint } from './resultCache.js'
+import { getCachedResults, setCachedResults, buildCacheKey, embeddingFingerprint, allowedHashesFingerprint } from './resultCache.js'
+import { bufferToFloat32 } from '../../../utils/embedding.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { logger } from '../../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
 // HNSW / ANN search support
@@ -88,7 +90,9 @@ export async function annSearch(
       if (id >= 0 && id < idToHash.length) hashes.push(idToHash[id])
     }
     return hashes
-  } catch {
+  } catch (e) {
+    // Emit structured warning so operators can detect ANN index health issues (review7 §4.3).
+    logger.warn(`[ANN] search failed for model "${model}" — falling back to exact search. Reason: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
 }
@@ -123,11 +127,6 @@ export function cosineSimilarityPrecomputed(a: Embedding, aMag: number, b: Embed
   return denom === 0 ? 0 : dot / denom
 }
 
-function bufferToEmbedding(buf: Buffer): Float32Array {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return f32
-}
-
 type CandidateRow = {
   blobHash: string; vector: Buffer
   quantized?: number | null; quantMin?: number | null; quantScale?: number | null
@@ -141,7 +140,7 @@ function rowToEmbedding(row: CandidateRow): Float32Array {
     const q = deserializeQuantized(row.vector, row.quantMin, row.quantScale)
     return dequantizeVector(q)
   }
-  return bufferToEmbedding(row.vector)
+  return bufferToFloat32(row.vector)
 }
 
 export function pathRelevanceScore(query: string, filePath: string): number {
@@ -186,11 +185,33 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     queryText, noCache = false, allowedHashes,
   } = options
 
+  // Per-mode row caps to prevent memory spikes on large indexes (review7 §4.4/§4.5).
+  const FILE_CAP = (() => {
+    const raw = process.env.GITSEMA_FILE_CAP; const n = raw ? parseInt(raw, 10) : NaN
+    return Number.isFinite(n) && n > 0 ? n : 50_000
+  })()
+  const CHUNK_CAP = (() => {
+    const raw = process.env.GITSEMA_CHUNK_CAP; const n = raw ? parseInt(raw, 10) : NaN
+    return Number.isFinite(n) && n > 0 ? n : 25_000
+  })()
+  const SYMBOL_CAP = (() => {
+    const raw = process.env.GITSEMA_SYMBOL_CAP; const n = raw ? parseInt(raw, 10) : NaN
+    return Number.isFinite(n) && n > 0 ? n : 25_000
+  })()
+  const MODULE_CAP = (() => {
+    const raw = process.env.GITSEMA_MODULE_CAP; const n = raw ? parseInt(raw, 10) : NaN
+    return Number.isFinite(n) && n > 0 ? n : 5_000
+  })()
+
   const cacheKeyOptions: Record<string, unknown> = {
     topK, model, recent, alpha, before, after,
     weightVector, weightRecency, weightPath, query,
     searchChunks, searchSymbols, searchModules, branch,
     negativeLambda, explain, earlyCut,
+    // §11.1 — include a deterministic fingerprint of allowedHashes so that
+    // two calls with the same query but different filter sets (e.g. different
+    // branch scopes) don't collide on the same cache entry.
+    allowedHashes: allowedHashesFingerprint(allowedHashes),
   }
   const cacheKey = buildCacheKey(
     queryText ?? embeddingFingerprint(queryEmbedding),
@@ -208,7 +229,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
   const wTotal = wv + wr + wp || 1
 
   const { db, rawDb } = getActiveSession()
-  const AUTO_CANDIDATE_LIMIT = 50_000
+  const AUTO_CANDIDATE_LIMIT = FILE_CAP
 
   const baseQuery = db.select({
     blobHash: embeddings.blobHash,
@@ -257,7 +278,13 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     const chunkConditions: SQL[] = []
     if (model) chunkConditions.push(eq(chunkEmbeddings.model, model))
     if (branch) chunkConditions.push(sql`${chunks.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
-    const chunkRows = chunkConditions.length > 0 ? chunkQuery.where(and(...chunkConditions)).all() : chunkQuery.all()
+    // Apply SQL-level cap before JS materialization (review7 §4.4).
+    const chunkQueryWithCap = (chunkConditions.length > 0 ? chunkQuery.where(and(...chunkConditions)) : chunkQuery)
+      .limit(CHUNK_CAP)
+    const chunkRows = chunkQueryWithCap.all()
+    if (chunkRows.length >= CHUNK_CAP) {
+      logger.warn(`[vectorSearch] chunk candidate pool hit cap (${CHUNK_CAP}); results may be incomplete. Set GITSEMA_CHUNK_CAP to raise the limit.`)
+    }
 
     for (const row of chunkRows) {
       candidatePool.push({
@@ -294,7 +321,13 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     const symConditions: SQL[] = []
     if (model) symConditions.push(eq(symbolEmbeddings.model, model))
     if (branch) symConditions.push(sql`${symbols.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
-    const symRows = symConditions.length > 0 ? symQuery.where(and(...symConditions)).all() : symQuery.all()
+    // Apply SQL-level cap before JS materialization (review7 §4.4).
+    const symQueryWithCap = (symConditions.length > 0 ? symQuery.where(and(...symConditions)) : symQuery)
+      .limit(SYMBOL_CAP)
+    const symRows = symQueryWithCap.all()
+    if (symRows.length >= SYMBOL_CAP) {
+      logger.warn(`[vectorSearch] symbol candidate pool hit cap (${SYMBOL_CAP}); results may be incomplete. Set GITSEMA_SYMBOL_CAP to raise the limit.`)
+    }
 
     for (const row of symRows) {
       candidatePool.push({
@@ -320,9 +353,14 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
       vector: moduleEmbeddings.vector,
     }).from(moduleEmbeddings)
 
-    const modRows = (model
+    // Apply SQL-level cap before JS materialization (review7 §4.4).
+    const modQueryWithCap = (model
       ? modQuery.where(eq(moduleEmbeddings.model, model))
-      : modQuery).all()
+      : modQuery).limit(MODULE_CAP)
+    const modRows = modQueryWithCap.all()
+    if (modRows.length >= MODULE_CAP) {
+      logger.warn(`[vectorSearch] module candidate pool hit cap (${MODULE_CAP}); results may be incomplete. Set GITSEMA_MODULE_CAP to raise the limit.`)
+    }
 
     for (const row of modRows) {
       candidatePool.push({

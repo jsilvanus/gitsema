@@ -1,10 +1,11 @@
 import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { runIndex } from '../../core/indexing/indexer.js'
 import { DEFAULT_MAX_SIZE } from '../../core/git/showBlob.js'
 
-export function registerInfrastructureTools(server: any) {
+export function registerInfrastructureTools(server: McpServer) {
   registerTool(
     server,
     'index',

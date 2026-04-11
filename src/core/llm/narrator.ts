@@ -49,31 +49,62 @@ function resolveLlmUrl(): { parsedUrl: URL; model: string; apiKey: string } | { 
 /** Call the chat completion endpoint with a prompt. */
 async function callLlm(parsedUrl: URL, model: string, apiKey: string, prompt: string, maxTokens = 300): Promise<string> {
   const endpoint = new URL('/v1/chat/completions', parsedUrl).toString()
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: maxTokens,
-      temperature: 0.3,
-    }),
-  })
-  if (!response.ok) {
-    const errText = await response.text()
-    throw new Error(`HTTP ${response.status} — ${errText.slice(0, 100)}`)
+  const timeoutMs = (() => {
+    const raw = process.env.GITSEMA_LLM_TIMEOUT
+    if (raw) { const n = parseInt(raw, 10); if (Number.isFinite(n) && n > 0) return n * 1000 }
+    return 30_000
+  })()
+  const maxRetries = (() => {
+    const raw = process.env.GITSEMA_LLM_RETRIES
+    if (raw) { const n = parseInt(raw, 10); if (Number.isFinite(n) && n >= 0) return n }
+    return 1
+  })()
+
+  async function attempt(attemptsLeft: number): Promise<string> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    let response: Response
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: maxTokens,
+          temperature: 0.3,
+        }),
+        signal: controller.signal,
+      })
+    } catch (e) {
+      clearTimeout(timer)
+      const isTimeout = e instanceof Error && e.name === 'AbortError'
+      if (isTimeout && attemptsLeft > 0) {
+        return attempt(attemptsLeft - 1)
+      }
+      throw isTimeout
+        ? new Error(`LLM request timed out after ${timeoutMs / 1000}s (degraded mode)`)
+        : e
+    }
+    clearTimeout(timer)
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`HTTP ${response.status} — ${errText.slice(0, 100)}`)
+    }
+    const data = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>
+      error?: { message?: string }
+    }
+    if (data.error) throw new Error(data.error.message ?? 'unknown error')
+    const content = data.choices?.[0]?.message?.content?.trim()
+    if (!content) throw new Error('empty response from LLM')
+    return content
   }
-  const data = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>
-    error?: { message?: string }
-  }
-  if (data.error) throw new Error(data.error.message ?? 'unknown error')
-  const content = data.choices?.[0]?.message?.content?.trim()
-  if (!content) throw new Error('empty response from LLM')
-  return content
+
+  return attempt(maxRetries)
 }
 
 // ---------------------------------------------------------------------------

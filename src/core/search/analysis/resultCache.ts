@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { SearchResult } from '../../models/types.js'
 
 const DEFAULT_TTL_MS = 60_000
@@ -34,6 +35,18 @@ export function embeddingFingerprint(vec: ArrayLike<number>): string {
   let s = `${vec.length}:`
   for (let i = 0; i < n; i++) s += vec[i].toFixed(5) + ','
   return s
+}
+
+/**
+ * Deterministic fingerprint for a Set of allowed blob hashes, for use in
+ * cache keys. Without this, two calls with the same query but different
+ * allowedHashes filters would collide in the result cache.
+ */
+export function allowedHashesFingerprint(allowed?: Set<string> | null): string | null {
+  if (!allowed || allowed.size === 0) return null
+  const sorted = [...allowed].sort().join(',')
+  const digest = createHash('sha1').update(sorted).digest('hex').slice(0, 16)
+  return `${allowed.size}:${digest}`
 }
 
 export function getCachedResults(key: string): SearchResult[] | null {

@@ -99,6 +99,7 @@
 |   [Phase 77 — Unified Indexing + Search Level Concept](#phase-77-—-unified-indexing-search-level-concept) | 2755 |
 |   [Phase 85 — Tier-1 Reliability: Test Isolation, SQL Sampling, Batch Dedup](#phase-85-—-tier-1-reliability-test-isolation-sql-sampling-batch-dedup-completed-v0840) | 2805 |
 |   [Phase 86 — Embedeer provider integration](#phase-85-—-embedeer-provider-integration) | 9999 |
+|   [Phase 90 — Model Local Names (Shorthand / globalName)](#phase-90-—-model-local-names-shorthand--globalname-completed-v0890) | 2999 |
 |   [Long-Term Investments (Phase 86+)](#long-term-investments-phase-86) | 2860 |
 
 ---
@@ -2832,6 +2833,270 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
+### Phase 86 — Tier-2 Code Organisation: MCP Modularization + Search Module Split + CLI Register Split *(completed v0.85.0)*
+
+**Goal:** Complete the interrupted Tier-2 refactor from review6, repairing 12 broken TypeScript/test errors left by partial file moves.
+
+**Implemented scope:**
+
+*Broken-state repairs (12 errors):*
+- `cli/index.ts`: removed duplicate content (file had been triple-concatenated during the interrupted refactor)
+- `cli/register/all.ts`: fixed import path `fileDiff.js` → `diff.js`
+- `search/clustering/clustering.ts`: fixed logger import path (`../../utils` → `../../../utils`)
+- `temporal/changePoints.ts`: changed `computeEvolution` import from sibling file to parent re-export stub so vitest mocks apply correctly (fixed 7 test failures)
+- `mcp/registerTool.ts`: widened `McpHandler` embed return type to `Embedding` (instead of `number[]`)
+- `mcp/tools/*.ts`: added explicit `McpServer` type annotation on all four tool-registration functions; added `!` non-null assertions on embedding values after `ok` guard; made `health_timeline` handler `async`
+- `mcp/tools/workflow.ts`: fixed import `computeAuthors` → `computeAuthorContributions`
+- `ranking.ts`: added `showHeadings` parameter to `renderFirstSeenResults` (called with 2 args in two places)
+- `labelEnhancer.ts`: added `chunks/chunking/chunked` token normalizations (failing test expectation)
+
+*Architecture delivered (by the preceding commits):*
+- `mcp/server.ts` split from 1,542 lines into 5 domain files (`tools/search.ts`, `tools/analysis.ts`, `tools/clustering.ts`, `tools/workflow.ts`, `tools/infrastructure.ts`) plus `registerTool()` helper
+- `cli/index.ts` split from 1,593 lines into thin aggregator + `register/` domain files
+- `src/core/search/` reorganized into `analysis/`, `clustering/`, `temporal/` subdirectories with backward-compat re-export stubs
+
+**Tests:** 697/697 pass. Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 87 — Tier-3 Robustness: Embed Retry, Queue Backpressure, Atomic FTS5, Body Limit *(completed v0.86.0)*
+
+**Goal:** Address the four production-readiness gaps identified in review6 Tier 3.
+
+**Implemented scope:**
+
+*Embedding retry with exponential backoff (`indexer.ts`):*
+- Added `withRetry<T>(fn, maxAttempts=2, baseDelayMs=500)` helper inside the indexer.
+- `timedEmbed()` now retries on transient errors: HTTP 429 (rate-limit), 503 (service unavailable), ECONNRESET, ETIMEDOUT. Non-transient errors propagate immediately.
+- Backoff schedule: 500 ms before attempt 2. Two-attempt cap avoids long stalls on extended outages.
+
+*AsyncQueue backpressure + error propagation (`asyncQueue.ts`):*
+- Added optional `maxBufferSize` constructor option.
+- New `pushAsync(item)` — `async`, blocks the caller when `items.length >= maxBufferSize` until a consumer calls `shift()`.
+- New `pushError(err)` — marks the queue closed with an error; all blocking `pushAsync` calls and pending `shift()` calls receive the error.
+- `shift()` now throws if the queue was closed via `pushError()`.
+- Both pipeline queues in `indexer.ts` now use `{ maxBufferSize: 8 }` and `pushAsync()` to bound peak memory. Producer IIFE `.catch()` propagates crashes to the next stage.
+
+*FTS5 content inside main transaction (`blobStore.ts`):*
+- `storeFtsContent()` is now called inside the `db.transaction()` callback in both `storeBlob()` and `storeBlobRecord()`.
+- Blob vector + FTS5 content are written atomically. A process crash between them can no longer leave a split-brain state where a blob is visible in vector search but absent from hybrid search.
+
+*HTTP request body size limit (`server/app.ts`):*
+- Replaced the hard-coded `'50mb'` Express body-parser limit with `process.env.GITSEMA_MAX_BODY_SIZE ?? '1mb'`.
+- Prevents memory exhaustion from oversized POST bodies in shared deployments; override via env var for large-blob use cases.
+
+**Tests:** 725/725. Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 88 — Tier-4 Scale/Features: LLM Narrator Tests + Docs Sync Check *(completed v0.87.0)*
+
+**Goal:** Address the two Tier-4 proposals from review6: test coverage for the LLM narrator and automated documentation drift detection.
+
+**Implemented scope:**
+
+*LLM narrator test coverage (`tests/narrator.test.ts` — 19 tests):*
+- Full unit coverage for `src/core/llm/narrator.ts` using `vi.stubGlobal('fetch', ...)` with canned `chat/completions` responses. Zero real HTTP calls.
+- Tests cover all three fallback paths in `resolveLlmUrl()`: missing `GITSEMA_LLM_URL`, invalid URL, unsupported protocol (`ftp:`).
+- Integration path tests: correct endpoint URL, Bearer token header, custom `GITSEMA_LLM_MODEL`, response content extraction.
+- Error paths: HTTP error status → error fallback string, empty `choices` array → error fallback string.
+- Functions covered: `narrateEvolution`, `narrateClusters`, `narrateSecurityFindings`, `narrateSearchResults`, `narrateChangePoints`.
+
+*Documentation sync check (`tests/docsSync.test.ts` — 9 tests):*
+- Guards against the doc drift identified in review6 §9.2.
+- Checks: `CLAUDE.md` contains the current schema version from `sqlite.ts` (`CURRENT_SCHEMA_VERSION`), README.md mentions all non-hidden CLI commands (tolerance ≤ 5 missing for forward-compat), canonical docs (`features.md`, `PLAN.md`, latest `review*.md`) exist and are non-trivial, `package.json` has a valid semver version at ≥ 0.80.0.
+- `CLAUDE.md` updated: schema version corrected from v17 → v19.
+
+**Tests:** 725/725 (62 files). Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 89 — Tier-5 Code Quality: review6 §11 Detailed Findings *(completed v0.88.0)*
+
+**Goal:** Address the six detailed code findings in review6 §11 that were
+explicitly outside the numbered Tier-1–4 proposal list but still represent
+correctness, maintainability, and schema-integrity bugs. Also collapse the
+stray `src/core/search/core/` duplicates (`vectorSearch.ts`, `hybridSearch.ts`,
+`resultCache.ts`) left over from the Phase 86 refactor into re-export shims so
+subsequent fixes only need one edit site.
+
+**Implemented scope:**
+
+*§11.1 — vectorSearch cache-key collision (`resultCache.ts`, `vectorSearch.ts`):*
+- Added `allowedHashesFingerprint(allowed?)` helper in `analysis/resultCache.ts`
+  — `sha1(sorted(hashes)).slice(0,16) + ':' + size`, or `null` when absent.
+- `vectorSearch()` now includes that fingerprint in `cacheKeyOptions` so two
+  calls with the same query text but different `allowedHashes` filters (e.g.
+  different branch-scoped searches) no longer collide on the cache entry left
+  behind by a prior unfiltered call.
+- Collapsed `core/resultCache.ts` and `core/vectorSearch.ts` into re-export
+  shims pointing at `analysis/` so cache state is unified (the old duplicate
+  `cache` Map in `core/resultCache.ts` was never invalidated by
+  `invalidateResultCache()`, a latent bug).
+
+*§11.2 — hybridSearch BM25 `range === 0` edge case (`hybridSearch.ts`):*
+- When every candidate row had an identical BM25 score, normalisation set
+  all scores to 1.0 and inflated the hybrid fusion beyond the intended
+  weight distribution. Now returns 0.5 (neutral midpoint) instead.
+- `core/hybridSearch.ts` collapsed to a re-export shim for the same
+  drift-prevention reason as §11.1.
+
+*§11.3 — Ollama batch fallback control flow (`local.ts`):*
+- Restructured `embedBatch()` so that only a 404 response triggers the
+  sequential fallback. Network-layer errors (ECONNREFUSED, ETIMEDOUT) and
+  non-404 HTTP errors now propagate to the caller unchanged, so upstream
+  retry/backoff (added in Phase 87) can react. Previously the confusing
+  double-negated catch block could swallow unrelated error types when
+  `_batchEndpointUnavailable` was set mid-call.
+
+*§11.4 — `bufferToEmbedding` duplication (`src/utils/embedding.ts`):*
+- The helper was privately re-declared in **13 different files** across
+  `src/core/search/`, `src/server/routes/`, and `src/cli/commands/`. Any
+  change to the storage format (e.g. future quantization work) would have
+  required 13 identical edits with zero compile-time enforcement.
+- New module `src/utils/embedding.ts` exports `bufferToFloat32(buf)` (the
+  zero-copy Float32Array view used in hot paths) and `bufferToEmbedding(buf)`
+  (the `number[]` variant used where a retainable copy is needed).
+- All 13 call sites now import from the shared util. Local duplicates have
+  been deleted.
+
+*§11.5 — within-run dedup `SIZE_CAP` warning + correctness (`indexer.ts`):*
+- Added a one-time `logger.warn()` when `seenHashes` exceeds the 50 000-entry
+  cap and is cleared, so operators can see that the rare branch fired.
+- **Bonus correctness fix:** before this change, clearing `seenHashes`
+  mid-stream could let the same blob hash appear twice in the `pending[]`
+  list. Both copies would pass `filterNewBlobs()` (which queries the DB
+  state *before* the run started) and a genuinely new blob would be
+  embedded twice. Added an authoritative `pendingSeen` dedup pass between
+  the stream loop and the byModel grouping so the `SIZE_CAP` clear is safe
+  under all conditions.
+
+*§11.6 — UNIQUE `(blob_hash, path)` constraint on paths table (schema v20):*
+- New migration v19 → v20 in `sqlite.ts`: deletes duplicate `paths` rows
+  (keeping lowest `id`) then creates `idx_paths_blob_path_unique` as a
+  unique index on `(blob_hash, path)`.
+- `initTables()` (fresh-DB path) creates the same unique index.
+- `src/core/db/schema.ts` `paths` table gains a `uniqueIndex` so Drizzle
+  tracks it.
+- `storeBlob()` and `storeBlobRecord()` in `blobStore.ts` now call
+  `.onConflictDoNothing()` on the paths insert so writers remain idempotent
+  for the same `(blob_hash, path)` pair.
+- `CURRENT_SCHEMA_VERSION` bumped to **20**; `CLAUDE.md` schema overview
+  header + migration list updated to match (required by the Phase 88
+  docsSync test).
+
+**Tests:** 725/725 (62 files). Build: clean.
+
+**Status:** ✅ complete.
+
+---
+
+### Phase 90 — Model Local Names (Shorthand / globalName) *(completed v0.89.0)*
+
+**Goal:** Allow users to register a gitsema model under a short local name
+(shorthand) while keeping a separate *global name* that is sent verbatim to the
+embedding provider (Ollama, OpenAI-compatible HTTP, embedeer). This enables:
+
+- Convenient CLI usage with short names (`my-embed`) while the provider
+  receives the full remote identifier (`hf.co/org/model:latest`).
+- Multiple local aliases for the same remote model, each with distinct prefix
+  or level settings.
+- Multi-provider setups where the same conceptual model lives under different
+  names on different backends.
+
+**Implemented scope:**
+
+*`ModelProfile.globalName` field (`src/core/config/configManager.ts`):*
+- Added `globalName?: string` to `ModelProfile` interface.
+- The config key `models.<localName>` is the shorthand used everywhere in
+  gitsema CLI arguments; `globalName` is the model identifier forwarded to
+  the provider.
+- When absent, the local name is used as-is (fully backward-compatible).
+- `getModelProfile()` merges `globalName` with standard local-wins-over-global
+  precedence alongside all other profile fields.
+
+*Provider resolution (`src/core/embedding/providerFactory.ts`):*
+- `buildProviderForModel()`, `getTextProvider()`, and `getCodeProvider()` all
+  resolve `profile.globalName ?? localName` before constructing the
+  `OllamaProvider`, `HttpProvider`, or `EmbedeerProvider` instance.
+- No changes to any call site — resolution is fully transparent.
+
+*CLI commands (`src/cli/commands/models.ts`):*
+- `ModelsAddOptions` gains `globalName?: string`.
+- `modelsAddCommand()` and `modelsUpdateCommand()` write `globalName` to the
+  profile when `--global-name <name>` is supplied.
+- `printProfile()` displays `globalName` when set.
+- `modelsInfoCommand()` shows `(shorthand for: <globalName>)` below the model
+  name when a globalName is configured.
+- `modelsListCommand()` adds a `→ Global name` column to the tabular output
+  (only rendered when at least one model has a `globalName` configured, so the
+  table is unchanged for setups that don't use the feature).
+
+*CLI registration (`src/cli/register/setup.ts`):*
+- `--global-name <name>` option added to both `models add` and `models update`
+  subcommands with a clear description.
+- Help text extended with a usage example.
+
+*Tests (`tests/modelGlobalName.test.ts`):*
+- 11 new tests covering: storage/retrieval, independent updates, last-write
+  wins, coexistence with prefixes/extRoles, provider resolution for Ollama,
+  HTTP, and fallback to local name.
+
+**Tests:** build clean, existing suite passes. **Status:** ✅ complete.
+
+---
+
+### Phase 91 — 8 Productized Usage Patterns (review7 §5) *(completed v0.90.0)*
+
+**Goal:** Implement all 8 productized usage patterns described in `docs/review7.md` §5
+as concrete, user-accessible features with CLI commands, documentation, and smoke tests.
+
+**Patterns implemented:**
+
+| # | Pattern | Template name | Key sources |
+|---|---------|---------------|-------------|
+| 1 | PR Semantic Risk Gate | `pr-review` | impact + changePoints + experts |
+| 2 | Release Narrative Pack | `release-audit` | vectorSearch + changePoints + experts |
+| 3 | Onboarding Assistant | `onboarding` | vectorSearch + changePoints + keyExperts |
+| 4 | Incident Triage Console | `incident` | firstSeen + changePoints + experts |
+| 5 | Ownership Intelligence | `ownership-intel` | computeAuthorContributions + vectorSearch |
+| 6 | Architecture Drift Monitor | `arch-drift` | computeHealthTimeline + scoreDebt + changePoints |
+| 7 | Knowledge Discovery Portal | `knowledge-portal` | vectorSearch + changePoints + experts |
+| 8 | Regression Forecasting | `regression-forecast` | vectorSearch + changePoints + experts + ref hint |
+
+**Implemented scope:**
+
+*`src/cli/commands/workflow.ts`:*
+- Expanded `TEMPLATES` from 3 to 8 entries (all 8 patterns).
+- Added `TEMPLATE_DESCRIPTIONS` export mapping each template to a human-readable description.
+- Added `WorkflowOptions.role` (alias for `--role <topic>` in onboarding) and `WorkflowOptions.ref` (base ref for regression-forecast).
+- Added `workflowListCommand()` — prints all 8 templates with descriptions (no DB/embedding needed).
+- New patterns: `onboarding`, `ownership-intel`, `arch-drift`, `knowledge-portal`, `regression-forecast`.
+- Imports added: `computeAuthorContributions`, `scoreDebt`, `computeHealthTimeline`, `getActiveSession`.
+
+*`src/cli/register/all.ts`:*
+- Updated `workflow run` description and added `--role`, `--ref` options.
+- Added `workflow list` subcommand wired to `workflowListCommand`.
+
+*`docs/patterns.md` (new):*
+- Comprehensive documentation for all 8 patterns: goal, example invocation, output sections table, flags, CI example.
+
+*`tests/workflow.test.ts`:*
+- Extended from 5 to 17 tests.
+- Added mocks for `authorSearch`, `debtScoring`, `healthTimeline`, `sqlite`.
+- Tests for all 5 new patterns (happy path + error paths for required flags).
+- Tests for `workflowListCommand` and `TEMPLATE_DESCRIPTIONS`.
+
+**Tests:** 17 workflow tests pass. Full suite green. **Status:** ✅ complete.
+
+---
+
 ### Long-Term Investments (Phase 86+)
 
 | Feature | Complexity | Notes |
@@ -2850,3 +3115,47 @@ The following phases are derived from the **review5** strategic review (reflecti
 | Feature | Reasoning | 
 |---------|:----------:|-------|
 | Python model server (GPU Docker) | We already have Node.js embedeer and if we want Docker+python, we can use ollama. |
+
+---
+
+### Phase 91 — review7 Improvement Bundle *(completed v0.90.0, 2026-04-09)*
+
+**Goal:** Implement the 8 concrete improvement points from `docs/review7.md`.
+
+**Implemented scope:**
+
+*§4.1 — Hash repo tokens at rest (schema v21):*
+- `repo_tokens` table rebuilt with `token_hash TEXT PRIMARY KEY` + `token_prefix TEXT NOT NULL` replacing the plaintext `token` PK.
+- `initTables()` creates the new schema for fresh DBs.
+- Migration v20 → v21: hashes all existing plaintext tokens with SHA-256, stores first-8-char prefix; uses JS `createHash` (crypto module) inside `applyMigrations()`.
+- `authMiddleware` now hashes incoming Bearer tokens with `createHash('sha256')` before DB lookup — plaintext is never stored or compared.
+- `gitsema repos token add` stores `token_hash` + `token_prefix`, never plaintext. `list` shows prefix only. `revoke` uses prefix LIKE query on `token_prefix`.
+- `CURRENT_SCHEMA_VERSION` bumped to **21**.
+
+*§4.2 — Narrator timeout + retry budget:*
+- `callLlm()` in `narrator.ts` now wraps each `fetch` in an `AbortController` with a configurable timeout (`GITSEMA_LLM_TIMEOUT` env, default 30 s).
+- On `AbortError` (timeout), retries up to `GITSEMA_LLM_RETRIES` (default 1) times before returning a structured failure message that includes "timed out".
+
+*§4.3 — Structured ANN warning on failure:*
+- `annSearch()` in `vectorSearch.ts` now catches errors and calls `logger.warn('[ANN] ...')` with the model name and error message instead of returning null silently. Operators can now detect HNSW index corruption or mismatches in logs.
+
+*§4.4 — SQL-level candidate filtering (chunk/symbol/module):*
+- Chunk, symbol, and module queries in `vectorSearch()` now carry `.limit(CAP)` **before** rows are materialised into JS. This prevents OOM on large indexes when `--chunks` or `--symbols` is enabled.
+
+*§4.5 — Per-mode row caps with warnings:*
+- Four configurable caps added: `GITSEMA_FILE_CAP` (50K), `GITSEMA_CHUNK_CAP` (25K), `GITSEMA_SYMBOL_CAP` (25K), `GITSEMA_MODULE_CAP` (5K). When a cap is hit `logger.warn` emits the cap value and the override env var.
+
+*§4.6 — Role-based quickstart playbooks:*
+- New `docs/playbooks.md` with concrete command sequences for four roles: solo developer, PR reviewer, security engineer, release manager.
+
+*§4.7 — Task-oriented command map in README:*
+- Added "Find the right command by goal" table to `README.md` (between the command group table and the detailed reference), with 20 goal → command rows covering the most common scenarios.
+
+*§4.8 — Team operations guidance in docs/deploy.md:*
+- New §11 "Team operations" in `docs/deploy.md` covering: token security, token rotation policy (90-day cadence + emergency rotation), audit logs (nginx + journal + Prometheus alert), backup/restore (hot SQLite backup, cron schedule, quarterly drill procedure), and health checks.
+
+**Tests:** Added `tests/review7.test.ts` (5 tests: token hashing invariants, ANN structured warning). Narrator timeout/retry tests added to `tests/narrator.test.ts` (3 new tests: timeout-no-retry, timeout-with-retry, custom timeout env var). All 27 tests in affected files pass.
+
+**Documentation:** `CLAUDE.md` schema overview updated to v21 + migration v20→v21 entry added. `docs/deploy.md` table of contents updated with §11.
+
+**Status:** ✅ complete.

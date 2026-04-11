@@ -1,9 +1,10 @@
 import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
 import { computeClusters, computeClusterSnapshot, compareClusterSnapshots, computeClusterTimeline, resolveRefToTimestamp, getBlobHashesUpTo } from '../../core/search/clustering.js'
 import { parseDateArg } from '../../core/search/timeSearch.js'
 
-export function registerClusteringTools(server: any) {
+export function registerClusteringTools(server: McpServer) {
   registerTool(
     server,
     'clusters',

@@ -11,7 +11,7 @@ The latest review is here. Do not edit the review file, but update that file wit
 
 | Document | Purpose |
 |---|---|
-| [`docs/review6.md`](docs/review6.md) | Latest strategic review: architecture maturity, scale readiness, test health, remaining gaps |
+| [`docs/review7.md`](docs/review7.md) | Latest strategic review: security, scale/OOM risk, accessibility, and product readiness |
 
 When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.
@@ -282,7 +282,7 @@ gitsema index
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
 
-**Schema overview (current schema v17):**
+**Schema overview (current schema v21):**
 
 | Table | Purpose |
 |---|---|
@@ -316,7 +316,11 @@ gitsema index
 - … (v3–v13: symbols, commit embeddings, clustering, module embeddings, provenance, HNSW quantization columns)
 - v13 → v14: Added `repos` table for multi-repo registry (Phase 41)
 - v14 → v17: Added `projections`, `saved_queries`, and related tables (Phases 53–55)
-- **Current version: 17**
+- v17 → v18: Added `repo_tokens` table for per-repo access control (Phase 75)
+- v18 → v19: Added `embed_config` table for embedding provenance (Phase 80+)
+- v19 → v20: Added `UNIQUE (blob_hash, path)` index on `paths` table (review6 §11.6 / Phase 89)
+- v20 → v21: Hashed repo tokens at rest — `token_hash` + `token_prefix` replace plaintext `token` in `repo_tokens` (review7 §4.1)
+- **Current version: 21**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

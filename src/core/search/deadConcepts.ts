@@ -4,6 +4,7 @@ import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
 import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
+import { bufferToFloat32 as bufferToEmbedding } from '../../utils/embedding.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -41,12 +42,6 @@ export interface DeadConceptResult {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-/** Deserializes a Float32Array stored as a Buffer back to Float32Array. */
-function bufferToEmbedding(buf: Buffer): Float32Array {
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
-  return f32
-}
 
 /**
  * Returns the set of blob hashes currently reachable from HEAD via

@@ -1,16 +1,16 @@
 import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
 import { getTextProvider } from '../../core/embedding/providerFactory.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { computeConceptChangePoints } from '../../core/search/changePoints.js'
-import { computeExperts } from '../../core/search/experts.js'
-import { computeImpact } from '../../core/search/impact.js'
 import { computeExperts as computeExpertsAlias } from '../../core/search/experts.js'
+import { computeImpact } from '../../core/search/impact.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 
-export function registerWorkflowTools(server: any) {
+export function registerWorkflowTools(server: McpServer) {
   // triage
   registerTool(
     server,
@@ -25,7 +25,7 @@ export function registerWorkflowTools(server: any) {
       const provider = getTextProvider()
       const eRes = await embed(provider, query, 'Error embedding query')
       if (!eRes.ok) return eRes.resp
-      const emb = eRes.embedding
+      const emb = eRes.embedding!
       const sections: Record<string, unknown> = {}
       try { sections.firstSeen = vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
       try { sections.changePoints = computeConceptChangePoints(query, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
@@ -64,7 +64,7 @@ export function registerWorkflowTools(server: any) {
         const q = query ?? file ?? 'code changes'
         const eRes = await embed(provider, q, 'Error embedding query')
         if (!eRes.ok) return eRes.resp
-        const emb = eRes.embedding
+        const emb = eRes.embedding!
         if (file) {
           try { sections.impact = await computeImpact(file, provider, { topK: top }) } catch (e) { sections.impact = [] }
         }
@@ -74,7 +74,7 @@ export function registerWorkflowTools(server: any) {
         const q = query ?? ''
         const eRes = await embed(provider, q, 'Error embedding query')
         if (!eRes.ok) return eRes.resp
-        const emb = eRes.embedding
+        const emb = eRes.embedding!
         try { sections.firstSeen = vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
         try { sections.changePoints = computeConceptChangePoints(q, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
         try { sections.experts = computeExpertsAlias({ topN: top }) } catch (e) { sections.experts = [] }
@@ -82,7 +82,7 @@ export function registerWorkflowTools(server: any) {
         const q = query ?? 'architecture changes quality'
         const eRes = await embed(provider, q, 'Error embedding query')
         if (!eRes.ok) return eRes.resp
-        const emb = eRes.embedding
+        const emb = eRes.embedding!
         try { sections.topChangedConcepts = vectorSearch(emb, { topK: top }) } catch (e) { sections.topChangedConcepts = [] }
         try { sections.changePoints = computeConceptChangePoints(q, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
         try { sections.experts = computeExpertsAlias({ topN: top }) } catch (e) { sections.experts = [] }
@@ -141,7 +141,7 @@ export function registerWorkflowTools(server: any) {
         try {
           const eRes = await embed(provider, query, 'Error embedding query')
           if (!eRes.ok) return eRes.resp
-          const emb = eRes.embedding
+          const emb = eRes.embedding!
           const cps = computeConceptChangePoints(query, emb, { topK: 50 })
           const maxDist = cps.points.length > 0 ? Math.max(...cps.points.map((c) => c.distance)) : 0
           const passed = maxDist <= max_drift

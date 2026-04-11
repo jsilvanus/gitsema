@@ -4,6 +4,7 @@ import { embeddings, paths, blobCommits, commits, symbols, symbolEmbeddings } fr
 import { eq, inArray } from 'drizzle-orm'
 import { cosineSimilarity, getBranchBlobHashSet } from '../core/vectorSearch.js'
 import { getFirstSeenMap } from './timeSearch.js'
+import { bufferToFloat32 as bufferToEmbedding } from '../../../utils/embedding.js'
 import type { Embedding } from '../../models/types.js'
 
 export interface EvolutionEntry {
@@ -12,10 +13,6 @@ export interface EvolutionEntry {
   timestamp: number
   distFromPrev: number
   distFromOrigin: number
-}
-
-function bufferToEmbedding(buf: Buffer): Float32Array {
-  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
 }
 
 function cosineDistance(a: Embedding, b: Embedding): number {

@@ -19,10 +19,7 @@ type EmbedOk = { ok: true; embedding: Embedding }
 type EmbedErr = { ok: false; resp: any }
 type EmbedResult = EmbedOk | EmbedErr
 
-type McpHandler = (
-  args: any,
-  helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<EmbedResult>; serializeSearchResults: (r: any[]) => string },
-) => any
+type McpHandler = (args: any, helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<EmbedResult>; serializeSearchResults: (r: any[]) => string }) => Promise<any> | any
 
 export function registerTool(server: any, name: string, description: string, schema: any, handler: McpHandler): void {
   server.tool(name, description, schema, async (args: any) => {
