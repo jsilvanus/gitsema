@@ -10,9 +10,10 @@
  * (i.e. the directory that contains `package.json`).
  */
 
-import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, type Stats } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, copyFileSync, readFileSync, type Stats } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { execSync } from 'node:child_process'
 
 /** Hook file names that gitsema manages. */
@@ -36,7 +37,8 @@ function getPackageRoot(): string {
   } catch {
     // Fallback: walk up from this file's location
     // This file lives at src/core/config/hookManager.ts → package root is ../../../
-    const thisFile = new URL(import.meta.url).pathname
+    // Use fileURLToPath to get a platform-correct filesystem path from import.meta.url
+    const thisFile = fileURLToPath(import.meta.url)
     return resolve(dirname(thisFile), '..', '..', '..')
   }
 }
@@ -127,7 +129,15 @@ export function installHooks(cwd: string = process.cwd()): HookInstallResult {
       symlinkSync(src, dest)
       result.installed.push(hook)
     } catch (err) {
-      result.errors.push(`Failed to install ${hook}: ${(err as Error).message}`)
+      // On Windows without developer mode or admin rights symlink creation
+      // may be disallowed (EPERM). Fall back to copying the file instead.
+      try {
+        copyFileSync(src, dest)
+        try { chmodSync(dest, 0o755) } catch {}
+        result.installed.push(hook)
+      } catch (err2) {
+        result.errors.push(`Failed to install ${hook}: ${(err as Error).message}`)
+      }
     }
   }
 
@@ -150,9 +160,10 @@ export function uninstallHooks(cwd: string = process.cwd()): HookInstallResult {
   }
 
   const hooksDir = join(gitDir, 'hooks')
-
+  const packageRoot = getPackageRoot()
   for (const hook of MANAGED_HOOKS) {
     const dest = join(hooksDir, hook)
+    const src = join(packageRoot, 'scripts', 'hooks', hook)
 
     const destStat = lstatSync_safe(dest)
     if (destStat === null) {
@@ -165,7 +176,24 @@ export function uninstallHooks(cwd: string = process.cwd()): HookInstallResult {
         rmSync(dest)
         result.removed.push(hook)
       } else {
-        result.skipped.push(hook)
+        // If the file was copied (fallback install), remove it only if it
+        // matches the canonical source script to avoid deleting user hooks.
+        if (existsSync(src)) {
+          try {
+            const a = readFileSync(src)
+            const b = readFileSync(dest)
+            if (a.equals(b)) {
+              rmSync(dest)
+              result.removed.push(hook)
+            } else {
+              result.skipped.push(hook)
+            }
+          } catch (err) {
+            result.errors.push(`Failed to inspect ${hook}: ${(err as Error).message}`)
+          }
+        } else {
+          result.skipped.push(hook)
+        }
       }
     } catch (err) {
       result.errors.push(`Failed to remove ${hook}: ${(err as Error).message}`)
