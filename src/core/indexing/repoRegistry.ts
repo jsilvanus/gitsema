@@ -1,6 +1,6 @@
 import { getActiveSession, openDatabaseAt } from '../db/sqlite.js'
 import { vectorSearch } from '../search/vectorSearch.js'
-import type { SearchResult } from '../models/types.js'
+import type { SearchResult, Embedding } from '../models/types.js'
 import { mergeSearchResults } from '../search/vectorSearch.js'
 
 export interface RepoEntry {
@@ -41,7 +41,7 @@ export interface MultiRepoSearchResult extends SearchResult {
  */
 export async function multiRepoSearch(
   mainSession: ReturnType<typeof getActiveSession>,
-  queryEmbedding: number[],
+  queryEmbedding: Embedding,
   opts: { repoIds?: string[]; topK?: number; model?: string },
 ): Promise<MultiRepoSearchResult[]> {
   const { rawDb } = mainSession

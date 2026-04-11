@@ -5,13 +5,12 @@ import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { computeConceptChangePoints } from '../../core/search/changePoints.js'
 import { computeExperts } from '../../core/search/experts.js'
 import { computeImpact } from '../../core/search/impact.js'
-import { computeAuthors } from '../../core/search/authorSearch.js'
 import { computeExperts as computeExpertsAlias } from '../../core/search/experts.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 
-export function registerWorkflowTools(server) {
+export function registerWorkflowTools(server: any) {
   // triage
   registerTool(
     server,

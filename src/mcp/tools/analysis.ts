@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { registerTool } from '../registerTool.js'
+import type { Embedding } from '../../core/models/types.js'
 import { computeEvolution, computeConceptEvolution } from '../../core/search/evolution.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
 import { computeSemanticBlame } from '../../core/search/semanticBlame.js'
@@ -23,7 +24,7 @@ import { computeOwnershipHeatmap } from '../../core/search/ownershipHeatmap.js'
 import { vectorSearch } from '../../core/search/vectorSearch.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 
-export function registerAnalysisTools(server) {
+export function registerAnalysisTools(server: any) {
   // evolution
   registerTool(
     server,
@@ -815,7 +816,7 @@ export function registerAnalysisTools(server) {
       const caseResults: Array<{ query: string; precision: number; recall: number; mrr: number }> = []
 
       for (const c of cases) {
-        let emb: number[]
+        let emb: Embedding
         const eRes = await embed(provider, c.query, 'Error embedding query')
         if (!eRes.ok) {
           caseResults.push({ query: c.query, precision: 0, recall: 0, mrr: 0 })

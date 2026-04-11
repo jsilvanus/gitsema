@@ -58,8 +58,8 @@ export function renderResults(results: SearchResult[], showHeadings = true): str
 	return lines.join('\n')
 }
 
-export function renderFirstSeenResults(results: SearchResult[]): string {
-	return renderResults(results)
+export function renderFirstSeenResults(results: SearchResult[], showHeadings = true): string {
+	return renderResults(results, showHeadings)
 }
 
 

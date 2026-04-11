@@ -1,5 +1,6 @@
 import { embedQuery } from '../core/embedding/embedQuery.js'
 import { formatDate } from '../core/search/ranking.js'
+import type { Embedding } from '../core/models/types.js'
 
 export function serializeSearchResults(results: any[]): string {
   if (results.length === 0) return '(no results)'
@@ -14,20 +15,27 @@ export function serializeSearchResults(results: any[]): string {
     .join('\n')
 }
 
-type McpHandler = (args: any, helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<{ ok: boolean; embedding?: number[]; resp?: any }>; serializeSearchResults: (r: any[]) => string }) => Promise<any>
+type EmbedOk = { ok: true; embedding: Embedding }
+type EmbedErr = { ok: false; resp: any }
+type EmbedResult = EmbedOk | EmbedErr
+
+type McpHandler = (
+  args: any,
+  helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<EmbedResult>; serializeSearchResults: (r: any[]) => string },
+) => any
 
 export function registerTool(server: any, name: string, description: string, schema: any, handler: McpHandler): void {
   server.tool(name, description, schema, async (args: any) => {
     const makeErr = (msg: string) => ({ content: [{ type: 'text', text: msg }] })
 
-    const helpers = {
+    const helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<EmbedResult>; serializeSearchResults: (r: any[]) => string } = {
       embed: async (provider: any, text: string, prefix = 'Error embedding query') => {
         try {
           const emb = await embedQuery(provider, text)
-          return { ok: true, embedding: emb }
+          return { ok: true as const, embedding: emb }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err)
-          return { ok: false, resp: makeErr(`${prefix}: ${msg}`) }
+          return { ok: false as const, resp: makeErr(`${prefix}: ${msg}`) }
         }
       },
       serializeSearchResults,

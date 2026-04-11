@@ -9,7 +9,7 @@ import { groupResults, renderResults } from '../../core/search/ranking.js'
 import { multiRepoSearch } from '../../core/indexing/repoRegistry.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 
-export function registerSearchTools(server) {
+export function registerSearchTools(server: any) {
   // semantic_search
   registerTool(
     server,

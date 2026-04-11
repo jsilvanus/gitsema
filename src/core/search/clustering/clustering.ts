@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import Database from 'better-sqlite3'
 import { getActiveSession } from '../../db/sqlite.js'
 import { embeddings, paths } from '../../db/schema.js'
-import { logger } from '../../utils/logger.js'
+import { logger } from '../../../utils/logger.js'
 import { cosineSimilarity } from '../vectorSearch.js'
 import { enhanceClusters, type EnhancedLabelOptions, type ClusterEnhancerInput } from './labelEnhancer.js'
 

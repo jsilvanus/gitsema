@@ -23,7 +23,7 @@ import { workflowCommand } from '../commands/workflow.js'
 import { cherryPickSuggestCommand } from '../commands/cherryPickSuggest.js'
 import { mapCommand } from '../commands/map.js'
 import { heatmapCommand } from '../commands/heatmap.js'
-import { diffCommand } from '../commands/fileDiff.js'
+import { diffCommand } from '../commands/diff.js'
 import { semanticDiffCommand } from '../commands/semanticDiff.js'
 import { serveCommand } from '../commands/serve.js'
 import { remoteIndexCommand } from '../commands/remoteIndex.js'
@@ -55,7 +55,6 @@ export function registerAll(program: Command) {
   registerSetup(program)
   registerIndexing(program)
   registerSearch(program)
-  registerAnalysis(program)
 
   // Concept evolution / concept-level timeline
   program
