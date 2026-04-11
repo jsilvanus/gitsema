@@ -146,8 +146,11 @@ export function registerAll(program: Command) {
 
   // Many analysis commands are already registered by registerAnalysis; avoid duplicates
 
-  program
-    .command('workflow run <template>')
+  // Register a single `workflow` parent command and add `run`/`list` subcommands
+  const workflow = program.command('workflow')
+
+  workflow
+    .command('run <template>')
     .description(
       'Run a productized workflow pattern (use `workflow list` to see all 8 patterns).\n' +
       'Patterns: pr-review, release-audit, onboarding, incident, ownership-intel, arch-drift, knowledge-portal, regression-forecast'
@@ -175,8 +178,8 @@ export function registerAll(program: Command) {
       })
     })
 
-  program
-    .command('workflow list')
+  workflow
+    .command('list')
     .description('List all 8 productized workflow patterns with descriptions')
     .action(workflowListCommand)
 
