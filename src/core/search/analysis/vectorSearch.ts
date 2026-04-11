@@ -3,7 +3,7 @@ import Database from 'better-sqlite3'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings } from '../../db/schema.js'
 import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
 import type { Embedding, SearchResult, SearchResultKind } from '../../models/types.js'
-import { filterByTimeRange, getFirstSeenMap, computeRecencyScores } from '../temporal/timeSearch.js'
+import { filterByTimeRangeLastSeen, getFirstSeenMap, computeRecencyScores } from '../temporal/timeSearch.js'
 import { dequantizeVector, deserializeQuantized } from '../../embedding/quantize.js'
 import { getCachedResults, setCachedResults, buildCacheKey, embeddingFingerprint, allowedHashesFingerprint } from './resultCache.js'
 import { bufferToFloat32 } from '../../../utils/embedding.js'
@@ -375,7 +375,7 @@ export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOpt
     candidatePool.filter((r) => !r.blobHash.startsWith('\0module:')).map((r) => r.blobHash),
   )]
   const filteredHashes = (before !== undefined || after !== undefined)
-    ? new Set(filterByTimeRange(allHashes, before, after))
+    ? new Set(filterByTimeRangeLastSeen(allHashes, before, after))
     : null
 
   const filteredPool = filteredHashes
