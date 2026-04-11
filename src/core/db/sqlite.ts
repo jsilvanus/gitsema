@@ -539,9 +539,6 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
       path TEXT NOT NULL
     );
-    -- Enforce (blob_hash, path) uniqueness (review6 §11.6, schema v20).
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_paths_blob_path_unique
-      ON paths(blob_hash, path);
 
     CREATE TABLE IF NOT EXISTS commits (
       commit_hash TEXT PRIMARY KEY,
@@ -746,6 +743,12 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     sqlite
       .prepare(`INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)`)
       .run(String(CURRENT_SCHEMA_VERSION))
+    // For fresh DBs we can safely create the unique index enforcing (blob_hash, path).
+    // For existing DBs this must be performed by the v20 migration after deduplication.
+    sqlite.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_paths_blob_path_unique
+        ON paths(blob_hash, path);
+    `)
   }
 }
 
