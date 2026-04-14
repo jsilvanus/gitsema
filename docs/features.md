@@ -59,7 +59,7 @@ One database can hold embeddings from **multiple embedding models simultaneously
 | Multi-repo registry | `gitsema repos add/list/remove` |
 | **Profile presets (Phase 63)** | `--profile speed\|balanced\|quality` |
 | **Auto-batch detection (Phase 63)** | Auto-enables `embedBatch()` when provider supports it |
-| **First-run CPU profiling** | Enabled by `GITSEMA_PROFILE_FIRST_RUN` or `index.profileFirstRun` (default: true). Profiles written to `.gitsema/profiles/embedeer-profile-<timestamp>.cpuprofile` |
+| **First-run CPU profiling** | Enabled by `GITSEMA_PROFILE_FIRST_RUN` or `index.profileFirstRun` (default: true). Profiles written to `.gitsema/profiles/embedeer-profile-<timestamp>.cpuprofile`. Precedence: env `GITSEMA_PROFILE_FIRST_RUN` overrides repo config `index.profileFirstRun`. Recommended: disable in CI by setting `GITSEMA_PROFILE_FIRST_RUN=0` in your CI environment. |
 | **Adaptive batch controller (Phase 63)** | In-flight batch size adjustment based on observed latency |
 | **Post-run maintenance recommendations (Phase 63)** | VSS, FTS backfill, vacuum suggestions after each run |
 | **BatchingProvider sub-batch chunking (Phase 62)** | Transparent sub-batch split + retry wrapper for any provider (`buildBatchingProvider()`) |

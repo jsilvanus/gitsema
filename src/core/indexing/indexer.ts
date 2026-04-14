@@ -14,7 +14,7 @@ import { createLimiter } from '../../utils/concurrency.js'
 import { extname, dirname } from 'node:path'
 import { minimatch } from 'minimatch'
 import { AsyncQueue } from '../../utils/asyncQueue.js'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { getConfigValue } from '../config/configManager.js'
 import { getActiveSession } from '../db/sqlite.js'
@@ -297,6 +297,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   // 3) default: enabled
   let _profileEnabled = true
   const envVal = process.env.GITSEMA_PROFILE_FIRST_RUN
+  // Detect common CI environments. If the env var is not explicitly set,
+  // disable first-run profiling in CI to avoid generating profiles during CI runs.
+  const _ciDetected = !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI)
   if (envVal !== undefined) {
     _profileEnabled = !['0', 'false', 'False', 'FALSE', ''].includes(envVal)
   } else {
@@ -313,6 +316,11 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     } catch {
       _profileEnabled = true
     }
+
+    if (_ciDetected) {
+      _profileEnabled = false
+      logger.debug?.('profile: CI environment detected; first-run profiling disabled by default (set GITSEMA_PROFILE_FIRST_RUN to override)')
+    }
   }
 
   // Prepare profiling variables (initialized when profiling starts)
@@ -328,27 +336,36 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   // Only start profiling if configured AND this appears to be a first-run
   // (no embeddings present) and no successful-profile marker exists.
   let _shouldProfileThisRun = false
-  try {
-    if (_profileEnabled && !existsSync(profileDoneMarker)) {
-      try {
-        const active = getActiveSession()
-        let embCount = 0
+    try {
+      if (_profileEnabled && !existsSync(profileDoneMarker)) {
         try {
-          const row = active.rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c?: number } | undefined
-          embCount = row?.c ?? 0
-        } catch {
-          embCount = 0
+          const active = getActiveSession()
+          let embCount = 0
+          let commitCount = 0
+          try {
+            const row = active.rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c?: number } | undefined
+            embCount = row?.c ?? 0
+          } catch {
+            embCount = 0
+          }
+          try {
+            const row2 = active.rawDb.prepare('SELECT COUNT(*) as c FROM indexed_commits').get() as { c?: number } | undefined
+            commitCount = row2?.c ?? 0
+          } catch {
+            commitCount = 0
+          }
+
+          // Treat either non-empty table as evidence of a prior index run.
+          if (embCount === 0 && commitCount === 0) _shouldProfileThisRun = true
+        } catch (err) {
+          // If DB/session inspection fails, conservatively do not profile.
+          logger.debug?.(`profile: unable to inspect DB for first-run check: ${err instanceof Error ? err.message : String(err)}`)
+          _shouldProfileThisRun = false
         }
-        if (embCount === 0) _shouldProfileThisRun = true
-      } catch (err) {
-        // If DB/session inspection fails, conservatively do not profile.
-        logger.debug?.(`profile: unable to inspect DB for first-run check: ${err instanceof Error ? err.message : String(err)}`)
-        _shouldProfileThisRun = false
       }
+    } catch (err) {
+      _shouldProfileThisRun = false
     }
-  } catch (err) {
-    _shouldProfileThisRun = false
-  }
 
   if (_shouldProfileThisRun) {
     try {
@@ -1103,10 +1120,25 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
             if (err) return reject(err)
             try {
               const profile = (res && (res as any).profile) ?? res
-              writeFileSync(_profileFilePath!, JSON.stringify(profile), 'utf8')
+              const tmpPath = `${_profileFilePath!}.tmp`
+              try {
+                writeFileSync(tmpPath, JSON.stringify(profile), 'utf8')
+                try {
+                  renameSync(tmpPath, _profileFilePath!)
+                } catch (rn) {
+                  // If atomic rename failed, attempt best-effort final write
+                  try {
+                    writeFileSync(_profileFilePath!, JSON.stringify(profile), 'utf8')
+                  } catch (wr2) {
+                    logger.error?.(`profile: failed to write CPU profile: ${wr2 instanceof Error ? wr2.message : String(wr2)}`)
+                  }
+                }
+              } catch (wr) {
+                logger.error?.(`profile: failed to write CPU profile to tmp: ${wr instanceof Error ? wr.message : String(wr)}`)
+              }
             } catch (wr) {
               // write failure is non-fatal — log and continue
-              logger.error?.(`profile: failed to write CPU profile: ${wr instanceof Error ? wr.message : String(wr)}`)
+              logger.error?.(`profile: failed to process CPU profile: ${wr instanceof Error ? wr.message : String(wr)}`)
             }
             resolve()
           })

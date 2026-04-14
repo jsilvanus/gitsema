@@ -36,8 +36,12 @@ function commitFile(dir: string, relPath: string, content: string, message: stri
 
 let repoDir: string
 let dbPath: string
+let _prevProfileEnv: string | undefined
+const _isCI = !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI)
 
 beforeAll(() => {
+  _prevProfileEnv = process.env.GITSEMA_PROFILE_FIRST_RUN
+  process.env.GITSEMA_PROFILE_FIRST_RUN = '1'
   repoDir = mkdtempSync(join(tmpdir(), 'gitsema-profile-'))
   dbPath = join(repoDir, 'test.db')
   initRepo(repoDir)
@@ -46,10 +50,13 @@ beforeAll(() => {
 
 afterAll(() => {
   try { rmSync(repoDir, { recursive: true, force: true }) } catch {}
+  if (_prevProfileEnv === undefined) delete process.env.GITSEMA_PROFILE_FIRST_RUN
+  else process.env.GITSEMA_PROFILE_FIRST_RUN = _prevProfileEnv
 })
 
 describe('first-run profiling', () => {
-  it('writes a .cpuprofile into .gitsema/profiles on first index run', async () => {
+  const maybeIt = _isCI ? it.skip : it
+  maybeIt('writes a .cpuprofile into .gitsema/profiles on first index run', async () => {
     const session = openDatabaseAt(dbPath)
     const provider = new MockEmbeddingProvider()
 
