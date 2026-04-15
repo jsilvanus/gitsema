@@ -1,5 +1,6 @@
 import type { Embedding } from '../models/types.js'
 import type { EmbeddingProvider } from './provider.js'
+import { logger } from '../../utils/logger.js'
 
 export interface EmbedeerOptions {
   model?: string
@@ -262,14 +263,14 @@ export async function ensureModelDownloadedAndOptimized(
           if (!okNested) {
             const okNestedNoArgs = await callAnyOnTarget(optimizeFns, [])
             if (!okNestedNoArgs) {
-              console.log(`embedeer: optimisation API not found for model '${modelName}'; skipping optimise step.`)
+              logger.info?.(`embedeer: optimisation API not found for model '${modelName}'; skipping optimise step.`)
             }
           }
-        } else {
+          } else {
           // Not fatal — optimisation is a best-effort convenience.
-          console.log(`embedeer: optimisation API not found for model '${modelName}'; skipping optimise step.`)
+          logger.info?.(`embedeer: optimisation API not found for model '${modelName}'; skipping optimise step.`)
         }
       }
     }
   }
-}
+  }

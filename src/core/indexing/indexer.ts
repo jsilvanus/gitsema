@@ -14,6 +14,11 @@ import { createLimiter } from '../../utils/concurrency.js'
 import { extname, dirname } from 'node:path'
 import { minimatch } from 'minimatch'
 import { AsyncQueue } from '../../utils/asyncQueue.js'
+import { mkdirSync, writeFileSync, existsSync, renameSync } from 'node:fs'
+import { join } from 'node:path'
+import { getConfigValue } from '../config/configManager.js'
+import { getActiveSession } from '../db/sqlite.js'
+import { EmbedeerProvider } from '../embedding/embedeer.js'
 
 export interface FilterOptions {
   /**
@@ -285,7 +290,147 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     embedLatencyP95Ms: 0,
   }
   const start = Date.now()
+  // --- First-run profiling setup -------------------------------------------------
+  // Decide whether to enable a first-run profile for this repo. Precedence:
+  // 1) GITSEMA_PROFILE_FIRST_RUN env var (truthy enables)
+  // 2) local config index.profileFirstRun (via getConfigValue)
+  // 3) default: enabled
+  let _profileEnabled = true
+  const envVal = process.env.GITSEMA_PROFILE_FIRST_RUN
+  // Detect common CI environments. If the env var is not explicitly set,
+  // disable first-run profiling in CI to avoid generating profiles during CI runs.
+  const _ciDetected = !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI)
+  if (envVal !== undefined) {
+    _profileEnabled = !['0', 'false', 'False', 'FALSE', ''].includes(envVal)
+  } else {
+    try {
+      const cfg = getConfigValue('index.profileFirstRun', repoPath)
+      if (cfg.value !== undefined) {
+        const v = cfg.value
+        if (typeof v === 'boolean') _profileEnabled = v
+        else if (typeof v === 'number') _profileEnabled = v !== 0
+        else if (typeof v === 'string') _profileEnabled = !['0', 'false', 'False', 'FALSE', ''].includes(v)
+      } else {
+        _profileEnabled = true
+      }
+    } catch {
+      _profileEnabled = true
+    }
+
+    if (_ciDetected) {
+      _profileEnabled = false
+      logger.debug?.('profile: CI environment detected; first-run profiling disabled by default (set GITSEMA_PROFILE_FIRST_RUN to override)')
+    }
+  }
+
+  // Prepare profiling variables (initialized when profiling starts)
+  let _inspectorSession: any | undefined
+  let _profileFilePath: string | undefined
+  let _createdProfileMarker = false
+  let _runSucceeded = false
+  // marker file prevents re-profiling across subsequent runs when a successful
+  // first-run profile has already been generated.
+  const profilesDir = join(repoPath ?? '.', '.gitsema', 'profiles')
+  const profileDoneMarker = join(profilesDir, '.first-run-profile-done')
+
+  // Only start profiling if configured AND this appears to be a first-run
+  // (no embeddings present) and no successful-profile marker exists.
+  let _shouldProfileThisRun = false
+    try {
+      if (_profileEnabled && !existsSync(profileDoneMarker)) {
+        try {
+          const active = getActiveSession()
+          let embCount = 0
+          let commitCount = 0
+          try {
+            const row = active.rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c?: number } | undefined
+            embCount = row?.c ?? 0
+          } catch {
+            embCount = 0
+          }
+          try {
+            const row2 = active.rawDb.prepare('SELECT COUNT(*) as c FROM indexed_commits').get() as { c?: number } | undefined
+            commitCount = row2?.c ?? 0
+          } catch {
+            commitCount = 0
+          }
+
+          // Treat either non-empty table as evidence of a prior index run.
+          if (embCount === 0 && commitCount === 0) _shouldProfileThisRun = true
+        } catch (err) {
+          // If DB/session inspection fails, conservatively do not profile.
+          logger.debug?.(`profile: unable to inspect DB for first-run check: ${err instanceof Error ? err.message : String(err)}`)
+          _shouldProfileThisRun = false
+        }
+      }
+    } catch (err) {
+      _shouldProfileThisRun = false
+    }
+
+  if (_shouldProfileThisRun) {
+    try {
+      mkdirSync(profilesDir, { recursive: true })
+      const ts = new Date().toISOString().replace(/[:.]/g, '_')
+      _profileFilePath = join(profilesDir, `embedeer-profile-${ts}.cpuprofile`)
+
+      // Start Node inspector CPU profiler
+      try {
+        // dynamic import to avoid bundlers/transpilers complaining
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const inspector = await import('inspector')
+        _inspectorSession = new inspector.Session()
+        _inspectorSession.connect()
+        await new Promise<void>((resolve, reject) => {
+          _inspectorSession.post('Profiler.enable', (err: Error | null) => {
+            if (err) return reject(err)
+            _inspectorSession.post('Profiler.start', (err2: Error | null) => (err2 ? reject(err2) : resolve()))
+          })
+        })
+        logger.info?.('profile: Node inspector CPU profiler started for first-run profiling')
+      } catch (err) {
+        logger.debug?.(`profile: failed to start inspector profiler: ${err instanceof Error ? err.message : String(err)}`)
+        _inspectorSession = undefined
+      }
+
+      // If the embedding provider in use is the Embedeer provider, attempt to
+      // invoke its programmatic profiling helper.  Avoid importing the
+      // `@jsilvanus/embedeer` package unless the provider stack actually uses
+      // it — importing embedeer eagerly can spawn workers or perform downloads
+      // which slow tests and CI.
+      try {
+        const unwrapUsesEmbedeer = (p: any): boolean => {
+          if (!p) return false
+          if (p instanceof EmbedeerProvider) return true
+          // Common wrapper shapes: { inner }, { inner: provider }, RoutingProvider
+          if (p.inner) return unwrapUsesEmbedeer(p.inner)
+          if (p.textProvider || p.codeProvider) return unwrapUsesEmbedeer(p.textProvider) || unwrapUsesEmbedeer(p.codeProvider)
+          return false
+        }
+
+        const usesEmbedeer = unwrapUsesEmbedeer(provider) || unwrapUsesEmbedeer(codeProvider) || (router && (unwrapUsesEmbedeer((router as any).textProvider) || unwrapUsesEmbedeer((router as any).codeProvider)))
+        if (usesEmbedeer) {
+          try {
+            const emb = await import('@jsilvanus/embedeer')
+            const embAny = emb as any
+            const gen = (embAny?.Embedder && embAny.Embedder.generateAndSaveProfile) ?? embAny?.generateAndSaveProfile
+            if (typeof gen === 'function') {
+              await gen({ mode: 'quick', device: 'cpu', sampleSize: 100 })
+              logger.info?.('profile: embedeer.generateAndSaveProfile invoked (user-level profile saved)')
+            }
+          } catch (err) {
+            logger.debug?.(`profile: embedeer profiling API not available or failed: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        }
+      } catch (err) {
+        logger.debug?.(`profile: embedeer detection failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    } catch (err) {
+      logger.debug?.(`profile: setup failed: ${err instanceof Error ? err.message : String(err)}`)
+      _shouldProfileThisRun = false
+    }
+  }
   const SIZE_CAP = 50_000
+  try {
   const seenHashes = new Set<string>()
   let sizeCapWarned = false
   let lastProgressTime = 0
@@ -962,5 +1107,59 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   computeLatencyStats()
 
   stats.elapsed = Date.now() - start
+  _runSucceeded = true
   return stats
+  } finally {
+    // Stop and write CPU profile if we started one. Always attempt to write
+    // a partial profile on failure, but only create the "done" marker when
+    // the run finished successfully.
+    if (_inspectorSession && _profileFilePath) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          _inspectorSession.post('Profiler.stop', (err: Error | null, res: { profile?: unknown }) => {
+            if (err) return reject(err)
+            try {
+              const profile = (res && (res as any).profile) ?? res
+              const tmpPath = `${_profileFilePath!}.tmp`
+              try {
+                writeFileSync(tmpPath, JSON.stringify(profile), 'utf8')
+                try {
+                  renameSync(tmpPath, _profileFilePath!)
+                } catch (rn) {
+                  // If atomic rename failed, attempt best-effort final write
+                  try {
+                    writeFileSync(_profileFilePath!, JSON.stringify(profile), 'utf8')
+                  } catch (wr2) {
+                    logger.error?.(`profile: failed to write CPU profile: ${wr2 instanceof Error ? wr2.message : String(wr2)}`)
+                  }
+                }
+              } catch (wr) {
+                logger.error?.(`profile: failed to write CPU profile to tmp: ${wr instanceof Error ? wr.message : String(wr)}`)
+              }
+            } catch (wr) {
+              // write failure is non-fatal — log and continue
+              logger.error?.(`profile: failed to process CPU profile: ${wr instanceof Error ? wr.message : String(wr)}`)
+            }
+            resolve()
+          })
+        })
+        try { _inspectorSession.disconnect() } catch {}
+        logger.info?.(`Saved CPU profile to ${_profileFilePath}`)
+      } catch (err) {
+        logger.info?.(`profile: error stopping inspector: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    // Create a success marker only when the run completed fully. This avoids
+    // preventing subsequent runs from profiling if the initial run failed.
+    if (_runSucceeded && _profileFilePath) {
+      try {
+        writeFileSync(profileDoneMarker, '1', 'utf8')
+      } catch (err) {
+        logger.debug?.(`profile: failed to write marker file: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    } else if (!_runSucceeded && _profileFilePath) {
+      logger.info?.(`profile: partial profile saved to ${_profileFilePath} (indexing did not complete)`)
+    }
+  }
 }

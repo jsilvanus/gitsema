@@ -86,6 +86,23 @@ export GITSEMA_API_KEY=sk-...
 gitsema index start
 ```
 
+### First-run profiling
+
+Gitsema can generate a CPU profile during the first successful indexing run to help tune embedding `concurrency` and `batchSize`.
+
+- Environment variable: `GITSEMA_PROFILE_FIRST_RUN` (truthy enables, falsy disables)
+- Repo config: `index.profileFirstRun` (use `gitsema config set index.profileFirstRun false --local` to disable)
+- Profiles are written into the indexed repo at `.gitsema/profiles/embedeer-profile-<timestamp>.cpuprofile`
+
+- Precedence: the `GITSEMA_PROFILE_FIRST_RUN` environment variable overrides the repo config `index.profileFirstRun`.
+- Recommended: disable profiling in CI. Example (GitHub Actions):
+  ```yaml
+  env:
+    GITSEMA_PROFILE_FIRST_RUN: '0'
+  ```
+
+By default profiling is enabled on the first run when no prior embeddings exist. If an index attempt fails, a partial profile is still saved but the "profile-done" marker is only written after a successful, full indexing run.
+
 ## Commands
 
 Commands are organised into groups. See [`docs/features.md`](docs/features.md) for the full feature catalog.

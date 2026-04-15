@@ -20,6 +20,7 @@
  */
 
 import { writeFileSync } from 'node:fs'
+import { logger } from './logger.js'
 
 export type OutputFormat = 'text' | 'json' | 'html' | 'markdown' | 'sarif'
 
@@ -113,7 +114,7 @@ export function resolveOutputs(opts: {
 export function writeToSink(sink: OutputSpec, content: string, label = 'Output'): void {
   if (sink.file) {
     writeFileSync(sink.file, content, 'utf8')
-    console.log(`${label} written to: ${sink.file}`)
+    logger.info?.(`${label} written to: ${sink.file}`)
   } else {
     process.stdout.write(content)
     if (!content.endsWith('\n')) process.stdout.write('\n')
