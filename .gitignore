@@ -1,7 +1,8 @@
 node_modules/
 dist/
 .gitsema/
-.claude/
+.claude/*
+!.claude/skills/
 modelserver/models/
 
 # Hugging Face cache
