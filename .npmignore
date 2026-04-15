@@ -1,6 +1,9 @@
 # Exclude local gitsema docs runtime data from package
 docs/.gitsema
 docs/.gitsema/**
+/docs/.gitsema
+/docs/.gitsema/**
+docs/.gitsema/*
 
 # Ensure node_modules and git metadata aren't published
 node_modules
