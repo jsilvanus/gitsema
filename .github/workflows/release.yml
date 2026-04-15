@@ -25,48 +25,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Wait for CI run for this commit to succeed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          sha="${GITHUB_SHA:-}"
-          repo="${GITHUB_REPOSITORY:-}"
-          if [ -z "$sha" ] || [ -z "$repo" ]; then
-            echo "GITHUB_SHA or GITHUB_REPOSITORY not set"
-            exit 1
-          fi
-          timeout=900  # 15 minutes
-          interval=10  # 10 seconds
-          start=$(date +%s)
-          echo "Waiting up to ${timeout}s for 'ci.yml' workflow run for commit ${sha}"
-          while true; do
-            now=$(date +%s)
-            elapsed=$((now - start))
-            if [ "$elapsed" -ge "$timeout" ]; then
-              echo "Timed out after ${timeout}s waiting for CI run for commit ${sha}"
-              exit 1
-            fi
-            resp=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" "https://api.github.com/repos/${repo}/actions/runs?workflow_id=ci.yml&per_page=100&sha=${sha}")
-            # Diagnostics: list matching runs (id, status, conclusion)
-            echo "$resp" | jq -r --arg sha "$sha" '.workflow_runs[] | select(.head_sha == $sha) | [.id, .status, .conclusion] | @tsv' || true
-            # If any matching run finished with success, proceed
-            success_id=$(echo "$resp" | jq -r --arg sha "$sha" '.workflow_runs[] | select(.head_sha == $sha and .status=="completed" and .conclusion=="success") | .id' | head -n1 || true)
-            if [ -n "$success_id" ]; then
-              echo "Found successful CI run id=${success_id}"
-              break
-            fi
-            # If any matching run finished but not success, fail
-            finished_non_success=$(echo "$resp" | jq -r --arg sha "$sha" '.workflow_runs[] | select(.head_sha == $sha and .status=="completed") | .conclusion' | head -n1 || true)
-            if [ -n "$finished_non_success" ]; then
-              echo "Found completed CI run with conclusion '${finished_non_success}' - failing"
-              exit 1
-            fi
-            echo "No completed CI run yet; sleeping ${interval}s..."
-            sleep $interval
-          done
-          echo "CI succeeded, continuing."
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
