@@ -1,6 +1,6 @@
 {
   "name": "gitsema",
-  "version": "0.90.5",
+  "version": "0.90.6",
   "description": "A content-addressed semantic index synchronized with Git's object model.",
   "type": "module",
   "main": "dist/cli/index.js",
