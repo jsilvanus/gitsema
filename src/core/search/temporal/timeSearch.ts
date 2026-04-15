@@ -1,5 +1,6 @@
 import { getActiveSession } from '../../db/sqlite.js'
 import { execFileSync } from 'node:child_process'
+import { dirname, resolve } from 'node:path'
 import { blobCommits, commits } from '../../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
 
@@ -149,10 +150,22 @@ export function parseDateArg(value: string): number {
   }
 
   // Finally, treat value as a git ref/commit-ish and query git for the commit timestamp.
+  // Use the active DB session's path to determine the repository cwd so `git` runs
+  // in the right repository (tests open DBs inside temp repo dirs).
+  let gitCwd = process.cwd()
   try {
-    const commitHash = execFileSync('git', ['rev-parse', '--verify', value], { encoding: 'utf8' }).trim()
+    const session = getActiveSession()
+    if (session && session.dbPath) {
+      gitCwd = dirname(resolve(session.dbPath))
+    }
+  } catch {
+    // fall through to process.cwd()
+  }
+
+  try {
+    const commitHash = execFileSync('git', ['rev-parse', '--verify', value], { encoding: 'utf8', cwd: gitCwd }).trim()
     if (commitHash) {
-      const tsOut = execFileSync('git', ['show', '-s', '--format=%ct', commitHash], { encoding: 'utf8' }).trim()
+      const tsOut = execFileSync('git', ['show', '-s', '--format=%ct', commitHash], { encoding: 'utf8', cwd: gitCwd }).trim()
       const ts = parseInt(tsOut, 10)
       if (!isNaN(ts)) return ts
     }
