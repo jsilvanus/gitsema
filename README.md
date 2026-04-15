@@ -1,6 +1,8 @@
 # gitsema
 
-![Gitsema logo](assets/logo.png)
+[![Gitsema logo](assets/logo.png)]
+
+[![npm version](https://img.shields.io/npm/v/gitsema.svg)](https://www.npmjs.com/package/gitsema) [![CI](https://github.com/jsilvanus/gitsema/actions/workflows/ci.yml/badge.svg)](https://github.com/jsilvanus/gitsema/actions/workflows/ci.yml)
 
 A content-addressed semantic index synchronized with Git's object model.
 
