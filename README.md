@@ -14,6 +14,14 @@ Gitsema walks your Git history, embeds every blob, and lets you semantically sea
 
 ## Installation
 
+Install from npm (requires Node.js >=18):
+
+```bash
+npm install -g gitsema
+```
+
+Or install from source:
+
 ```bash
 git clone https://github.com/jsilvanus/gitsema.git
 cd gitsema

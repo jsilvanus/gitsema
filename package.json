@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "pnpm build",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
     "gen:toc": "node scripts/generate_toc.mjs"
@@ -25,6 +26,18 @@
   ],
   "author": "jsilvanus",
   "license": "ISC",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org"
+  },
   "bugs": {
     "url": "https://github.com/jsilvanus/gitsema/issues"
   },
