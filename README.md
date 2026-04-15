@@ -1,5 +1,7 @@
 # gitsema
 
+![Gitsema logo](assets/logo.png)
+
 A content-addressed semantic index synchronized with Git's object model.
 
 Gitsema walks your Git history, embeds every blob, and lets you semantically search your codebase — including across time. It treats blob hashes as the unit of identity, so identical content is only embedded once regardless of how many commits reference it.
