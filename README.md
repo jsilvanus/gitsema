@@ -6,7 +6,7 @@ Gitsema walks your Git history, embeds every blob, and lets you semantically sea
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
 - Git (must be on `PATH`)
 - An embedding backend — either:
   - **Ollama** (local, default): [ollama.ai](https://ollama.ai) with `nomic-embed-text` pulled
@@ -14,7 +14,7 @@ Gitsema walks your Git history, embeds every blob, and lets you semantically sea
 
 ## Installation
 
-Install from npm (requires Node.js >=18):
+Install from npm (requires Node.js >=20):
 
 ```bash
 npm install -g gitsema
@@ -58,7 +58,7 @@ All configuration is done through environment variables. Set them in your shell 
 
 | Variable | Default | Description |
 |---|---|---|
-| `GITSEMA_PROVIDER` | `ollama` | Embedding backend: `ollama` or `http` |
+| `GITSEMA_PROVIDER` | `ollama` | Embedding backend: `ollama`, `http`, or `embedeer` |
 
 ### Ollama provider (`GITSEMA_PROVIDER=ollama`)
 
@@ -111,23 +111,34 @@ Gitsema can generate a CPU profile during the first successful indexing run to h
 
 By default profiling is enabled on the first run when no prior embeddings exist. If an index attempt fails, a partial profile is still saved but the "profile-done" marker is only written after a successful, full indexing run.
 
+### Operational settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITSEMA_VERBOSE` | off | Set to `1` for debug logging (same as `--verbose`) |
+| `GITSEMA_REMOTE` | *(optional)* | Default remote `gitsema tools serve` URL; overridden per-command by `--remote` |
+| `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
+| `GITSEMA_LOG_MAX_BYTES` | `1048576` | Log rotation threshold (1 MB) |
+
 ## Commands
 
 Commands are organised into groups. See [`docs/features.md`](docs/features.md) for the full feature catalog.
 
 | Group | Commands |
 |---|---|
-| **Indexing** | `index` (status), `index start`, `index export`, `index import`, `index doctor`, `index vacuum`, `index backfill-fts`, `index rebuild-fts`, `index gc`, `index clear-model`, `index update-modules`, `index build-vss`, `remote-index`, `watch` |
+| **Setup** | `quickstart`, `config`, `status`, `models`, `repos` |
+| **Indexing** | `index` (status), `index start`, `index doctor`, `index vacuum`, `index backfill-fts`, `index rebuild-fts`, `index gc`, `index clear-model`, `index update-modules`, `index build-vss`, `index export`, `index import`, `remote-index`, `watch` |
 | **Protocol Servers** | `tools mcp`, `tools serve`, `tools lsp` |
-| **Search & Discovery** | `search`, `code-search`, `first-seen`, `dead-concepts` |
-| **File History** | `file-evolution`, `file-diff`, `blame`, `impact` |
-| **Concept History** | `evolution`, `diff`, `lifecycle`, `bisect` |
+| **Search & Discovery** | `search`, `code-search`, `first-seen`, `dead-concepts`, `repl` |
+| **File History** | `file-evolution`, `file-diff`, `blame`, `impact`, `file-change-points` |
+| **Concept History** | `evolution`, `diff`, `author`, `lifecycle` |
 | **Cluster Analysis** | `clusters`, `cluster-diff`, `cluster-timeline` |
 | **Change Detection** | `change-points`, `file-change-points`, `cluster-change-points` |
-| **Branch / Merge** | `branch-summary`, `merge-audit`, `merge-preview`, `cherry-pick-suggest`, `ci-diff` |
-| **Analysis** | `author`, `impact`, `refactor-candidates`, `doc-gap`, `contributor-profile`, `security-scan`, `health`, `debt` |
-| **Visualization** | `map`, `heatmap` |
-| **Configuration** | `config`, `status`, `repos`, `project` |
+| **Branch / Merge** | `branch-summary`, `merge-audit`, `merge-preview`, `cherry-pick-suggest`, `ci-diff`, `bisect` |
+| **Code Quality** | `code-review`, `security-scan`, `health`, `debt`, `doc-gap`, `refactor-candidates` |
+| **Analysis** | `author`, `contributor-profile`, `triage`, `policy`, `ownership`, `eval`, `cross-repo-similarity`, `pr-report` |
+| **Workflows** | `workflow run <template>`, `workflow list` |
+| **Visualization** | `map`, `heatmap`, `project` |
 
 > **Backward-compatible aliases:** `concept-evolution` → `evolution`, `semantic-blame` → `blame`, `gitsema mcp` / `gitsema serve` / `gitsema lsp` → use `gitsema tools mcp` / `gitsema tools serve` / `gitsema tools lsp` instead. The old DB maintenance commands (`gitsema doctor`, `gitsema vacuum`, `gitsema gc`, `gitsema backfill-fts`, `gitsema rebuild-fts`, `gitsema update-modules`, `gitsema build-vss`, `gitsema clear-model`) still work as hidden deprecated aliases and print a migration hint — use the `gitsema index <subcommand>` forms instead.
 
@@ -139,11 +150,12 @@ Not sure which command to use? Search by what you want to accomplish:
 
 | I want to… | Command(s) |
 |---|---|
-| **Get started — index and search** | `gitsema index start`, `gitsema search "query"` |
+| **Get started with guided setup** | `gitsema quickstart` |
+| **Index and search** | `gitsema index start`, `gitsema search "query"` |
 | **See what's indexed / coverage** | `gitsema index`, `gitsema status` |
 | **Find where a concept first appeared** | `gitsema first-seen "query"` |
 | **Track how a file changed semantically over time** | `gitsema file-evolution path/to/file` |
-| **Compare two versions of a file** | `gitsema diff <ref1> <ref2> path/to/file` |
+| **Compare two versions of a file** | `gitsema file-diff <ref1> <ref2> path/to/file` |
 | **Understand how a concept evolved** | `gitsema evolution "query"` |
 | **Find functions or classes by meaning** | `gitsema code-search "query"` |
 | **Detect when major semantic shifts happened** | `gitsema change-points "query"` |
@@ -152,19 +164,35 @@ Not sure which command to use? Search by what you want to accomplish:
 | **Find stale or dead concepts** | `gitsema dead-concepts` |
 | **Assess code health over time** | `gitsema health`, `gitsema debt` |
 | **Find security-pattern matches** | `gitsema security-scan` |
-| **Review a PR semantically** | `gitsema branch-summary`, `gitsema merge-audit` |
+| **Review a PR semantically** | `gitsema code-review`, `gitsema branch-summary`, `gitsema merge-audit` |
 | **Find refactor candidates** | `gitsema refactor-candidates` |
 | **Find doc coverage gaps** | `gitsema doc-gap` |
+| **Triage an incident** | `gitsema triage "query"` |
+| **Run a full analysis workflow** | `gitsema workflow run <template>` |
+| **Run an interactive search session** | `gitsema repl` |
 | **Set up a team server** | `gitsema tools serve --port 4242 --key <token>` |
 | **Expose to Claude / AI assistants** | `gitsema tools mcp` |
-| **Search across multiple repos** | `gitsema repos search "query"` |
+| **Search across multiple repos** | `gitsema repos add`, `gitsema search "query" --repos <ids>` |
 | **Add narrated summaries to any output** | Append `--narrate` to most commands |
+| **Output JSON / HTML / Markdown** | Append `--out json`, `--out html`, or `--out markdown` |
 
 See [`docs/playbooks.md`](docs/playbooks.md) for role-based recipes (solo dev, PR reviewer, security engineer, release manager).
 
 ---
 
 ### Setup & Infrastructure
+
+#### `gitsema quickstart`
+
+Interactive setup wizard. Detects your environment, walks through provider configuration (Ollama or HTTP), runs a test embedding, and records settings to `.gitsema/config.json`.
+
+```bash
+gitsema quickstart
+```
+
+Use this the first time you set up gitsema in a new repo or on a new machine.
+
+---
 
 #### `gitsema status`
 
@@ -202,23 +230,33 @@ Uses the currently configured embedding model (`GITSEMA_MODEL` / `gitsema config
 
 ```
 Options:
-  --since <ref>           Only index commits after this point.
-                          Accepts a date (2024-01-01), tag (v1.0), or commit hash.
-                          Use "all" to force a full re-index.
-  --max-commits <n>       Stop after indexing this many commits.
-  --concurrency <n>       Number of blobs to embed concurrently in parallel (default: 4).
-                          Increase on fast hardware / remote APIs; decrease if the embedding
-                          server is being throttled.
-  --ext <extensions>      Only index files with these extensions, e.g. ".ts,.js,.py"
-  --max-size <size>       Skip blobs larger than this size, e.g. "200kb", "1mb" (default: 200kb)
-  --exclude <patterns>    Skip blobs whose path contains any of these patterns, e.g. "node_modules,dist"
-  --chunker <strategy>    Chunking strategy: file (default), function, or fixed
-  --window-size <n>       Chunk size in characters for the fixed chunker (default: 1500)
-  --overlap <n>           Overlap between adjacent fixed chunks (default: 200)
-  --file <paths...>       Index specific file(s) from HEAD (can supply multiple paths)
-  --model <model>         Override embedding model for this run
-  --allow-mixed           Skip embed-config compatibility check (allow mixing different
-                          embedding dimensions/configs in the same index)
+  --since <ref>              Only index commits after this point.
+                             Accepts a date (2024-01-01), tag (v1.0), or commit hash.
+                             Use "all" to force a full re-index.
+  --max-commits <n>          Stop after indexing this many commits.
+  --concurrency <n>          Parallel embedding calls (default: 4). Increase on fast
+                             hardware; decrease if the embedding server throttles.
+  --embed-batch-size <n>     Batch size for embedding API calls.
+  --ext <extensions>         Only index files with these extensions, e.g. ".ts,.js,.py"
+  --include-glob <patterns>  Only index paths matching these glob patterns (comma-separated).
+  --max-size <size>          Skip blobs larger than this (e.g. "200kb", "1mb"; default: 200kb)
+  --exclude <patterns>       Skip blobs whose path contains any of these substrings.
+  --chunker <strategy>       Chunking strategy: file (default), function, or fixed.
+  --level <granularity>      Alias for --chunker: blob/file, function, fixed, multi.
+  --window-size <n>          Characters per chunk for the fixed chunker (default: 1500).
+  --overlap <n>              Character overlap between adjacent fixed chunks (default: 200).
+  --file <paths...>          Index specific file(s) from HEAD (repeatable).
+  --model <model>            Override all embedding models for this run.
+  --text-model <model>       Override the text/prose embedding model.
+  --code-model <model>       Override the code embedding model.
+  --quantize                 Enable Int8 scalar quantization of stored vectors.
+  --build-vss                Build the HNSW vector index immediately after indexing.
+  --auto-build-vss [n]       Auto-build VSS when total blobs exceed n (default: 10000).
+  --remote <url>             Proxy embedding calls to a remote gitsema server.
+  --branch <name>            Tag indexed blobs as belonging to this branch.
+  --profile <preset>         Apply a preset: speed, balanced, or quality.
+  --allow-mixed              Skip embed-config compatibility check (allow mixing
+                             different models/dimensions in the same index).
 ```
 
 Examples:
@@ -446,6 +484,7 @@ Options:
 | `GITSEMA_RATE_LIMIT_RPM` | `300` | Requests per minute per token/IP |
 | `GITSEMA_RATE_LIMIT_BURST` | `= RPM` | Per-window burst allowance |
 | `GITSEMA_METRICS_PUBLIC` | off | Set to `1` to expose `/metrics` without auth |
+| `GITSEMA_MAX_BODY_SIZE` | `1mb` | Max request body size (e.g. `2mb`, `512kb`) |
 
 For full deployment instructions (systemd, Docker, secrets, backups) see [`docs/deploy.md`](docs/deploy.md).
 
@@ -462,17 +501,26 @@ Semantically search the index.
 ```
 Options:
   -k, --top <n>           Number of results (default: 10)
+  --level <granularity>   Search at: file, chunk, or symbol level (default: symbol)
+  --threshold <n>         Minimum similarity score 0–1 to include a result (default: 0)
   --recent                Blend cosine similarity with a recency score
-  --alpha <n>             Weight for cosine similarity in blended score (0–1, default: 0.8)
+  --alpha <n>             Cosine weight in blended score (0–1, default: 0.8)
   --before <date>         Only blobs first seen before this date (YYYY-MM-DD)
   --after <date>          Only blobs first seen after this date (YYYY-MM-DD)
-  --weight-vector <n>     Weight for vector similarity in three-signal ranking (default: 0.7)
-  --weight-recency <n>    Weight for recency (default: 0.2)
-  --weight-path <n>       Weight for path relevance (default: 0.1)
+  --weight-vector <n>     Vector weight in three-signal ranking (default: 0.7)
+  --weight-recency <n>    Recency weight (default: 0.2)
+  --weight-path <n>       Path-relevance weight (default: 0.1)
   --group <mode>          Group results by: file, module, or commit
   --chunks                Include chunk-level embeddings in results
   --hybrid                Combine vector similarity with BM25 keyword matching
-  --bm25-weight <n>       Weight for the BM25 signal in hybrid search (default: 0.3)
+  --bm25-weight <n>       BM25 weight in hybrid score (default: 0.3)
+  --branch <name>         Restrict results to blobs seen on this branch
+  --model <model>         Override query embedding model
+  --vss                   Use the HNSW approximate nearest-neighbour index
+  --repos <ids>           Comma-separated repo IDs for multi-repo search
+  --narrate               Generate an LLM summary of the results
+  --out <spec>            Output format (repeatable): text, json[:file], html[:file],
+                          markdown[:file]
 ```
 
 Examples:
@@ -494,11 +542,21 @@ Find when a concept first appeared in the codebase, sorted chronologically.
 
 ```
 Options:
-  -k, --top <n>   Number of results (default: 10)
+  -k, --top <n>           Number of results (default: 10)
+  --hybrid                Combine vector + BM25 search
+  --bm25-weight <n>       BM25 weight in hybrid score (default: 0.3)
+  --include-commits       Also search commit messages
+  --branch <name>         Restrict to this branch
+  --model <model>         Override query embedding model
+  --narrate               Generate an LLM summary
+  --dump [file]           Output JSON to file or stdout
+  --out <spec>            Output format (repeatable): text, json[:file], html[:file],
+                          markdown[:file]
 ```
 
 ```bash
 gitsema first-seen "JWT token validation"
+gitsema first-seen "rate limiting" --hybrid --include-commits
 ```
 
 ---
@@ -513,8 +571,22 @@ Find historical concepts that no longer exist in HEAD but are semantically simil
 Options:
   -k, --top <n>       Number of results (default: 10)
   --since <date>      Only consider blobs whose latest commit is on or after this date
+  --branch <name>     Restrict to this branch
   --dump [file]       Output structured JSON
+  --out <spec>        Output format (repeatable)
 ```
+
+---
+
+#### `gitsema repl`
+
+Interactive semantic exploration REPL. Provides a persistent session where you can run search, first-seen, evolution, and other queries without re-embedding the query each time.
+
+```bash
+gitsema repl
+```
+
+Inside the REPL, type a query to search, or prefix with a command name (e.g. `first-seen auth`, `evolution "error handling"`). Type `help` for available commands, `exit` to quit.
 
 ---
 
@@ -903,6 +975,142 @@ gitsema eval eval-cases.jsonl --dump eval-results.json
 
 ---
 
+### Code Quality
+
+#### `gitsema code-review [options]`
+
+Semantic code review assistant. Compares the diff between two refs and surfaces analogous blobs from history — prior implementations, related patterns, and known-good precedents — to inform a review.
+
+```
+Options:
+  --base <ref>          Base ref (default: main)
+  --head <ref>          Head ref (default: HEAD)
+  --diff-file <file>    Read diff from a file instead of computing from refs
+  --top <n>             Analogues to show per hunk (default: 5)
+  --threshold <n>       Minimum similarity score (default: 0.75)
+  --format <fmt>        Output format: text (default) or json
+```
+
+```bash
+gitsema code-review
+gitsema code-review --base main --head feature/auth
+```
+
+---
+
+### Workflows
+
+#### `gitsema workflow run <template> [options]`
+
+Run a productized analysis workflow. Each template bundles multiple commands into a coherent, narrated report.
+
+| Template | Description |
+|---|---|
+| `pr-review` | Semantic PR review: diff, analogues, reviewer suggestions |
+| `incident` | Incident triage: first-seen, change-points, bisect, experts |
+| `onboarding` | Codebase orientation: clusters, experts, concept map |
+| `release-audit` | Release readiness: health, debt, security, dead-concepts |
+| `ownership-intel` | Ownership heatmap and contributor profiles |
+| `arch-drift` | Architectural drift detection via cluster timeline |
+| `knowledge-portal` | Knowledge discovery portal for a concept area |
+| `regression-forecast` | Predict regression risk from semantic change signals |
+
+```
+Options:
+  --query <text>      Concept or topic to focus the workflow on
+  --file <path>       File to analyze (used by pr-review)
+  --base <ref>        Base git ref (used by pr-review, regression-forecast)
+  --role <topic>      Alias for --query
+  -k, --top <n>       Result limit per section (default: 5)
+  --format <fmt>      Output format: markdown (default) or json
+  --out <spec>        Output format (repeatable)
+  --dump [file]       Output JSON to file or stdout
+```
+
+```bash
+gitsema workflow run pr-review --base main
+gitsema workflow run incident --query "payment timeout"
+gitsema workflow run release-audit
+```
+
+#### `gitsema workflow list`
+
+List all available workflow templates with short descriptions.
+
+```bash
+gitsema workflow list
+```
+
+---
+
+### Triage & Policy
+
+#### `gitsema triage <query> [options]`
+
+Incident triage bundle. Runs first-seen, change-points, semantic bisect, and expert suggestions in one pass, then assembles a structured report.
+
+```
+Options:
+  --top <n>           Top results per section (default: 10)
+  --ref1 <ref>        Earlier bound for bisect / change-points
+  --ref2 <ref>        Later bound for bisect / change-points
+  --file <path>       File to include semantic diff for
+  --dump [file]       Output JSON
+  --out <spec>        Output format (repeatable)
+```
+
+```bash
+gitsema triage "payment timeout error"
+gitsema triage "auth regression" --ref1 v2.0 --ref2 HEAD --dump triage.json
+```
+
+---
+
+#### `gitsema policy [subcommand] [options]`
+
+CI policy gates. Checks drift, debt, and security thresholds and exits non-zero when any gate fails — suitable for CI pipelines.
+
+```bash
+# Run all policy checks with defaults
+gitsema policy check
+
+# Override individual thresholds
+gitsema policy check --max-debt-score 0.4 --max-drift 0.3
+```
+
+```
+Options:
+  --max-debt-score <n>    Fail if mean debt score exceeds this (default: 0.6)
+  --min-security-score <n> Fail if security similarity score drops below this
+  --max-drift <n>         Fail if concept drift exceeds this threshold
+  --query <q>             Query to scope drift and change-point checks
+  --dump [file]           Output JSON report
+```
+
+Returns HTTP 422 / exit code 1 when any gate fails; 200 / 0 when all pass.
+
+---
+
+#### `gitsema ownership <query> [options]`
+
+Ownership heatmap. Shows which authors own blobs that are semantically related to a query, weighted by recency and volume.
+
+```
+Options:
+  --top <n>           Top blobs to consider (default: 20)
+  --window-days <n>   Rolling window for recency weighting
+  --branch <name>     Restrict to this branch
+  --dump [file]       Output JSON
+  --out <spec>        Output format (repeatable)
+```
+
+```bash
+gitsema ownership "authentication middleware"
+gitsema ownership "database migrations" --window-days 90
+```
+
+---
+
 ### Search Performance & AI Reliability
 
 #### `--early-cut <n>` (on `gitsema search`)
@@ -935,6 +1143,42 @@ Applies a **preset indexing profile** that sets coherent defaults for concurrenc
 gitsema index start --profile speed
 gitsema index start --profile quality
 ```
+
+#### `--out <spec>` — unified output (most commands)
+
+Most commands support `--out` for controlling output format. The flag is repeatable so you can emit multiple formats at once.
+
+| Value | Description |
+|---|---|
+| `text` | Human-readable terminal output (default) |
+| `json` | JSON to stdout |
+| `json:<file>` | JSON written to `<file>` |
+| `html` | Interactive HTML to stdout |
+| `html:<file>` | Interactive HTML written to `<file>` |
+| `markdown` | Markdown to stdout |
+| `markdown:<file>` | Markdown written to `<file>` |
+
+```bash
+gitsema search "auth" --out json:results.json --out text
+gitsema clusters --out html:clusters.html
+gitsema evolution "error handling" --out markdown:report.md
+```
+
+`--dump [file]` is a legacy alias for `--out json[:file]` and is still accepted.
+
+---
+
+#### `--narrate` — LLM summaries (most commands)
+
+Appending `--narrate` to any supporting command generates a plain-language narrative summary of the results using an LLM. Configure the LLM endpoint with `GITSEMA_LLM_URL` (OpenAI-compatible).
+
+```bash
+gitsema evolution "authentication" --narrate
+gitsema clusters --narrate
+gitsema health --narrate
+```
+
+---
 
 #### `GET /api/v1/capabilities` (HTTP server)
 
@@ -1054,7 +1298,7 @@ See [`docs/features.md`](docs/features.md) for the complete, grouped catalog of 
 
 ## Strategic review
 
-For the latest deep review of bottlenecks, missing features, productization ideas, and AI-assisted coding workflows, see [`docs/review4.md`](docs/review4.md).
+For the latest deep review of bottlenecks, missing features, productization ideas, and AI-assisted coding workflows, see [`docs/review7.md`](docs/review7.md).
 
 ---
 
