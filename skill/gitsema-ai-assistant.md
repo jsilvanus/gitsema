@@ -409,6 +409,147 @@ gitsema index start
 
 ---
 
+## Model management
+
+### Providers
+
+Gitsema supports three embedding backends:
+
+| Provider | `GITSEMA_PROVIDER` value | Notes |
+|----------|--------------------------|-------|
+| **Embedeer** | `embedeer` | Primary recommended provider. Local, no API key needed. Requires `@jsilvanus/embedeer` npm package. |
+| Ollama | `ollama` | Local via `localhost:11434`. Good fallback if Embedeer is unavailable. |
+| HTTP (OpenAI-compatible) | `http` | Any hosted API. Requires `GITSEMA_HTTP_URL` and optionally `GITSEMA_API_KEY`. |
+
+**Embedeer** is the primary way to run models. It handles model downloads, quantization, and optimisation automatically via the `@jsilvanus/embedeer` package:
+
+```bash
+npm install @jsilvanus/embedeer   # one-time setup
+
+export GITSEMA_PROVIDER=embedeer
+export GITSEMA_MODEL=nomic-ai/nomic-embed-text-v1
+gitsema index start
+```
+
+### Suggested default model: `nomic-ai/nomic-embed-text-v1`
+
+`nomic-ai/nomic-embed-text-v1` is the recommended default model. It produces high-quality embeddings for both code and prose, but it **requires task instruction prefixes** — unlike models such as OpenAI's `text-embedding-3-small` which work without them.
+
+**Required prefixes for nomic-embed-text-v1:**
+
+| Context | Prefix |
+|---------|--------|
+| Indexing documents (code files) | `search_document:` |
+| Indexing documents (text/prose files) | `search_document:` |
+| Search queries | `search_query:` |
+
+Without these prefixes, embedding quality degrades significantly. Gitsema's prefix system applies them automatically once configured — you never add them manually to queries.
+
+### Configuring a model profile with prefixes
+
+Use `gitsema models add` to register a model and its prefixes. This only needs to be done once (stored in `.gitsema/config.json` or `~/.config/gitsema/config.json`):
+
+```bash
+# Register nomic-embed-text-v1 with Embedeer + correct prefixes
+gitsema models add nomic-ai/nomic-embed-text-v1 \
+  --provider embedeer \
+  --prefix-code "search_document:" \
+  --prefix-text "search_document:" \
+  --prefix-query "search_query:" \
+  --prefix-other "search_document:" \
+  --set-text --set-code
+
+# Confirm the profile was saved
+gitsema models info nomic-ai/nomic-embed-text-v1
+```
+
+Then index normally:
+
+```bash
+gitsema index start
+```
+
+Gitsema will prepend `search_document:` to every blob it indexes and `search_query:` to every search query — automatically, for every command and MCP tool.
+
+### Models that do NOT require prefixes
+
+Most OpenAI-compatible models work without prefixes:
+
+```bash
+# OpenAI text-embedding-3-small — no prefixes needed
+gitsema models add text-embedding-3-small \
+  --provider http \
+  --url https://api.openai.com \
+  --key sk-... \
+  --set-text --set-code
+```
+
+Do not set prefixes for these models. Adding unnecessary prefixes will reduce embedding quality.
+
+### Full `models` command reference
+
+```bash
+gitsema models list                          # List all configured models and their profiles
+gitsema models add <name> [options]          # Register/update a model profile
+gitsema models info <name>                   # Show full profile for a model
+gitsema models remove <name>                 # Remove a model's configuration
+```
+
+**`models add` options:**
+
+| Flag | Description |
+|------|-------------|
+| `--provider ollama\|http\|embedeer` | Backend for this model |
+| `--url <url>` | HTTP provider base URL |
+| `--key <token>` | API key for HTTP provider |
+| `--global-name <id>` | Remote model identifier (when local shorthand differs from remote name) |
+| `--prefix-code <str>` | Prefix for code file embeddings (indexing) |
+| `--prefix-text <str>` | Prefix for prose/docs embeddings (indexing) |
+| `--prefix-query <str>` | Prefix applied to all search queries |
+| `--prefix-other <str>` | Prefix for files categorised as "other" |
+| `--prefix-type <role=prefix>` | Custom role prefix (repeatable) |
+| `--ext-role <ext=role>` | Map file extension to a role (repeatable) |
+| `--set-text` | Also set as default text model (`textModel` in config) |
+| `--set-code` | Also set as default code model (`codeModel` in config) |
+| `--global` | Save to global config (`~/.config/gitsema/config.json`) |
+
+### How prefixes work internally
+
+Gitsema applies prefixes through a `PrefixedProvider` wrapper that prepends the configured string (plus a space) to every text before sending it to the embedding backend. The prefix used depends on the **role** of the input:
+
+- `code` role → `--prefix-code` — applied when indexing source code files
+- `text` role → `--prefix-text` — applied when indexing prose/doc files
+- `query` role → `--prefix-query` — applied to all search queries
+- `other` role → `--prefix-other` — applied to files not classified as code or text
+
+Role assignment is based on file extension using built-in heuristics, overridable per-extension with `--ext-role .ipynb=jupyter`.
+
+Prefixes are **transparent** to the rest of the system: cache keys and DB provenance records use the base model name, not the prefixed variant.
+
+### Switching models
+
+Changing models after indexing requires a full re-index, because embeddings from different models live in separate vector spaces and are not comparable:
+
+```bash
+# Clear old embeddings for a specific model
+gitsema index clear-model <old-model-name> --yes
+
+# Re-index with new model
+export GITSEMA_MODEL=nomic-ai/nomic-embed-text-v1
+gitsema index start --since all
+```
+
+Or keep both models in the database for multi-model search:
+
+```bash
+export GITSEMA_TEXT_MODEL=nomic-ai/nomic-embed-text-v1
+export GITSEMA_CODE_MODEL=nomic-ai/nomic-embed-text-v1
+gitsema index start   # adds embeddings under the new model name
+# Old embeddings remain; queries use the currently configured model
+```
+
+---
+
 ## Chunking strategies
 
 | Strategy | Flag | Best for |
