@@ -1,6 +1,6 @@
 # gitsema
 
-[![Gitsema logo](assets/logo.png)]
+![Gitsema logo](assets/logo.png)
 
 [![npm version](https://img.shields.io/npm/v/gitsema.svg)](https://www.npmjs.com/package/gitsema) [![CI](https://github.com/jsilvanus/gitsema/actions/workflows/ci.yml/badge.svg)](https://github.com/jsilvanus/gitsema/actions/workflows/ci.yml)
 
@@ -15,6 +15,7 @@ Gitsema walks your Git history, embeds every blob, and lets you semantically sea
 - An embedding backend — either:
   - **Ollama** (local, default): [ollama.ai](https://ollama.ai) with `nomic-embed-text` pulled
   - **HTTP / OpenAI-compatible API**: any endpoint that speaks the OpenAI embeddings API
+  - **Embedeer** (`npm i @jsiulvanus/embedeer`)
 
 ## Installation
 
