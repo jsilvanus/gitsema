@@ -421,12 +421,14 @@ export async function modelsAddCommand(
 
   // If the user selected the embedeer provider, attempt to download & optimise the model.
   if ((options.provider === 'embedeer') || (profile.provider === 'embedeer')) {
+    // Use the configured globalName for remote downloads when present; otherwise fall back to the local alias.
+    const remoteModelName = profile.globalName ?? modelName
     try {
-      console.log(`embedeer: ensuring model '${modelName}' is downloaded and optimised (this may take a while)...`)
+      console.log(`embedeer: ensuring model '${remoteModelName}' is downloaded and optimised (this may take a while)...`)
       // Best-effort: download if missing, then optimise.
       // Failures are reported but do not prevent the profile from being saved.
       // eslint-disable-next-line no-await-in-loop
-      await ensureModelDownloadedAndOptimized(modelName, { downloadIfMissing: true, optimize: true })
+      await ensureModelDownloadedAndOptimized(remoteModelName, { downloadIfMissing: true, optimize: true })
       console.log('embedeer: model setup complete.')
     } catch (err) {
       console.error(`embedeer: model setup failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -502,9 +504,11 @@ export async function modelsUpdateCommand(
   try {
     const finalProfile = getModelProfile(modelName)
     if (finalProfile.provider === 'embedeer') {
-      console.log(`embedeer: running optimisation for model '${modelName}' (this may take a while)...`)
+      // Use the configured globalName where available for remote operations.
+      const remoteModelName = finalProfile.globalName ?? modelName
+      console.log(`embedeer: running optimisation for model '${remoteModelName}' (this may take a while)...`)
       // eslint-disable-next-line no-await-in-loop
-      await ensureModelDownloadedAndOptimized(modelName, { downloadIfMissing: true, optimize: true })
+      await ensureModelDownloadedAndOptimized(remoteModelName, { downloadIfMissing: true, optimize: true })
       console.log('embedeer: optimisation complete.')
     }
   } catch (err) {
