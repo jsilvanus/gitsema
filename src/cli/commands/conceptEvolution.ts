@@ -1,9 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { resolveOutputs, hasSinkFormat, getSink, collectOut } from '../../utils/outputSink.js'
 export { collectOut }
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeConceptEvolution } from '../../core/search/evolution.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
@@ -13,6 +11,7 @@ import type { ConceptEvolutionEntry } from '../../core/search/evolution.js'
 import { remoteConceptEvolution } from '../../client/remoteClient.js'
 import { renderConceptEvolutionHtml } from '../../core/viz/htmlRenderer.js'
 import { narrateSearchResults } from '../../core/llm/narrator.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 
 export interface ConceptEvolutionCommandOptions {
   top?: string
@@ -33,16 +32,6 @@ export interface ConceptEvolutionCommandOptions {
   /** Generate an LLM narrative summary of concept evolution */
   narrate?: boolean
   noHeadings?: boolean
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 /**
@@ -130,7 +119,11 @@ export async function conceptEvolutionCommand(
   }
 
   // Apply CLI model overrides
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
 
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
   if (remoteUrl) {
@@ -186,9 +179,6 @@ export async function conceptEvolutionCommand(
 
   const includeContent = options.includeContent ?? false
 
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model =
-    process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
   const provider = buildProviderOrExit(providerType, model)
 
   let queryEmbedding: Embedding

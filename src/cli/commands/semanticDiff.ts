@@ -1,13 +1,12 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import type { SemanticDiffEntry, SemanticDiffResult } from '../../core/search/semanticDiff.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 
 export interface SemanticDiffCommandOptions {
   top?: string
@@ -21,16 +20,6 @@ export interface SemanticDiffCommandOptions {
   bm25Weight?: string
   branch?: string
   out?: string[]
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 function renderGroup(label: string, entries: SemanticDiffEntry[]): string {
@@ -106,11 +95,11 @@ export async function semanticDiffCommand(
   }
 
   // Apply CLI model overrides
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model =
-    process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
   const provider = buildProviderOrExit(providerType, model)
 
   let queryEmbedding: Embedding

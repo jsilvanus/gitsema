@@ -1,7 +1,5 @@
 import { runIndex, type IndexStats } from '../../core/indexing/indexer.js'
 import { runRemoteIndex } from '../../core/indexing/remoteIndexer.js'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { DEFAULT_MAX_SIZE, showBlob } from '../../core/git/showBlob.js'
 import { resolveBlobAtRef } from '../../core/search/evolution.js'
 import { getFileCategory } from '../../core/embedding/fileType.js'
@@ -17,6 +15,7 @@ import { computeConfigHash, saveEmbedConfig, checkConfigCompatibility, type Embe
 import { getRawDb, DB_PATH } from '../../core/db/sqlite.js'
 import { getProfileDefaults, postRunRecommendations } from '../../core/indexing/adaptiveTuning.js'
 import { computeIndexStatus, formatIndexStatus } from '../../core/indexing/indexStatus.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 
 /** Maps `--level` values to the corresponding `--chunker` strategy string. */
 const LEVEL_TO_CHUNKER: Record<string, string> = {
@@ -62,14 +61,7 @@ export async function indexFileCommand(filePath: string, options: { chunker?: st
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
 
-  let provider: EmbeddingProvider
-  try {
-    provider = buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
+  const provider = buildProviderOrExit(providerType, model)
 
   // Resolve blob at HEAD; if running from a subdirectory `filePath` may be
   // relative to cwd rather than the repo root. Try git's prefix and repo root
@@ -268,16 +260,6 @@ function renderProgress(stats: IndexStats): string {
   )
 }
 
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
-}
-
 /**
  * Returns undefined when the input is undefined.
  * Throws on unrecognisable formats.
@@ -392,7 +374,11 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
   }
 
   // Apply CLI model overrides so provider factories pick them up
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+  const { providerType, textModel, codeModel } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
 
   // Remote mode: ship blobs to a gitsema server instead of embedding locally
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
@@ -454,13 +440,6 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
     console.log(`  Commits mapped:    ${stats.commits}`)
     return
   }
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-
-  // Text model (default, also used for unrecognised file types)
-  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  // Code model — defaults to the text model when not set, keeping single-model behaviour
-  const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
 
   const textProvider = buildProviderOrExit(providerType, textModel)
   // Only build a separate code provider when the models differ
@@ -757,7 +736,6 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
 
   // Optionally build VSS index after indexing
   if (options.buildVss) {
-    const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
     await buildVssCommand({ model: textModel })
   }
 
@@ -769,7 +747,6 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
     const rawDb = getRawDb()
     const countRow = rawDb.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c: number }
     if (countRow.c >= threshold) {
-      const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
       console.log(`Auto-building VSS index (${countRow.c} blobs ≥ threshold ${threshold})…`)
       await buildVssCommand({ model: textModel })
     } else {

@@ -43,13 +43,27 @@ describe('policyCheckCommand', () => {
     logSpy.mockRestore()
   })
 
-  it('exits with code 1 when drift exceeds threshold (distance 0.1 > 0)', async () => {
+  it('exits with code 2 (usage) when --max-drift is not a positive number', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`exit:${code}`)
     }) as never)
     await expect(
       policyCheckCommand({ maxDrift: '0', query: 'x' }),
-    ).rejects.toThrow('exit:1')
+    ).rejects.toThrow('exit:2')
     exitSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
+
+  it('exits with code 3 (gate failed) when drift exceeds threshold (distance 0.1 > 0.05)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`)
+    }) as never)
+    await expect(
+      policyCheckCommand({ maxDrift: '0.05', query: 'x' }),
+    ).rejects.toThrow('exit:3')
+    exitSpy.mockRestore()
+    logSpy.mockRestore()
   })
 })

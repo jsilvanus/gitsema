@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { setConfigValue, getLocalConfigPath } from '../../core/config/configManager.js'
 import { indexStartCommand } from './index.js'
+import { probeOllama } from '../lib/provider.js'
 
 function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve))
@@ -60,14 +61,7 @@ export async function quickstartCommand(): Promise<void> {
 
   if (!providerType) {
     // Try Ollama (check if the API responds without using shell)
-    let ollamaOk = false
-    try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 2000)
-      const resp = await fetch('http://localhost:11434/api/tags', { signal: controller.signal })
-      clearTimeout(timeout)
-      ollamaOk = resp.ok
-    } catch { /* not running or network error */ }
+    const ollamaOk = await probeOllama()
 
     if (ollamaOk) {
       console.log('  ✓ Ollama detected at http://localhost:11434')

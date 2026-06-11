@@ -10,15 +10,17 @@
  *
  * Exit code:
  *   0 — all concepts within threshold
- *   1 — one or more concepts drifted beyond threshold (CI failure)
- *   2 — tool error (provider unreachable, invalid refs, etc.)
+ *   1 — runtime error (provider unreachable, embedding failure, etc.)
+ *   2 — invalid usage (bad arguments, malformed --concepts file)
+ *   3 — one or more concepts drifted beyond threshold (CI gate failure)
  */
 
 import { execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch, cosineSimilarity } from '../../core/search/vectorSearch.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { EXIT_USAGE, EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
 
 export interface RegressionGateOptions {
   base?: string
@@ -63,18 +65,17 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
       }
     } catch (err) {
       console.error(`Error reading concepts file: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(2)
+      process.exit(EXIT_USAGE)
     }
   }
 
   if (queries.length === 0) {
     console.error('Error: provide --query <text> or --concepts <file.json>')
-    process.exit(2)
+    process.exit(EXIT_USAGE)
   }
 
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const modelName = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProvider(providerType, modelName)
+  const { providerType, textModel: modelName } = resolveModels({})
+  const provider = buildProviderOrExit(providerType, modelName, EXIT_RUNTIME)
 
   // Resolve refs to commit hashes for display
   let baseHash = baseRef; let headHash = headRef
@@ -97,7 +98,7 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
       embedding = await embedQuery(provider, query) as number[]
     } catch (err) {
       console.error(`Could not embed query "${query}": ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(2)
+      process.exit(EXIT_RUNTIME)
     }
 
     // Search at base/head ref. When refs are branch names the `branch` filter in
@@ -138,5 +139,5 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
     }
   }
 
-  process.exit(allPassed ? 0 : 1)
+  process.exit(allPassed ? 0 : EXIT_GATE_FAILED)
 }

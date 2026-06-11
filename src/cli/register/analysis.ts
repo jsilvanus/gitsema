@@ -39,16 +39,36 @@ export function registerAnalysis(program: Command) {
     .option('-k, --top <n>', 'number of top results per section', '5')
     .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, out: opts.out, top: opts.top }) })
 
+  const policyCheckAction = async (opts: any) => {
+    await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump, out: opts.out })
+  }
+
   program
-    .command('policy check')
-    .description('Run policy gates for drift, debt, and security scores (CI-friendly exit codes)')
-    .option('--max-drift <n>', 'fail if any concept change-point distance exceeds n')
-    .option('--max-debt-score <n>', 'fail if aggregate debt score exceeds n')     
-    .option('--min-security-score <n>', 'fail if any security similarity score is below this threshold')
+    .command('policy-check')
+    .description('Run policy gates for drift, debt, and security scores (CI-friendly exit codes). Exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed.')
+    .option('--max-drift <n>', 'fail if any concept change-point distance exceeds n (cosine distance, 0–2)')
+    .option('--max-debt-score <n>', 'fail if aggregate debt score exceeds n')
+    .option('--min-security-score <n>', 'fail if any security finding similarity exceeds this threshold (cosine similarity, 0–1)')
     .option('--query <text>', 'concept query (required for drift gate)')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[])
-    .action(async (opts: any) => { await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump, out: opts.out }) })
+    .action(policyCheckAction)
+
+  // Deprecated alias for the old two-word `policy check` form.
+  const policy = program.command('policy', { hidden: true })
+  policy
+    .command('check')
+    .description('Alias for `policy-check` [deprecated: use `gitsema policy-check`]')
+    .option('--max-drift <n>', 'fail if any concept change-point distance exceeds n (cosine distance, 0–2)')
+    .option('--max-debt-score <n>', 'fail if aggregate debt score exceeds n')
+    .option('--min-security-score <n>', 'fail if any security finding similarity exceeds this threshold (cosine similarity, 0–1)')
+    .option('--query <text>', 'concept query (required for drift gate)')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[])
+    .action(async (opts: any) => {
+      console.warn('Deprecation notice: `gitsema policy check` is deprecated — use `gitsema policy-check` instead.')
+      await policyCheckAction(opts)
+    })
 
   program
     .command('ownership <query>')
@@ -88,13 +108,13 @@ export function registerAnalysis(program: Command) {
 
   program
     .command('regression-gate')
-    .description('CI gate: fail if key concepts drift beyond threshold between two refs')
+    .description('CI gate: fail if key concepts drift beyond threshold between two refs. Exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed.')
     .option('--base <ref>', 'base ref to compare from (default: main)')
     .option('--head <ref>', 'head ref to compare to (default: HEAD)')
     .option('--query <text>', 'single concept query to check')
     .option('--concepts <file>', 'JSON file with list of concept queries to check')
-    .option('--threshold <n>', 'max allowed cosine drift (default: 0.15)')        
-    .option('--top <n>', 'top-k results to compare (default: 10)')
+    .option('--threshold <n>', 'max allowed cosine drift (cosine distance, 0–2, default: 0.15)')
+    .option('-k, --top <n>', 'top-k results to compare (default: 10)')
     .option('--format <fmt>', 'output format: text (default) or json')
     .action(async (opts: { base?: string; head?: string; query?: string; concepts?: string; threshold?: string; top?: string; format?: string }) => {
       await regressionGateCommand(opts)
@@ -105,8 +125,8 @@ export function registerAnalysis(program: Command) {
     .description('Compare semantic similarity of a concept across two separately indexed repos')
     .option('--repo-a <db>', 'path to repo A .gitsema/index.db')
     .option('--repo-b <db>', 'path to repo B .gitsema/index.db')
-    .option('--top <n>', 'top results per repo (default: 5)')
-    .option('--threshold <n>', 'similarity threshold for shared-concept match (default: 0.7)')
+    .option('-k, --top <n>', 'top results per repo (default: 5)')
+    .option('--threshold <n>', 'similarity threshold for shared-concept match (cosine similarity, 0–1, default: 0.7)')
     .option('--format <fmt>', 'output format: text (default) or json')
     .action(async (query: string, opts: { repoA?: string; repoB?: string; top?: string; threshold?: string; format?: string }) => {
       await crossRepoSimilarityCommand(query, opts)
@@ -114,12 +134,12 @@ export function registerAnalysis(program: Command) {
 
   program
     .command('code-review')
-    .description('Semantic code review: find historical analogues for changed code and flag regressions')
+    .description('Semantic code review: find historical analogues for changed code and flag regressions. Exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed.')
     .option('--base <ref>', 'base git ref (e.g. main)')
     .option('--head <ref>', 'head git ref (e.g. HEAD)')
-    .option('--diff-file <file>', 'read diff from a patch file instead of git')   
-    .option('--top <n>', 'top analogues per file (default: 5)')
-    .option('--threshold <n>', 'minimum similarity score (default: 0.75)')        
+    .option('--diff-file <file>', 'read diff from a patch file instead of git')
+    .option('-k, --top <n>', 'top analogues per file (default: 5)')
+    .option('--threshold <n>', 'minimum similarity score (cosine similarity, 0–1, default: 0.75)')
     .option('--format <fmt>', 'output format: text (default) or json')
     .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string }) => {
       await codeReviewCommand(opts)

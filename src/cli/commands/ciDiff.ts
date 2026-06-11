@@ -1,11 +1,11 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff, type SemanticDiffResult } from '../../core/search/semanticDiff.js'
 import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
 
 export interface CiDiffCommandOptions {
   base?: string
@@ -20,16 +20,6 @@ export interface CiDiffCommandOptions {
   codeModel?: string
   /** GitHub token for posting PR review comments (overrides GITHUB_TOKEN env var) */
   githubToken?: string
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 function renderSummaryText(result: SemanticDiffResult, threshold: number): string {
@@ -65,11 +55,12 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
   const format = options.format ?? 'text'
   const threshold = options.threshold !== undefined ? parseFloat(options.threshold) : 0.3
 
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProviderOrExit(providerType, model)
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
+  const provider = buildProviderOrExit(providerType, model, EXIT_RUNTIME)
 
   let queryEmbedding: Embedding
   try {
@@ -77,7 +68,7 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: could not embed query — ${msg}`)
-    process.exit(1)
+    process.exit(EXIT_RUNTIME)
     throw err
   }
 
@@ -87,7 +78,7 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: ${msg}`)
-    process.exit(1)
+    process.exit(EXIT_RUNTIME)
     throw err
   }
 
@@ -127,7 +118,7 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
 
   // Exit with non-zero if there are significant changes (for CI gate use case)
   if (result.gained.length > 0 || result.lost.length > 0) {
-    process.exitCode = 1
+    process.exitCode = EXIT_GATE_FAILED
   }
 }
 

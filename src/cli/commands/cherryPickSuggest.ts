@@ -1,27 +1,16 @@
-import { writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { suggestCherryPicks } from '../../core/search/cherryPick.js'
-import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 import { formatScore } from '../../core/search/ranking.js'
 import type { Embedding } from '../../core/models/types.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { emitJsonSink } from '../lib/output.js'
 
 export interface CherryPickOptions {
   top?: string
   model?: string
   dump?: string | boolean
   out?: string[]
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 export async function cherryPickSuggestCommand(query: string, options: CherryPickOptions): Promise<void> {
@@ -36,9 +25,7 @@ export async function cherryPickSuggestCommand(query: string, options: CherryPic
     process.exit(1)
   }
 
-  applyModelOverrides({ model: options.model })
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const { providerType, textModel } = resolveModels({ model: options.model })
   const provider = buildProviderOrExit(providerType, textModel)
 
   let qEmb: Embedding
@@ -55,17 +42,12 @@ export async function cherryPickSuggestCommand(query: string, options: CherryPic
   const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
   const jsonSink = getSink(sinks, 'json')
 
-  if (jsonSink) {
-    const json = JSON.stringify(results, null, 2)
-    if (jsonSink.file) {
-      writeFileSync(jsonSink.file, json, 'utf8')
-      console.log(`Wrote cherry-pick suggestions to ${jsonSink.file}`)
-    } else {
-      process.stdout.write(json + '\n')
-      return
-    }
-    if (!hasSinkFormat(sinks, 'text')) return
-  }
+  if (emitJsonSink({
+    sinks,
+    jsonSink,
+    payload: results,
+    fileMessage: (file) => `Wrote cherry-pick suggestions to ${file}`,
+  }).handled) return
 
   if (results.length === 0) {
     console.log('No cherry-pick suggestions found.')

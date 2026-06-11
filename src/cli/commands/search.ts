@@ -1,9 +1,7 @@
 import { writeFileSync, existsSync } from 'node:fs'
 import { resolveOutputs, writeToSink, hasSinkFormat, getSink, collectOut } from '../../utils/outputSink.js'
 export { collectOut }
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding, SearchResult } from '../../core/models/types.js'
 import { vectorSearch, vectorSearchWithAnn, mergeSearchResults, type VectorSearchOptions } from '../../core/search/vectorSearch.js'
 import { hybridSearch } from '../../core/search/hybridSearch.js'
@@ -13,6 +11,7 @@ import { parseDateArg } from '../../core/search/timeSearch.js'
 import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { getRawDb } from '../../core/db/sqlite.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { splitIdentifier } from '../../core/search/labelEnhancer.js'
 import { narrateSearchResults } from '../../core/llm/narrator.js'
 import { formatExplainForLlm } from '../../core/search/explainFormatter.js'
@@ -86,16 +85,6 @@ export interface SearchCommandOptions {
   noHeadings?: boolean
 }
 
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
-}
-
 /**
  * Renders a list of CommitSearchResults as human-readable CLI output.
  *
@@ -129,7 +118,11 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   }
 
   // Apply CLI model overrides to environment so provider factories pick them up
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
+  const { providerType, textModel, codeModel } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
 
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
   if (remoteUrl) {
@@ -237,9 +230,6 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
   }
 
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
   const dualModel = codeModel !== textModel
   const noCache = options.cache === false
 
