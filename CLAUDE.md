@@ -11,7 +11,7 @@ The latest review is here. Do not edit the review file, but update that file wit
 
 | Document | Purpose |
 |---|---|
-| [`docs/review7.md`](docs/review7.md) | Latest strategic review: security, scale/OOM risk, accessibility, and product readiness |
+| [`docs/review8.md`](docs/review8.md) | Latest strategic review: CLI wiring, usability, code reuse, and directory structure |
 
 When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.

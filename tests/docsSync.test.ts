@@ -89,7 +89,7 @@ describe('README.md command coverage', () => {
 // 3. features.md and PLAN.md exist and are non-trivial
 // ---------------------------------------------------------------------------
 describe('canonical docs exist', () => {
-  for (const doc of ['docs/features.md', 'docs/PLAN.md', 'docs/review7.md']) {
+  for (const doc of ['docs/features.md', 'docs/PLAN.md', 'docs/review8.md']) {
     it(`${doc} exists and has content`, () => {
       const path = join(ROOT, doc)
       expect(existsSync(path), `${doc} should exist`).toBe(true)
