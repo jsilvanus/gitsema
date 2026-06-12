@@ -3236,6 +3236,27 @@ PRs: https://github.com/jsilvanus/gitsema/pull/67, https://github.com/jsilvanus/
 
 **Status:** ✅ complete.
 
+### Phase 96 — LLM Narrator/Explainer/Guide via chattydeer *(completed, version: pending release)*
+
+**Goal:** Add an optional LLM narration/explainer/guide layer on top of gitsema's existing git-history evidence, backed by `@jsilvanus/chattydeer` (pinned `^0.2.0`).
+
+**Implemented scope:**
+
+- New `src/core/narrator/` module: `types.ts` (provider interface, config types), `redact.ts` (secret/PII redaction applied before any LLM payload), `audit.ts` (records narrator calls), `chattydeerProvider.ts` (lazy-loaded `ChattydeerNarratorProvider`, safe-by-default — no network call unless a narrator model with `httpUrl` is configured), `resolveNarrator.ts` (DB-backed narrator/guide model config storage and active-selection in the new `settings` table), `narrator.ts` (`runNarrate`/`runExplain` — evidence-only by default).
+- Schema v22: added `kind` + `params_json` columns to `embed_config` (narrator/guide configs share this table, distinguished by `kind`), and a new `settings` key-value table for active-config selection. Migration `src/core/db/migrations/022_narrator_config.ts`.
+- New CLI commands: `gitsema narrate [options]`, `gitsema explain <topic> [options]` (both safe-by-default — return raw commit evidence unless `--narrate` is passed and a narrator model is configured), and `gitsema guide [question] [options]` (interactive LLM chat with gathered git context, falls back to narrator model). All registered in the `Analysis` command group.
+- `gitsema models add/list/activate/remove --narrator|--guide` subcommands for managing LLM model configs (provider `chattydeer`, OpenAI-compatible `--http-url`).
+- New MCP tools `narrate_repo` and `explain_issue_or_error` (`src/mcp/tools/narrator.ts`), registered in `src/mcp/server.ts`.
+- New HTTP routes: `POST /api/v1/narrate`, `POST /api/v1/explain` (`src/server/routes/narrator.ts`), and `POST /api/v1/guide/chat` (`src/server/routes/guide.ts`).
+- `narrate`/`explain` wired to the unified `--out <spec>` option (json/markdown/text sinks, file or stdout), with `--format md|text|json` retained as a legacy alias.
+- New tests: `tests/narratorConfig.test.ts` (DB-backed config CRUD + active-selection through a real temp DB and the v22 migration), `tests/narratorRedact.test.ts` (redaction patterns), `tests/narratorSmoke.test.ts` (provider safe-by-default behavior — no network calls when disabled).
+
+**Dependency note:** Only `@jsilvanus/chattydeer@0.2.0` exists on npm at the time of this port; `docs/chattydeer_contract.md` documents a richer tool-calling contract targeting a future `0.3.0`. The current `Explainer.create(modelName, { generateFn, deterministic })` / `explain()` / `destroy()` surface in 0.2.0 is sufficient for `narrate`/`explain`/`guide`'s single-turn text generation, but **tool-calling (function_calls) for `guide`, as described in `docs/chattydeer_contract.md`, is not available until chattydeer 0.3.0** — `guide` currently does a single context-enriched Q&A without LLM-driven tool invocation.
+
+**Tests:** `npx vitest run` — all 907 tests pass, including the three new narrator test files (which exercise the v22 migration through real temp SQLite DBs).
+
+**Status:** ✅ complete (core narrate/explain/guide + safe-by-default LLM integration); ⏳ chattydeer 0.3.0 tool-calling for `guide` is a follow-up once that version is published.
+
 ## Long-Term Investments
 
 | Feature | Complexity | Notes |

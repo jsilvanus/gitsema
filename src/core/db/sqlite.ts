@@ -49,8 +49,9 @@ export interface DbSession {
  * 19 — Added repo_tokens table (Phase 75 per-repo access control)
  * 20 — Enforce uniqueness of (blob_hash, path) in paths table (review6 §11.6)
  * 21 — Hash repo tokens at rest: token_hash + token_prefix replace plaintext token (review7 §4.1)
+ * 22 — Added kind + params_json columns to embed_config; added settings table (narrator model config)
  */
-export const CURRENT_SCHEMA_VERSION = 21
+export const CURRENT_SCHEMA_VERSION = 22
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -229,7 +230,7 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       UNIQUE (module_path, model)
     );
 
-    -- Embedding provenance (Phase 35 / v13)
+    -- Embedding provenance (Phase 35 / v13); last_used_at added in v18; kind + params_json added in v22
     CREATE TABLE IF NOT EXISTS embed_config (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       config_hash TEXT NOT NULL UNIQUE,
@@ -240,7 +241,10 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       chunker TEXT NOT NULL,
       window_size INTEGER,
       overlap INTEGER,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      kind TEXT DEFAULT 'embedding',
+      params_json TEXT
     );
 
     -- Incremental-indexing resume markers (Phase 35 / v13)
@@ -291,6 +295,14 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       y REAL NOT NULL,
       projected_at INTEGER NOT NULL,
       UNIQUE (blob_hash, model)
+    );
+
+    -- Narrator model config and active settings (schema v22)
+    -- kind column on embed_config distinguishes 'embedding' from 'narrator' configs
+    -- params_json stores narrator-specific params (httpUrl, apiKey, maxTokens, etc.)
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
   `)
 

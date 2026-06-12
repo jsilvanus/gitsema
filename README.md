@@ -93,7 +93,7 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 |---|---|
 | `gitsema config <action> [key] [value]` | Manage persistent configuration (`set`, `get`, `list`, `unset`) |
 | `gitsema status [file]` | Show index status and database info, or status for a specific file |
-| `gitsema models` | Manage embedding model configurations (list, add, remove, info) |
+| `gitsema models` | Manage embedding model configurations (list, add, remove, info); also manages LLM narrator/guide model configs via `--narrator`/`--guide` |
 | `gitsema index` | Show index coverage (blob counts per model) |
 | `gitsema index start [options]` | Perform indexing — walk Git history and embed all blobs |
 | `gitsema quickstart` | Guided onboarding wizard: detect provider, configure model, and index HEAD |
@@ -191,6 +191,42 @@ Same underlying search as `gitsema search`, but results are sorted by first-seen
 | `gitsema policy-check [options]` | Run policy gates for drift, debt, and security scores (CI-friendly exit codes) |
 | `gitsema ownership <query> [options]` | Show ownership heatmap for a concept (ownership confidence and trends) |
 | `gitsema eval <file> [options]` | Evaluate retrieval quality against a JSONL file of (query, expectedPaths) pairs |
+| `gitsema narrate [options]` | Return commit evidence (default) or an LLM-generated narrative of repository development history |
+| `gitsema explain <topic> [options]` | Return matching commits (default) or an LLM-generated explanation/timeline for a bug, error, or topic |
+| `gitsema guide [question] [options]` | Interactive LLM chat that answers questions about this repository, using gathered git context |
+
+#### `gitsema narrate [options]` / `gitsema explain <topic> [options]`
+
+Both commands are **safe-by-default**: with no narrator model configured (or without `--narrate`), they return raw commit evidence as JSON/text — no network calls are made. Pass `--narrate` (and configure a narrator model) to generate LLM prose instead.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--since <ref\|date>` | — | Only include commits after this ref or date |
+| `--until <ref\|date>` | — | Only include commits before this ref or date |
+| `--range <rev-range>` | — | Git revision range (e.g. `v1.0..HEAD`) (`narrate` only) |
+| `--focus <area>` | `all` | Filter commits by area: `bugs`, `features`, `ops`, `security`, `deps`, `performance`, `all` (`narrate` only) |
+| `--format <fmt>` | `md` | Output format when narrating: `md`, `text`, `json` (legacy: prefer `--out`) |
+| `--out <spec>` | — | Output spec (repeatable): `text\|json[:file]\|markdown[:file]` (overrides `--format`) |
+| `--max-commits <n>` | `500` | Maximum commits to analyse (`narrate` only) |
+| `--narrator-model-id <id>` | — | `embed_config.id` of the narrator model to use (overrides active selection) |
+| `--model <name>` | — | Narrator model name to use (overrides active selection) |
+| `--narrate` | off | Call the configured LLM narrator and return prose (default: return evidence only) |
+| `--evidence-only` | on | Return raw commit evidence without calling the LLM (this is the default) |
+
+Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`.
+
+#### `gitsema guide [question] [options]`
+
+Interactive LLM chat that gathers repository context (recent commits, repo stats) and answers questions about the codebase. Falls back to the active narrator model if no guide model is configured, and prints the gathered context (without calling an LLM) if neither is configured.
+
+| Flag | Description |
+|---|---|
+| `--guide-model-id <id>` | `embed_config.id` of the guide model to use |
+| `--model <name>` | Guide/narrator model name to use |
+| `--no-context` | Skip gathering git context (faster but less accurate) |
+| `-i, --interactive` | Start an interactive REPL session (one question per line) |
+
+Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`.
 
 #### `gitsema policy-check [options]`
 

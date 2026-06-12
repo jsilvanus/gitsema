@@ -272,6 +272,28 @@ export const embedConfig = sqliteTable('embed_config', {
   createdAt: integer('created_at').notNull(),
   /** Timestamp of the last indexing run that used this config (updated by indexStartCommand). */
   lastUsedAt: integer('last_used_at'),
+  /**
+   * Config kind: 'embedding' (default) or 'narrator'.
+   * Narrator configs store chat-completion provider params in params_json.
+   * Added in schema v22.
+   */
+  kind: text('kind').default('embedding'),
+  /**
+   * JSON-encoded extra parameters (narrator-specific: httpUrl, apiKey, maxTokens, etc.).
+   * Added in schema v22.
+   */
+  paramsJson: text('params_json'),
+})
+
+/**
+ * Key-value settings table for active config selections and other persistent settings.
+ * Known keys:
+ *   active_narrator_model_config_id — INTEGER id of the active narrator embed_config row
+ * Added in schema v22.
+ */
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
 })
 
 export const indexingCheckpoints = sqliteTable('indexing_checkpoints', {

@@ -9,6 +9,8 @@ import { quickstartCommand } from '../commands/quickstart.js'
 import { regressionGateCommand } from '../commands/regressionGate.js'
 import { crossRepoSimilarityCommand } from '../commands/crossRepoSimilarity.js'
 import { codeReviewCommand } from '../commands/codeReview.js'
+import { registerNarratorCommands } from '../commands/narrate.js'
+import { registerGuideCommand } from '../commands/guide.js'
 import { collectOut } from '../../utils/outputSink.js'
 
 export function registerAnalysis(program: Command) {
@@ -148,4 +150,7 @@ export function registerAnalysis(program: Command) {
     .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string; out?: string[] }) => {
       await codeReviewCommand(opts)
     })
+
+  registerNarratorCommands(program)
+  registerGuideCommand(program)
 }
