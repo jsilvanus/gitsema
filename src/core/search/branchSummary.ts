@@ -1,8 +1,8 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity } from './analysis/vectorSearch.js'
 import { bufferToEmbedding } from '../../utils/embedding.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../git/branchDiff.js'
-import { computeEvolution } from './evolution.js'
+import { computeEvolution } from './temporal/evolution.js'
 
 // ---------------------------------------------------------------------------
 // Public types

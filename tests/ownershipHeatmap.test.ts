@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('../src/core/search/vectorSearch.js', () => ({ vectorSearch: vi.fn().mockReturnValue([{ blobHash: 'b1' }, { blobHash: 'b2' }]) }))
+vi.mock('../src/core/search/analysis/vectorSearch.js', () => ({ vectorSearch: vi.fn().mockReturnValue([{ blobHash: 'b1' }, { blobHash: 'b2' }]) }))
 vi.mock('../src/core/db/sqlite.js', () => ({ getActiveSession: vi.fn() }))
 
 import { computeOwnershipHeatmap } from '../src/core/search/ownershipHeatmap.js'

@@ -4,7 +4,7 @@ import { getActiveSession } from '../../db/sqlite.js'
 import { embeddings, paths } from '../../db/schema.js'
 import { logger } from '../../../utils/logger.js'
 import { bufferToEmbedding } from '../../../utils/embedding.js'
-import { cosineSimilarity } from '../vectorSearch.js'
+import { cosineSimilarity } from '../analysis/vectorSearch.js'
 import { enhanceClusters, type EnhancedLabelOptions, type ClusterEnhancerInput } from './labelEnhancer.js'
 
 // ---------------------------------------------------------------------------

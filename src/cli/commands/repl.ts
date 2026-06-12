@@ -17,8 +17,8 @@
 import * as readline from 'node:readline'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
-import { hybridSearch } from '../../core/search/hybridSearch.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
 import { renderResults } from '../../core/search/ranking.js'
 
 export interface ReplOptions {

@@ -15,7 +15,7 @@ vi.mock('../src/core/embedding/providerFactory.js', () => ({
 vi.mock('../src/core/embedding/embedQuery.js', () => ({
   embedQuery: vi.fn().mockResolvedValue([0.1, 0.2]),
 }))
-vi.mock('../src/core/search/changePoints.js', () => ({
+vi.mock('../src/core/search/temporal/changePoints.js', () => ({
   computeConceptChangePoints: vi.fn().mockReturnValue({
     type: 'concept-change-points',
     query: 'x',

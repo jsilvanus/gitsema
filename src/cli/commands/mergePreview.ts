@@ -3,7 +3,7 @@ import { computeMergeImpact } from '../../core/search/mergeAudit.js'
 import {
   type TemporalClusterReport,
   type ClusterChange,
-} from '../../core/search/clustering.js'
+} from '../../core/search/clustering/clustering.js'
 import { renderClusterDiffHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 

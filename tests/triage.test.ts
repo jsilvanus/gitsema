@@ -5,15 +5,15 @@ vi.mock('../src/core/embedding/providerFactory.js', () => ({
   buildProvider: vi.fn().mockReturnValue({ model: 'm' }),
 }))
 vi.mock('../src/core/embedding/embedQuery.js', () => ({ embedQuery: vi.fn().mockResolvedValue([0.1, 0.2]) }))
-vi.mock('../src/core/search/vectorSearch.js', () => ({ vectorSearch: vi.fn().mockReturnValue([{ blobHash: 'b1', paths: ['p1'], score: 0.9 }]) }))
-vi.mock('../src/core/search/changePoints.js', () => ({ computeConceptChangePoints: vi.fn().mockReturnValue([{ distance: 0.2 }]) }))
+vi.mock('../src/core/search/analysis/vectorSearch.js', () => ({ vectorSearch: vi.fn().mockReturnValue([{ blobHash: 'b1', paths: ['p1'], score: 0.9 }]) }))
+vi.mock('../src/core/search/temporal/changePoints.js', () => ({ computeConceptChangePoints: vi.fn().mockReturnValue([{ distance: 0.2 }]) }))
 vi.mock('../src/core/search/semanticBisect.js', () => ({ computeSemanticBisect: vi.fn().mockReturnValue({ culprit: 'abc' }) }))
-vi.mock('../src/core/search/evolution.js', () => ({ computeFileEvolution: vi.fn().mockReturnValue([{ path: 'p1' }]) }))
+vi.mock('../src/core/search/temporal/evolution.js', () => ({ computeFileEvolution: vi.fn().mockReturnValue([{ path: 'p1' }]) }))
 vi.mock('../src/core/search/experts.js', () => ({ computeExperts: vi.fn().mockReturnValue([{ authorName: 'A', authorEmail: 'a', blobCount: 1, clusters: [] }]) }))
 
 import { triageCommand } from '../src/cli/commands/triage.js'
 import { embedQuery } from '../src/core/embedding/embedQuery.js'
-import { vectorSearch } from '../src/core/search/vectorSearch.js'
+import { vectorSearch } from '../src/core/search/analysis/vectorSearch.js'
 
 describe('triageCommand', () => {
   beforeEach(() => { vi.restoreAllMocks() })

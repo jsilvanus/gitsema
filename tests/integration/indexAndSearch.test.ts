@@ -26,7 +26,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../../src/core/db/schema.js'
 import { openDatabaseAt, withDbSession } from '../../src/core/db/sqlite.js'
 import { runIndex } from '../../src/core/indexing/indexer.js'
-import { vectorSearch } from '../../src/core/search/vectorSearch.js'
+import { vectorSearch } from '../../src/core/search/analysis/vectorSearch.js'
 import type { EmbeddingProvider } from '../../src/core/embedding/provider.js'
 
 // ---------------------------------------------------------------------------

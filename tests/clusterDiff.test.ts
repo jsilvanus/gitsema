@@ -5,7 +5,7 @@ import {
   type ClusterSnapshot,
   type ClusterInfo,
   type ClusterReport,
-} from '../src/core/search/clustering.js'
+} from '../src/core/search/clustering/clustering.js'
 
 // ---------------------------------------------------------------------------
 // Helpers

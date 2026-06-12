@@ -23,7 +23,7 @@ vi.mock('../src/core/search/impact.js', () => ({
   computeImpact: vi.fn().mockResolvedValue({ file: 'src/foo.ts', coupled: [{ paths: ['src/bar.ts'], score: 0.9, blobHash: 'abc' }] }),
 }))
 
-vi.mock('../src/core/search/changePoints.js', () => ({
+vi.mock('../src/core/search/temporal/changePoints.js', () => ({
   computeConceptChangePoints: vi.fn().mockReturnValue({ type: 'concept-change-points', points: [] }),
 }))
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { kMeansInit, assignClusters, updateCentroids, extractKeywords } from '../src/core/search/clustering.js'
+import { kMeansInit, assignClusters, updateCentroids, extractKeywords } from '../src/core/search/clustering/clustering.js'
 
 describe('kMeansInit', () => {
   it('returns k centroids drawn from the input set', () => {

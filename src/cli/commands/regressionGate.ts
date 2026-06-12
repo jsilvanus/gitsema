@@ -18,7 +18,7 @@
 import { execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch, cosineSimilarity } from '../../core/search/vectorSearch.js'
+import { vectorSearch, cosineSimilarity } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_USAGE, EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
 

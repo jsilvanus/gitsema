@@ -3,8 +3,8 @@ import {
   computeFileChangePoints,
   type FileChangePointReport,
   type FileChangePoint,
-} from '../../core/search/changePoints.js'
-import { resolveRefToTimestamp } from '../../core/search/clustering.js'
+} from '../../core/search/temporal/changePoints.js'
+import { resolveRefToTimestamp } from '../../core/search/clustering/clustering.js'
 import { renderFileChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 import { narrateFileChangePoints } from '../../core/llm/narrator.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'

@@ -3,7 +3,7 @@
  * similar enough to be refactoring candidates.
  */
 import { getActiveSession } from '../db/sqlite.js'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity } from './analysis/vectorSearch.js'
 
 export interface RefactorPair {
   hashA: string

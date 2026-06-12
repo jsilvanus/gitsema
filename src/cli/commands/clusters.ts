@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs'
-import { computeClusters, getBlobHashesOnBranch, type ClusterReport } from '../../core/search/clustering.js'
+import { computeClusters, getBlobHashesOnBranch, type ClusterReport } from '../../core/search/clustering/clustering.js'
 import { renderClustersHtml } from '../../core/viz/htmlRenderer.js'
 import { applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { narrateClusters } from '../../core/llm/narrator.js'

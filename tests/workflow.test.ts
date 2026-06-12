@@ -10,7 +10,7 @@ vi.mock('../src/core/embedding/embedQuery.js', () => ({
 vi.mock('../src/core/search/impact.js', () => ({
   computeImpact: vi.fn().mockResolvedValue({ targetPath: 'src/x.ts', results: [] }),
 }))
-vi.mock('../src/core/search/changePoints.js', () => ({
+vi.mock('../src/core/search/temporal/changePoints.js', () => ({
   computeConceptChangePoints: vi.fn().mockReturnValue({
     type: 'concept-change-points',
     query: 'q',
@@ -23,7 +23,7 @@ vi.mock('../src/core/search/changePoints.js', () => ({
 vi.mock('../src/core/search/experts.js', () => ({
   computeExperts: vi.fn().mockReturnValue([]),
 }))
-vi.mock('../src/core/search/vectorSearch.js', () => ({
+vi.mock('../src/core/search/analysis/vectorSearch.js', () => ({
   vectorSearch: vi.fn().mockReturnValue([]),
 }))
 vi.mock('../src/core/search/authorSearch.js', () => ({
@@ -34,7 +34,7 @@ vi.mock('../src/core/search/authorSearch.js', () => ({
 vi.mock('../src/core/search/debtScoring.js', () => ({
   scoreDebt: vi.fn().mockResolvedValue([]),
 }))
-vi.mock('../src/core/search/healthTimeline.js', () => ({
+vi.mock('../src/core/search/temporal/healthTimeline.js', () => ({
   computeHealthTimeline: vi.fn().mockReturnValue([]),
 }))
 vi.mock('../src/core/db/sqlite.js', () => ({

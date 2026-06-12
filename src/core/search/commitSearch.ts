@@ -2,7 +2,7 @@ import { getActiveSession } from '../db/sqlite.js'
 import { commitEmbeddings, commits, blobCommits, paths, blobs } from '../db/schema.js'
 import { eq, inArray } from 'drizzle-orm'
 import type { Embedding } from '../models/types.js'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity } from './analysis/vectorSearch.js'
 
 /**
  * A single result from `searchCommits()`.

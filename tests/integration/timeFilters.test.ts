@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process'
 import { openDatabaseAt, withDbSession } from '../../src/core/db/sqlite.js'
 import { runIndex } from '../../src/core/indexing/indexer.js'
 import { parseDateArg } from '../../src/core/search/temporal/timeSearch.js'
-import { vectorSearch } from '../../src/core/search/vectorSearch.js'
+import { vectorSearch } from '../../src/core/search/analysis/vectorSearch.js'
 
 /** Minimal deterministic mock embedding provider used by the indexer in tests */
 class MockEmbeddingProvider {

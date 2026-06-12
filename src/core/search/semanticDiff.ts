@@ -1,6 +1,6 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
-import { resolveRefToTimestamp, getBlobHashesUpTo } from './clustering.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './analysis/vectorSearch.js'
+import { resolveRefToTimestamp, getBlobHashesUpTo } from './clustering/clustering.js'
 import type { Embedding } from '../models/types.js'
 
 // ---------------------------------------------------------------------------

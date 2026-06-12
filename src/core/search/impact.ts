@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings } from '../db/schema.js'
 import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
-import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
+import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './analysis/vectorSearch.js'
 import { bufferToFloat32 } from '../../utils/embedding.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 

@@ -14,7 +14,7 @@
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { openDatabaseAt } from '../../core/db/sqlite.js'
-import { vectorSearchWithSession } from '../../core/search/vectorSearch.js'
+import { vectorSearchWithSession } from '../../core/search/analysis/vectorSearch.js'
 
 export interface CrossRepoSimilarityOptions {
   repoA?: string

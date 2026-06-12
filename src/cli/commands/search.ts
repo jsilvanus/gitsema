@@ -3,18 +3,18 @@ import { resolveOutputs, writeToSink, hasSinkFormat, getSink, collectOut } from 
 export { collectOut }
 import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.js'
 import type { Embedding, SearchResult } from '../../core/models/types.js'
-import { vectorSearch, vectorSearchWithAnn, mergeSearchResults, type VectorSearchOptions } from '../../core/search/vectorSearch.js'
-import { hybridSearch } from '../../core/search/hybridSearch.js'
+import { vectorSearch, vectorSearchWithAnn, mergeSearchResults, type VectorSearchOptions } from '../../core/search/analysis/vectorSearch.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
 import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
-import { parseBooleanQuery, mergeOr, mergeAnd } from '../../core/search/booleanSearch.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { parseBooleanQuery, mergeOr, mergeAnd } from '../../core/search/analysis/booleanSearch.js'
+import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { getRawDb } from '../../core/db/sqlite.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
-import { splitIdentifier } from '../../core/search/labelEnhancer.js'
+import { splitIdentifier } from '../../core/search/clustering/labelEnhancer.js'
 import { narrateSearchResults } from '../../core/llm/narrator.js'
-import { formatExplainForLlm } from '../../core/search/explainFormatter.js'
+import { formatExplainForLlm } from '../../core/search/analysis/explainFormatter.js'
 
 export interface SearchCommandOptions {
   top?: string

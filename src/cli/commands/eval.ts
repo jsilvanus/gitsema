@@ -19,7 +19,7 @@ import { writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { getTextProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 
 export interface EvalCase {

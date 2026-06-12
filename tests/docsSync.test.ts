@@ -57,14 +57,13 @@ describe('README.md command coverage', () => {
 
   it('README.md mentions all non-hidden commands', () => {
     const readme = read('README.md')
-    const cliIndex = read('src/cli/index.ts')
+    const program = read('src/cli/program.ts')
 
     // Extract command names from COMMAND_GROUPS (keys that aren't aliases)
-    const commandGroupsMatch = cliIndex.match(/const COMMAND_GROUPS[^=]*=\s*\{([^}]+)\}/s)
+    const commandGroupsMatch = program.match(/COMMAND_GROUPS[^=]*=\s*\{([^}]+)\}/s)
     if (!commandGroupsMatch) {
-      // COMMAND_GROUPS may have moved; skip gracefully
-      console.warn('Could not extract COMMAND_GROUPS from cli/index.ts')
-      return
+      // COMMAND_GROUPS must be extractable here — a silent skip would mask real drift
+      throw new Error('Could not extract COMMAND_GROUPS from src/cli/program.ts')
     }
 
     const commandKeys = [...commandGroupsMatch[1].matchAll(/'([a-z][a-z-]+)'/g)]

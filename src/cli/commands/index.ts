@@ -1,7 +1,7 @@
 import { runIndex, type IndexStats } from '../../core/indexing/indexer.js'
 import { runRemoteIndex } from '../../core/indexing/remoteIndexer.js'
 import { DEFAULT_MAX_SIZE, showBlob } from '../../core/git/showBlob.js'
-import { resolveBlobAtRef } from '../../core/search/evolution.js'
+import { resolveBlobAtRef } from '../../core/search/temporal/evolution.js'
 import { getFileCategory } from '../../core/embedding/fileType.js'
 import { storeBlob, storeBlobRecord, storeChunk, getLastIndexedCommit } from '../../core/indexing/blobStore.js'
 import { createChunker } from '../../core/chunking/chunker.js'

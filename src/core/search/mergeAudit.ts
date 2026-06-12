@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { cosineSimilarity } from './vectorSearch.js'
+import { cosineSimilarity } from './analysis/vectorSearch.js'
 import { bufferToEmbedding } from '../../utils/embedding.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../git/branchDiff.js'
 import {
@@ -8,7 +8,7 @@ import {
   getBlobHashesUpTo,
   resolveRefToTimestamp,
   type TemporalClusterReport,
-} from './clustering.js'
+} from './clustering/clustering.js'
 
 // ---------------------------------------------------------------------------
 // Public types

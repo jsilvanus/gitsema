@@ -5,8 +5,8 @@
 import { execFileSync } from 'node:child_process'
 import { getActiveSession } from '../db/sqlite.js'
 import type { Embedding } from '../models/types.js'
-import { resolveRefToTimestamp, getBlobHashesUpTo } from './clustering.js'
-import { cosineSimilarity, vectorNorm } from './vectorSearch.js'
+import { resolveRefToTimestamp, getBlobHashesUpTo } from './clustering/clustering.js'
+import { cosineSimilarity, vectorNorm } from './analysis/vectorSearch.js'
 
 export interface BisectStep {
   ref: string

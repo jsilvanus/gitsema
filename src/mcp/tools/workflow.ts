@@ -2,8 +2,8 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
 import { getTextProvider } from '../../core/embedding/providerFactory.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
-import { computeConceptChangePoints } from '../../core/search/changePoints.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
+import { computeConceptChangePoints } from '../../core/search/temporal/changePoints.js'
 import { computeExperts as computeExpertsAlias } from '../../core/search/experts.js'
 import { computeImpact } from '../../core/search/impact.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
@@ -32,7 +32,7 @@ export function registerWorkflowTools(server: McpServer) {
       try { sections.experts = computeExpertsAlias({ topN: top }) } catch (e) { sections.experts = [] }
       if (file) {
         try {
-          const { computeEvolution } = await import('../../core/search/evolution.js')
+          const { computeEvolution } = await import('../../core/search/temporal/evolution.js')
           sections.fileEvolution = computeEvolution(file)
         } catch (e) { sections.fileEvolution = [] }
       }

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getActiveSession } from '../db/sqlite.js'
 import { dequantizeVector, deserializeQuantized } from '../embedding/quantize.js'
-import { cosineSimilarityPrecomputed, vectorNorm } from './vectorSearch.js'
+import { cosineSimilarityPrecomputed, vectorNorm } from './analysis/vectorSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
 export interface DebtResult {

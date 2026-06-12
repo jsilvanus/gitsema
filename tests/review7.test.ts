@@ -58,7 +58,7 @@ vi.mock('../src/utils/logger.js', () => ({
   },
 }))
 
-import { annSearch } from '../src/core/search/vectorSearch.js'
+import { annSearch } from '../src/core/search/analysis/vectorSearch.js'
 import { logger } from '../src/utils/logger.js'
 
 afterEach(() => { vi.restoreAllMocks() })

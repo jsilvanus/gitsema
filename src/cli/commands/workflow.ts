@@ -3,13 +3,13 @@ import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.j
 import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { computeImpact } from '../../core/search/impact.js'
-import { computeConceptChangePoints } from '../../core/search/changePoints.js'
+import { computeConceptChangePoints } from '../../core/search/temporal/changePoints.js'
 import { computeExperts } from '../../core/search/experts.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { computeAuthorContributions } from '../../core/search/authorSearch.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
-import { computeHealthTimeline } from '../../core/search/healthTimeline.js'
+import { computeHealthTimeline } from '../../core/search/temporal/healthTimeline.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 
 export interface WorkflowOptions {

@@ -1,7 +1,7 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { commits, blobCommits, embeddings, paths } from '../db/schema.js'
 import { inArray } from 'drizzle-orm'
-import { cosineSimilarity, vectorSearch } from './vectorSearch.js'
+import { cosineSimilarity, vectorSearch } from './analysis/vectorSearch.js'
 
 function bufToFloat32(buf: Buffer): Float32Array {
   return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)

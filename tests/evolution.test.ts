@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buildCommitUrl } from '../src/core/search/evolution.js'
+import { buildCommitUrl } from '../src/core/search/temporal/evolution.js'
 import { buildAlerts } from '../src/cli/commands/evolution.js'
-import type { EvolutionEntry } from '../src/core/search/evolution.js'
+import type { EvolutionEntry } from '../src/core/search/temporal/evolution.js'
 
 // ---------------------------------------------------------------------------
 // buildCommitUrl

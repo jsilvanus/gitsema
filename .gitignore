@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .gitsema/
+tmp/
+*.log
 .claude/*
 !.claude/skills/
 modelserver/models/

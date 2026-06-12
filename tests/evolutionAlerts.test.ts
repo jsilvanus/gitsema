@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCommitUrl, extractAlerts } from '../src/core/search/evolution.js'
+import { buildCommitUrl, extractAlerts } from '../src/core/search/temporal/evolution.js'
 
 describe('evolution alerts', () => {
   it('builds commit urls for common hosts', () => {

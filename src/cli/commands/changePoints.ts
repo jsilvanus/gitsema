@@ -5,10 +5,10 @@ import {
   computeConceptChangePoints,
   type ConceptChangePointReport,
   type ConceptChangePoint,
-} from '../../core/search/changePoints.js'
-import { resolveRefToTimestamp } from '../../core/search/clustering.js'
+} from '../../core/search/temporal/changePoints.js'
+import { resolveRefToTimestamp } from '../../core/search/clustering/clustering.js'
 import { renderConceptChangePointsHtml } from '../../core/viz/htmlRenderer.js'
-import { hybridSearch } from '../../core/search/hybridSearch.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
 import { narrateChangePoints } from '../../core/llm/narrator.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'

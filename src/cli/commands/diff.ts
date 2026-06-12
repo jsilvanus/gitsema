@@ -1,4 +1,4 @@
-import { computeDiff } from '../../core/search/evolution.js'
+import { computeDiff } from '../../core/search/temporal/evolution.js'
 import { shortHash } from '../../core/search/ranking.js'
 import { writeFileSync } from 'node:fs'
 import { narrateDiff } from '../../core/llm/narrator.js'

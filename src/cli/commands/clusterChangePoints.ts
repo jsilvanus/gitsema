@@ -4,7 +4,7 @@ import {
   resolveRefToTimestamp,
   type ClusterChangePointReport,
   type ClusterChangePoint,
-} from '../../core/search/clustering.js'
+} from '../../core/search/clustering/clustering.js'
 import { renderClusterChangePointsHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 

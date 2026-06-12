@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { getCodeProvider } from '../../core/embedding/providerFactory.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { renderResults } from '../../core/search/ranking.js'
 

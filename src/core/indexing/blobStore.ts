@@ -6,7 +6,7 @@ import type { BlobHash, Embedding } from '../models/types.js'
 import type { FileCategory } from '../embedding/fileType.js'
 import type { CommitEntry } from '../git/commitMap.js'
 import { quantizeVector, serializeQuantized } from '../embedding/quantize.js'
-import { invalidateResultCache } from '../search/resultCache.js'
+import { invalidateResultCache } from '../search/analysis/resultCache.js'
 
 /**
  * Serializes a float32 embedding to a SQLite-ready Buffer, optionally quantizing to Int8.

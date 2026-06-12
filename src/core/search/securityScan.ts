@@ -1,6 +1,6 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { embedQuery } from '../embedding/embedQuery.js'
-import { vectorSearch } from './vectorSearch.js'
+import { vectorSearch } from './analysis/vectorSearch.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
 export interface SecurityFinding {

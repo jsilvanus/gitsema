@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { computeConceptChangePoints } from '../../core/search/changePoints.js'
+import { computeConceptChangePoints } from '../../core/search/temporal/changePoints.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 import { getActiveSession } from '../../core/db/sqlite.js'

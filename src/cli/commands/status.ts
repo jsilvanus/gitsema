@@ -10,7 +10,7 @@ import { OllamaProvider } from '../../core/embedding/local.js'
 import { sql } from 'drizzle-orm'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import { readFileSync } from 'node:fs'
-import { resolveBlobAtRef } from '../../core/search/evolution.js'
+import { resolveBlobAtRef } from '../../core/search/temporal/evolution.js'
 import { shortHash } from '../../core/search/ranking.js'
 
 function formatBytes(bytes: number): string {
@@ -150,7 +150,7 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   const n = embeddingCount.count
   if (n >= VSS_SCALE_THRESHOLD) {
     // Check whether a VSS HNSW index file already exists
-    const { getVssIndexPaths } = await import('../../core/search/vectorSearch.js')
+    const { getVssIndexPaths } = await import('../../core/search/analysis/vectorSearch.js')
     const vssPaths = getVssIndexPaths(textModel)
     const { existsSync } = await import('node:fs')
     const vssReady = vssPaths !== null && existsSync(vssPaths.indexPath)
@@ -165,7 +165,7 @@ export async function statusCommand(filePath: string | undefined, options: Statu
     }
   } else if (n >= 10000) {
     // Moderate size — suggest early-cut
-    const { getVssIndexPaths } = await import('../../core/search/vectorSearch.js')
+    const { getVssIndexPaths } = await import('../../core/search/analysis/vectorSearch.js')
     const vssPaths = getVssIndexPaths(textModel)
     const { existsSync } = await import('node:fs')
     const vssReady = vssPaths !== null && existsSync(vssPaths.indexPath)

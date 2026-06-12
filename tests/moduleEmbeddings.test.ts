@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
 import { openDatabaseAt, withDbSession } from '../src/core/db/sqlite.js'
 import { runIndex } from '../src/core/indexing/indexer.js'
-import { vectorSearch } from '../src/core/search/vectorSearch.js'
+import { vectorSearch } from '../src/core/search/analysis/vectorSearch.js'
 import { getModuleEmbedding, storeModuleEmbedding, getAllBlobEmbeddingsWithPaths, deleteAllModuleEmbeddings } from '../src/core/indexing/blobStore.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 

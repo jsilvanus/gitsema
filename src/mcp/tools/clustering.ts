@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
-import { computeClusters, computeClusterSnapshot, compareClusterSnapshots, computeClusterTimeline, resolveRefToTimestamp, getBlobHashesUpTo } from '../../core/search/clustering.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { computeClusters, computeClusterSnapshot, compareClusterSnapshots, computeClusterTimeline, resolveRefToTimestamp, getBlobHashesUpTo } from '../../core/search/clustering/clustering.js'
+import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 
 export function registerClusteringTools(server: McpServer) {
   registerTool(
@@ -19,7 +19,7 @@ export function registerClusteringTools(server: McpServer) {
       try {
         let blobHashFilter: string[] | undefined
         if (branch) {
-          const { getBlobHashesOnBranch } = await import('../../core/search/clustering.js')
+          const { getBlobHashesOnBranch } = await import('../../core/search/clustering/clustering.js')
           blobHashFilter = getBlobHashesOnBranch(branch)
         }
         const report = await computeClusters({ k, topKeywords: top_keywords, useEnhancedLabels: enhanced_labels, blobHashFilter })

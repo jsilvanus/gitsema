@@ -5,7 +5,7 @@ import {
   type ClusterTimelineReport,
   type ClusterTimelineStep,
   type ClusterChange,
-} from '../../core/search/clustering.js'
+} from '../../core/search/clustering/clustering.js'
 import { renderClusterTimelineHtml } from '../../core/viz/htmlRenderer.js'
 import { narrateClusterTimeline } from '../../core/llm/narrator.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'

@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { computeExperts, type Expert } from '../../core/search/experts.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 
 export interface ExpertsCommandOptions {

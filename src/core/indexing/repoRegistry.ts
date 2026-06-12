@@ -1,7 +1,7 @@
 import { getActiveSession, openDatabaseAt } from '../db/sqlite.js'
-import { vectorSearch } from '../search/vectorSearch.js'
+import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import type { SearchResult, Embedding } from '../models/types.js'
-import { mergeSearchResults } from '../search/vectorSearch.js'
+import { mergeSearchResults } from '../search/analysis/vectorSearch.js'
 
 export interface RepoEntry {
   id: string
