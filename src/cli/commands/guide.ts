@@ -20,7 +20,7 @@ import { createInterface } from 'node:readline'
 import { resolveGuideConfig } from '../../core/narrator/resolveNarrator.js'
 import { redactAll } from '../../core/narrator/redact.js'
 import { withAudit } from '../../core/narrator/audit.js'
-import { GUIDE_TOOL_DEFINITIONS, executeTool } from '../../core/narrator/guideTools.js'
+import { GUIDE_TOOL_DEFINITIONS, executeTool, toolRepoStats } from '../../core/narrator/guideTools.js'
 import type { NarratorModelConfig } from '../../core/narrator/types.js'
 import { logger } from '../../utils/logger.js'
 
@@ -55,12 +55,13 @@ const GUIDE_TOOLS: GuideTool[] = [
     name: 'repo_stats',
     description: 'Basic repository statistics (branches, tags, total commits)',
     call: () => {
+      // Reuse the portable repo_stats tool (no `wc -l`/`/dev/null` shellisms,
+      // which fail on Windows cmd).
       try {
-        const branches = execSync('git branch --list | wc -l', { encoding: 'utf8' }).trim()
-        const tags = execSync('git tag --list | wc -l', { encoding: 'utf8' }).trim()
-        const commits = execSync('git rev-list --count HEAD 2>/dev/null || echo 0', { encoding: 'utf8' }).trim()
-        const remotes = execSync('git remote -v 2>/dev/null | head -4', { encoding: 'utf8' }).trim()
-        return `Branches: ${branches}  Tags: ${tags}  Commits: ${commits}\nRemotes:\n${remotes}`
+        const stats = JSON.parse(toolRepoStats()) as {
+          branches?: number; tags?: number; commits?: number; remotes?: string[]
+        }
+        return `Branches: ${stats.branches ?? 0}  Tags: ${stats.tags ?? 0}  Commits: ${stats.commits ?? 0}\nRemotes:\n${(stats.remotes ?? []).join('\n')}`
       } catch {
         return '(stats unavailable)'
       }

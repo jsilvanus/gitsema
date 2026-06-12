@@ -135,22 +135,40 @@ export const GUIDE_TOOL_DEFINITIONS: ToolDefinition[] = [
 // Individual tool implementations
 // ---------------------------------------------------------------------------
 
-function toolRepoStats(): string {
+export function toolRepoStats(): string {
   try {
-    const branches = execSync('git branch --list | wc -l', { encoding: 'utf8' }).trim()
-    const tags = execSync('git tag --list | wc -l', { encoding: 'utf8' }).trim()
-    const commits = execSync('git rev-list --count HEAD 2>/dev/null || echo 0', { encoding: 'utf8' }).trim()
-    const remotes = execSync('git remote -v 2>/dev/null', { encoding: 'utf8' })
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .slice(0, 4)
-    return toCappedJson({
-      branches: parseInt(branches, 10) || 0,
-      tags: parseInt(tags, 10) || 0,
-      commits: parseInt(commits, 10) || 0,
-      remotes,
-    })
+    // Count in JS rather than piping through `wc -l` etc. — the shell
+    // built-ins differ between POSIX and Windows cmd.
+    const countLines = (cmd: string): number => {
+      try {
+        const out = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+        return out ? out.split('\n').filter(Boolean).length : 0
+      } catch {
+        return 0
+      }
+    }
+    const branches = countLines('git branch --list')
+    const tags = countLines('git tag --list')
+    let commits = 0
+    try {
+      commits = parseInt(
+        execSync('git rev-list --count HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(),
+        10,
+      ) || 0
+    } catch {
+      commits = 0
+    }
+    let remotes: string[] = []
+    try {
+      remotes = execSync('git remote -v', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .slice(0, 4)
+    } catch {
+      remotes = []
+    }
+    return toCappedJson({ branches, tags, commits, remotes })
   } catch (err) {
     return errorResult(`repo_stats failed: ${err instanceof Error ? err.message : String(err)}`)
   }
