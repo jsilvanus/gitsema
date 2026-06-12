@@ -21,6 +21,7 @@ import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_USAGE, EXIT_RUNTIME } from '../lib/errors.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 
 export interface CodeReviewOptions {
   base?: string
@@ -29,6 +30,8 @@ export interface CodeReviewOptions {
   top?: string
   threshold?: string
   format?: string
+  /** Unified output spec (repeatable); --out wins over --format */
+  out?: string[]
 }
 
 interface HunkSummary {
@@ -65,7 +68,13 @@ function parseDiff(diffText: string): HunkSummary[] {
 export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> {
   const topK = parseInt(opts.top ?? '5', 10)
   const threshold = parseFloat(opts.threshold ?? '0.75')
-  const format = opts.format ?? 'text'
+
+  // --out wins over --format when present; otherwise --format keeps working unchanged.
+  const sinks = opts.out && opts.out.length > 0
+    ? resolveOutputs({ out: opts.out })
+    : undefined
+  const jsonSink = sinks ? getSink(sinks, 'json') : undefined
+  const format = sinks ? (jsonSink ? 'json' : 'text') : (opts.format ?? 'text')
 
   // Obtain the diff text
   let diffText = ''
@@ -152,7 +161,13 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
   }
 
   if (format === 'json') {
-    console.log(JSON.stringify({ reviews }, null, 2))
+    const json = JSON.stringify({ reviews }, null, 2)
+    if (jsonSink?.file) {
+      fs.writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Code review JSON written to: ${jsonSink.file}`)
+    } else {
+      console.log(json)
+    }
     return
   }
 

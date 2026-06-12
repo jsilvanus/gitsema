@@ -20,8 +20,8 @@ export function registerAnalysis(program: Command) {
     .option('--file <path>', 'File path to analyze for semantic diff and impact') 
     .option('--query <text>', 'Concept query for change-point highlights')        
     .option('-k, --top <n>', 'Result limit', '10')
-    .option('--since <date>', 'Filter reviewer activity since date (YYYY-MM-DD)') 
-    .option('--until <date>', 'Filter reviewer activity until date (YYYY-MM-DD)') 
+    .option('--since <date>', 'Filter reviewer activity since date (YYYY-MM-DD or ISO 8601)')
+    .option('--until <date>', 'Filter reviewer activity until date (YYYY-MM-DD or ISO 8601)')
     .option('--dump [file]', 'Output JSON report; writes to file or stdout if no path given')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])       
     .action(async (options) => {
@@ -82,9 +82,10 @@ export function registerAnalysis(program: Command) {
   program
     .command('eval <file>')
     .description('Evaluate retrieval quality against a JSONL file of (query, expectedPaths) pairs.')
-    .option('-k, --top <n>', 'retrieve top-k results per query (default: 10)')    
-    .option('--dump [file]', 'write full JSON results to <file> (or stdout if no file given)')
-    .action(async (file: string, opts: { top?: string; dump?: string | boolean }) => {
+    .option('-k, --top <n>', 'retrieve top-k results per query (default: 10)')
+    .option('--dump [file]', 'write full JSON results to <file> (or stdout if no file given) (legacy: prefer --out json)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .action(async (file: string, opts: { top?: string; dump?: string | boolean; out?: string[] }) => {
       await evalCommand({ file, ...opts })
     })
 
@@ -115,8 +116,9 @@ export function registerAnalysis(program: Command) {
     .option('--concepts <file>', 'JSON file with list of concept queries to check')
     .option('--threshold <n>', 'max allowed cosine drift (cosine distance, 0–2, default: 0.15)')
     .option('-k, --top <n>', 'top-k results to compare (default: 10)')
-    .option('--format <fmt>', 'output format: text (default) or json')
-    .action(async (opts: { base?: string; head?: string; query?: string; concepts?: string; threshold?: string; top?: string; format?: string }) => {
+    .option('--format <fmt>', 'output format: text (default) or json (legacy: prefer --out <fmt>)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --format)', collectOut, [] as string[])
+    .action(async (opts: { base?: string; head?: string; query?: string; concepts?: string; threshold?: string; top?: string; format?: string; out?: string[] }) => {
       await regressionGateCommand(opts)
     })
 
@@ -127,8 +129,9 @@ export function registerAnalysis(program: Command) {
     .option('--repo-b <db>', 'path to repo B .gitsema/index.db')
     .option('-k, --top <n>', 'top results per repo (default: 5)')
     .option('--threshold <n>', 'similarity threshold for shared-concept match (cosine similarity, 0–1, default: 0.7)')
-    .option('--format <fmt>', 'output format: text (default) or json')
-    .action(async (query: string, opts: { repoA?: string; repoB?: string; top?: string; threshold?: string; format?: string }) => {
+    .option('--format <fmt>', 'output format: text (default) or json (legacy: prefer --out <fmt>)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --format)', collectOut, [] as string[])
+    .action(async (query: string, opts: { repoA?: string; repoB?: string; top?: string; threshold?: string; format?: string; out?: string[] }) => {
       await crossRepoSimilarityCommand(query, opts)
     })
 
@@ -140,8 +143,9 @@ export function registerAnalysis(program: Command) {
     .option('--diff-file <file>', 'read diff from a patch file instead of git')
     .option('-k, --top <n>', 'top analogues per file (default: 5)')
     .option('--threshold <n>', 'minimum similarity score (cosine similarity, 0–1, default: 0.75)')
-    .option('--format <fmt>', 'output format: text (default) or json')
-    .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string }) => {
+    .option('--format <fmt>', 'output format: text (default) or json (legacy: prefer --out <fmt>)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --format)', collectOut, [] as string[])
+    .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string; out?: string[] }) => {
       await codeReviewCommand(opts)
     })
 }

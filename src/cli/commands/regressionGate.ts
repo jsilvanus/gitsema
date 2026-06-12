@@ -16,11 +16,12 @@
  */
 
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch, cosineSimilarity } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_USAGE, EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 
 export interface RegressionGateOptions {
   base?: string
@@ -30,6 +31,8 @@ export interface RegressionGateOptions {
   threshold?: string  // default 0.15 cosine distance
   format?: string     // 'text' | 'json'
   topK?: string
+  /** Unified output spec (repeatable); --out wins over --format */
+  out?: string[]
 }
 
 export interface RegressionResult {
@@ -46,7 +49,13 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
   const headRef = opts.head ?? 'HEAD'
   const globalThreshold = parseFloat(opts.threshold ?? '0.15')
   const topK = parseInt(opts.topK ?? '10', 10)
-  const format = opts.format ?? 'text'
+
+  // --out wins over --format when present; otherwise --format keeps working unchanged.
+  const sinks = opts.out && opts.out.length > 0
+    ? resolveOutputs({ out: opts.out })
+    : undefined
+  const jsonSink = sinks ? getSink(sinks, 'json') : undefined
+  const format = sinks ? (jsonSink ? 'json' : 'text') : (opts.format ?? 'text')
 
   // Collect queries
   const queries: Array<{ query: string; threshold: number }> = []
@@ -128,7 +137,13 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
   const allPassed = results.every((r) => r.passed)
 
   if (format === 'json') {
-    console.log(JSON.stringify({ base: baseHash, head: headHash, results, allPassed }, null, 2))
+    const json = JSON.stringify({ base: baseHash, head: headHash, results, allPassed }, null, 2)
+    if (jsonSink?.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Regression gate JSON written to: ${jsonSink.file}`)
+    } else {
+      console.log(json)
+    }
   } else {
     console.log()
     if (allPassed) {

@@ -2,6 +2,8 @@ import { writeFileSync } from 'node:fs'
 import { computeExperts, type Expert } from '../../core/search/experts.js'
 import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { emitJsonSink } from '../lib/output.js'
 
 export interface ExpertsCommandOptions {
   top?: string
@@ -11,6 +13,8 @@ export interface ExpertsCommandOptions {
   topClusters?: string
   dump?: string | boolean
   html?: string | boolean
+  /** Unified output spec (repeatable) */
+  out?: string[]
 }
 
 export async function expertsCommand(options: ExpertsCommandOptions): Promise<void> {
@@ -68,32 +72,39 @@ export async function expertsCommand(options: ExpertsCommandOptions): Promise<vo
     process.exit(1)
   }
 
-  // ── Output: JSON dump ─────────────────────────────────────────────────────
-  if (options.dump !== undefined) {
+  // ── Output: sinks (--out / legacy --dump / --html) ──────────────────────────
+  const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const jsonSink = getSink(sinks, 'json')
+  const htmlSink = getSink(sinks, 'html')
+
+  if (jsonSink) {
     const payload = {
       generatedAt: new Date().toISOString(),
       since: since ? new Date(since * 1000).toISOString() : null,
       until: until ? new Date(until * 1000).toISOString() : null,
       experts,
     }
-    const json = JSON.stringify(payload, null, 2)
-    if (typeof options.dump === 'string' && options.dump !== '') {
-      writeFileSync(options.dump, json, 'utf8')
-      console.log(`Experts JSON written to ${options.dump}`)
-    } else {
-      console.log(json)
-    }
-    return
+    const { handled } = emitJsonSink({
+      sinks,
+      jsonSink,
+      payload,
+      fileMessage: (file) => `Experts JSON written to ${file}`,
+      htmlAware: true,
+    })
+    if (handled) return
   }
 
   // ── Output: HTML ──────────────────────────────────────────────────────────
-  if (options.html !== undefined) {
+  if (htmlSink) {
     const { renderExpertsHtml } = await import('../../core/viz/htmlRenderer.js')
     const html = renderExpertsHtml(experts, { since, until })
-    const outFile = typeof options.html === 'string' && options.html !== '' ? options.html : 'experts.html'
-    writeFileSync(outFile, html, 'utf8')
-    console.log(`Experts HTML written to: ${outFile}`)
-    return
+    if (htmlSink.file) {
+      writeFileSync(htmlSink.file, html, 'utf8')
+      console.log(`Experts HTML written to: ${htmlSink.file}`)
+    } else {
+      process.stdout.write(html + '\n')
+    }
+    if (!hasSinkFormat(sinks, 'text')) return
   }
 
   // ── Output: human-readable text ───────────────────────────────────────────

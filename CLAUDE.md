@@ -123,8 +123,10 @@ The indexer applies a multi-level fallback chain: whole-file → function chunke
 | `-k, --top <n>` | `10` | Results to return |
 | `--recent` | off | Blend cosine similarity with recency score |
 | `--alpha <n>` | `0.8` | Cosine weight in blended score |
-| `--before <date>` | — | Only blobs first seen before YYYY-MM-DD |
-| `--after <date>` | — | Only blobs first seen after YYYY-MM-DD |
+| `--before <date>` | — | Only blobs first seen before this date (YYYY-MM-DD or ISO 8601); alias of `--until` |
+| `--after <date>` | — | Only blobs first seen after this date (YYYY-MM-DD or ISO 8601); alias of `--since` |
+| `--since <date>` | — | Only blobs first seen at or after this date (YYYY-MM-DD or ISO 8601); alias of `--after` |
+| `--until <date>` | — | Only blobs first seen before this date (YYYY-MM-DD or ISO 8601); alias of `--before` |
 | `--weight-vector <n>` | `0.7` | Vector weight in three-signal ranking |
 | `--weight-recency <n>` | `0.2` | Recency weight |
 | `--weight-path <n>` | `0.1` | Path-relevance weight |

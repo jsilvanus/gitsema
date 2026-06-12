@@ -7,18 +7,19 @@ import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 import { toSarif } from '../../core/search/sarifOutput.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { narrateSecurityFindings } from '../../core/llm/narrator.js'
-import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { resolveOutputs, hasSinkFormat, getSink, collectOut } from '../../utils/outputSink.js'
 
 export function securityScanCommand(): Command {
   return new Command('security-scan')
     .description('Scan the codebase for common security patterns (semantic + structural heuristics)')
     .option('--top <n>', 'top results per pattern', '10')
     .option('--model <model>', 'embedding model to use')
-    .option('--dump [file]', 'output JSON to file or stdout')
+    .option('--dump [file]', 'output JSON to file or stdout (legacy: prefer --out json)')
     .option('--sarif [file]', 'output SARIF 2.1.0 format to file or stdout')
     .option('--high-confidence-only', 'only report findings with both semantic + structural signal')
     .option('--narrate', 'generate an LLM triage summary of findings (requires GITSEMA_LLM_URL)')
     .option('--no-headings', "don't print column header row")
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .action(async (opts: { top?: string; model?: string; dump?: string | boolean; sarif?: string | boolean; highConfidenceOnly?: boolean; narrate?: boolean; noHeadings?: boolean; out?: string[] }) => {
       let top: number
       try {

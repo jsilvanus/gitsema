@@ -22,6 +22,10 @@ export interface SearchCommandOptions {
   alpha?: string
   before?: string
   after?: string
+  /** Alias for --after: only include blobs first seen at or after this date. Used when --after is unset. */
+  since?: string
+  /** Alias for --before: only include blobs first seen before this date. Used when --before is unset. */
+  until?: string
   weightVector?: string
   weightRecency?: string
   weightPath?: string
@@ -166,19 +170,23 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   let before: number | undefined
   let after: number | undefined
 
-  if (options.before) {
+  // --before/--after take precedence; --until/--since are aliases used when unset.
+  const beforeArg = options.before ?? options.until
+  const afterArg = options.after ?? options.since
+
+  if (beforeArg) {
     try {
-      before = parseDateArg(options.before)
+      before = parseDateArg(beforeArg)
     } catch (err) {
-      console.error(`Error: --before ${err instanceof Error ? err.message : String(err)}`)
+      console.error(`Error: --before/--until ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)
     }
   }
-  if (options.after) {
+  if (afterArg) {
     try {
-      after = parseDateArg(options.after)
+      after = parseDateArg(afterArg)
     } catch (err) {
-      console.error(`Error: --after ${err instanceof Error ? err.message : String(err)}`)
+      console.error(`Error: --after/--since ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)
     }
   }

@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.91.0** · Schema: **v21** · Test suite: **778 tests**
+> Current version: **v0.92.0** · Schema: **v21** · Test suite: **854 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -119,6 +119,8 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | Include stored content in dumps | `--include-content` |
 | LLM narrative | `--narrate` on `evolution`, `diff`, `file-evolution` |
 | **Unified output system (Phase 70)** | `--out <format>[:<file>]` (repeatable) on `search`, `evolution`, `triage`, `policy-check`, `ownership`, `workflow run`; formats: `text\|json\|html\|markdown\|sarif` |
+| **Unified --out coverage (Phase 95)** | `--out` now also available on every command that previously had only `--dump`/`--html`/`--format` (e.g. `experts`, `author`, `clusters`, `cluster-diff`, `cluster-timeline`, `change-points`, `file-change-points`, `cluster-change-points`, `branch-summary`, `merge-audit`, `merge-preview`, `impact`, `dead-concepts`, `blame`, `debt`, `eval`, `regression-gate`, `cross-repo-similarity`, `code-review`); legacy flags remain functional and are annotated "legacy: prefer --out ..." |
+| **Canonical --since/--until (Phase 95)** | `gitsema search` accepts `--since`/`--until` as documented aliases of `--after`/`--before` (YYYY-MM-DD or ISO 8601), matching the `--since`/`--until` convention used elsewhere in the CLI |
 
 ---
 

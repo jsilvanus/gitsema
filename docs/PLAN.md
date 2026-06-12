@@ -109,6 +109,7 @@
 |   [Phase 91 — 8 Productized Usage Patterns (review7 §5) *(completed v0.90.0)*](#phase-91-—-8-productized-usage-patterns-review7-§5-completed-v0900) | 3055 |
 |   [Phase 92 — review7 Improvement Bundle *(completed, 2026-04-09)*](#phase-92-—-review7-improvement-bundle-completed-2026-04-09) | 3101 |
 |   [Phase 93 — Time filter semantics & pagination stability](#phase-93-—-time-filter-semantics-pagination-stability) | 3143 |
+|   [Phase 95 — Flag unification (review8 §8.6/§8.9)](#phase-95-—-flag-unification-review8-§86§89) | 3232 |
 | [Long-Term Investments](#long-term-investments) | 3173 |
 | [Non-goals for now (revisited later)](#non-goals-for-now-revisited-later) | 3186 |
 
@@ -3209,6 +3210,27 @@ PRs: https://github.com/jsilvanus/gitsema/pull/67, https://github.com/jsilvanus/
 - Updated `CLAUDE.md`: MCP tool count 24 → 32 with full table, architecture diagram now reflects `analysis/`, `temporal/`, and `clustering/` subdirectories, expanded the documented config-key list, and corrected the `first-seen`/`file-evolution`/`file-diff`/`diff` CLI reference sections to match `--help` output.
 
 **Tests:** `npx vitest run tests/docsSync.test.ts` — all 9 tests pass (README now covers all `COMMAND_GROUPS` keys).
+
+**Status:** ✅ complete.
+
+### Phase 95 — Flag unification (review8 §8.6/§8.9) *(completed v0.92.0)*
+
+**Goal:** Implement review8 §8.6 (output-flag unification) and §8.9 (date-flag standardization).
+
+**Implemented scope:**
+
+*§8.6 — `--out` unification:*
+- Added the canonical `--out <spec>` option (`text|json[:file]|html[:file]|markdown[:file]`, repeatable) to every command that previously exposed only `--dump`/`--html`: `blame`, `dead-concepts`, `impact`, `clusters`, `cluster-diff`, `cluster-timeline`, `change-points`, `file-change-points`, `cluster-change-points`, `branch-summary`, `merge-audit`, `merge-preview`, `author`, `experts`, `debt`, `eval`. Most handlers already called `resolveOutputs({ out, dump, html })`; `experts` and `debt` were converted from ad-hoc dump/html handling to the shared `resolveOutputs`/`emitJsonSink` pattern, preserving legacy output byte-for-byte.
+- Added `--out <spec>` (`text|json[:file]`) to the three `--format`-only commands in `register/analysis.ts` — `regression-gate`, `cross-repo-similarity`, `code-review` — with `--out` winning over `--format` when both are given.
+- Annotated all legacy `--dump`, `--html`, and `--format` help strings with "(legacy: prefer --out ...)" where not already present. `ci-diff` keeps its pre-existing single-file `--out <file>` (predates the unified spec system) and is documented as an explicit exception.
+
+*§8.9 — `--since`/`--until` standardization:*
+- `gitsema search` now accepts `--since`/`--until` as documented aliases of `--after`/`--before` (explicit `--before`/`--after` win when both given).
+- Swept `--since`/`--until` help strings across `register/all.ts` and `register/analysis.ts` to state accepted formats (YYYY-MM-DD / ISO 8601, plus "or git ref" only where the handler genuinely resolves refs, e.g. `cluster-timeline`, `change-points`, `file-change-points`, `cluster-change-points`).
+
+*New test:* `tests/flagConsistency.test.ts` walks `buildProgram()`'s full command tree and asserts every `--dump`/`--html`/`--format` command also has `--out`, every command with both `--before` and `--after` also has `--since`/`--until`, and every `--top` option has the `-k` short flag — with documented exception lists for `ci-diff` (`--out` name collision) and seven commands whose `--top` is a differently-scoped per-group count (`clusters`, `cluster-diff`, `cluster-timeline`, `merge-preview`, `repos search`, `security-scan`, `watch run`).
+
+**Tests:** `npx vitest run` — all tests pass, including the new `tests/flagConsistency.test.ts`.
 
 **Status:** ✅ complete.
 
