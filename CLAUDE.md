@@ -225,6 +225,15 @@ Supported dot-notation keys for command defaults (see `src/core/config/configMan
 ### `gitsema backfill-fts`
 Populate FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added). Required to use `--hybrid` search on older index entries.
 
+### `gitsema narrate [options]`
+Return commit evidence (default, no LLM call) or an LLM-generated narrative of repository development history. Evidence-only mode is safe-by-default — no network calls unless `--narrate` is passed and a narrator model is configured (`gitsema models add <name> --narrator --http-url <url> --activate`). Supports `--since`/`--until`/`--range`, `--focus`, `--format md|text|json`, and `--out <spec>`.
+
+### `gitsema explain <topic> [options]`
+Return matching commits (default, no LLM call) or an LLM-generated explanation/timeline for a bug, error, or topic. Same safe-by-default and narrator-model conventions as `narrate`.
+
+### `gitsema guide [question] [options]`
+Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured (no network access). When a model is configured, runs a real agentic tool-calling loop (`@jsilvanus/chattydeer` `runAgentLoop`, maxRoundtrips 5) against the tool registry in `src/core/narrator/guideTools.ts` (`repo_stats`, `recent_commits`, `narrate_repo`, `explain_topic`, `semantic_search`; `file_evolution`/`concept_evolution`/`branch_summary` are TODO). Supports `-i/--interactive` for a multi-turn REPL session (one agent session reused across turns).
+
 ---
 
 ## Architecture
@@ -335,7 +344,7 @@ gitsema index
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
 
-**Schema overview (current schema v21):**
+**Schema overview (current schema v22):**
 
 | Table | Purpose |
 |---|---|
@@ -357,8 +366,9 @@ gitsema index
 | `blob_clusters` | K-means cluster assignments |
 | `cluster_assignments` | Cluster snapshot entries per ref |
 | `module_embeddings` | Directory centroid running-mean embeddings (Phase 33) |
-| `embed_config` | Recorded embedding provenance (model, dimensions, chunker) |
+| `embed_config` | Recorded embedding provenance (model, dimensions, chunker); also stores narrator/guide LLM model configs via `kind` + `params_json` (v22) |
 | `indexing_checkpoints` | Resume markers for interrupted indexing runs |
+| `settings` | Key-value settings, e.g. active narrator/guide model config selection (v22) |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
@@ -373,7 +383,8 @@ gitsema index
 - v18 → v19: Added `embed_config` table for embedding provenance (Phase 80+)
 - v19 → v20: Added `UNIQUE (blob_hash, path)` index on `paths` table (review6 §11.6 / Phase 89)
 - v20 → v21: Hashed repo tokens at rest — `token_hash` + `token_prefix` replace plaintext `token` in `repo_tokens` (review7 §4.1)
-- **Current version: 21**
+- v21 → v22: Added `kind` + `params_json` columns to `embed_config`, and a `settings` key-value table, for LLM narrator/guide model configs (Phase 91)
+- **Current version: 22**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 
@@ -392,7 +403,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (32 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow}.ts`):**
+**Exposed tools (34 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator}.ts`):**
 
 | Tool | Description |
 |---|---|
@@ -428,6 +439,8 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `triage` | Incident triage bundle: first-seen, change points, evolution, bisect, experts |
 | `policy_check` | CI policy gate — debt score, security similarity, and concept drift thresholds |
 | `workflow_run` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
+| `narrate_repo` | Generate evidence (default) or an LLM narrative of repository development history |
+| `explain_issue_or_error` | Generate evidence (default) or an LLM explanation/timeline for a bug, error, or topic |
 
 ---
 

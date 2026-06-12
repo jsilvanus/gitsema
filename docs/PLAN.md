@@ -3236,6 +3236,39 @@ PRs: https://github.com/jsilvanus/gitsema/pull/67, https://github.com/jsilvanus/
 
 **Status:** ✅ complete.
 
+### Phase 96 — LLM Narrator/Explainer/Guide via chattydeer *(completed v0.93.0)*
+
+**Goal:** Add an optional LLM narration/explainer/guide layer on top of gitsema's existing git-history evidence, backed by `@jsilvanus/chattydeer` (pinned `^0.2.0`).
+
+**Implemented scope:**
+
+- New `src/core/narrator/` module: `types.ts` (provider interface, config types), `redact.ts` (secret/PII redaction applied before any LLM payload), `audit.ts` (records narrator calls), `chattydeerProvider.ts` (lazy-loaded `ChattydeerNarratorProvider`, safe-by-default — no network call unless a narrator model with `httpUrl` is configured), `resolveNarrator.ts` (DB-backed narrator/guide model config storage and active-selection in the new `settings` table), `narrator.ts` (`runNarrate`/`runExplain` — evidence-only by default).
+- Schema v22: added `kind` + `params_json` columns to `embed_config` (narrator/guide configs share this table, distinguished by `kind`), and a new `settings` key-value table for active-config selection. Migration `src/core/db/migrations/022_narrator_config.ts`.
+- New CLI commands: `gitsema narrate [options]`, `gitsema explain <topic> [options]` (both safe-by-default — return raw commit evidence unless `--narrate` is passed and a narrator model is configured), and `gitsema guide [question] [options]` (interactive LLM chat with gathered git context, falls back to narrator model). All registered in the `Analysis` command group.
+- `gitsema models add/list/activate/remove --narrator|--guide` subcommands for managing LLM model configs (provider `chattydeer`, OpenAI-compatible `--http-url`).
+- New MCP tools `narrate_repo` and `explain_issue_or_error` (`src/mcp/tools/narrator.ts`), registered in `src/mcp/server.ts`.
+- New HTTP routes: `POST /api/v1/narrate`, `POST /api/v1/explain` (`src/server/routes/narrator.ts`), and `POST /api/v1/guide/chat` (`src/server/routes/guide.ts`).
+- `narrate`/`explain` wired to the unified `--out <spec>` option (json/markdown/text sinks, file or stdout), with `--format md|text|json` retained as a legacy alias.
+- New tests: `tests/narratorConfig.test.ts` (DB-backed config CRUD + active-selection through a real temp DB and the v22 migration), `tests/narratorRedact.test.ts` (redaction patterns), `tests/narratorSmoke.test.ts` (provider safe-by-default behavior — no network calls when disabled).
+
+**Dependency note (resolved):** `@jsilvanus/chattydeer` has been bumped to `^0.4.5` (from `^0.2.0`), which ships the agentic tool-calling contract described in `docs/chattydeer_contract.md`: `createChatProvider(httpUrl, model, apiKey?, opts?)`, `createAgentSession({ systemPrompt?, messages? })`, and `runAgentLoop(session, { provider, tools, executeTool, maxRoundtrips, redactContent, ... })`. `@jsilvanus/embedeer` was bumped to `1.7.3` in the same pass (no regressions — full suite green before and after).
+
+`gitsema guide` now runs a **real agentic loop** via `runAgentLoop` (maxRoundtrips: 5) against a `src/core/narrator/guideTools.ts` tool registry. Wired tools:
+
+- `repo_stats`, `recent_commits` — reuse the existing context-gathering helpers from `guide.ts`.
+- `narrate_repo`, `explain_topic` — reuse the evidence-only paths of `runNarrate`/`runExplain` from `narrator.ts` (never trigger a nested LLM call).
+- `semantic_search` — reuses `vectorSearch` + `embedQuery` + `getTextProvider`; returns a structured `{ error: ... }` string (no throw, fast fail) when no `.gitsema` index exists or the embedding provider is unreachable.
+
+**TODO (not yet wired — need index + heavier plumbing):** `file_evolution`, `concept_evolution`, `branch_summary` — listed as a TODO comment in `guideTools.ts`.
+
+All tool results are compact JSON strings capped to ~4000 chars. `redactContent` (wired to `redactAll`) is applied to every outbound message. Interactive mode (`-i`) reuses one `createAgentSession`/`createChatProvider` pair across turns for true multi-turn conversation. The no-model safe-by-default path (placeholder + setup hint, no network) is preserved byte-for-byte. `POST /api/v1/guide/chat` now also returns optional `roundtrips`/`toolCallsUsed` fields (existing response fields unchanged).
+
+Also fixed in this pass: `getActiveGuideConfig`/`resolveGuideConfig` previously called `getNarratorConfigById` (filters `kind = 'narrator'`) for guide-kind (`kind = 'guide'`) configs, so an active guide model config was never resolved — added `getGuideConfigById` (filters `kind = 'guide'`) and fixed the lookup chain.
+
+**Tests:** `npx vitest run` — all 921 tests pass (907 existing + 14 new in `tests/guideAgentLoop.test.ts`, which mocks `@jsilvanus/chattydeer` with a fake provider/session/loop — no network).
+
+**Status:** ✅ complete — agentic `guide` loop wired with 5 of 8 contract tools (the remaining 3 are TODO, see above).
+
 ## Long-Term Investments
 
 | Feature | Complexity | Notes |

@@ -20,6 +20,7 @@ import { migration as m018 } from './018_embed_config_last_used.js'
 import { migration as m019 } from './019_repo_tokens.js'
 import { migration as m020 } from './020_paths_uniqueness.js'
 import { migration as m021 } from './021_token_hashing.js'
+import { migration as m022 } from './022_narrator_config.js'
 
 export type Migration = {
   version: number
@@ -49,6 +50,7 @@ export const migrations: Migration[] = [
   m019,
   m020,
   m021,
+  m022,
 ]
 
 migrations.sort((a, b) => a.version - b.version)

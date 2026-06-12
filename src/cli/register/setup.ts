@@ -12,6 +12,10 @@ import {
   modelsAddCommand,
   modelsRemoveCommand,
   modelsUpdateCommand,
+  modelsKindListCommand,
+  modelsKindAddCommand,
+  modelsKindActivateCommand,
+  modelsKindRemoveCommand,
 } from '../commands/models.js'
 import { collectOut } from '../../utils/outputSink.js'
 
@@ -127,7 +131,11 @@ Examples:
     .command('list')
     .description('List all configured model profiles and indexed models')
     .option('--json', 'output as JSON')
-    .action(async (opts: { json?: boolean }) => {
+    .option('--narrator', 'list LLM narrator model configs instead of embedding models')
+    .option('--guide', 'list LLM guide model configs instead of embedding models')
+    .action(async (opts: { json?: boolean; narrator?: boolean; guide?: boolean }) => {
+      if (opts.narrator) return modelsKindListCommand('narrator', { json: opts.json })
+      if (opts.guide) return modelsKindListCommand('guide', { json: opts.json })
       await modelsListCommand(opts)
     })
 
@@ -156,12 +164,39 @@ Examples:
     .option('--prefix-other <str>', 'prefix for files in the "other" category (not code or text), e.g. "search_document:"')
     .option('--prefix-type <role=prefix>', 'user-defined role prefix (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
     .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
+    .option('--narrator', 'add an LLM narrator model config instead of an embedding model')
+    .option('--guide', 'add an LLM guide model config instead of an embedding model')
+    .option('--http-url <url>', 'OpenAI-compatible chat-completions base URL (for --narrator/--guide)')
+    .option('--max-tokens <n>', 'max tokens per LLM call (for --narrator/--guide, default: 512)')
+    .option('--temperature <n>', 'sampling temperature (for --narrator/--guide, default: 0.3)')
+    .option('--activate', 'activate this model immediately (for --narrator/--guide)')
     .action(async (
       name: string,
       opts: { globalName?: string; provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
-        prefixCode?: string; prefixText?: string; prefixQuery?: string; prefixOther?: string; prefixType?: string[]; extRole?: string[] },
+        prefixCode?: string; prefixText?: string; prefixQuery?: string; prefixOther?: string; prefixType?: string[]; extRole?: string[];
+        narrator?: boolean; guide?: boolean; httpUrl?: string; maxTokens?: string; temperature?: string; activate?: boolean },
     ) => {
+      if (opts.narrator || opts.guide) {
+        const kind = opts.narrator ? 'narrator' : 'guide'
+        return modelsKindAddCommand(name, kind, {
+          httpUrl: opts.httpUrl ?? '',
+          key: opts.key,
+          maxTokens: opts.maxTokens,
+          temperature: opts.temperature,
+          activate: opts.activate,
+        })
+      }
       await modelsAddCommand(name, opts)
+    })
+
+  modelsSub
+    .command('activate <name>')
+    .description('Activate an LLM narrator or guide model config as the default for narrate/explain/guide')
+    .option('--narrator', 'activate a narrator model config (default)')
+    .option('--guide', 'activate a guide model config')
+    .action(async (name: string, opts: { narrator?: boolean; guide?: boolean }) => {
+      const kind = opts.guide ? 'guide' : 'narrator'
+      await modelsKindActivateCommand(name, kind)
     })
 
   modelsSub
@@ -196,10 +231,16 @@ Examples:
     .option('--purge-index', 'also delete all stored embeddings for this model from the index')
     .option('-y, --yes', 'skip confirmation when purging index data')
     .option('--global', 'remove from global config instead of local')
+    .option('--narrator', 'remove an LLM narrator model config instead of an embedding model')
+    .option('--guide', 'remove an LLM guide model config instead of an embedding model')
     .action(async (
       name: string,
-      opts: { purgeIndex?: boolean; yes?: boolean; global?: boolean },
+      opts: { purgeIndex?: boolean; yes?: boolean; global?: boolean; narrator?: boolean; guide?: boolean },
     ) => {
+      if (opts.narrator || opts.guide) {
+        const kind = opts.narrator ? 'narrator' : 'guide'
+        return modelsKindRemoveCommand(name, kind)
+      }
       await modelsRemoveCommand(name, opts)
     })
 }

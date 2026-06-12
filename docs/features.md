@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.92.0** · Schema: **v21** · Test suite: **854 tests**
+> Current version: **v0.93.0** · Schema: **v22** · Test suite: **921 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -188,6 +188,8 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | **Policy checks for CI (Phase 66)** | `gitsema policy-check [--max-drift] [--max-debt-score] [--min-security-score] [--query]` — exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed |
 | **Ownership heatmap by concept (Phase 67)** | `gitsema ownership <query> [--top] [--window] [--dump]` |
 | **Workflow templates (Phase 68)** | `gitsema workflow run <pr-review\|incident\|release-audit> [--format] [--dump]` |
+| **LLM narration / explanation / guide (Phase 96)** | `gitsema narrate [options]`, `gitsema explain <topic> [options]`, `gitsema guide [question] [options]` — safe-by-default (evidence-only, no network) unless a narrator/guide model is configured via `gitsema models add <name> --narrator\|--guide --http-url <url> --activate`; all LLM payloads pass through secret/PII redaction |
+| **Guide agentic tool-calling loop (Phase 96)** | `gitsema guide` runs a `@jsilvanus/chattydeer` `runAgentLoop` (maxRoundtrips 5) against a tool registry (`repo_stats`, `recent_commits`, `narrate_repo`, `explain_topic`, `semantic_search`); `-i/--interactive` reuses one agent session across turns. `file_evolution`/`concept_evolution`/`branch_summary` tools are TODO |
 
 ---
 
