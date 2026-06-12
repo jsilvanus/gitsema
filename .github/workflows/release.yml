@@ -1,31 +1,32 @@
-name: Publish Package
+name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      publish:
-        description: Publish after tests
-        required: false
-        default: "false"
 
 permissions:
-  id-token: write  # Required for OIDC
-  contents: read
+  contents: write       # changesets action pushes the Version Packages branch
+  pull-requests: write  # ...and opens/updates the Version Packages PR
+  id-token: write       # OIDC trusted publishing to npm
+
+concurrency: release-${{ github.ref }}
 
 jobs:
   test:
+    permissions:
+      contents: read
     uses: ./.github/workflows/ci.yml
 
-  publish:
+  release:
     needs: test
-    name: Publish to npm
+    name: Version or publish via changesets
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -44,5 +45,11 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Publish to npm
-        run: npm publish --access public
+      - name: Create Version Packages PR or publish to npm
+        uses: changesets/action@v1
+        with:
+          publish: pnpm exec changeset publish
+          title: "chore(release): version packages"
+          commit: "chore(release): version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
