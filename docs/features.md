@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.70.0** · Schema: **v17** · Test suite: **~364 tests**
+> Current version: **v0.91.0** · Schema: **v21** · Test suite: **778 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -118,7 +118,7 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | Structured JSON / HTML dump | `--dump [file]`, `--html [file]` *(legacy; prefer `--out`)* |
 | Include stored content in dumps | `--include-content` |
 | LLM narrative | `--narrate` on `evolution`, `diff`, `file-evolution` |
-| **Unified output system (Phase 70)** | `--out <format>[:<file>]` (repeatable) on `search`, `evolution`, `triage`, `policy check`, `ownership`, `workflow run`; formats: `text\|json\|html\|markdown\|sarif` |
+| **Unified output system (Phase 70)** | `--out <format>[:<file>]` (repeatable) on `search`, `evolution`, `triage`, `policy-check`, `ownership`, `workflow run`; formats: `text\|json\|html\|markdown\|sarif` |
 
 ---
 
@@ -183,7 +183,7 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | **Semantic PR report (Phase 61)** | `gitsema pr-report` |
 | **Retrieval evaluation harness (Phase 64)** | `gitsema eval <file.jsonl>` |
 | **Incident triage bundle (Phase 65)** | `gitsema triage <query> [--ref1] [--ref2] [--file] [--top] [--dump]` |
-| **Policy checks for CI (Phase 66)** | `gitsema policy check [--max-drift] [--max-debt-score] [--min-security-score] [--query]` |
+| **Policy checks for CI (Phase 66)** | `gitsema policy-check [--max-drift] [--max-debt-score] [--min-security-score] [--query]` — exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed |
 | **Ownership heatmap by concept (Phase 67)** | `gitsema ownership <query> [--top] [--window] [--dump]` |
 | **Workflow templates (Phase 68)** | `gitsema workflow run <pr-review\|incident\|release-audit> [--format] [--dump]` |
 
@@ -295,6 +295,14 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | `health_timeline` | Time-bucketed codebase health metrics |
 | `debt_score` | Technical debt scoring |
 | `multi_repo_search` | Search across multiple registered gitsema repos |
+| `experts` | Top contributors by semantic area (which concepts/clusters they work on) |
+| `doc_gap` | Find code blobs with insufficient documentation coverage |
+| `contributor_profile` | Top blobs an author specializes in (semantic centroid of their commits) |
+| `ownership` | Ownership heatmap: ranks authors by share of touched blobs for a concept |
+| `eval` | Retrieval evaluation harness — precision@k, recall@k, MRR for a JSONL test set |
+| `triage` | Incident triage bundle: first-seen, change points, evolution, bisect, experts |
+| `policy_check` | CI policy gate — debt score, security similarity, and concept drift thresholds |
+| `workflow_run` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
 
 ---
 
@@ -387,7 +395,7 @@ Detailed rationale is documented in [`docs/review4.md`](docs/review4.md). High-v
 6. ~~Add semantic PR report generation for CI and code review.~~ ✅ Phase 61 (`gitsema pr-report`)
 7. ~~Add incident triage bundles (`bisect` + `change-points` + `first-seen`).~~ ✅ Phase 65 (`gitsema triage`)
 8. ~~Add concept ownership heatmap and ownership-shift tracking.~~ ✅ Phase 67 (`gitsema ownership`)
-9. ~~Add policy-style CI gates for drift/debt/security thresholds.~~ ✅ Phase 66 (`gitsema policy check`)
+9. ~~Add policy-style CI gates for drift/debt/security thresholds.~~ ✅ Phase 66 (`gitsema policy-check`)
 10. ~~Add AI-oriented provenance explain mode for prompt grounding.~~ ✅ Phase 64 (`--explain-llm`)
 11. ~~Add saved workflow templates (`pr-review`, `incident`, `release-audit`).~~ ✅ Phase 68 (`gitsema workflow run`)
 12. ~~Add retrieval quality evaluation harness for AI workflows.~~ ✅ Phase 64 (`gitsema eval`)

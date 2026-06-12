@@ -134,18 +134,36 @@ The indexer applies a multi-level fallback chain: whole-file → function chunke
 | `--bm25-weight <n>` | `0.3` | BM25 weight in hybrid score |
 | `--branch <name>` | — | Restrict results to blobs seen on this branch |
 
-### `gitsema first-seen <query> [-k n]`
+### `gitsema first-seen <query> [options]`
 Find when a concept first appeared — same as `search` but sorted chronologically (earliest first).
+
+| Flag | Default | Description |
+|---|---|---|
+| `-k, --top <n>` | `10` | Number of results to return |
+| `--branch <name>` | — | Restrict results to blobs seen on this branch |
+| `--hybrid` | off | Blend vector similarity with BM25 keyword matching (requires prior `backfill-fts`) |
+| `--bm25-weight <n>` | `0.3` | BM25 weight in hybrid score |
+| `--include-commits` | off | Also search commit messages and show chronological commit results |
+| `--dump [file]` | — | Output structured JSON; writes to `<file>` or stdout |
+| `--vss` | off | Use the usearch HNSW ANN index for approximate search |
+| `--html [file]` | — | Output interactive HTML; writes to `<file>` or `first-seen.html` |
+| `--out <spec>` | — | Output spec (repeatable): `text\|json[:file]\|html[:file]\|markdown[:file]` (overrides `--dump`/`--html`) |
+| `--repos <ids>` | — | Comma-separated repo IDs to include in search (multi-repo) |
 
 ### `gitsema file-evolution <path> [options]`
 Track semantic drift of a single file across its Git history.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--threshold <n>` | `0.3` | Cosine distance above which a version is flagged as a large change |
+| `--threshold <n>` | `0.3` | Cosine distance (0–2) above which a version is flagged as a large change |
+| `--level <level>` | `file` | `file` or `symbol` — symbol uses per-symbol centroid embeddings |
 | `--dump [file]` | — | Output structured JSON; writes to `<file>` or stdout |
+| `--html [file]` | — | Output an interactive HTML visualization |
+| `--out <spec>` | — | Output spec (repeatable): `text\|json[:file]\|html[:file]\|markdown[:file]` (overrides `--dump`/`--html`) |
 | `--include-content` | off | Add stored file text per version in JSON (requires `--dump`) |
+| `--alerts [n]` | `5` | Show the top-N largest semantic jumps with author and commit link |
 | `--branch <name>` | — | Restrict evolution to blobs seen on this branch |
+| `--narrate` | off | Generate an LLM narrative summary of semantic shifts (requires `GITSEMA_LLM_URL`) |
 
 ### `gitsema evolution <query> [options]`
 Trace how a semantic concept evolved across the entire codebase history. (`concept-evolution` is a backward-compat alias.)
@@ -157,8 +175,14 @@ Trace how a semantic concept evolved across the entire codebase history. (`conce
 | `--dump [file]` | — | Structured JSON output |
 | `--include-content` | off | Add stored file text (requires `--dump`) |
 
-### `gitsema diff <ref1> <ref2> <path>`
+### `gitsema file-diff <ref1> <ref2> <path>`
 Compute cosine distance between two versions of a file. `--neighbors <n>` shows nearest-neighbor blobs for each version.
+
+### `gitsema diff <ref1> <ref2> <query>`
+Compute a conceptual/semantic diff of a topic across two git refs — shows gained, lost, and stable concepts.
+
+### `gitsema policy-check [options]`
+Run policy gates for drift, debt, and security scores. Exit codes: `0` = ok, `1` = runtime error, `2` = usage error, `3` = gate failed. The same exit-code contract applies to `ci-diff`, `regression-gate`, and `code-review`.
 
 ### `gitsema tools <server>`
 Preferred entry point for all long-running protocol servers. Subcommands:
@@ -174,7 +198,7 @@ The old top-level `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work a
 ### `gitsema config <action> [key] [value]`
 Manage persistent configuration (set/get/list/unset). Stored in `.gitsema/config.json` (repo-level, default) or `~/.config/gitsema/config.json` (global, `--global`). Env vars override config file values.
 
-Supported dot-notation keys for command defaults: `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `index.concurrency`, `index.chunker`, `index.ext`, `search.hybrid`, `search.top`, `evolution.threshold`, `clusters.k`, and more. Use `gitsema config list` to see all active values and their sources.
+Supported dot-notation keys for command defaults (see `src/core/config/configManager.ts`): `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `verbose`, `logMaxBytes`, `servePort`, `serveKey`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, and more. Use `gitsema config list` to see all active values and their sources.
 
 ### `gitsema backfill-fts`
 Populate FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added). Required to use `--hybrid` search on older index entries.
@@ -208,11 +232,18 @@ git repo
 [ src/core/db/ ]           schema.ts   — Drizzle ORM table definitions
    │                        sqlite.ts   — connection, WAL mode, versioned migrations, FTS5 init
    ↓
-[ src/core/search/ ]       vectorSearch.ts  — cosine similarity, three-signal ranking
-   │                        hybridSearch.ts  — vector + BM25 fusion
-   │                        evolution.ts     — file/concept drift timelines
-   │                        timeSearch.ts    — date parsing, recency scoring
-   │                        ranking.ts       — result formatting and grouping
+[ src/core/search/ ]       analysis/vectorSearch.ts  — cosine similarity, three-signal ranking
+   │                        analysis/hybridSearch.ts  — vector + BM25 fusion
+   │                        analysis/booleanSearch.ts — AND/OR/NOT query composition
+   │                        analysis/resultCache.ts   — query result caching
+   │                        temporal/evolution.ts     — file/concept drift timelines
+   │                        temporal/timeSearch.ts    — date parsing, recency scoring
+   │                        temporal/changePoints.ts  — change-point detection
+   │                        temporal/healthTimeline.ts — codebase health metrics by time bucket
+   │                        clustering/clustering.ts  — k-means clustering
+   │                        ranking.ts                — result formatting and grouping
+   │                        (ungrouped: authorSearch.ts, impact.ts, mergeAudit.ts, debtScoring.ts,
+   │                         experts.ts, cherryPick.ts, semanticDiff.ts, semanticBlame.ts, etc.)
    ↓
 [ src/cli/ ]               index.ts + commands/*.ts  — Commander.js CLI
 [ src/mcp/ ]               server.ts                 — MCP stdio server
@@ -339,7 +370,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (24 total):**
+**Exposed tools (32 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow}.ts`):**
 
 | Tool | Description |
 |---|---|
@@ -367,6 +398,14 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `health_timeline` | Codebase health metrics by time bucket |
 | `debt_score` | Technical debt scoring by isolation, age, and change frequency |
 | `multi_repo_search` | Search across multiple registered gitsema repos |
+| `experts` | Top contributors by semantic area (which concepts/clusters they work on) |
+| `doc_gap` | Find code blobs with insufficient documentation coverage vs. prose/docs |
+| `contributor_profile` | Top blobs an author specializes in (semantic centroid of their commits) |
+| `ownership` | Ownership heatmap: ranks authors by share of touched blobs for a concept |
+| `eval` | Retrieval evaluation harness — precision@k, recall@k, MRR for a JSONL test set |
+| `triage` | Incident triage bundle: first-seen, change points, evolution, bisect, experts |
+| `policy_check` | CI policy gate — debt score, security similarity, and concept drift thresholds |
+| `workflow_run` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
 
 ---
 

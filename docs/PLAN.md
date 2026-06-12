@@ -3180,6 +3180,38 @@ as concrete, user-accessible features with CLI commands, documentation, and smok
 
 PRs: https://github.com/jsilvanus/gitsema/pull/67, https://github.com/jsilvanus/gitsema/pull/68
 
+### Phase 94 — review8 CLI Wiring & Documentation Restoration *(completed v0.91.0)*
+
+**Goal:** Address the CLI-wiring, usability, and documentation-parity findings from `docs/review8.md`.
+
+**Implemented scope:**
+
+*§2 — Broken wiring (six unreachable commands):*
+- `registerAnalysis(program)` is now called from `registerAll`; the duplicate definitions of `eval`, `repl`, `quickstart`, `regression-gate`, `cross-repo-similarity`, and `code-review` were removed from `all.ts` so `analysis.ts` is the single source for analysis commands.
+- Re-registered `first-seen` and `file-evolution` (handlers were intact but orphaned).
+- `pr-report`, `triage`, `ownership`, and `policy-check` (renamed from `policy check` to match the kebab-case convention) are now reachable.
+- The misleading comment at `all.ts:147` was corrected.
+
+*§4 — Shared CLI helpers:*
+- Extracted `buildProviderOrExit`, model-override resolution, and the JSON/sink output epilogue into shared `src/cli/lib/` helpers, removing ~500 lines of drifted copy-paste across ~14–35 command files.
+- Adopted an exit-code scheme (0 ok / 1 runtime error / 2 usage error / 3 gate failed) for the CI-facing commands: `ci-diff`, `regression-gate`, `code-review`, `policy-check`.
+- Added `.description()` to the `workflow` parent command.
+
+*§6 — Search-module reorg completion:*
+- Finished the `src/core/search/` reorganization: removed the top-level shims, the `core/` shim directory (including the duplicated `booleanSearch.ts`), and the barrel `src/core/search/index.ts`. Canonical implementations now live under `analysis/`, `temporal/`, and `clustering/`; imports and tests updated accordingly.
+
+*§6 — Repo root cleanup:*
+- Removed stale `package-lock.json`/`yarn.lock`, the vestigial root `index.js`, `index.log`, `tmp/search-backups/`, and ad-hoc notes (`plan3.md`, `ISSUE_BODY_search_after.md`); added `tmp/` and `*.log` to `.gitignore`. Folded `src/core/phase41plus.ts`'s note into this plan and removed the file.
+
+*§5 — Documentation restoration:*
+- Rebuilt `README.md` from a 9-line stub into a full user-facing reference (install/quick-start, configuration, command reference by group, exit-code contract for CI commands, MCP pointer) — restores `tests/docsSync.test.ts` to green.
+- Fixed `docs/features.md` header (v0.90.11 / schema v21 / 778 tests), renamed `policy check` → `policy-check` throughout, added the 8 missing MCP tools to the catalog (`experts`, `doc_gap`, `contributor_profile`, `ownership`, `eval`, `triage`, `policy_check`, `workflow_run` — now 32 total).
+- Updated `CLAUDE.md`: MCP tool count 24 → 32 with full table, architecture diagram now reflects `analysis/`, `temporal/`, and `clustering/` subdirectories, expanded the documented config-key list, and corrected the `first-seen`/`file-evolution`/`file-diff`/`diff` CLI reference sections to match `--help` output.
+
+**Tests:** `npx vitest run tests/docsSync.test.ts` — all 9 tests pass (README now covers all `COMMAND_GROUPS` keys).
+
+**Status:** ✅ complete.
+
 ## Long-Term Investments
 
 | Feature | Complexity | Notes |
