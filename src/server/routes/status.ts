@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { db, DB_PATH } from '../../core/db/sqlite.js'
+import { getActiveSession, DB_PATH } from '../../core/db/sqlite.js'
 import { blobs, embeddings, chunks, commits } from '../../core/db/schema.js'
 import { sql } from 'drizzle-orm'
 
@@ -7,6 +7,7 @@ export function statusRouter(): Router {
   const router = Router()
 
   router.get('/', (_req, res) => {
+    const { db } = getActiveSession()
     const [blobCount] = db.select({ count: sql<number>`count(*)` }).from(blobs).all()
     const [embCount] = db.select({ count: sql<number>`count(*)` }).from(embeddings).all()
     const [chunkCount] = db.select({ count: sql<number>`count(*)` }).from(chunks).all()

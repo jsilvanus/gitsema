@@ -11,11 +11,22 @@ import { registerAnalysisTools } from './tools/analysis.js'
 import { registerClusteringTools } from './tools/clustering.js'
 import { registerWorkflowTools } from './tools/workflow.js'
 import { registerInfrastructureTools } from './tools/infrastructure.js'
+import { readFileSync } from 'node:fs'
+
+// Read package version dynamically so the MCP server always matches package.json
+let _mcpVersion = '0.0.0'
+try {
+  const pkgPath = new URL('../../package.json', import.meta.url)
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string }
+  if (pkg && typeof pkg.version === 'string') _mcpVersion = pkg.version
+} catch {
+  // fall back to default
+}
 
 export async function startMcpServer(): Promise<void> {
   const server = new McpServer({
     name: 'gitsema',
-    version: '0.0.1',
+    version: _mcpVersion,
   })
 
   // Register domain-grouped tool sets

@@ -19,18 +19,70 @@ import { getModelProfile, type ModelProfile } from '../config/configManager.js'
 import { getFileCategory } from './fileType.js'
 import { extname } from 'node:path'
 
+// ---------------------------------------------------------------------------
+// ResolvedConfig — explicit configuration object
+// ---------------------------------------------------------------------------
+
+/**
+ * Explicit configuration object that can be passed to provider factory
+ * functions instead of relying on `process.env`. When provided, the factory
+ * reads all settings from this object rather than env vars.
+ *
+ * CLI commands build a `ResolvedConfig` from env vars + config file at the
+ * boundary and pass it down — keeping the core free of `process.env` reads.
+ */
+export interface ResolvedConfig {
+  provider?: string
+  model?: string
+  textModel?: string
+  codeModel?: string
+  httpUrl?: string
+  apiKey?: string
+}
+
+/**
+ * Builds a `ResolvedConfig` from the current `process.env` state.
+ * Use this at the CLI/server boundary to capture env state once and pass the
+ * resulting object into core functions.
+ */
+export function resolveConfigFromEnv(): ResolvedConfig {
+  return {
+    provider: process.env.GITSEMA_PROVIDER,
+    model: process.env.GITSEMA_MODEL,
+    textModel: process.env.GITSEMA_TEXT_MODEL,
+    codeModel: process.env.GITSEMA_CODE_MODEL,
+    httpUrl: process.env.GITSEMA_HTTP_URL,
+    apiKey: process.env.GITSEMA_API_KEY,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers to read config fields with env-var fallback
+// ---------------------------------------------------------------------------
+
+function cfgProvider(config?: ResolvedConfig): string | undefined {
+  return config?.provider ?? process.env.GITSEMA_PROVIDER
+}
+function cfgHttpUrl(config?: ResolvedConfig): string | undefined {
+  return config?.httpUrl ?? process.env.GITSEMA_HTTP_URL
+}
+function cfgApiKey(config?: ResolvedConfig): string | undefined {
+  return config?.apiKey ?? process.env.GITSEMA_API_KEY
+}
+
 /**
  * Constructs an EmbeddingProvider from explicit type and model values.
  *
- * @throws {Error} When `type === 'http'` but `GITSEMA_HTTP_URL` is not set.
+ * @param config - Optional explicit config. Falls back to `process.env` when omitted.
+ * @throws {Error} When `type === 'http'` but no HTTP URL is available.
  */
-export function buildProvider(type: string, model: string): EmbeddingProvider {
+export function buildProvider(type: string, model: string, config?: ResolvedConfig): EmbeddingProvider {
   if (type === 'http') {
-    const baseUrl = process.env.GITSEMA_HTTP_URL
+    const baseUrl = cfgHttpUrl(config)
     if (!baseUrl) {
       throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
     }
-    return new HttpProvider({ baseUrl, model, apiKey: process.env.GITSEMA_API_KEY })
+    return new HttpProvider({ baseUrl, model, apiKey: cfgApiKey(config) })
   }
   if (type === 'embedeer') {
     return new EmbedeerProvider({ model })
@@ -45,23 +97,22 @@ export function buildProvider(type: string, model: string): EmbeddingProvider {
  * Resolution order for each setting:
  *   per-model config (local) > per-model config (global) > env vars > defaults
  *
+ * @param config - Optional explicit config. Falls back to `process.env` when omitted.
  * @throws {Error} When the resolved provider is "http" but no URL is available.
  */
-export function buildProviderForModel(modelName: string): EmbeddingProvider {
+export function buildProviderForModel(modelName: string, config?: ResolvedConfig): EmbeddingProvider {
   const profile = getModelProfile(modelName)
-  // Use globalName (the remote model identifier) when provided; otherwise
-  // fall back to the local name which doubles as the model identifier.
   const resolvedModel = profile.globalName ?? modelName
-  const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
+  const type = profile.provider ?? cfgProvider(config) ?? 'ollama'
   if (type === 'http') {
-    const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
+    const baseUrl = profile.httpUrl ?? cfgHttpUrl(config)
     if (!baseUrl) {
       throw new Error(
         `HTTP URL required for model '${modelName}'. ` +
         `Set it with: gitsema models add ${modelName} --provider http --url <url>`,
       )
     }
-    const apiKey = profile.apiKey ?? process.env.GITSEMA_API_KEY
+    const apiKey = profile.apiKey ?? cfgApiKey(config)
     return new HttpProvider({ baseUrl, model: resolvedModel, apiKey })
   }
   if (type === 'embedeer') {
@@ -75,17 +126,16 @@ export function buildProviderForModel(modelName: string): EmbeddingProvider {
  * splits large `embedBatch()` calls into sub-batches and adds per-sub-batch
  * retry with exponential back-off.
  *
- * The `maxSubBatchSize` governs the maximum texts per sub-batch call; when
- * omitted it defaults to 32.
- *
- * @throws {Error} When `type === 'http'` but `GITSEMA_HTTP_URL` is not set.
+ * @param config - Optional explicit config. Falls back to `process.env` when omitted.
+ * @throws {Error} When `type === 'http'` but no HTTP URL is available.
  */
 export function buildBatchingProvider(
   type: string,
   model: string,
   maxSubBatchSize?: number,
+  config?: ResolvedConfig,
 ): EmbeddingProvider {
-  const inner = buildProvider(type, model)
+  const inner = buildProvider(type, model, config)
   return new BatchingProvider(inner, { maxSubBatchSize })
 }
 
@@ -113,6 +163,35 @@ function maybePrefix(provider: EmbeddingProvider, prefix: string | undefined): E
 }
 
 /**
+ * Shared implementation for building a provider from a resolved model name
+ * and an optional role prefix. Both `getTextProvider` and `getCodeProvider`
+ * delegate to this to avoid duplicated if/else chains.
+ *
+ * @param modelName - The resolved model name (after env var cascade)
+ * @param role - The role key for prefix lookup in the profile (e.g. 'text', 'code')
+ * @param config - Optional explicit config. Falls back to `process.env` when omitted.
+ * @throws {Error} When the resolved provider is "http" but no URL is available.
+ */
+function buildFromProfile(modelName: string, role: string, config?: ResolvedConfig): EmbeddingProvider {
+  const profile = getModelProfile(modelName)
+  const resolvedModel = profile.globalName ?? modelName
+  const type = profile.provider ?? cfgProvider(config) ?? 'ollama'
+  let inner: EmbeddingProvider
+  if (type === 'http') {
+    const baseUrl = profile.httpUrl ?? cfgHttpUrl(config)
+    if (!baseUrl) {
+      throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
+    }
+    inner = new HttpProvider({ baseUrl, model: resolvedModel, apiKey: profile.apiKey ?? cfgApiKey(config) })
+  } else if (type === 'embedeer') {
+    inner = new EmbedeerProvider({ model: resolvedModel })
+  } else {
+    inner = new OllamaProvider({ model: resolvedModel })
+  }
+  return maybePrefix(inner, profile.prefixes?.[role])
+}
+
+/**
  * Returns a text-oriented EmbeddingProvider based on environment variables
  * and per-model profile (if configured for the resolved model name).
  *
@@ -121,27 +200,14 @@ function maybePrefix(provider: EmbeddingProvider, prefix: string | undefined): E
  * If the model profile configures a "text" prefix, the returned provider
  * automatically prepends it to every embed call.
  *
+ * @param config - Optional explicit config. Falls back to `process.env` when omitted.
  * @throws {Error} When the resolved provider is "http" but no URL is available.
  */
-export function getTextProvider(): EmbeddingProvider {
+export function getTextProvider(config?: ResolvedConfig): EmbeddingProvider {
   const model =
+    config?.textModel ?? config?.model ??
     process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const profile = getModelProfile(model)
-  const resolvedModel = profile.globalName ?? model
-  const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
-  let inner: EmbeddingProvider
-  if (type === 'http') {
-    const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-    }
-    inner = new HttpProvider({ baseUrl, model: resolvedModel, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
-  } else if (type === 'embedeer') {
-    inner = new EmbedeerProvider({ model: resolvedModel })
-  } else {
-    inner = new OllamaProvider({ model: resolvedModel })
-  }
-  return maybePrefix(inner, profile.prefixes?.['text'])
+  return buildFromProfile(model, 'text', config)
 }
 
 /**
@@ -153,30 +219,17 @@ export function getTextProvider(): EmbeddingProvider {
  * If the model profile configures a "code" prefix, the returned provider
  * automatically prepends it to every embed call.
  *
+ * @param config - Optional explicit config. Falls back to `process.env` when omitted.
  * @throws {Error} When the resolved provider is "http" but no URL is available.
  */
-export function getCodeProvider(): EmbeddingProvider {
+export function getCodeProvider(config?: ResolvedConfig): EmbeddingProvider {
   const model =
+    config?.codeModel ?? config?.textModel ?? config?.model ??
     process.env.GITSEMA_CODE_MODEL ??
     process.env.GITSEMA_TEXT_MODEL ??
     process.env.GITSEMA_MODEL ??
     'nomic-embed-text'
-  const profile = getModelProfile(model)
-  const resolvedModel = profile.globalName ?? model
-  const type = profile.provider ?? process.env.GITSEMA_PROVIDER ?? 'ollama'
-  let inner: EmbeddingProvider
-  if (type === 'http') {
-    const baseUrl = profile.httpUrl ?? process.env.GITSEMA_HTTP_URL
-    if (!baseUrl) {
-      throw new Error('GITSEMA_HTTP_URL is required when GITSEMA_PROVIDER=http')
-    }
-    inner = new HttpProvider({ baseUrl, model: resolvedModel, apiKey: profile.apiKey ?? process.env.GITSEMA_API_KEY })
-  } else if (type === 'embedeer') {
-    inner = new EmbedeerProvider({ model: resolvedModel })
-  } else {
-    inner = new OllamaProvider({ model: resolvedModel })
-  }
-  return maybePrefix(inner, profile.prefixes?.['code'])
+  return buildFromProfile(model, 'code', config)
 }
 
 /**
