@@ -1,4 +1,4 @@
-import { vectorSearch } from './vectorSearch.js'
+import { vectorSearch } from './analysis/vectorSearch.js'
 import { getActiveSession } from '../db/sqlite.js'
 import type { Embedding } from '../models/types.js'
 

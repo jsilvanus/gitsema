@@ -1,4 +1,4 @@
-import { vectorSearch } from '../search/vectorSearch.js'
+import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import { getActiveSession } from '../db/sqlite.js'
 import { embedQuery } from '../embedding/embedQuery.js'
 import { buildProvider } from '../embedding/providerFactory.js'

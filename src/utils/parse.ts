@@ -27,3 +27,15 @@ export function parseNonNegativeInt(value: string, optionName: string): number {
   }
   return n
 }
+
+/**
+ * Parse a string as a positive (finite) float, e.g. similarity/distance thresholds.
+ * Throws with a descriptive message if the value is not a number greater than zero.
+ */
+export function parsePositiveFloat(value: string, optionName: string): number {
+  const n = Number(value.trim())
+  if (value.trim() === '' || !Number.isFinite(n) || n <= 0) {
+    throw new Error(`${optionName} must be a positive number, got: ${JSON.stringify(value)}`)
+  }
+  return n
+}

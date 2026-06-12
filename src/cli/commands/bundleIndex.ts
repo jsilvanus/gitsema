@@ -15,7 +15,7 @@ import { pipeline } from 'node:stream/promises'
 import { pack as tarPack } from 'tar-stream'
 import { extract as tarExtract } from 'tar-stream'
 import { CURRENT_SCHEMA_VERSION } from '../../core/db/sqlite.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 
 const DB_DIR = '.gitsema'
 const DB_FILE = 'index.db'

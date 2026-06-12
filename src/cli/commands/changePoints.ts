@@ -1,18 +1,18 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding } from '../../core/models/types.js'
 import {
   computeConceptChangePoints,
   type ConceptChangePointReport,
   type ConceptChangePoint,
-} from '../../core/search/changePoints.js'
-import { resolveRefToTimestamp } from '../../core/search/clustering.js'
+} from '../../core/search/temporal/changePoints.js'
+import { resolveRefToTimestamp } from '../../core/search/clustering/clustering.js'
 import { renderConceptChangePointsHtml } from '../../core/viz/htmlRenderer.js'
-import { hybridSearch } from '../../core/search/hybridSearch.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
 import { narrateChangePoints } from '../../core/llm/narrator.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { emitJsonSink } from '../lib/output.js'
 
 export interface ChangePointsCommandOptions {
   top?: string
@@ -32,16 +32,6 @@ export interface ChangePointsCommandOptions {
   narrate?: boolean
   noHeadings?: boolean
   out?: string[]
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 function renderChangePoint(point: ConceptChangePoint, rank: number): string {
@@ -131,10 +121,11 @@ export async function changePointsCommand(
   }
 
   // Apply CLI model overrides
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
   const provider = buildProviderOrExit(providerType, model)
 
   let queryEmbedding: Embedding
@@ -170,17 +161,13 @@ export async function changePointsCommand(
     const jsonSink = getSink(sinks, 'json')
     const htmlSink = getSink(sinks, 'html')
 
-    if (jsonSink) {
-      const json = JSON.stringify(report, null, 2)
-      if (jsonSink.file) {
-        writeFileSync(jsonSink.file, json, 'utf8')
-        console.log(`Change points JSON written to: ${jsonSink.file}`)
-      } else {
-        process.stdout.write(json + '\n')
-        return
-      }
-      if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
-    }
+    if (emitJsonSink({
+      sinks,
+      jsonSink,
+      payload: report,
+      fileMessage: (file) => `Change points JSON written to: ${file}`,
+      htmlAware: true,
+    }).handled) return
 
     if (htmlSink) {
       const html = renderConceptChangePointsHtml(report)

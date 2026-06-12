@@ -12,12 +12,12 @@
  * Falls back gracefully when GITSEMA_LLM_URL is not configured.
  */
 
-import type { EvolutionEntry, DiffResult } from '../search/evolution.js'
+import type { EvolutionEntry, DiffResult } from '../search/temporal/evolution.js'
 import type { SecurityFinding } from '../search/securityScan.js'
-import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering.js'
+import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering/clustering.js'
 import type { SearchResult } from '../models/types.js'
-import type { ConceptChangePointReport, FileChangePointReport } from '../search/changePoints.js'
-import type { HealthSnapshot } from '../search/healthTimeline.js'
+import type { ConceptChangePointReport, FileChangePointReport } from '../search/temporal/changePoints.js'
+import type { HealthSnapshot } from '../search/temporal/healthTimeline.js'
 import type { ConceptLifecycleResult } from '../search/conceptLifecycle.js'
 
 // ---------------------------------------------------------------------------

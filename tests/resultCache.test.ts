@@ -7,7 +7,7 @@ import {
   invalidateResultCache,
   cacheSize,
   resetResultCache,
-} from '../src/core/search/resultCache.js'
+} from '../src/core/search/analysis/resultCache.js'
 import type { SearchResult } from '../src/core/models/types.js'
 
 const RESULT: SearchResult = {

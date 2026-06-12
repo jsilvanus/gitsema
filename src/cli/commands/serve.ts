@@ -1,9 +1,8 @@
 import { createServer } from 'node:http'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { createApp } from '../../server/app.js'
 import { logger } from '../../utils/logger.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 
 export interface ServeCommandOptions {
   port?: string
@@ -11,16 +10,6 @@ export interface ServeCommandOptions {
   chunker?: string
   concurrency?: string
   ui?: boolean
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 export async function serveCommand(options: ServeCommandOptions): Promise<void> {
@@ -53,9 +42,7 @@ export async function serveCommand(options: ServeCommandOptions): Promise<void> 
     chunkerStrategy = options.chunker as ChunkStrategy
   }
 
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
+  const { providerType, textModel, codeModel } = resolveModels({})
 
   const textProvider = buildProviderOrExit(providerType, textModel)
   const codeProvider = codeModel !== textModel ? buildProviderOrExit(providerType, codeModel) : undefined

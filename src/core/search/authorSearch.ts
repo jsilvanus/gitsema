@@ -1,7 +1,7 @@
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
-import { cosineSimilarity, getBranchBlobHashSet } from './vectorSearch.js'
+import { cosineSimilarity, getBranchBlobHashSet } from './analysis/vectorSearch.js'
 import { bufferToFloat32 as bufferToEmbedding } from '../../utils/embedding.js'
 import type { Embedding } from '../models/types.js'
 

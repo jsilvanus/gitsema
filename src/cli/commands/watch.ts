@@ -2,8 +2,8 @@ import { Command } from 'commander'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
+import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { bufferToEmbedding } from '../../utils/embedding.js'
 
 function embeddingToBuffer(vec: number[] | Float32Array): Buffer {

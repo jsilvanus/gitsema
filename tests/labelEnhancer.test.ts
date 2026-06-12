@@ -8,7 +8,7 @@ import {
   normalizeToken,
   PROGRAMMING_NOISE_WORDS,
   TOKEN_NORMALIZATIONS,
-} from '../src/core/search/labelEnhancer.js'
+} from '../src/core/search/clustering/labelEnhancer.js'
 
 // ---------------------------------------------------------------------------
 // splitIdentifier

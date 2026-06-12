@@ -10,15 +10,18 @@
  *
  * Exit code:
  *   0 — all concepts within threshold
- *   1 — one or more concepts drifted beyond threshold (CI failure)
- *   2 — tool error (provider unreachable, invalid refs, etc.)
+ *   1 — runtime error (provider unreachable, embedding failure, etc.)
+ *   2 — invalid usage (bad arguments, malformed --concepts file)
+ *   3 — one or more concepts drifted beyond threshold (CI gate failure)
  */
 
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch, cosineSimilarity } from '../../core/search/vectorSearch.js'
+import { vectorSearch, cosineSimilarity } from '../../core/search/analysis/vectorSearch.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { EXIT_USAGE, EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 
 export interface RegressionGateOptions {
   base?: string
@@ -28,6 +31,8 @@ export interface RegressionGateOptions {
   threshold?: string  // default 0.15 cosine distance
   format?: string     // 'text' | 'json'
   topK?: string
+  /** Unified output spec (repeatable); --out wins over --format */
+  out?: string[]
 }
 
 export interface RegressionResult {
@@ -44,7 +49,13 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
   const headRef = opts.head ?? 'HEAD'
   const globalThreshold = parseFloat(opts.threshold ?? '0.15')
   const topK = parseInt(opts.topK ?? '10', 10)
-  const format = opts.format ?? 'text'
+
+  // --out wins over --format when present; otherwise --format keeps working unchanged.
+  const sinks = opts.out && opts.out.length > 0
+    ? resolveOutputs({ out: opts.out })
+    : undefined
+  const jsonSink = sinks ? getSink(sinks, 'json') : undefined
+  const format = sinks ? (jsonSink ? 'json' : 'text') : (opts.format ?? 'text')
 
   // Collect queries
   const queries: Array<{ query: string; threshold: number }> = []
@@ -63,18 +74,17 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
       }
     } catch (err) {
       console.error(`Error reading concepts file: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(2)
+      process.exit(EXIT_USAGE)
     }
   }
 
   if (queries.length === 0) {
     console.error('Error: provide --query <text> or --concepts <file.json>')
-    process.exit(2)
+    process.exit(EXIT_USAGE)
   }
 
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const modelName = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProvider(providerType, modelName)
+  const { providerType, textModel: modelName } = resolveModels({})
+  const provider = buildProviderOrExit(providerType, modelName, EXIT_RUNTIME)
 
   // Resolve refs to commit hashes for display
   let baseHash = baseRef; let headHash = headRef
@@ -97,7 +107,7 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
       embedding = await embedQuery(provider, query) as number[]
     } catch (err) {
       console.error(`Could not embed query "${query}": ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(2)
+      process.exit(EXIT_RUNTIME)
     }
 
     // Search at base/head ref. When refs are branch names the `branch` filter in
@@ -127,7 +137,13 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
   const allPassed = results.every((r) => r.passed)
 
   if (format === 'json') {
-    console.log(JSON.stringify({ base: baseHash, head: headHash, results, allPassed }, null, 2))
+    const json = JSON.stringify({ base: baseHash, head: headHash, results, allPassed }, null, 2)
+    if (jsonSink?.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Regression gate JSON written to: ${jsonSink.file}`)
+    } else {
+      console.log(json)
+    }
   } else {
     console.log()
     if (allPassed) {
@@ -138,5 +154,5 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
     }
   }
 
-  process.exit(allPassed ? 0 : 1)
+  process.exit(allPassed ? 0 : EXIT_GATE_FAILED)
 }

@@ -10,7 +10,7 @@
  *   - COMMON_JS — shared browser JS utilities (esc, shortHash)
  */
 
-import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering.js'
+import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering/clustering.js'
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 

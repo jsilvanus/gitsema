@@ -8,7 +8,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { bufferToEmbedding } from '../../utils/embedding.js'
 

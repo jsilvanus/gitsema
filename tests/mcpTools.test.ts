@@ -52,15 +52,15 @@ vi.mock('../src/core/embedding/providerFactory.js', async (importOriginal) => {
 // ---------------------------------------------------------------------------
 // Import MCP tools after mocking dependencies
 // ---------------------------------------------------------------------------
-import { computeHealthTimeline } from '../src/core/search/healthTimeline.js'
+import { computeHealthTimeline } from '../src/core/search/temporal/healthTimeline.js'
 import { scanForVulnerabilities } from '../src/core/search/securityScan.js'
 import { scoreDebt } from '../src/core/search/debtScoring.js'
-import { vectorSearch, cosineSimilarity, vectorNorm, pathRelevanceScore, cosineSimilarityPrecomputed } from '../src/core/search/vectorSearch.js'
-import { computeEvolution, computeConceptEvolution } from '../src/core/search/evolution.js'
-import { computeConceptChangePoints } from '../src/core/search/changePoints.js'
+import { vectorSearch, cosineSimilarity, vectorNorm, pathRelevanceScore, cosineSimilarityPrecomputed } from '../src/core/search/analysis/vectorSearch.js'
+import { computeEvolution, computeConceptEvolution } from '../src/core/search/temporal/evolution.js'
+import { computeConceptChangePoints } from '../src/core/search/temporal/changePoints.js'
 import { computeAuthorContributions } from '../src/core/search/authorSearch.js'
 import { findDeadConcepts } from '../src/core/search/deadConcepts.js'
-import { kMeansInit, assignClusters, updateCentroids, extractKeywords } from '../src/core/search/clustering.js'
+import { kMeansInit, assignClusters, updateCentroids, extractKeywords } from '../src/core/search/clustering/clustering.js'
 import { getActiveSession } from '../src/core/db/sqlite.js'
 import { getTextProvider } from '../src/core/embedding/providerFactory.js'
 

@@ -4,8 +4,8 @@
  *         renderClusterChangePointsHtml, renderDeadConceptsHtml,
  *         renderMergeAuditHtml, renderBranchSummaryHtml, renderSemanticDiffHtml.
  */
-import type { ConceptChangePointReport, FileChangePointReport } from '../search/changePoints.js'
-import type { ClusterChangePointReport } from '../search/clustering.js'
+import type { ConceptChangePointReport, FileChangePointReport } from '../search/temporal/changePoints.js'
+import type { ClusterChangePointReport } from '../search/clustering/clustering.js'
 import type { DeadConceptResult } from '../search/deadConcepts.js'
 import type { SemanticCollisionReport } from '../search/mergeAudit.js'
 import type { BranchSummaryResult } from '../search/branchSummary.js'

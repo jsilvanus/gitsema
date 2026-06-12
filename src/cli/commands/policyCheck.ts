@@ -1,13 +1,14 @@
 import { writeFileSync } from 'node:fs'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
-import { applyModelOverrides, buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { computeConceptChangePoints } from '../../core/search/changePoints.js'
+import { computeConceptChangePoints } from '../../core/search/temporal/changePoints.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { scanForVulnerabilities } from '../../core/search/securityScan.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
-import { parsePositiveInt } from '../../utils/parse.js'
+import { parsePositiveFloat } from '../../utils/parse.js'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { EXIT_USAGE, EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
 
 export interface PolicyCheckOptions {
   maxDrift?: string
@@ -31,23 +32,13 @@ interface PolicyResults {
   }
 }
 
-function buildProviderOrExit(): EmbeddingProvider {
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-  }
-}
-
 export async function policyCheckCommand(options: PolicyCheckOptions): Promise<void> {
-  applyModelOverrides({
+  const { providerType, textModel } = resolveModels({
     model: options.model,
     textModel: options.textModel,
     codeModel: options.codeModel,
   })
+  const buildPolicyProvider = (): EmbeddingProvider => buildProviderOrExit(providerType, textModel, EXIT_RUNTIME)
   const session = getActiveSession()
 
   const results: PolicyResults = { passed: true, checks: {} }
@@ -56,18 +47,18 @@ export async function policyCheckCommand(options: PolicyCheckOptions): Promise<v
   if (options.maxDebtScore !== undefined) {
     let maxDebt: number
     try {
-      maxDebt = parsePositiveInt(options.maxDebtScore, '--max-debt-score')
+      maxDebt = parsePositiveFloat(options.maxDebtScore, '--max-debt-score')
     } catch (err) {
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_USAGE)
     }
-    const provider = buildProviderOrExit()
+    const provider = buildPolicyProvider()
     let debtResults
     try {
       debtResults = await scoreDebt(session, provider)
     } catch (err) {
       console.error(`Error computing debt score: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_RUNTIME)
     }
     const avgScore = debtResults!.length > 0
       ? debtResults!.reduce((sum, r) => sum + r.debtScore, 0) / debtResults!.length
@@ -81,18 +72,18 @@ export async function policyCheckCommand(options: PolicyCheckOptions): Promise<v
   if (options.minSecurityScore !== undefined) {
     let minSec: number
     try {
-      minSec = parsePositiveInt(options.minSecurityScore, '--min-security-score')
+      minSec = parsePositiveFloat(options.minSecurityScore, '--min-security-score')
     } catch (err) {
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_USAGE)
     }
-    const provider = buildProviderOrExit()
+    const provider = buildPolicyProvider()
     let findings
     try {
       findings = await scanForVulnerabilities(session, provider)
     } catch (err) {
       console.error(`Error running security scan: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_RUNTIME)
     }
     // Higher similarity = closer match to vulnerability pattern = more risky.
     // Gate fails if any finding exceeds the user's threshold.
@@ -106,22 +97,22 @@ export async function policyCheckCommand(options: PolicyCheckOptions): Promise<v
   if (options.maxDrift !== undefined) {
     if (!options.query) {
       console.error('Error: --query is required when using --max-drift')
-      process.exit(1)
+      process.exit(EXIT_USAGE)
     }
     let maxDrift: number
     try {
-      maxDrift = parsePositiveInt(options.maxDrift, '--max-drift')
+      maxDrift = parsePositiveFloat(options.maxDrift, '--max-drift')
     } catch (err) {
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_USAGE)
     }
-    const provider = buildProviderOrExit()
+    const provider = buildPolicyProvider()
     let emb
     try {
       emb = await embedQuery(provider, options.query!)
     } catch (err) {
       console.error(`Error embedding query: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_RUNTIME)
     }
     const cps = computeConceptChangePoints(options.query!, emb!, { topK: 50 })
     const maxDist = cps.points.length > 0
@@ -145,7 +136,7 @@ export async function policyCheckCommand(options: PolicyCheckOptions): Promise<v
     }
     if (!hasSinkFormat(sinks, 'text') && results.passed) return
     if (!hasSinkFormat(sinks, 'text') && !results.passed) {
-      process.exit(1)
+      process.exit(EXIT_GATE_FAILED)
     }
   }
 
@@ -166,5 +157,5 @@ export async function policyCheckCommand(options: PolicyCheckOptions): Promise<v
     }
   }
 
-  if (!results.passed) process.exit(1)
+  if (!results.passed) process.exit(EXIT_GATE_FAILED)
 }

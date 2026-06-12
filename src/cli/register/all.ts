@@ -43,22 +43,20 @@ import { startMcpServer } from '../../mcp/server.js'
 import { authorCommand } from '../commands/author.js'
 import { projectCommand } from '../commands/project.js'
 import { expertsCommand } from '../commands/experts.js'
-import { evalCommand } from '../commands/eval.js'
-import { replCommand } from '../commands/repl.js'
-import { quickstartCommand } from '../commands/quickstart.js'
-import { regressionGateCommand } from '../commands/regressionGate.js'
-import { crossRepoSimilarityCommand } from '../commands/crossRepoSimilarity.js'
-import { codeReviewCommand } from '../commands/codeReview.js'
+import { firstSeenCommand } from '../commands/firstSeen.js'
+import { evolutionCommand } from '../commands/evolution.js'
 
 export function registerAll(program: Command) {
   // Preserve per-domain registration modules
   registerSetup(program)
   registerIndexing(program)
   registerSearch(program)
+  registerAnalysis(program)
 
   // Concept evolution / concept-level timeline
   program
     .command('evolution <query>')
+    .alias('concept-evolution')
     .description('Trace how a semantic concept evolved across the entire codebase history.')
     .option(
       '--include-content',
@@ -72,6 +70,40 @@ export function registerAll(program: Command) {
     .option('--narrate', 'generate an LLM summary of concept evolution results (requires GITSEMA_LLM_URL)')
     .option('--no-headings', "don't print column header row")
     .action(conceptEvolutionCommand)
+
+  program
+    .command('file-evolution <path>')
+    .description('Track semantic drift of a file over its Git history (see also: file-diff, evolution)')
+    .option(
+      '--threshold <n>',
+      'cosine distance threshold above which a version change is flagged as a large change (0–2, default 0.3)',
+    )
+    .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
+    .option(
+      '--dump [file]',
+      'output structured JSON of all evolution entries; writes to <file> if given, otherwise prints JSON to stdout',
+    )
+    .option(
+      '--html [file]',
+      'output an interactive HTML visualization; writes to <file> if given, otherwise file-evolution.html',
+    )
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option(
+      '--include-content',
+      'include the stored file content for each version in the JSON dump (only used with --dump)',
+    )
+    .option(
+      '--alerts [n]',
+      'show the top-N largest semantic jumps (default 5) with author and commit link; use with --dump to include in JSON output',
+    )
+    .option('--model <model>', 'override embedding model')
+    .option('--text-model <model>', 'override text embedding model')
+    .option('--code-model <model>', 'override code embedding model')
+    .option('--branch <name>', 'restrict evolution to blobs seen on this branch')
+    .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
+    .option('--narrate', 'generate an LLM narrative summary of semantic shifts (requires GITSEMA_LLM_URL)')
+    .option('--no-headings', "don't print column header row")
+    .action(evolutionCommand)
 
   program
     .command('bisect <good> <bad> <query>')
@@ -88,7 +120,7 @@ export function registerAll(program: Command) {
   program
     .command('refactor-candidates')
     .description('Find pairs of symbols/chunks/files that are semantically similar enough to be refactoring candidates')
-    .option('--threshold <n>', 'similarity threshold (default 0.88)', '0.88')
+    .option('--threshold <n>', 'similarity threshold (cosine similarity, 0–1, default 0.88)', '0.88')
     .option('-k, --top <n>', 'max pairs to return (default 50)', '50')
     .option('--level <level>', 'search granularity: symbol (default), chunk, file', 'symbol')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
@@ -98,14 +130,14 @@ export function registerAll(program: Command) {
 
   program
     .command('ci-diff')
-    .description('CI/CD semantic diff — compare semantic content between two Git refs and exit non-zero when concepts changed')
+    .description('CI/CD semantic diff — compare semantic content between two Git refs and exit non-zero when concepts changed. Exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed.')
     .option('--base <ref>', 'base ref to compare from (default HEAD~1)', 'HEAD~1')
     .option('--head <ref>', 'head ref to compare to (default HEAD)', 'HEAD')
     .option('--query <query>', 'semantic topic to focus on (default "semantic changes")', 'semantic changes')
     .option('-k, --top <n>', 'max blobs per diff group (default 20)', '20')
-    .option('--format <fmt>', 'output format: text (default), html, json', 'text')
-    .option('--threshold <n>', 'score threshold for significant changes (default 0.3)', '0.3')
-    .option('--out <file>', 'output file path')
+    .option('--format <fmt>', 'output format: text (default), html, json (legacy: prefer --out <fmt>)', 'text')
+    .option('--threshold <n>', 'score threshold for significant changes (cosine similarity, 0–1, default 0.3)', '0.3')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
     .option('--model <model>', 'override embedding model')
     .option('--text-model <model>', 'override text embedding model')
     .option('--code-model <model>', 'override code embedding model')
@@ -116,7 +148,7 @@ export function registerAll(program: Command) {
     .command('lifecycle <query>')
     .description('Analyze the lifecycle stages (born → growing → mature → declining → dead) of a semantic concept across Git history')
     .option('--steps <n>', 'number of time windows to sample (default 10)', '10')
-    .option('--threshold <n>', 'cosine similarity threshold for "match" (default 0.7)', '0.7')
+    .option('--threshold <n>', 'cosine similarity threshold for "match" (0–1, default 0.7)', '0.7')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--model <model>', 'override embedding model')
@@ -144,10 +176,9 @@ export function registerAll(program: Command) {
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .action(contributorProfileCommand)
 
-  // Many analysis commands are already registered by registerAnalysis; avoid duplicates
-
   // Register a single `workflow` parent command and add `run`/`list` subcommands
   const workflow = program.command('workflow')
+  workflow.description('Run productized, multi-step workflow patterns (see `gitsema workflow list`)')
 
   workflow
     .command('run <template>')
@@ -273,7 +304,8 @@ export function registerAll(program: Command) {
     .option('--text-model <model>', 'override text embedding model')
     .option('--code-model <model>', 'override code embedding model')
     .option('--branch <name>', 'restrict neighbor search to blobs seen on this branch')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .action(semanticBlameCommand)
 
   program
@@ -281,8 +313,9 @@ export function registerAll(program: Command) {
     .description('Find historical concepts no longer in HEAD but semantically similar to current code (see also: search, concept-evolution)')
     .option('-k, --top <n>', 'number of results to return', '10')
     .option('--since <date>', 'only consider dead blobs whose latest commit is on or after this date (YYYY-MM-DD or ISO 8601)')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise dead-concepts.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise dead-concepts.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--branch <name>', 'restrict dead-concept candidates to blobs seen on this branch')
     .option('--no-headings', "don't print section header")
     .action(deadConceptsCommand)
@@ -293,12 +326,13 @@ export function registerAll(program: Command) {
     .option('-k, --top <n>', 'number of similar blobs to return', '10')
     .option('--chunks', 'include chunk-level embeddings for finer-grained coupling')
     .option('--level <level>', 'search level: file (default), chunk, or symbol')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
     .option('--model <model>', 'override embedding model')
     .option('--text-model <model>', 'override text embedding model')
     .option('--code-model <model>', 'override code embedding model')
     .option('--branch <name>', 'restrict results to blobs seen on this branch')
-    .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise impact.html')
+    .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise impact.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print section header")
     .action(impactCommand)
 
@@ -309,8 +343,9 @@ export function registerAll(program: Command) {
     .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
     .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
     .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise clusters.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise clusters.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
     .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
     .option('--branch <name>', 'restrict clustering to blobs seen on this branch')
@@ -328,8 +363,9 @@ export function registerAll(program: Command) {
     .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
     .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
     .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-diff.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-diff.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
     .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
     .option('--branch <name>', 'restrict clustering to blobs seen on this branch at each ref')
@@ -341,14 +377,15 @@ export function registerAll(program: Command) {
     .description('Show how semantic clusters shifted over the commit history — multi-step timeline (see also: clusters, cluster-diff)')
     .option('--k <n>', 'number of clusters per step (default 8)', '8')
     .option('--steps <n>', 'number of evenly-spaced time checkpoints (default 5)', '5')
-    .option('--since <ref>', 'start date or git ref for the timeline (default: earliest indexed commit)')
-    .option('--until <ref>', 'end date or git ref for the timeline (default: latest indexed commit)')
+    .option('--since <ref>', 'start of the timeline: date (YYYY-MM-DD or ISO 8601) or git ref (default: earliest indexed commit)')
+    .option('--until <ref>', 'end of the timeline: date (YYYY-MM-DD or ISO 8601) or git ref (default: latest indexed commit)')
     .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
     .option('--iterations <n>', 'max k-means iterations per step (default 20)', '20')
     .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
-    .option('--threshold <n>', 'centroid-drift threshold above which a cluster is flagged as relabeled (default 0.15)', '0.15')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-timeline.html')
+    .option('--threshold <n>', 'centroid-drift threshold above which a cluster is flagged as relabeled (cosine distance, 0–2, default 0.15)', '0.15')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-timeline.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
     .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
     .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
@@ -359,18 +396,19 @@ export function registerAll(program: Command) {
     .command('change-points <query>')
     .description('Detect conceptual change points for a semantic query across commit history (see also: concept-evolution, cluster-change-points)')
     .option('-k, --top <n>', 'number of top-matching blobs used to define concept state per commit (default 50)', '50')
-    .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
+    .option('--threshold <n>', 'cosine distance threshold to flag a change point (0–2, default 0.3)', '0.3')
     .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
-    .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
-    .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+    .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD or ISO 8601), tag, or commit hash')
+    .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD or ISO 8601), tag, or commit hash')
     .option('--model <model>', 'override embedding model')
     .option('--text-model <model>', 'override text embedding model')
     .option('--code-model <model>', 'override code embedding model')
     .option('--hybrid', 'blend vector similarity with BM25 keyword matching')
     .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
     .option('--branch <name>', 'restrict concept state to blobs seen on this branch')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise change-points.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise change-points.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--narrate', 'generate an LLM narrative of change points (requires GITSEMA_LLM_URL)')
     .option('--no-headings', "don't print report header")
     .action(changePointsCommand)
@@ -378,14 +416,15 @@ export function registerAll(program: Command) {
   program
     .command('file-change-points <path>')
     .description('Detect semantic change points in a file\'s Git history (see also: file-evolution, change-points)')
-    .option('--threshold <n>', 'cosine distance threshold to flag a change point (default 0.3)', '0.3')
+    .option('--threshold <n>', 'cosine distance threshold to flag a change point (0–2, default 0.3)', '0.3')
     .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
     .option('--level <level>', 'embedding level: file (default) or symbol — symbol uses per-symbol centroid embeddings')
     .option('--branch <name>', 'restrict to blobs seen on this branch')
-    .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
-    .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise file-change-points.html')
+    .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD or ISO 8601), tag, or commit hash')
+    .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD or ISO 8601), tag, or commit hash')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise file-change-points.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--narrate', 'generate an LLM narrative of file change points (requires GITSEMA_LLM_URL)')
     .option('--no-headings', "don't print report header")
     .action(fileChangePointsCommand)
@@ -394,13 +433,14 @@ export function registerAll(program: Command) {
     .command('cluster-change-points')
     .description('Detect change points in the repo\'s cluster structure across commit history (see also: cluster-timeline, change-points)')
     .option('--k <n>', 'number of clusters to compute per step (default 8)', '8')
-    .option('--threshold <n>', 'mean centroid shift threshold to flag a change point (default 0.3)', '0.3')
+    .option('--threshold <n>', 'mean centroid shift threshold to flag a change point (cosine distance, 0–2, default 0.3)', '0.3')
     .option('--top-points <n>', 'show top-N largest shifts (default 5)', '5')
-    .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
-    .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD), tag, or commit hash')
+    .option('--since <ref>', 'limit commits from this point; accepts a date (YYYY-MM-DD or ISO 8601), tag, or commit hash')
+    .option('--until <ref>', 'limit commits up to this point; accepts a date (YYYY-MM-DD or ISO 8601), tag, or commit hash')
     .option('--max-commits <n>', 'cap the number of commits evaluated (sampled evenly across the range); omit to evaluate every commit')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-change-points.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise cluster-change-points.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
     .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
     .option('--branch <name>', 'restrict cluster snapshots to blobs seen on this branch')
@@ -411,8 +451,9 @@ export function registerAll(program: Command) {
     .description('Generate a semantic summary of what a branch is about compared to its base branch (see also: merge-audit, merge-preview)')
     .option('--base <branch>', 'base branch to compare against (default: main)')
     .option('-k, --top <n>', 'number of nearest concept clusters to show (default 5)', '5')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise branch-summary.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise branch-summary.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'show more keyword detail for concept clusters in the output')
     .option('--enhanced-keywords-n <n>', 'number of keywords to display per cluster when --enhanced-labels is set (default 8)', '8')
     .action(branchSummaryCommand)
@@ -423,8 +464,9 @@ export function registerAll(program: Command) {
     .option('--base <commit>', 'override merge-base detection with this commit hash or ref')
     .option('--threshold <n>', 'cosine similarity threshold for a collision (0–1, default 0.85)', '0.85')
     .option('-k, --top <n>', 'max collision pairs to display (default 20)', '20')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise merge-audit.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise merge-audit.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'show top keywords alongside cluster labels in collision output')
     .action(mergeAuditCommand)
 
@@ -436,8 +478,9 @@ export function registerAll(program: Command) {
     .option('--top <n>', 'top representative paths to show per cluster (default 5)', '5')
     .option('--iterations <n>', 'max k-means iterations (default 20)', '20')
     .option('--edge-threshold <n>', 'cosine similarity threshold for concept graph edges (default 0.3)', '0.3')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise merge-preview.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise merge-preview.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
     .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
     .action(mergePreviewCommand)
@@ -454,9 +497,9 @@ export function registerAll(program: Command) {
     .command('author <query>')
     .description('Rank authors by semantic contribution to a concept (see also: search, evolution)')
     .option('-k, --top <n>', 'number of top authors to return (default 10)', '10')
-    .option('--since <date>', 'only consider contributions since this date (YYYY-MM-DD)')
+    .option('--since <date>', 'only consider contributions since this date (YYYY-MM-DD or ISO 8601)')
     .option('--detail', 'show the specific files and commits that contributed to each author\'s ranking')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
     .option('--branch <name>', 'restrict concept attribution to blobs seen on this branch')
     .option('--model <model>', 'override embedding model')
     .option('--text-model <model>', 'override text embedding model')
@@ -467,7 +510,8 @@ export function registerAll(program: Command) {
     .option('--hybrid', 'use hybrid (vector + BM25) search to find initial candidate blobs')
     .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
     .option('--vss', 'use the usearch HNSW ANN index for approximate candidate selection')
-    .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise author.html')
+    .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise author.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print query title header")
     .action(authorCommand)
 
@@ -484,83 +528,18 @@ export function registerAll(program: Command) {
     .command('experts')
     .description('Show top contributors ranked by blob count and the semantic areas they worked on (see also: author, contributor-profile)')
     .addHelpText('after', '\nNo embedding provider required — uses data already in the index.\nRun `gitsema clusters` first to get richer semantic-area labels.\n\nExamples:\n  gitsema experts                         # top 10 contributors overall\n  gitsema experts --top 5 --since 2024-01-01  # top 5 in 2024\n  gitsema experts --dump experts.json     # export to JSON\n  gitsema experts --html experts.html     # interactive HTML report')
-    .option('--top <n>', 'number of top contributors to show (default 10)', '10')
-    .option('--since <ref>', 'only count commits at or after this date or ISO 8601 timestamp (e.g. 2024-01-01)')
-    .option('--until <ref>', 'only count commits at or before this date or ISO 8601 timestamp (e.g. 2024-12-31)')
+    .option('-k, --top <n>', 'number of top contributors to show (default 10)', '10')
+    .option('--since <ref>', 'only count commits at or after this date (YYYY-MM-DD or ISO 8601 timestamp, e.g. 2024-01-01)')
+    .option('--until <ref>', 'only count commits at or before this date (YYYY-MM-DD or ISO 8601 timestamp, e.g. 2024-12-31)')
     .option('--min-blobs <n>', 'suppress contributors with fewer than this many blobs (default 1)', '1')
     .option('--top-clusters <n>', 'max semantic areas to show per contributor (default 5)', '5')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
-    .option('--html [file]', 'output an interactive HTML report; writes to <file> if given, otherwise experts.html')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+    .option('--html [file]', 'output an interactive HTML report; writes to <file> if given, otherwise experts.html (legacy: prefer --out html)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .action(async (opts: Parameters<typeof expertsCommand>[0]) => {
       await expertsCommand(opts)
     })
 
-  // Eval / repl / quickstart / regression-gate / cross-repo / code-review handlers
-  program
-    .command('eval <file>')
-    .description('Evaluate retrieval quality against a JSONL file of (query, expectedPaths) pairs.')
-    .option('-k, --top <n>', 'retrieve top-k results per query (default: 10)')
-    .option('--dump [file]', 'write full JSON results to <file> (or stdout if no file given)')
-    .action(async (file: string, opts: { top?: string; dump?: string | boolean }) => {
-      await evalCommand({ file, ...opts })
-    })
-
-  program
-    .command('repl')
-    .description('Start an interactive semantic search session (query loop with shared embedding provider)')
-    .option('-k, --top <n>', 'number of results per query (default: 10)')
-    .option('--level <level>', 'search level: file, chunk, symbol, module (default: file)')
-    .option('--hybrid', 'enable hybrid (BM25+vector) search mode')
-    .option('--model <model>', 'embedding model to use')
-    .action(async (opts: { top?: string; level?: string; hybrid?: boolean; model?: string }) => {
-      await replCommand(opts)
-    })
-
-  program
-    .command('quickstart')
-    .description('Guided onboarding wizard: detect provider, configure model, and index HEAD in one step')
-    .action(async () => {
-      await quickstartCommand()
-    })
-
-  program
-    .command('regression-gate')
-    .description('CI gate: fail if key concepts drift beyond threshold between two refs')
-    .option('--base <ref>', 'base ref to compare from (default: main)')
-    .option('--head <ref>', 'head ref to compare to (default: HEAD)')
-    .option('--query <text>', 'single concept query to check')
-    .option('--concepts <file>', 'JSON file with list of concept queries to check')
-    .option('--threshold <n>', 'max allowed cosine drift (default: 0.15)')
-    .option('--top <n>', 'top-k results to compare (default: 10)')
-    .option('--format <fmt>', 'output format: text (default) or json')
-    .action(async (opts: { base?: string; head?: string; query?: string; concepts?: string; threshold?: string; top?: string; format?: string }) => {
-      await regressionGateCommand(opts)
-    })
-
-  program
-    .command('cross-repo-similarity <query>')
-    .description('Compare semantic similarity of a concept across two separately indexed repos')
-    .option('--repo-a <db>', 'path to repo A .gitsema/index.db')
-    .option('--repo-b <db>', 'path to repo B .gitsema/index.db')
-    .option('--top <n>', 'top results per repo (default: 5)')
-    .option('--threshold <n>', 'similarity threshold for shared-concept match (default: 0.7)')
-    .option('--format <fmt>', 'output format: text (default) or json')
-    .action(async (query: string, opts: { repoA?: string; repoB?: string; top?: string; threshold?: string; format?: string }) => {
-      await crossRepoSimilarityCommand(query, opts)
-    })
-
-  program
-    .command('code-review')
-    .description('Semantic code review: find historical analogues for changed code and flag regressions')
-    .option('--base <ref>', 'base git ref (e.g. main)')
-    .option('--head <ref>', 'head git ref (e.g. HEAD)')
-    .option('--diff-file <file>', 'read diff from a patch file instead of git')
-    .option('--top <n>', 'top analogues per file (default: 5)')
-    .option('--threshold <n>', 'minimum similarity score (default: 0.75)')
-    .option('--format <fmt>', 'output format: text (default) or json')
-    .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string }) => {
-      await codeReviewCommand(opts)
-    })
 }
 
 export default registerAll

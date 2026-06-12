@@ -111,7 +111,7 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } 
     // 3. Search latency class
     const VSS_THRESHOLD = parseInt(process.env.GITSEMA_VSS_THRESHOLD ?? '50000', 10)
     const n = report.embeddingCount
-    const { getVssIndexPaths } = await import('../../core/search/vectorSearch.js')
+    const { getVssIndexPaths } = await import('../../core/search/analysis/vectorSearch.js')
     const { existsSync } = await import('node:fs')
     const vssPaths = getVssIndexPaths(modelName)
     const vssReady = vssPaths !== null && existsSync(vssPaths.indexPath)

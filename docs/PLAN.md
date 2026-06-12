@@ -109,6 +109,7 @@
 |   [Phase 91 — 8 Productized Usage Patterns (review7 §5) *(completed v0.90.0)*](#phase-91-—-8-productized-usage-patterns-review7-§5-completed-v0900) | 3055 |
 |   [Phase 92 — review7 Improvement Bundle *(completed, 2026-04-09)*](#phase-92-—-review7-improvement-bundle-completed-2026-04-09) | 3101 |
 |   [Phase 93 — Time filter semantics & pagination stability](#phase-93-—-time-filter-semantics-pagination-stability) | 3143 |
+|   [Phase 95 — Flag unification (review8 §8.6/§8.9)](#phase-95-—-flag-unification-review8-§86§89) | 3232 |
 | [Long-Term Investments](#long-term-investments) | 3173 |
 | [Non-goals for now (revisited later)](#non-goals-for-now-revisited-later) | 3186 |
 
@@ -3179,6 +3180,61 @@ as concrete, user-accessible features with CLI commands, documentation, and smok
 **Rollback plan:** Revert the merge commit(s) for PR #67 and PR #68 and re-run the test suite. If necessary, revert only the specific functions in `timeSearch.ts` / `vectorSearch.ts` and reapply a hotfix branch.
 
 PRs: https://github.com/jsilvanus/gitsema/pull/67, https://github.com/jsilvanus/gitsema/pull/68
+
+### Phase 94 — review8 CLI Wiring & Documentation Restoration *(completed v0.91.0)*
+
+**Goal:** Address the CLI-wiring, usability, and documentation-parity findings from `docs/review8.md`.
+
+**Implemented scope:**
+
+*§2 — Broken wiring (six unreachable commands):*
+- `registerAnalysis(program)` is now called from `registerAll`; the duplicate definitions of `eval`, `repl`, `quickstart`, `regression-gate`, `cross-repo-similarity`, and `code-review` were removed from `all.ts` so `analysis.ts` is the single source for analysis commands.
+- Re-registered `first-seen` and `file-evolution` (handlers were intact but orphaned).
+- `pr-report`, `triage`, `ownership`, and `policy-check` (renamed from `policy check` to match the kebab-case convention) are now reachable.
+- The misleading comment at `all.ts:147` was corrected.
+
+*§4 — Shared CLI helpers:*
+- Extracted `buildProviderOrExit`, model-override resolution, and the JSON/sink output epilogue into shared `src/cli/lib/` helpers, removing ~500 lines of drifted copy-paste across ~14–35 command files.
+- Adopted an exit-code scheme (0 ok / 1 runtime error / 2 usage error / 3 gate failed) for the CI-facing commands: `ci-diff`, `regression-gate`, `code-review`, `policy-check`.
+- Added `.description()` to the `workflow` parent command.
+
+*§6 — Search-module reorg completion:*
+- Finished the `src/core/search/` reorganization: removed the top-level shims, the `core/` shim directory (including the duplicated `booleanSearch.ts`), and the barrel `src/core/search/index.ts`. Canonical implementations now live under `analysis/`, `temporal/`, and `clustering/`; imports and tests updated accordingly.
+
+*§6 — Repo root cleanup:*
+- Removed stale `package-lock.json`/`yarn.lock`, the vestigial root `index.js`, `index.log`, `tmp/search-backups/`, and ad-hoc notes (`plan3.md`, `ISSUE_BODY_search_after.md`); added `tmp/` and `*.log` to `.gitignore`. Folded `src/core/phase41plus.ts`'s note into this plan and removed the file.
+
+*§5 — Documentation restoration:*
+- Rebuilt `README.md` from a 9-line stub into a full user-facing reference (install/quick-start, configuration, command reference by group, exit-code contract for CI commands, MCP pointer) — restores `tests/docsSync.test.ts` to green.
+- Fixed `docs/features.md` header (v0.90.11 / schema v21 / 778 tests), renamed `policy check` → `policy-check` throughout, added the 8 missing MCP tools to the catalog (`experts`, `doc_gap`, `contributor_profile`, `ownership`, `eval`, `triage`, `policy_check`, `workflow_run` — now 32 total).
+- Updated `CLAUDE.md`: MCP tool count 24 → 32 with full table, architecture diagram now reflects `analysis/`, `temporal/`, and `clustering/` subdirectories, expanded the documented config-key list, and corrected the `first-seen`/`file-evolution`/`file-diff`/`diff` CLI reference sections to match `--help` output.
+
+**Tests:** `npx vitest run tests/docsSync.test.ts` — all 9 tests pass (README now covers all `COMMAND_GROUPS` keys).
+
+**Status:** ✅ complete.
+
+### Phase 95 — Flag unification (review8 §8.6/§8.9) *(completed v0.92.0)*
+
+**Goal:** Implement review8 §8.6 (output-flag unification) and §8.9 (date-flag standardization).
+
+**Implemented scope:**
+
+*§8.6 — `--out` unification:*
+- Added the canonical `--out <spec>` option (`text|json[:file]|html[:file]|markdown[:file]`, repeatable) to every command that previously exposed only `--dump`/`--html`: `blame`, `dead-concepts`, `impact`, `clusters`, `cluster-diff`, `cluster-timeline`, `change-points`, `file-change-points`, `cluster-change-points`, `branch-summary`, `merge-audit`, `merge-preview`, `author`, `experts`, `debt`, `eval`. Most handlers already called `resolveOutputs({ out, dump, html })`; `experts` and `debt` were converted from ad-hoc dump/html handling to the shared `resolveOutputs`/`emitJsonSink` pattern, preserving legacy output byte-for-byte.
+- Added `--out <spec>` (`text|json[:file]`) to the three `--format`-only commands in `register/analysis.ts` — `regression-gate`, `cross-repo-similarity`, `code-review` — with `--out` winning over `--format` when both are given.
+- Annotated all legacy `--dump`, `--html`, and `--format` help strings with "(legacy: prefer --out ...)" where not already present. `ci-diff` keeps its pre-existing single-file `--out <file>` (predates the unified spec system) and is documented as an explicit exception.
+
+*§8.9 — `--since`/`--until` standardization:*
+- `gitsema search` now accepts `--since`/`--until` as documented aliases of `--after`/`--before` (explicit `--before`/`--after` win when both given).
+- Swept `--since`/`--until` help strings across `register/all.ts` and `register/analysis.ts` to state accepted formats (YYYY-MM-DD / ISO 8601, plus "or git ref" only where the handler genuinely resolves refs, e.g. `cluster-timeline`, `change-points`, `file-change-points`, `cluster-change-points`).
+
+*New test:* `tests/flagConsistency.test.ts` walks `buildProgram()`'s full command tree and asserts every `--dump`/`--html`/`--format` command also has `--out`, every command with both `--before` and `--after` also has `--since`/`--until`, and every `--top` option has the `-k` short flag — with documented exception lists for `ci-diff` (`--out` name collision) and seven commands whose `--top` is a differently-scoped per-group count (`clusters`, `cluster-diff`, `cluster-timeline`, `merge-preview`, `repos search`, `security-scan`, `watch run`).
+
+**Tests:** `npx vitest run` — all tests pass, including the new `tests/flagConsistency.test.ts`.
+
+**Follow-up:** The `ci-diff` exception noted above (§8.6) was eliminated — `ci-diff` now exposes the standard `--out <spec>` (repeatable, `text|json[:file]|html[:file]|markdown[:file]`) alongside its legacy `--format <fmt>` (now annotated "(legacy: prefer --out <fmt>)"), and `OUT_EXCEPTIONS` in `tests/flagConsistency.test.ts` is empty.
+
+**Status:** ✅ complete.
 
 ## Long-Term Investments
 

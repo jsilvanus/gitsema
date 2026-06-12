@@ -8,6 +8,7 @@ import { securityScanCommand } from '../commands/securityScan.js'
 import { healthCommand } from '../commands/health.js'
 import { debtCommand } from '../commands/debt.js'
 import { toolsCommand } from '../commands/tools.js'
+import { firstSeenCommand } from '../commands/firstSeen.js'
 import { collectOut } from '../../utils/outputSink.js'
 
 export function registerSearch(program: Command) {
@@ -17,8 +18,10 @@ export function registerSearch(program: Command) {
     .option('-k, --top <n>', 'number of results to return', '10')
     .option('--recent', 'blend cosine similarity with a recency score')
     .option('--alpha <n>', 'weight for cosine similarity in blended score (0–1, default 0.8)')
-    .option('--before <date>', 'only include blobs first seen before this date (YYYY-MM-DD)')
-    .option('--after <date>', 'only include blobs first seen after this date (YYYY-MM-DD)')
+    .option('--before <date>', 'only include blobs first seen before this date (YYYY-MM-DD or ISO 8601) (alias of --until)')
+    .option('--after <date>', 'only include blobs first seen after this date (YYYY-MM-DD or ISO 8601) (alias of --since)')
+    .option('--since <date>', 'only include blobs first seen at or after this date (YYYY-MM-DD or ISO 8601); alias of --after')
+    .option('--until <date>', 'only include blobs first seen before this date (YYYY-MM-DD or ISO 8601); alias of --before')
     .option('--weight-vector <n>', 'weight for vector similarity in three-signal ranking (default 0.7)')
     .option('--weight-recency <n>', 'weight for recency in three-signal ranking (default 0.2)')
     .option('--weight-path <n>', 'weight for path relevance in three-signal ranking (default 0.1)')
@@ -51,6 +54,26 @@ export function registerSearch(program: Command) {
     .option('--no-headings', "don't print column header row")
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .action(searchCommand)
+
+  program
+    .command('first-seen <query>')
+    .description('Find when a concept first appeared in the codebase, sorted by date (see also: search, concept-evolution)')
+    .option('-k, --top <n>', 'number of results to return', '10')
+    .option('--branch <name>', 'restrict results to blobs seen on this branch')
+    .option('--no-headings', "don't print header row")
+    .option('--hybrid', 'blend vector similarity with BM25 keyword matching (requires prior backfill-fts)')
+    .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
+    .option('--include-commits', 'also search commit messages and show chronological commit results')
+    .option('--model <model>', 'override embedding model')
+    .option('--text-model <model>', 'override text embedding model')
+    .option('--code-model <model>', 'override code embedding model')
+    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
+    .option('--remote <url>', 'proxy to a remote gitsema server (overrides GITSEMA_REMOTE)')
+    .option('--vss', 'use the usearch HNSW ANN index for approximate search (requires prior `gitsema build-vss`; falls back to linear scan)')
+    .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise first-seen.html')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option('--repos <ids>', 'comma-separated repo IDs to include in search (multi-repo)')
+    .action(firstSeenCommand)
 
   program.addCommand(codeSearchCommand())
   program.addCommand(reposCommand())

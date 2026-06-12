@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { writeFileSync } from 'node:fs'
-import { computeHealthTimeline } from '../../core/search/healthTimeline.js'
+import { computeHealthTimeline } from '../../core/search/temporal/healthTimeline.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { narrateHealthTimeline } from '../../core/llm/narrator.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'

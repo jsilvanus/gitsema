@@ -5,8 +5,8 @@ import {
   renderClusterTimelineHtml,
   renderConceptEvolutionHtml,
 } from '../src/core/viz/htmlRenderer.js'
-import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../src/core/search/clustering.js'
-import type { ConceptEvolutionEntry } from '../src/core/search/evolution.js'
+import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../src/core/search/clustering/clustering.js'
+import type { ConceptEvolutionEntry } from '../src/core/search/temporal/evolution.js'
 
 // Minimal fixture data
 const CLUSTER_A = {

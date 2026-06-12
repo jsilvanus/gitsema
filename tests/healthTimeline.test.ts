@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { openDatabaseAt } from '../src/core/db/sqlite.js'
-import { computeHealthTimeline } from '../src/core/search/healthTimeline.js'
+import { computeHealthTimeline } from '../src/core/search/temporal/healthTimeline.js'
 
 describe('healthTimeline', () => {
   it('returns empty on empty DB', () => {

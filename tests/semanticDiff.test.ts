@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { computeSemanticDiff } from '../src/core/search/semanticDiff.js'
 import type { SemanticDiffResult } from '../src/core/search/semanticDiff.js'
-import { cosineSimilarity } from '../src/core/search/vectorSearch.js'
+import { cosineSimilarity } from '../src/core/search/analysis/vectorSearch.js'
 
 // ---------------------------------------------------------------------------
 // cosineSimilarity (used internally by computeSemanticDiff)

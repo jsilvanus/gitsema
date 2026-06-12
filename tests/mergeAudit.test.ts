@@ -20,7 +20,7 @@ vi.mock('../src/core/git/branchDiff.js', () => ({
   getBranchExclusiveBlobs: vi.fn(),
 }))
 
-vi.mock('../src/core/search/clustering.js', () => ({
+vi.mock('../src/core/search/clustering/clustering.js', () => ({
   computeClusterSnapshot: vi.fn(),
   compareClusterSnapshots: vi.fn(),
   getBlobHashesUpTo: vi.fn(),

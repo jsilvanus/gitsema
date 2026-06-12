@@ -6,7 +6,7 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, existsSync: vi.fn(() => false) }
 })
 
-import { getVssIndexPaths, annSearch } from '../src/core/search/vectorSearch.js'
+import { getVssIndexPaths, annSearch } from '../src/core/search/analysis/vectorSearch.js'
 
 afterEach(() => { vi.restoreAllMocks() })
 

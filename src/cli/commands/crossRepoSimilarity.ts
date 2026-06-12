@@ -11,10 +11,12 @@
  *     --repo-b ./repoB/.gitsema/index.db
  */
 
+import { writeFileSync } from 'node:fs'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { openDatabaseAt } from '../../core/db/sqlite.js'
-import { vectorSearchWithSession } from '../../core/search/vectorSearch.js'
+import { vectorSearchWithSession } from '../../core/search/analysis/vectorSearch.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 
 export interface CrossRepoSimilarityOptions {
   repoA?: string
@@ -22,6 +24,8 @@ export interface CrossRepoSimilarityOptions {
   top?: string
   threshold?: string
   format?: string
+  /** Unified output spec (repeatable); --out wins over --format */
+  out?: string[]
 }
 
 export async function crossRepoSimilarityCommand(
@@ -34,7 +38,13 @@ export async function crossRepoSimilarityCommand(
   }
   const topK = parseInt(opts.top ?? '5', 10)
   const threshold = parseFloat(opts.threshold ?? '0.7')
-  const format = opts.format ?? 'text'
+
+  // --out wins over --format when present; otherwise --format keeps working unchanged.
+  const sinks = opts.out && opts.out.length > 0
+    ? resolveOutputs({ out: opts.out })
+    : undefined
+  const jsonSink = sinks ? getSink(sinks, 'json') : undefined
+  const format = sinks ? (jsonSink ? 'json' : 'text') : (opts.format ?? 'text')
 
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
   const modelName = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
@@ -58,11 +68,17 @@ export async function crossRepoSimilarityCommand(
   sessionB.rawDb.close()
 
   if (format === 'json') {
-    console.log(JSON.stringify({
+    const json = JSON.stringify({
       query,
       repoA: { path: opts.repoA, results: resultsA },
       repoB: { path: opts.repoB, results: resultsB },
-    }, null, 2))
+    }, null, 2)
+    if (jsonSink?.file) {
+      writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Cross-repo similarity JSON written to: ${jsonSink.file}`)
+    } else {
+      console.log(json)
+    }
     return
   }
 

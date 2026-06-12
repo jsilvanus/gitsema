@@ -1,13 +1,13 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import {
   computeSemanticBlame,
   type SemanticBlameEntry,
 } from '../../core/search/semanticBlame.js'
 import { shortHash } from '../../core/search/ranking.js'
-import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { emitJsonSink } from '../lib/output.js'
 
 export interface SemanticBlameCommandOptions {
   /** Number of nearest-neighbor blobs per block (default 3). */
@@ -24,16 +24,6 @@ export interface SemanticBlameCommandOptions {
   codeModel?: string
   branch?: string
   out?: string[]
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 function formatDate(timestamp: number | null): string {
@@ -114,10 +104,11 @@ export async function semanticBlameCommand(
   }
 
   // Apply CLI model overrides
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
   const provider = buildProviderOrExit(providerType, model)
 
   let entries: SemanticBlameEntry[]
@@ -131,17 +122,12 @@ export async function semanticBlameCommand(
   const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
   const jsonSink = getSink(sinks, 'json')
 
-  if (jsonSink) {
-    const json = JSON.stringify(entries, null, 2)
-    if (jsonSink.file) {
-      writeFileSync(jsonSink.file, json, 'utf8')
-      console.log(`Wrote semantic blame JSON to ${jsonSink.file}`)
-    } else {
-      process.stdout.write(json + '\n')
-      return
-    }
-    if (!hasSinkFormat(sinks, 'text')) return
-  }
+  if (emitJsonSink({
+    sinks,
+    jsonSink,
+    payload: entries,
+    fileMessage: (file) => `Wrote semantic blame JSON to ${file}`,
+  }).handled) return
 
   console.log(renderResults(filePath.trim(), entries))
 }

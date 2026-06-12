@@ -26,7 +26,7 @@ vi.mock('../src/core/db/sqlite.js', () => ({
   getRawDb: vi.fn().mockReturnValue({ prepare: vi.fn().mockReturnValue({ all: vi.fn().mockReturnValue([]), get: vi.fn().mockReturnValue(undefined), run: vi.fn() }) }),
 }))
 
-import { formatExplainForLlm } from '../src/core/search/explainFormatter.js'
+import { formatExplainForLlm } from '../src/core/search/analysis/explainFormatter.js'
 import type { SearchResult } from '../src/core/models/types.js'
 
 afterEach(() => {

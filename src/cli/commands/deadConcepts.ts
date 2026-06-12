@@ -3,7 +3,7 @@ import {
   findDeadConcepts,
   type DeadConceptResult,
 } from '../../core/search/deadConcepts.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { shortHash } from '../../core/search/ranking.js'
 import { renderDeadConceptsHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'

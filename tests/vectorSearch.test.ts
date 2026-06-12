@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { cosineSimilarity, pathRelevanceScore, reservoirSample } from '../src/core/search/vectorSearch.js'
+import { cosineSimilarity, pathRelevanceScore, reservoirSample } from '../src/core/search/analysis/vectorSearch.js'
 
 // ---------------------------------------------------------------------------
 // cosineSimilarity

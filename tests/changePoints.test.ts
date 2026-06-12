@@ -4,11 +4,11 @@ import {
   computeFileChangePoints,
   type ConceptChangePointReport,
   type FileChangePointReport,
-} from '../src/core/search/changePoints.js'
+} from '../src/core/search/temporal/changePoints.js'
 import {
   computeClusterChangePoints,
   type ClusterChangePointReport,
-} from '../src/core/search/clustering.js'
+} from '../src/core/search/clustering/clustering.js'
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -18,12 +18,12 @@ vi.mock('../src/core/db/sqlite.js', () => ({
   getActiveSession: vi.fn(),
 }))
 
-vi.mock('../src/core/search/evolution.js', () => ({
+vi.mock('../src/core/search/temporal/evolution.js', () => ({
   computeEvolution: vi.fn(),
 }))
 
 import { getActiveSession } from '../src/core/db/sqlite.js'
-import { computeEvolution } from '../src/core/search/evolution.js'
+import { computeEvolution } from '../src/core/search/temporal/evolution.js'
 
 // Deterministic 2-D embedding vectors (unit-length for cleaner cosine math)
 const emb = {

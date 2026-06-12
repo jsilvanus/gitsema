@@ -1,7 +1,5 @@
 import { resolve } from 'node:path'
 import { existsSync, writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import {
   computeImpact,
   type ImpactReport,
@@ -10,6 +8,8 @@ import {
 } from '../../core/search/impact.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { shortHash } from '../../core/search/ranking.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { emitJsonSink } from '../lib/output.js'
 
 export interface ImpactCommandOptions {
   /** Number of similar blobs to return (default 10). */
@@ -31,16 +31,6 @@ export interface ImpactCommandOptions {
   html?: string | boolean
   noHeadings?: boolean
   out?: string[]
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 /**
@@ -119,10 +109,11 @@ export async function impactCommand(
   }
 
   // Apply CLI model overrides
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
   const provider = buildProviderOrExit(providerType, model)
 
   let report: ImpactReport = { targetPath: filePath, targetBlobHash: null, results: [], moduleGroups: [] }
@@ -142,17 +133,13 @@ export async function impactCommand(
   const jsonSink = getSink(sinks, 'json')
   const htmlSink = getSink(sinks, 'html')
 
-  const json = JSON.stringify(report, null, 2)
-  if (jsonSink) {
-    if (jsonSink.file) {
-      writeFileSync(jsonSink.file, json, 'utf8')
-      console.log(`Wrote impact report JSON to ${jsonSink.file}`)
-    } else {
-      process.stdout.write(json + '\n')
-      return
-    }
-    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
-  }
+  if (emitJsonSink({
+    sinks,
+    jsonSink,
+    payload: report,
+    fileMessage: (file) => `Wrote impact report JSON to ${file}`,
+    htmlAware: true,
+  }).handled) return
 
   // --html
   if (htmlSink) {

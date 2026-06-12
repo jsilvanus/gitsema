@@ -1,11 +1,10 @@
-import { writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticBisect, type BisectResult } from '../../core/search/semanticBisect.js'
 import { formatDate } from '../../core/search/ranking.js'
-import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { emitJsonSink } from '../lib/output.js'
 
 export interface SemanticBisectCommandOptions {
   top?: string
@@ -15,16 +14,6 @@ export interface SemanticBisectCommandOptions {
   textModel?: string
   codeModel?: string
   out?: string[]
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 function renderBisectResult(result: BisectResult): string {
@@ -57,10 +46,11 @@ export async function semanticBisectCommand(
   const topK = options.top !== undefined ? parseInt(options.top, 10) : 20
   const maxSteps = options.maxSteps !== undefined ? parseInt(options.maxSteps, 10) : 10
 
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
   const provider = buildProviderOrExit(providerType, model)
 
   let queryEmbedding: Embedding
@@ -86,17 +76,12 @@ export async function semanticBisectCommand(
   const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
   const jsonSink = getSink(sinks, 'json')
 
-  if (jsonSink) {
-    const json = JSON.stringify(result, null, 2)
-    if (jsonSink.file) {
-      writeFileSync(jsonSink.file, json, 'utf8')
-      console.log(`Bisect result written to: ${jsonSink.file}`)
-    } else {
-      process.stdout.write(json + '\n')
-      return
-    }
-    if (!hasSinkFormat(sinks, 'text')) return
-  }
+  if (emitJsonSink({
+    sinks,
+    jsonSink,
+    payload: result,
+    fileMessage: (file) => `Bisect result written to: ${file}`,
+  }).handled) return
 
   console.log(renderBisectResult(result))
 }

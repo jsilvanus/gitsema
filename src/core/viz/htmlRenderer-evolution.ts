@@ -2,7 +2,7 @@
  * Evolution HTML renderers (Phase 76 modularisation).
  * Covers: renderConceptEvolutionHtml, renderFileEvolutionHtml.
  */
-import type { ConceptEvolutionEntry, EvolutionEntry } from '../search/evolution.js'
+import type { ConceptEvolutionEntry, EvolutionEntry } from '../search/temporal/evolution.js'
 import { escHtml, safeJson, BASE_CSS, COMMON_JS } from './htmlRenderer-shared.js'
 
 const CONCEPT_EVOLUTION_JS = `

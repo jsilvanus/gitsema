@@ -17,9 +17,11 @@
 
 import * as fs from 'node:fs'
 import { execSync } from 'node:child_process'
-import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch } from '../../core/search/vectorSearch.js'
+import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { EXIT_USAGE, EXIT_RUNTIME } from '../lib/errors.js'
+import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 
 export interface CodeReviewOptions {
   base?: string
@@ -28,6 +30,8 @@ export interface CodeReviewOptions {
   top?: string
   threshold?: string
   format?: string
+  /** Unified output spec (repeatable); --out wins over --format */
+  out?: string[]
 }
 
 interface HunkSummary {
@@ -64,7 +68,13 @@ function parseDiff(diffText: string): HunkSummary[] {
 export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> {
   const topK = parseInt(opts.top ?? '5', 10)
   const threshold = parseFloat(opts.threshold ?? '0.75')
-  const format = opts.format ?? 'text'
+
+  // --out wins over --format when present; otherwise --format keeps working unchanged.
+  const sinks = opts.out && opts.out.length > 0
+    ? resolveOutputs({ out: opts.out })
+    : undefined
+  const jsonSink = sinks ? getSink(sinks, 'json') : undefined
+  const format = sinks ? (jsonSink ? 'json' : 'text') : (opts.format ?? 'text')
 
   // Obtain the diff text
   let diffText = ''
@@ -73,7 +83,7 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
       diffText = fs.readFileSync(opts.diffFile, 'utf8')
     } catch (err) {
       console.error(`Cannot read diff file: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_USAGE)
     }
   } else if (opts.base || opts.head) {
     const base = opts.base ?? 'main'
@@ -82,7 +92,7 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
       diffText = execSync(`git diff ${base}...${head}`, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
     } catch (err) {
       console.error(`git diff failed: ${err instanceof Error ? err.message : String(err)}`)
-      process.exit(1)
+      process.exit(EXIT_USAGE)
     }
   } else if (!process.stdin.isTTY) {
     const chunks: Buffer[] = []
@@ -92,7 +102,7 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
     diffText = Buffer.concat(chunks).toString('utf8')
   } else {
     console.error('Error: provide --base/--head, --diff-file, or pipe a diff to stdin.')
-    process.exit(1)
+    process.exit(EXIT_USAGE)
   }
 
   if (!diffText.trim()) {
@@ -106,9 +116,8 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
     return
   }
 
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const modelName = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProvider(providerType, modelName)
+  const { providerType, textModel: modelName } = resolveModels({})
+  const provider = buildProviderOrExit(providerType, modelName, EXIT_RUNTIME)
 
   const reviews: Array<{
     file: string
@@ -152,7 +161,13 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
   }
 
   if (format === 'json') {
-    console.log(JSON.stringify({ reviews }, null, 2))
+    const json = JSON.stringify({ reviews }, null, 2)
+    if (jsonSink?.file) {
+      fs.writeFileSync(jsonSink.file, json, 'utf8')
+      console.log(`Code review JSON written to: ${jsonSink.file}`)
+    } else {
+      console.log(json)
+    }
     return
   }
 

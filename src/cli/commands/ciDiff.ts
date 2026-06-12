@@ -1,11 +1,12 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff, type SemanticDiffResult } from '../../core/search/semanticDiff.js'
 import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
+import { resolveOutputs, writeToSink, type OutputSpec } from '../../utils/outputSink.js'
 
 export interface CiDiffCommandOptions {
   base?: string
@@ -14,7 +15,7 @@ export interface CiDiffCommandOptions {
   top?: string
   format?: string
   threshold?: string
-  out?: string
+  out?: string[]
   model?: string
   textModel?: string
   codeModel?: string
@@ -22,14 +23,24 @@ export interface CiDiffCommandOptions {
   githubToken?: string
 }
 
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
+/**
+ * Resolve the ci-diff output sinks.
+ *
+ * `--out` (unified spec, repeatable) takes precedence over the legacy
+ * `--format` flag. With no `--out`, falls back to the legacy `--format`
+ * behavior: text to stdout (default), `--format json` prints JSON to
+ * stdout, `--format html` writes ci-diff.html. The old "--format + --out
+ * <file> writes to that path" behavior is intentionally removed — use
+ * `--out <fmt>:<file>` instead.
+ *
+ * `--out html` (or `html:`) with no file defaults to `ci-diff.html`,
+ * matching other commands' conventions.
+ */
+export function resolveCiDiffSinks(options: { out?: string[]; format?: string }): OutputSpec[] {
+  const sinks = resolveOutputs({ out: options.out, format: options.format })
+  return sinks.map((sink) =>
+    sink.format === 'html' && !sink.file ? { ...sink, file: 'ci-diff.html' } : sink,
+  )
 }
 
 function renderSummaryText(result: SemanticDiffResult, threshold: number): string {
@@ -65,11 +76,12 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
   const format = options.format ?? 'text'
   const threshold = options.threshold !== undefined ? parseFloat(options.threshold) : 0.3
 
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const model = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
-  const provider = buildProviderOrExit(providerType, model)
+  const { providerType, textModel: model } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
+  const provider = buildProviderOrExit(providerType, model, EXIT_RUNTIME)
 
   let queryEmbedding: Embedding
   try {
@@ -77,7 +89,7 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: could not embed query — ${msg}`)
-    process.exit(1)
+    process.exit(EXIT_RUNTIME)
     throw err
   }
 
@@ -87,36 +99,49 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: ${msg}`)
-    process.exit(1)
+    process.exit(EXIT_RUNTIME)
     throw err
   }
 
-  if (format === 'html') {
-    const html = renderSemanticDiffHtml(result)
-    const outFile = options.out ?? 'ci-diff.html'
-    writeFileSync(outFile, html, 'utf8')
-    console.log(`CI diff HTML written to: ${outFile}`)
-    return
-  }
-
-  if (format === 'json') {
-    const json = JSON.stringify(result, null, 2)
-    if (options.out) {
-      writeFileSync(options.out, json, 'utf8')
-      console.log(`CI diff JSON written to: ${options.out}`)
-    } else {
-      process.stdout.write(json + '\n')
-    }
-    return
-  }
-
-  // text format (default)
+  const sinks = resolveCiDiffSinks(options)
   const text = renderSummaryText(result, threshold)
-  if (options.out) {
-    writeFileSync(options.out, text, 'utf8')
-    console.log(`CI diff written to: ${options.out}`)
-  } else {
+
+  // Legacy --format behavior (no --out given): preserve exact prior control
+  // flow, including early returns that skip the GitHub-comment and gate steps.
+  if (!options.out || options.out.length === 0) {
+    if (format === 'html') {
+      const html = renderSemanticDiffHtml(result)
+      const outFile = 'ci-diff.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`CI diff HTML written to: ${outFile}`)
+      return
+    }
+
+    if (format === 'json') {
+      const json = JSON.stringify(result, null, 2)
+      process.stdout.write(json + '\n')
+      return
+    }
+
+    // text format (default)
     console.log(text)
+  } else {
+    // Unified --out specs: write each requested format to its sink.
+    for (const sink of sinks) {
+      switch (sink.format) {
+        case 'json':
+          writeToSink(sink, JSON.stringify(result, null, 2), 'CI diff JSON')
+          break
+        case 'html':
+          writeToSink(sink, renderSemanticDiffHtml(result), 'CI diff HTML')
+          break
+        case 'markdown':
+        case 'text':
+        default:
+          writeToSink(sink, text, 'CI diff')
+          break
+      }
+    }
   }
 
   // Post as GitHub PR review comment if token is provided
@@ -127,7 +152,7 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
 
   // Exit with non-zero if there are significant changes (for CI gate use case)
   if (result.gained.length > 0 || result.lost.length > 0) {
-    process.exitCode = 1
+    process.exitCode = EXIT_GATE_FAILED
   }
 }
 

@@ -58,7 +58,19 @@ vi.mock('../src/utils/logger.js', () => ({
   },
 }))
 
-import { annSearch } from '../src/core/search/vectorSearch.js'
+// Stub usearch so the test does not depend on the native binding loading
+// (it fails to load on the Windows CI runner, which made annSearch bail out
+// before reaching the warn path under test).
+vi.mock('usearch', () => ({
+  Index: class {
+    load(_path: string) {}
+    search() {
+      return { keys: [] }
+    }
+  },
+}))
+
+import { annSearch } from '../src/core/search/analysis/vectorSearch.js'
 import { logger } from '../src/utils/logger.js'
 
 afterEach(() => { vi.restoreAllMocks() })

@@ -1,14 +1,14 @@
 import { writeFileSync } from 'node:fs'
-import { buildProvider, applyModelOverrides } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeAuthorContributions, type AuthorContribution } from '../../core/search/authorSearch.js'
-import { hybridSearch } from '../../core/search/hybridSearch.js'
-import { parseDateArg } from '../../core/search/timeSearch.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
+import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { logger } from '../../utils/logger.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { emitJsonSink } from '../lib/output.js'
 
 export interface AuthorCommandOptions {
   top?: string
@@ -28,16 +28,6 @@ export interface AuthorCommandOptions {
   html?: string | boolean
   noHeadings?: boolean
   out?: string[]
-}
-
-function buildProviderOrExit(providerType: string, model: string): EmbeddingProvider {
-  try {
-    return buildProvider(providerType, model)
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-    throw err
-  }
 }
 
 export async function authorCommand(query: string, options: AuthorCommandOptions): Promise<void> {
@@ -62,10 +52,11 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
   }
 
   // Apply CLI model overrides
-  applyModelOverrides({ model: options.model, textModel: options.textModel, codeModel: options.codeModel })
-
-  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
-  const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const { providerType, textModel } = resolveModels({
+    model: options.model,
+    textModel: options.textModel,
+    codeModel: options.codeModel,
+  })
   const provider = buildProviderOrExit(providerType, textModel)
 
   let queryEmbedding: Embedding
@@ -101,7 +92,6 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
   // Optionally include commit search results
   let commitResults: CommitSearchResult[] | undefined
   if (options.includeCommits) {
-    const textModel = process.env.GITSEMA_TEXT_MODEL ?? process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
     commitResults = searchCommits(queryEmbedding, { topK: 50, model: textModel })
   }
 
@@ -111,18 +101,14 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
 
   const outObj: any = { authors: results }
   if (commitResults) outObj.commits = commitResults
-  const json = JSON.stringify(outObj, null, 2)
 
-  if (jsonSink) {
-    if (jsonSink.file) {
-      writeFileSync(jsonSink.file, json, 'utf8')
-      console.log(`Author attribution written to ${jsonSink.file}`)
-    } else {
-      process.stdout.write(json + '\n')
-      return
-    }
-    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
-  }
+  if (emitJsonSink({
+    sinks,
+    jsonSink,
+    payload: outObj,
+    fileMessage: (file) => `Author attribution written to ${file}`,
+    htmlAware: true,
+  }).handled) return
 
   if (htmlSink) {
     const { renderAuthorHtml } = await import('../../core/viz/htmlRenderer.js')

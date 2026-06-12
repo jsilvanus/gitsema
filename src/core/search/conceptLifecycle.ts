@@ -4,8 +4,8 @@
  */
 import { getActiveSession } from '../db/sqlite.js'
 import type { Embedding } from '../models/types.js'
-import { getBlobHashesUpTo } from './clustering.js'
-import { cosineSimilarity } from './vectorSearch.js'
+import { getBlobHashesUpTo } from './clustering/clustering.js'
+import { cosineSimilarity } from './analysis/vectorSearch.js'
 
 export type LifecycleStage = 'born' | 'growing' | 'mature' | 'declining' | 'dead' | 'unknown'
 

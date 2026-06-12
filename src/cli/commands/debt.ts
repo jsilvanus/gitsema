@@ -5,15 +5,16 @@ import { getActiveSession } from '../../core/db/sqlite.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { parsePositiveInt } from '../../utils/parse.js'
-import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { resolveOutputs, hasSinkFormat, getSink, collectOut } from '../../utils/outputSink.js'
 
 export function debtCommand(): Command {
   return new Command('debt')
     .description('Score technical debt across the codebase')
-    .option('--top <n>', 'top results', '20')
+    .option('-k, --top <n>', 'top results', '20')
     .option('--model <model>', 'embedding model')
     .option('--branch <name>', 'restrict to blobs on this branch')
-    .option('--dump [file]', 'output JSON to file or stdout')
+    .option('--dump [file]', 'output JSON to file or stdout (legacy: prefer --out json)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print column header row")
     .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean; noHeadings?: boolean; out?: string[] }) => {
       let top: number

@@ -2,7 +2,7 @@
  * Cluster HTML renderers (Phase 76 modularisation).
  * Covers: renderClustersHtml, renderClusterDiffHtml, renderClusterTimelineHtml.
  */
-import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering.js'
+import type { ClusterReport, TemporalClusterReport, ClusterTimelineReport } from '../search/clustering/clustering.js'
 import { PALETTE, escHtml, safeJson, sanitizeCluster, sanitizeClusterReport, sanitizeTemporalReport, sanitizeTimelineReport, BASE_CSS, COMMON_JS } from './htmlRenderer-shared.js'
 
 const CLUSTER_SIM_JS = `

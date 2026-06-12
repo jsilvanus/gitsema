@@ -14,13 +14,13 @@ vi.mock('../src/core/git/branchDiff.js', () => ({
   getBranchExclusiveBlobs: vi.fn(),
 }))
 
-vi.mock('../src/core/search/evolution.js', () => ({
+vi.mock('../src/core/search/temporal/evolution.js', () => ({
   computeEvolution: vi.fn(),
 }))
 
 import { getActiveSession } from '../src/core/db/sqlite.js'
 import { getMergeBase, getBranchExclusiveBlobs } from '../src/core/git/branchDiff.js'
-import { computeEvolution } from '../src/core/search/evolution.js'
+import { computeEvolution } from '../src/core/search/temporal/evolution.js'
 
 const mockGetActiveSession = vi.mocked(getActiveSession)
 const mockGetMergeBase = vi.mocked(getMergeBase)

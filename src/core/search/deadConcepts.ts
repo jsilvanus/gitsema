@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import { getActiveSession } from '../db/sqlite.js'
 import { embeddings, paths, commits, blobCommits } from '../db/schema.js'
 import { inArray, eq, sql, and, type SQL } from 'drizzle-orm'
-import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './vectorSearch.js'
+import { cosineSimilarity, vectorNorm, cosineSimilarityPrecomputed } from './analysis/vectorSearch.js'
 import { bufferToFloat32 as bufferToEmbedding } from '../../utils/embedding.js'
 
 const execFileAsync = promisify(execFile)
