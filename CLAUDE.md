@@ -107,7 +107,7 @@ pnpm test -- --watch        # watch mode during development
 ## CI/CD
 
 - **ci.yml** — triggers on push to `main` and on PRs: `pnpm install --frozen-lockfile` → `pnpm build` → `pnpm test` (Node 20 / pnpm 9)
-- **release.yml** — triggers on `v*` tags: same pipeline + auto-creates a GitHub Release
+- **release.yml** — triggers on pushes to `main`: runs CI, then `changesets/action` maintains the "chore(release): version packages" PR; merging that PR publishes to npm (OIDC trusted publishing)
 
 ---
 
