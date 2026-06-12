@@ -6,6 +6,7 @@ import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
+import { resolveOutputs, writeToSink, type OutputSpec } from '../../utils/outputSink.js'
 
 export interface CiDiffCommandOptions {
   base?: string
@@ -14,12 +15,32 @@ export interface CiDiffCommandOptions {
   top?: string
   format?: string
   threshold?: string
-  out?: string
+  out?: string[]
   model?: string
   textModel?: string
   codeModel?: string
   /** GitHub token for posting PR review comments (overrides GITHUB_TOKEN env var) */
   githubToken?: string
+}
+
+/**
+ * Resolve the ci-diff output sinks.
+ *
+ * `--out` (unified spec, repeatable) takes precedence over the legacy
+ * `--format` flag. With no `--out`, falls back to the legacy `--format`
+ * behavior: text to stdout (default), `--format json` prints JSON to
+ * stdout, `--format html` writes ci-diff.html. The old "--format + --out
+ * <file> writes to that path" behavior is intentionally removed — use
+ * `--out <fmt>:<file>` instead.
+ *
+ * `--out html` (or `html:`) with no file defaults to `ci-diff.html`,
+ * matching other commands' conventions.
+ */
+export function resolveCiDiffSinks(options: { out?: string[]; format?: string }): OutputSpec[] {
+  const sinks = resolveOutputs({ out: options.out, format: options.format })
+  return sinks.map((sink) =>
+    sink.format === 'html' && !sink.file ? { ...sink, file: 'ci-diff.html' } : sink,
+  )
 }
 
 function renderSummaryText(result: SemanticDiffResult, threshold: number): string {
@@ -82,32 +103,45 @@ export async function ciDiffCommand(options: CiDiffCommandOptions): Promise<void
     throw err
   }
 
-  if (format === 'html') {
-    const html = renderSemanticDiffHtml(result)
-    const outFile = options.out ?? 'ci-diff.html'
-    writeFileSync(outFile, html, 'utf8')
-    console.log(`CI diff HTML written to: ${outFile}`)
-    return
-  }
-
-  if (format === 'json') {
-    const json = JSON.stringify(result, null, 2)
-    if (options.out) {
-      writeFileSync(options.out, json, 'utf8')
-      console.log(`CI diff JSON written to: ${options.out}`)
-    } else {
-      process.stdout.write(json + '\n')
-    }
-    return
-  }
-
-  // text format (default)
+  const sinks = resolveCiDiffSinks(options)
   const text = renderSummaryText(result, threshold)
-  if (options.out) {
-    writeFileSync(options.out, text, 'utf8')
-    console.log(`CI diff written to: ${options.out}`)
-  } else {
+
+  // Legacy --format behavior (no --out given): preserve exact prior control
+  // flow, including early returns that skip the GitHub-comment and gate steps.
+  if (!options.out || options.out.length === 0) {
+    if (format === 'html') {
+      const html = renderSemanticDiffHtml(result)
+      const outFile = 'ci-diff.html'
+      writeFileSync(outFile, html, 'utf8')
+      console.log(`CI diff HTML written to: ${outFile}`)
+      return
+    }
+
+    if (format === 'json') {
+      const json = JSON.stringify(result, null, 2)
+      process.stdout.write(json + '\n')
+      return
+    }
+
+    // text format (default)
     console.log(text)
+  } else {
+    // Unified --out specs: write each requested format to its sink.
+    for (const sink of sinks) {
+      switch (sink.format) {
+        case 'json':
+          writeToSink(sink, JSON.stringify(result, null, 2), 'CI diff JSON')
+          break
+        case 'html':
+          writeToSink(sink, renderSemanticDiffHtml(result), 'CI diff HTML')
+          break
+        case 'markdown':
+        case 'text':
+        default:
+          writeToSink(sink, text, 'CI diff')
+          break
+      }
+    }
   }
 
   // Post as GitHub PR review comment if token is provided

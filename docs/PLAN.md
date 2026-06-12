@@ -3232,6 +3232,8 @@ PRs: https://github.com/jsilvanus/gitsema/pull/67, https://github.com/jsilvanus/
 
 **Tests:** `npx vitest run` — all tests pass, including the new `tests/flagConsistency.test.ts`.
 
+**Follow-up:** The `ci-diff` exception noted above (§8.6) was eliminated — `ci-diff` now exposes the standard `--out <spec>` (repeatable, `text|json[:file]|html[:file]|markdown[:file]`) alongside its legacy `--format <fmt>` (now annotated "(legacy: prefer --out <fmt>)"), and `OUT_EXCEPTIONS` in `tests/flagConsistency.test.ts` is empty.
+
 **Status:** ✅ complete.
 
 ## Long-Term Investments

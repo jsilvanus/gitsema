@@ -55,14 +55,9 @@ const visibleCommands = allCommands.filter((c) => !c.hidden)
  * Commands with --dump/--html/--format that legitimately cannot also carry the
  * unified --out spec option.
  *
- * `ci-diff` already defines its own `--out <file>` option (a plain file-path,
- * predating the unified --out <spec> system) alongside --format. Adding a
- * second, differently-typed --out is not possible (Commander does not support
- * duplicate option names), and renaming/removing the existing --out is out of
- * scope for this change (would break existing CI pipelines). Its --format and
- * --out are annotated as legacy in the help text instead.
+ * (none currently — all such commands now also define --out)
  */
-const OUT_EXCEPTIONS = new Set<string>(['ci-diff'])
+const OUT_EXCEPTIONS = new Set<string>([])
 
 /**
  * Commands with --before/--after that legitimately cannot also carry
