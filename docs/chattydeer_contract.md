@@ -1,5 +1,31 @@
 # `@jsilvanus/chattydeer` — Contract for gitsema-guide function calling
 
+> ## Status (chattydeer 0.4.5)
+>
+> **Implemented.** gitsema now depends on `@jsilvanus/chattydeer@^0.4.5`, which
+> ships this contract: `createChatProvider(httpUrl, model, apiKey?, opts?)`,
+> `createAgentSession({ systemPrompt?, messages? })` (the lightweight
+> `{ history, append() }` session — distinct from the `ChatSession` class
+> below, which gitsema does **not** use), and
+> `runAgentLoop(session, { provider, tools, executeTool, maxRoundtrips, redactContent, ... })`.
+> `executeTool`'s signature now matches `(call: { id, name, arguments }) => Promise<string>`
+> as described below. `gitsema guide` wires this up in
+> `src/cli/commands/guide.ts` against the tool registry in
+> `src/core/narrator/guideTools.ts` (see `docs/PLAN.md` Phase 96 for which
+> tools are wired vs. TODO).
+>
+> The OpenAI-compatible `/v1/chat/completions` pass-through handler
+> (`createOpenAiChatHandler`, §5 below) also exists in chattydeer 0.4.5 but is
+> **not yet consumed** by gitsema — `gitsema tools serve` does not expose it.
+>
+> The sections below are retained as the original design contract for
+> reference; some details (e.g. `ChatSession`/`ChatCompletionProvider` as
+> separate interfaces) describe the originally-proposed shape and differ in
+> minor ways from the shipped `createAgentSession`/`createChatProvider` API
+> actually used.
+
+---
+
 > This document describes the additional API surface that gitsema requires from
 > `@jsilvanus/chattydeer` to power the `gitsema guide` interactive chat with
 > full function-call (tool-call) execution.  

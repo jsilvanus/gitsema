@@ -12,11 +12,11 @@ importers:
         specifier: 8.5.0
         version: 8.5.0(zod@4.3.6)
       '@jsilvanus/chattydeer':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.4.5
+        version: 0.4.5
       '@jsilvanus/embedeer':
-        specifier: 1.7.1
-        version: 1.7.1
+        specifier: 1.7.3
+        version: 1.7.3
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
@@ -738,17 +738,18 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
-  '@jsilvanus/chattydeer@0.2.0':
-    resolution: {integrity: sha512-Tl55/conB6xllSyf9y7zG3zXxRZp7AamnnJv1wmU/Mk2WlbsPKTh8J8LMaymIFu3tXmoBtuS2Q/3aTC0jsqPjQ==}
-    engines: {node: '>=18'}
+  '@jsilvanus/chattydeer@0.4.5':
+    resolution: {integrity: sha512-f62x3pjgVrSg8SHGtCR7jlTDhy1tnfujqSdMlgS7q2eQv+C9F1d2z0HMoljdjGajVmgJgE4ECWfMzPAtsIllkw==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@jsilvanus/embedeer@1.3.1':
     resolution: {integrity: sha512-5jOImrV30+S0p5dUjiGHOXP6tZq3iWhaOsfv1awczJJlouWtzR33buUVTa7oTNuL/juUzvA+JFqLNlExj3Un5g==}
     engines: {node: '>=18'}
     hasBin: true
 
-  '@jsilvanus/embedeer@1.7.1':
-    resolution: {integrity: sha512-JaZa6T7WGwhOc/hK+8c+19Mc6KuHaZDozc58/yJ1ujTh1SFW6YspL12eOTzwFC2qzXJW0ikZYACgtdMFmURuMA==}
+  '@jsilvanus/embedeer@1.7.3':
+    resolution: {integrity: sha512-Gl1AI0OVWyf+iBXUQTLXmdCOZ06azpHBCNaamp622kzlKyaijjhkJR/n6P+q1VqZ/jrjfX9yYCO5T4RzoN1q1A==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -2646,7 +2647,7 @@ snapshots:
   '@js-sdsl/ordered-map@4.4.2':
     optional: true
 
-  '@jsilvanus/chattydeer@0.2.0':
+  '@jsilvanus/chattydeer@0.4.5':
     dependencies:
       '@huggingface/transformers': 4.0.1
       '@jsilvanus/embedeer': 1.3.1
@@ -2655,7 +2656,7 @@ snapshots:
     dependencies:
       '@huggingface/transformers': 4.0.1
 
-  '@jsilvanus/embedeer@1.7.1':
+  '@jsilvanus/embedeer@1.7.3':
     dependencies:
       '@huggingface/transformers': 4.0.1
     optionalDependencies:

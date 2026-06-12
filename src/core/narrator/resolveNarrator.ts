@@ -226,11 +226,17 @@ export function getActiveGuideConfigId(rawDb: InstanceType<typeof Database>): nu
   return Number.isFinite(n) ? n : null
 }
 
+/** Get a guide config by its embed_config.id. */
+export function getGuideConfigById(rawDb: InstanceType<typeof Database>, id: number): NarratorModelConfig | null {
+  const row = rawDb.prepare(`SELECT id, config_hash, provider, model, params_json, created_at, last_used_at FROM embed_config WHERE id = ? AND kind = 'guide'`).get(id) as NarratorRow | undefined
+  return row ? rowToConfig(row) : null
+}
+
 /** Get the active guide config object. */
 export function getActiveGuideConfig(rawDb: InstanceType<typeof Database>): NarratorModelConfig | null {
   const id = getActiveGuideConfigId(rawDb)
   if (id === null) return null
-  return getNarratorConfigById(rawDb, id)
+  return getGuideConfigById(rawDb, id)
 }
 
 /** Set the active guide config by embed_config.id. */
@@ -280,23 +286,37 @@ export function deleteGuideConfig(rawDb: InstanceType<typeof Database>, name: st
   return res.changes > 0
 }
 
+/**
+ * Resolve the active guide NarratorModelConfig from the DB, without
+ * constructing a provider. Falls back to the narrator config, then null
+ * (safe-by-default — no model configured).
+ *
+ * Shared by `resolveGuideProvider` (single-shot narration) and the
+ * `gitsema guide` agent loop, which needs raw params (httpUrl/apiKey/model)
+ * to construct a `createChatProvider` from `@jsilvanus/chattydeer`.
+ */
+export function resolveGuideConfig(opts: {
+  guideModelId?: number
+  modelName?: string
+} = {}): NarratorModelConfig | null {
+  const { rawDb } = getActiveSession()
+
+  if (opts.guideModelId !== undefined) {
+    return getGuideConfigById(rawDb, opts.guideModelId) ?? getNarratorConfigById(rawDb, opts.guideModelId)
+  } else if (opts.modelName) {
+    return getGuideConfigByName(rawDb, opts.modelName) ?? getNarratorConfigByName(rawDb, opts.modelName)
+  } else {
+    // Prefer guide config; fall back to narrator config
+    return getActiveGuideConfig(rawDb) ?? getActiveNarratorConfig(rawDb)
+  }
+}
+
 /** Resolve the active guide NarratorProvider from the DB. Falls back to narrator config, then disabled. */
 export function resolveGuideProvider(opts: {
   guideModelId?: number
   modelName?: string
 } = {}): ChattydeerNarratorProvider {
-  const { rawDb } = getActiveSession()
-
-  let config: NarratorModelConfig | null = null
-
-  if (opts.guideModelId !== undefined) {
-    config = getNarratorConfigById(rawDb, opts.guideModelId)
-  } else if (opts.modelName) {
-    config = getGuideConfigByName(rawDb, opts.modelName) ?? getNarratorConfigByName(rawDb, opts.modelName)
-  } else {
-    // Prefer guide config; fall back to narrator config
-    config = getActiveGuideConfig(rawDb) ?? getActiveNarratorConfig(rawDb)
-  }
+  const config = resolveGuideConfig(opts)
 
   if (!config) {
     return createDisabledProvider()

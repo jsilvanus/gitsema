@@ -1,12 +1,14 @@
 /**
  * HTTP routes for the guide chat feature.
  *
- * POST /api/v1/guide/chat — OpenAI-compatible single-turn chat endpoint.
+ * POST /api/v1/guide/chat — single-turn chat endpoint backed by the gitsema
+ *   guide agent loop (chattydeer `runAgentLoop` — repo_stats, recent_commits,
+ *   narrate_repo, explain_topic, semantic_search; up to 5 roundtrips).
  *   Body: { question: string, model?: string, guideModelId?: number, includeContext?: boolean }
- *   Response: { answer, contextUsed, llmEnabled, citations }
+ *   Response: { answer, contextUsed, llmEnabled, roundtrips?, toolCallsUsed? }
  *
- * For full OpenAI /v1/chat/completions compatibility including function_calls,
- * see docs/chattydeer_contract.md for the required chattydeer API extensions.
+ * For full OpenAI /v1/chat/completions pass-through (not yet wired), see
+ * docs/chattydeer_contract.md.
  */
 
 import { Router, type Request, type Response } from 'express'
@@ -49,6 +51,8 @@ router.post('/chat', async (req: Request, res: Response) => {
       answer: result.answer,
       contextUsed: result.contextUsed,
       llmEnabled: result.llmEnabled,
+      ...(result.roundtrips !== undefined ? { roundtrips: result.roundtrips } : {}),
+      ...(result.toolCallsUsed !== undefined ? { toolCallsUsed: result.toolCallsUsed } : {}),
     })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) })

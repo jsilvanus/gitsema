@@ -3,21 +3,25 @@
  *
  * The guide uses the active "guide" model config (kind='guide' in embed_config),
  * falling back to the active narrator model. It builds a context from gitsema
- * search results and recent git history, then asks the LLM to answer the
- * user's question.
- *
- * For multi-turn / function-call capable execution, see docs/chattydeer_contract.md.
- * The current implementation does a single context-enriched Q&A.
+ * search results and recent git history, then runs a real agentic tool-calling
+ * loop (via `@jsilvanus/chattydeer`'s `createAgentSession` + `runAgentLoop`) so
+ * the LLM can call gitsema tools (repo_stats, recent_commits, narrate_repo,
+ * explain_topic, semantic_search — see guideTools.ts) to gather additional
+ * evidence before answering.
  *
  * Safe-by-default: if no guide or narrator model is configured the command
- * prints the gathered context without calling an LLM.
+ * prints the gathered context without calling an LLM or chattydeer — no
+ * network access occurs.
  */
 
 import type { Command } from 'commander'
 import { execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { resolveGuideProvider } from '../../core/narrator/resolveNarrator.js'
+import { resolveGuideConfig } from '../../core/narrator/resolveNarrator.js'
 import { redactAll } from '../../core/narrator/redact.js'
+import { withAudit } from '../../core/narrator/audit.js'
+import { GUIDE_TOOL_DEFINITIONS, executeTool } from '../../core/narrator/guideTools.js'
+import type { NarratorModelConfig } from '../../core/narrator/types.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -30,7 +34,7 @@ interface GuideTool {
   call: (args: Record<string, string>) => string
 }
 
-/** Registry of built-in gitsema tools available to the guide. */
+/** Registry of built-in gitsema tools available to the guide for context-gathering. */
 const GUIDE_TOOLS: GuideTool[] = [
   {
     name: 'recent_commits',
@@ -65,7 +69,7 @@ const GUIDE_TOOLS: GuideTool[] = [
 ]
 
 /** Gather quick context for the guide prompt. */
-function gatherContext(question: string): string {
+function gatherContext(_question: string): string {
   const parts: string[] = []
 
   // Recent commits
@@ -80,69 +84,202 @@ function gatherContext(question: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// System prompt
+// ---------------------------------------------------------------------------
+
+const SYSTEM_PROMPT = [
+  'You are gitsema-guide, an expert assistant for the git repository the user is working in.',
+  'You have access to repository context gathered by gitsema tools, and you can call additional',
+  'gitsema tools (repo_stats, recent_commits, narrate_repo, explain_topic, semantic_search) to',
+  'gather more evidence before answering.',
+  'Answer questions about the codebase, history, and development patterns.',
+  'Always cite commit hashes when referencing specific changes.',
+  'Be concise, factual, and mention when you are uncertain.',
+].join('\n')
+
+// ---------------------------------------------------------------------------
+// chattydeer provider/session construction (lazy import)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal shape of the chattydeer module surface this file relies on.
+ * chattydeer ships .d.ts but several signatures are typed `any` —
+ * these narrower local types document the actual contract we depend on
+ * (verified against chattydeer 0.4.5).
+ */
+interface ChattydeerModule {
+  createChatProvider(httpUrl: string | undefined, model: string, apiKey?: string, opts?: { timeoutMs?: number }): {
+    complete(req?: unknown): Promise<unknown>
+    stream(req?: unknown): AsyncGenerator<unknown, void, unknown>
+    destroy(): Promise<void>
+  }
+  createAgentSession(opts?: { systemPrompt?: string; messages?: unknown[] }): {
+    readonly history: unknown[]
+    append(msg: unknown): void
+  }
+  runAgentLoop(session: unknown, opts: {
+    provider: unknown
+    tools: typeof GUIDE_TOOL_DEFINITIONS
+    executeTool(call: { id: string; name: string; arguments: Record<string, unknown> }): Promise<string>
+    maxRoundtrips?: number
+    maxTokens?: number
+    temperature?: number
+    onMessage?(msg: unknown): void
+    redactContent?(text: string): string
+  }): Promise<{ answer: string; messages: unknown[]; roundtrips: number }>
+}
+
+let _chattydeerModule: ChattydeerModule | null = null
+
+async function getChattydeerModule(): Promise<ChattydeerModule> {
+  if (_chattydeerModule === null) {
+    // @ts-ignore — chattydeer is a plain JS ESM package without strict types
+    _chattydeerModule = await import('@jsilvanus/chattydeer') as unknown as ChattydeerModule
+  }
+  return _chattydeerModule
+}
+
+/** A reusable agent session across multiple turns (interactive mode). */
+export interface GuideSession {
+  agentSession: ReturnType<ChattydeerModule['createAgentSession']>
+  provider: ReturnType<ChattydeerModule['createChatProvider']>
+  config: NarratorModelConfig
+}
+
+/**
+ * Create a chattydeer agent session + provider from a resolved guide model
+ * config. Caller is responsible for calling `provider.destroy()` when done.
+ */
+async function createGuideSession(config: NarratorModelConfig, systemPrompt: string): Promise<GuideSession> {
+  const mod = await getChattydeerModule()
+  const params = config.params
+  const provider = mod.createChatProvider(params.httpUrl, config.name, params.apiKey, {
+    timeoutMs: 30_000,
+  })
+  const agentSession = mod.createAgentSession({ systemPrompt })
+  return { agentSession, provider, config }
+}
+
+// ---------------------------------------------------------------------------
 // Core guide Q&A
 // ---------------------------------------------------------------------------
 
+export interface RunGuideResult {
+  answer: string
+  contextUsed: boolean
+  llmEnabled: boolean
+  /** Number of LLM <-> tool roundtrips used (only present when the agent loop ran). */
+  roundtrips?: number
+  /** Names of tools invoked during the agent loop (only present when the agent loop ran). */
+  toolCallsUsed?: string[]
+}
+
+/**
+ * Run a single guide turn.
+ *
+ * When `session` is provided, the existing agent session/provider is reused
+ * (multi-turn interactive mode) and the caller owns its lifecycle (no
+ * `provider.destroy()` is called here). When `session` is omitted, a
+ * single-shot session is created and destroyed within this call.
+ */
 export async function runGuide(question: string, opts: {
   guideModelId?: number
   model?: string
   includeContext?: boolean
-}): Promise<{ answer: string; contextUsed: boolean; llmEnabled: boolean }> {
+  session?: GuideSession
+}): Promise<RunGuideResult> {
   const includeContext = opts.includeContext !== false
 
-  // Build context
+  // Build context (only gathered once per turn; on subsequent interactive
+  // turns the conversation history already carries prior context).
   const context = includeContext ? gatherContext(question) : ''
 
-  // Resolve guide provider (guide model → narrator model → disabled)
-  const provider = resolveGuideProvider({
-    guideModelId: opts.guideModelId,
-    modelName: opts.model,
-  })
+  let config: NarratorModelConfig | null = null
+  let session = opts.session
+  if (session) {
+    config = session.config
+  } else {
+    config = resolveGuideConfig({ guideModelId: opts.guideModelId, modelName: opts.model })
+  }
+
+  // Safe-by-default: no model configured — no network access.
+  if (!config || !config.params?.httpUrl) {
+    const answer = [
+      '# Repository Context',
+      '',
+      context || '(no context gathered)',
+      '',
+      '---',
+      '',
+      `**Question:** ${question}`,
+      '',
+      '> No guide or narrator model configured. Run `gitsema models add <name> --guide --http-url <url> --activate` to enable LLM answers.',
+    ].join('\n')
+    return { answer, contextUsed: includeContext, llmEnabled: false }
+  }
+
+  // Build the user prompt (context + question), redacted before it ever
+  // leaves the process via chattydeer's `redactContent` hook (applied to
+  // every outbound message) and as a defence-in-depth pre-redaction here.
+  const rawUserPrompt = context
+    ? `Repository context:\n${context}\n\n---\n\nQuestion: ${question}`
+    : `Question: ${question}`
+
+  const { texts, firedPatterns } = redactAll([rawUserPrompt])
+  const userPrompt = texts[0]
+  if (firedPatterns.length > 0) {
+    logger.info(`[guide] redacted ${firedPatterns.length} pattern(s) from prompt`)
+  }
+
+  const ownSession = !session
+  if (!session) {
+    session = await createGuideSession(config, SYSTEM_PROMPT)
+  }
 
   try {
-    if (!provider) {
-      const answer = [
-        '# Repository Context',
-        '',
-        context || '(no context gathered)',
-        '',
-        '---',
-        '',
-        `**Question:** ${question}`,
-        '',
-        '> No guide or narrator model configured. Run `gitsema models add <name> --guide --http-url <url> --activate` to enable LLM answers.',
-      ].join('\n')
-      return { answer, contextUsed: includeContext, llmEnabled: false }
-    }
+    session.agentSession.append({ role: 'user', content: userPrompt })
 
-    // Build system + user prompt
-    const systemPrompt = [
-      'You are gitsema-guide, an expert assistant for the git repository the user is working in.',
-      'You have access to repository context gathered by gitsema tools.',
-      'Answer questions about the codebase, history, and development patterns.',
-      'Always cite commit hashes when referencing specific changes.',
-      'Be concise, factual, and mention when you are uncertain.',
-    ].join('\n')
+    const mod = await getChattydeerModule()
+    const params = config.params
 
-    const rawUserPrompt = context
-      ? `Repository context:\n${context}\n\n---\n\nQuestion: ${question}`
-      : `Question: ${question}`
+    const toolCallsUsed: string[] = []
 
-    const { texts, firedPatterns } = redactAll([rawUserPrompt])
-    const userPrompt = texts[0]
-    if (firedPatterns.length > 0) {
-      logger.info(`[guide] redacted ${firedPatterns.length} pattern(s) from prompt`)
-    }
-
-    const res = await provider.narrate({
-      systemPrompt,
-      userPrompt,
-      maxTokens: 1024,
+    const result = await withAudit('narrate', 'chattydeer', config.name, firedPatterns, async () => {
+      return mod.runAgentLoop(session!.agentSession, {
+        provider: session!.provider,
+        tools: GUIDE_TOOL_DEFINITIONS,
+        executeTool: async (call) => {
+          toolCallsUsed.push(call.name)
+          return executeTool(call)
+        },
+        maxRoundtrips: 5,
+        maxTokens: params.maxTokens ?? 1024,
+        temperature: params.temperature ?? 0.3,
+        redactContent: (text: string) => redactAll([text]).texts[0],
+      })
     })
 
-    return { answer: res.prose, contextUsed: includeContext, llmEnabled: res.llmEnabled }
+    return {
+      answer: result.answer,
+      contextUsed: includeContext,
+      llmEnabled: true,
+      roundtrips: result.roundtrips,
+      toolCallsUsed,
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.error(`[guide] agent loop failed: ${msg}`)
+    return {
+      answer: `(guide error: ${msg})`,
+      contextUsed: includeContext,
+      llmEnabled: true,
+      roundtrips: 0,
+      toolCallsUsed: [],
+    }
   } finally {
-    await provider.destroy()
+    if (ownSession && session) {
+      await session.provider.destroy()
+    }
   }
 }
 
@@ -162,22 +299,37 @@ export async function guideCommand(
   const guideModelId = opts.guideModelId !== undefined ? parseInt(opts.guideModelId, 10) : undefined
   const includeContext = !opts.noContext
 
-  // Interactive mode: read questions from stdin line-by-line
+  // Interactive mode: read questions from stdin line-by-line, reusing one
+  // agent session across turns so the conversation is multi-turn.
   if (opts.interactive || (!question && process.stdin.isTTY)) {
     const rl = createInterface({ input: process.stdin, output: process.stdout })
     console.log('gitsema guide — type your question (Ctrl-C or empty line to exit)\n')
+
+    // Resolve the model config once; build a shared session lazily on first
+    // turn if a model is configured (safe-by-default if not).
+    const config = resolveGuideConfig({ guideModelId, modelName: opts.model })
+    let session: GuideSession | undefined
+    if (config && config.params?.httpUrl) {
+      session = await createGuideSession(config, SYSTEM_PROMPT)
+    }
+
     rl.prompt()
     rl.on('line', async (line) => {
       const q = line.trim()
       if (!q) { rl.close(); return }
-      const { answer, llmEnabled } = await runGuide(q, { guideModelId, model: opts.model, includeContext })
+      const { answer, llmEnabled } = await runGuide(q, { guideModelId, model: opts.model, includeContext, session })
       console.log(`\n${answer}\n`)
       if (!llmEnabled) {
         console.log('(No LLM model configured — showing context only.)\n')
       }
       rl.prompt()
     })
-    rl.on('close', () => process.exit(0))
+    rl.on('close', async () => {
+      if (session) {
+        await session.provider.destroy()
+      }
+      process.exit(0)
+    })
     return
   }
 
@@ -205,7 +357,9 @@ export function registerGuideCommand(program: Command): void {
     .command('guide [question]')
     .description(
       'Interactive LLM chat that answers questions about this repository. ' +
-      'Uses the active guide model (or narrator model as fallback). ' +
+      'Uses the active guide model (or narrator model as fallback) with a real ' +
+      'agentic tool-calling loop (repo_stats, recent_commits, narrate_repo, ' +
+      'explain_topic, semantic_search; up to 5 roundtrips). ' +
       'Prints gathered context even when no LLM is configured.',
     )
     .option('--guide-model-id <id>', 'embed_config.id of the guide model to use')

@@ -217,14 +217,26 @@ Configure a narrator model with `gitsema models add <name> --narrator --http-url
 
 #### `gitsema guide [question] [options]`
 
-Interactive LLM chat that gathers repository context (recent commits, repo stats) and answers questions about the codebase. Falls back to the active narrator model if no guide model is configured, and prints the gathered context (without calling an LLM) if neither is configured.
+Interactive LLM chat that gathers repository context (recent commits, repo stats) and answers questions about the codebase. Falls back to the active narrator model if no guide model is configured, and prints the gathered context (without calling an LLM, no network access) if neither is configured.
+
+When a guide (or fallback narrator) model is configured, `guide` runs a real **agentic tool-calling loop** (via `@jsilvanus/chattydeer`'s `runAgentLoop`): the LLM can call gitsema tools to gather additional evidence before answering, up to **5 roundtrips**. Available tools:
+
+| Tool | Description |
+|---|---|
+| `repo_stats` | Branch/tag/commit counts and configured remotes |
+| `recent_commits` | Last N commits (hash, date, subject) |
+| `narrate_repo` | Commit evidence for a date range/focus (evidence-only, no nested LLM call) |
+| `explain_topic` | Commits matching a topic keyword (evidence-only, no nested LLM call) |
+| `semantic_search` | Vector similarity search over the `.gitsema` index (only available when an index exists and the embedding provider is reachable) |
+
+All outbound content (prompts, tool results) is passed through the same secret/PII redaction (`redactAll`) used by `narrate`/`explain` before it reaches the LLM. `file_evolution`, `concept_evolution`, and `branch_summary` are not yet wired as tools (see `docs/chattydeer_contract.md`).
 
 | Flag | Description |
 |---|---|
 | `--guide-model-id <id>` | `embed_config.id` of the guide model to use |
 | `--model <name>` | Guide/narrator model name to use |
 | `--no-context` | Skip gathering git context (faster but less accurate) |
-| `-i, --interactive` | Start an interactive REPL session (one question per line) |
+| `-i, --interactive` | Start an interactive REPL session (one question per line, multi-turn — the agent session is reused across turns) |
 
 Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`.
 

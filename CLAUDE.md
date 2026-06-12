@@ -212,7 +212,7 @@ Return commit evidence (default, no LLM call) or an LLM-generated narrative of r
 Return matching commits (default, no LLM call) or an LLM-generated explanation/timeline for a bug, error, or topic. Same safe-by-default and narrator-model conventions as `narrate`.
 
 ### `gitsema guide [question] [options]`
-Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured. Supports `-i/--interactive` for a REPL session.
+Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured (no network access). When a model is configured, runs a real agentic tool-calling loop (`@jsilvanus/chattydeer` `runAgentLoop`, maxRoundtrips 5) against the tool registry in `src/core/narrator/guideTools.ts` (`repo_stats`, `recent_commits`, `narrate_repo`, `explain_topic`, `semantic_search`; `file_evolution`/`concept_evolution`/`branch_summary` are TODO). Supports `-i/--interactive` for a multi-turn REPL session (one agent session reused across turns).
 
 ---
 
