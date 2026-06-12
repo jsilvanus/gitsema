@@ -18,7 +18,27 @@ When implementing a new feature or phase:
 2. Update the command/option tables in **`README.md`** if the feature adds a new command or flag.
 3. Mark the phase as completed in **`docs/PLAN.md`** and note any deviations from the original spec.
 4. Use latest review when starting the next iteration of development.
-5. Run `npm version minor` (or `patch` for hotfixes) **after each phase** and push the tag.
+5. **Add a changeset** describing the change (see "Releases & changesets" below). Do **not** run `npm version` or push `v*` tags manually — versioning and publishing are handled by changesets.
+
+---
+
+## Releases & changesets
+
+This repo uses [changesets](https://github.com/changesets/changesets) for versioning, `CHANGELOG.md` generation, and npm publishing (OIDC trusted publishing — no npm token).
+
+- **Every user-facing change must include a changeset.** Run `pnpm exec changeset` (interactive), or create `.changeset/<kebab-name>.md` directly:
+
+  ```md
+  ---
+  "gitsema": minor
+  ---
+
+  One or two sentences describing the change from the user's perspective.
+  ```
+
+  Use `patch` for fixes, `minor` for features/phases, `major` for breaking changes. Write the summary for end users — it becomes the CHANGELOG entry.
+- **Release flow:** merging to `main` runs `release.yml`, which lets `changesets/action` accumulate pending changesets into a **"chore(release): version packages"** PR (bumps `package.json`, updates `CHANGELOG.md`). Merging *that* PR publishes to npm automatically.
+- Internal-only changes (CI tweaks, refactors with no behavior change, docs typos) may omit a changeset.
 
 ---
 
