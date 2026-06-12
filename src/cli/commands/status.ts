@@ -1,5 +1,5 @@
 import { remoteStatus } from '../../client/remoteClient.js'
-import { db, DB_PATH, getRawDb } from '../../core/db/sqlite.js'
+import { getActiveSession, DB_PATH, getRawDb } from '../../core/db/sqlite.js'
 import { blobs, embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, commitEmbeddings, moduleEmbeddings } from '../../core/db/schema.js'
 import { eq } from 'drizzle-orm'
 import { logger } from '../../utils/logger.js'
@@ -44,6 +44,7 @@ export async function statusCommand(filePath: string | undefined, options: Statu
     return
   }
 
+  const { db } = getActiveSession()
   const [blobCount] = db.select({ count: sql<number>`count(*)` }).from(blobs).all()
   const [embeddingCount] = db.select({ count: sql<number>`count(*)` }).from(embeddings).all()
   const [pathCount] = db.select({ count: sql<number>`count(*)` }).from(paths).all()

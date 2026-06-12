@@ -3,8 +3,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { createHash } from 'node:crypto'
 import * as schema from './schema.js'
+import { runMigrations } from './migrations/runner.js'
 
 const DB_DIR = '.gitsema'
 const DB_PATH = join(DB_DIR, 'index.db')
@@ -57,446 +57,7 @@ export const CURRENT_SCHEMA_VERSION = 21
  * `meta` table. Safe to call on both fresh and existing databases.
  */
 function applyMigrations(sqlite: InstanceType<typeof Database>): void {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)`)
-
-  const row = sqlite.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as
-    | { value: string }
-    | undefined
-
-  let version: number
-  if (row === undefined) {
-    // meta table just created — determine starting version by inspecting the
-    // live schema so we don't re-apply migrations that already ran.
-    const cols = sqlite.prepare(`PRAGMA table_info(embeddings)`).all() as Array<{ name: string }>
-    version = cols.some((c) => c.name === 'file_type') ? 1 : 0
-    sqlite.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(version))
-  } else {
-    version = parseInt(row.value, 10)
-  }
-
-  // v0 → v1: add file_type column to embeddings
-  if (version < 1) {
-    sqlite.exec(`ALTER TABLE embeddings ADD COLUMN file_type TEXT`)
-    version = 1
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('1')
-  }
-
-  // v1 → v2: add blob_branches table
-  if (version < 2) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS blob_branches (
-        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
-        branch_name TEXT NOT NULL,
-        PRIMARY KEY (blob_hash, branch_name)
-      )
-    `)
-    version = 2
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('2')
-  }
-
-  // v2 → v3: add query_embeddings cache table (Phase 18)
-  if (version < 3) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS query_embeddings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        query_text TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        cached_at INTEGER NOT NULL,
-        UNIQUE (query_text, model)
-      )
-    `)
-    version = 3
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('3')
-  }
-
-  // v3 → v4: add symbols + symbol_embeddings tables (Phase 19)
-  if (version < 4) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS symbols (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
-        start_line INTEGER NOT NULL,
-        end_line INTEGER NOT NULL,
-        symbol_name TEXT NOT NULL,
-        symbol_kind TEXT NOT NULL,
-        language TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS symbol_embeddings (
-        symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id),
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL
-      );
-    `)
-    version = 4
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('4')
-  }
-
-  // v4 → v5: add blob_clusters + cluster_assignments tables (Phase 21)
-  if (version < 5) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS blob_clusters (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        label TEXT NOT NULL,
-        centroid BLOB NOT NULL,
-        size INTEGER NOT NULL,
-        representative_paths TEXT NOT NULL,
-        top_keywords TEXT NOT NULL,
-        clustered_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS cluster_assignments (
-        blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
-        cluster_id INTEGER NOT NULL REFERENCES blob_clusters(id)
-      );
-    `)
-    version = 5
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('5')
-  }
-
-  // v5 → v6: add index on commits.timestamp for fast temporal cluster queries (Phase 22)
-  if (version < 6) {
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_commits_timestamp ON commits (timestamp)`)
-    version = 6
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('6')
-  }
-
-  // v6 → v7: add commit_embeddings table for commit message semantic search (Phase 30)
-  if (version < 7) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS commit_embeddings (
-        commit_hash TEXT PRIMARY KEY REFERENCES commits(commit_hash),
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL
-      )
-    `)
-    version = 7
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('7')
-  }
-
-  // v7 → v8: add author_name and author_email columns to commits (Phase 31)
-  if (version < 8) {
-    // Guard against fresh DBs where initTables() already added these columns
-    const commitCols = sqlite.prepare('PRAGMA table_info(commits)').all() as Array<{ name: string }>
-    if (!commitCols.some((c) => c.name === 'author_name')) {
-      sqlite.exec(`ALTER TABLE commits ADD COLUMN author_name TEXT`)
-    }
-    if (!commitCols.some((c) => c.name === 'author_email')) {
-      sqlite.exec(`ALTER TABLE commits ADD COLUMN author_email TEXT`)
-    }
-    version = 8
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('8')
-  }
-
-  // v8 → v9: add module_embeddings table and chunk_id on symbols (Phase 33)
-  if (version < 9) {
-    // Guard the ALTER TABLE: column may already exist when the DB was created
-    // from scratch with the updated initTables (which already includes chunk_id).
-    const symbolCols = sqlite.prepare(`PRAGMA table_info(symbols)`).all() as Array<{ name: string }>
-    if (!symbolCols.some((c) => c.name === 'chunk_id')) {
-      sqlite.exec(`ALTER TABLE symbols ADD COLUMN chunk_id INTEGER`)
-    }
-
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS module_embeddings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        module_path TEXT NOT NULL UNIQUE,
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        blob_count INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-    `)
-    version = 9
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('9')
-  }
-
-  // v9 → v10: rebuild embedding tables with composite (hash, model) PKs
-  if (version < 10) {
-    sqlite.pragma('foreign_keys = OFF')
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS embeddings_v10 (
-        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        file_type TEXT,
-        PRIMARY KEY (blob_hash, model)
-      );
-      INSERT OR IGNORE INTO embeddings_v10 SELECT blob_hash, model, dimensions, vector, file_type FROM embeddings;
-      DROP TABLE embeddings;
-      ALTER TABLE embeddings_v10 RENAME TO embeddings;
-
-      CREATE TABLE IF NOT EXISTS chunk_embeddings_v10 (
-        chunk_id INTEGER NOT NULL REFERENCES chunks(id),
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        PRIMARY KEY (chunk_id, model)
-      );
-      INSERT OR IGNORE INTO chunk_embeddings_v10 SELECT chunk_id, model, dimensions, vector FROM chunk_embeddings;
-      DROP TABLE chunk_embeddings;
-      ALTER TABLE chunk_embeddings_v10 RENAME TO chunk_embeddings;
-
-      CREATE TABLE IF NOT EXISTS symbol_embeddings_v10 (
-        symbol_id INTEGER NOT NULL REFERENCES symbols(id),
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        PRIMARY KEY (symbol_id, model)
-      );
-      INSERT OR IGNORE INTO symbol_embeddings_v10 SELECT symbol_id, model, dimensions, vector FROM symbol_embeddings;
-      DROP TABLE symbol_embeddings;
-      ALTER TABLE symbol_embeddings_v10 RENAME TO symbol_embeddings;
-
-      CREATE TABLE IF NOT EXISTS commit_embeddings_v10 (
-        commit_hash TEXT NOT NULL REFERENCES commits(commit_hash),
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        PRIMARY KEY (commit_hash, model)
-      );
-      INSERT OR IGNORE INTO commit_embeddings_v10 SELECT commit_hash, model, dimensions, vector FROM commit_embeddings;
-      DROP TABLE commit_embeddings;
-      ALTER TABLE commit_embeddings_v10 RENAME TO commit_embeddings;
-
-      CREATE TABLE IF NOT EXISTS module_embeddings_v10 (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        module_path TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        blob_count INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE (module_path, model)
-      );
-      INSERT OR IGNORE INTO module_embeddings_v10 SELECT id, module_path, model, dimensions, vector, blob_count, updated_at FROM module_embeddings;
-      DROP TABLE module_embeddings;
-      ALTER TABLE module_embeddings_v10 RENAME TO module_embeddings;
-    `)
-    sqlite.pragma('foreign_keys = ON')
-    version = 10
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('10')
-  }
-
-  // v10 → v11: add quantization columns to embedding tables (Phase 36)
-  if (version < 11) {
-    // Use PRAGMA table_info guards to ensure idempotency on fresh DBs
-    const embCols = sqlite.prepare('PRAGMA table_info(embeddings)').all() as Array<{ name: string }>
-    if (!embCols.some((c) => c.name === 'quantized')) {
-      sqlite.exec(`ALTER TABLE embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
-      sqlite.exec(`ALTER TABLE embeddings ADD COLUMN quant_min REAL`)
-      sqlite.exec(`ALTER TABLE embeddings ADD COLUMN quant_scale REAL`)
-    }
-
-    const chunkCols = sqlite.prepare('PRAGMA table_info(chunk_embeddings)').all() as Array<{ name: string }>
-    if (!chunkCols.some((c) => c.name === 'quantized')) {
-      sqlite.exec(`ALTER TABLE chunk_embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
-      sqlite.exec(`ALTER TABLE chunk_embeddings ADD COLUMN quant_min REAL`)
-      sqlite.exec(`ALTER TABLE chunk_embeddings ADD COLUMN quant_scale REAL`)
-    }
-
-    const symCols = sqlite.prepare('PRAGMA table_info(symbol_embeddings)').all() as Array<{ name: string }>
-    if (!symCols.some((c) => c.name === 'quantized')) {
-      sqlite.exec(`ALTER TABLE symbol_embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
-      sqlite.exec(`ALTER TABLE symbol_embeddings ADD COLUMN quant_min REAL`)
-      sqlite.exec(`ALTER TABLE symbol_embeddings ADD COLUMN quant_scale REAL`)
-    }
-
-    const commitEmbCols = sqlite.prepare('PRAGMA table_info(commit_embeddings)').all() as Array<{ name: string }>
-    if (!commitEmbCols.some((c) => c.name === 'quantized')) {
-      sqlite.exec(`ALTER TABLE commit_embeddings ADD COLUMN quantized INTEGER DEFAULT 0`)
-      sqlite.exec(`ALTER TABLE commit_embeddings ADD COLUMN quant_min REAL`)
-      sqlite.exec(`ALTER TABLE commit_embeddings ADD COLUMN quant_scale REAL`)
-    }
-
-    version = 11
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('11')
-  }
-
-  // v11 → v12: add missing performance indexes
-  if (version < 12) {
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_paths_blob_hash ON paths(blob_hash)`)
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_paths_path ON paths(path)`)
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_symbols_blob_hash ON symbols(blob_hash)`)
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_blob_hash ON chunks(blob_hash)`)
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_blob_commits_blob_hash ON blob_commits(blob_hash)`)
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_blob_branches_branch_name ON blob_branches(branch_name)`)
-    version = 12
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('12')
-  }
-
-  // v12 → v13: add embed_config provenance table and indexing_checkpoints table
-  if (version < 13) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS embed_config (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        config_hash TEXT NOT NULL UNIQUE,
-        provider TEXT NOT NULL,
-        model TEXT NOT NULL,
-        code_model TEXT,
-        dimensions INTEGER NOT NULL,
-        chunker TEXT NOT NULL,
-        window_size INTEGER,
-        overlap INTEGER,
-        created_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS indexing_checkpoints (
-        blob_hash TEXT PRIMARY KEY,
-        commit_hash TEXT NOT NULL,
-        status TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_attempt_at INTEGER NOT NULL
-      );
-    `)
-    version = 13
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('13')
-  }
-
-  // v13 → v14: add repos table to track indexed repositories
-  if (version < 14) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS repos (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        url TEXT,
-        added_at INTEGER NOT NULL
-      );
-    `)
-    version = 14
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('14')
-  }
-
-  // v14 → v15: add db_path column to repos table (Phase 50 — multi-repo search)
-  if (version < 15) {
-    sqlite.exec(`ALTER TABLE repos ADD COLUMN db_path TEXT;`)
-    version = 15
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('15')
-  }
-
-  // v15 → v16: add saved_queries table (Phase 53 — saved searches and watch mode)
-  if (version < 16) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS saved_queries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        query_text TEXT NOT NULL,
-        query_embedding BLOB,
-        last_run_ts INTEGER,
-        webhook_url TEXT,
-        created_at INTEGER NOT NULL
-      );
-    `)
-    version = 16
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('16')
-  }
-
-  // v16 → v17: add projections table (Phase 55 — embedding space explorer)
-  if (version < 17) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS projections (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
-        model TEXT NOT NULL,
-        x REAL NOT NULL,
-        y REAL NOT NULL,
-        projected_at INTEGER NOT NULL,
-        UNIQUE (blob_hash, model)
-      );
-    `)
-    version = 17
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('17')
-  }
-
-  // v17 → v18: add last_used_at column to embed_config for multi-model status tracking
-  if (version < 18) {
-    const embedConfigCols = sqlite.prepare('PRAGMA table_info(embed_config)').all() as Array<{ name: string }>
-    if (!embedConfigCols.some((c) => c.name === 'last_used_at')) {
-      sqlite.exec(`ALTER TABLE embed_config ADD COLUMN last_used_at INTEGER`)
-    }
-    version = 18
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('18')
-  }
-
-  // v18 → v19: add repo_tokens table for per-repo access control (Phase 75)
-  if (version < 19) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS repo_tokens (
-        token TEXT PRIMARY KEY,
-        repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-        label TEXT,
-        created_at INTEGER NOT NULL
-      )
-    `)
-    version = 19
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('19')
-  }
-
-  // v19 → v20: enforce uniqueness of (blob_hash, path) in the paths table
-  // (review6 §11.6). Prior to this migration, direct `storeBlobRecord()`
-  // callers (e.g. the HTTP blob upload route) could insert duplicate rows
-  // for the same blob+path because the in-memory `seenHashes` dedup in the
-  // indexer only covered the Git-walk path. We first delete any existing
-  // duplicates, keeping the lowest-id row, then create a unique index.
-  if (version < 20) {
-    sqlite.exec(`
-      DELETE FROM paths
-       WHERE id NOT IN (
-         SELECT MIN(id) FROM paths GROUP BY blob_hash, path
-       );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_paths_blob_path_unique
-        ON paths(blob_hash, path);
-    `)
-    version = 20
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('20')
-  }
-
-  // v20 → v21: hash repo tokens at rest (review7 §4.1).
-  // Replace plaintext token primary key with SHA-256 hash + 8-char prefix for display.
-  // Existing plaintext tokens are hashed in place so that valid tokens remain usable
-  // provided operators re-configure clients with the same token value they already hold.
-  if (version < 21) {
-    const tokenCols = sqlite.prepare('PRAGMA table_info(repo_tokens)').all() as Array<{ name: string }>
-    const hasTokenHash = tokenCols.some((c) => c.name === 'token_hash')
-    if (!hasTokenHash) {
-      // Fetch existing plaintext tokens before restructuring the table.
-      const existing = sqlite.prepare('SELECT token, repo_id, label, created_at FROM repo_tokens').all() as Array<{
-        token: string; repo_id: string; label: string | null; created_at: number
-      }>
-
-      sqlite.pragma('foreign_keys = OFF')
-      sqlite.exec(`
-        CREATE TABLE IF NOT EXISTS repo_tokens_v21 (
-          token_hash  TEXT PRIMARY KEY,
-          token_prefix TEXT NOT NULL,
-          repo_id     TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-          label       TEXT,
-          created_at  INTEGER NOT NULL
-        );
-      `)
-
-      const insert = sqlite.prepare(
-        'INSERT OR IGNORE INTO repo_tokens_v21 (token_hash, token_prefix, repo_id, label, created_at) VALUES (?, ?, ?, ?, ?)',
-      )
-      for (const row of existing) {
-        const hash = createHash('sha256').update(row.token).digest('hex')
-        const prefix = row.token.slice(0, 8)
-        insert.run(hash, prefix, row.repo_id, row.label, row.created_at)
-      }
-
-      sqlite.exec(`
-        DROP TABLE repo_tokens;
-        ALTER TABLE repo_tokens_v21 RENAME TO repo_tokens;
-      `)
-      sqlite.pragma('foreign_keys = ON')
-    }
-    version = 21
-    sqlite.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run('21')
-  }
+  runMigrations(sqlite)
 }
 
 
@@ -753,35 +314,54 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 }
 
 // ---------------------------------------------------------------------------
-// Default database (module-level singleton — backward compatible)
+// Default database (lazy singleton — opened on first access)
 // ---------------------------------------------------------------------------
 
-/** Raw better-sqlite3 handle for the default DB. Used by legacy callers via getRawDb(). */
-let rawSqlite: InstanceType<typeof Database>
+let _defaultSession: DbSession | undefined
+
+/**
+ * Opens the default database lazily on first call and caches the session.
+ * All subsequent calls return the same session.
+ */
+function getDefaultSession(): DbSession {
+  if (!_defaultSession) {
+    _defaultSession = openDatabaseAt(DB_PATH)
+  }
+  return _defaultSession
+}
+
+/**
+ * @deprecated Prefer `getActiveSession().db` in new code.
+ *
+ * Returns the default Drizzle ORM handle. Triggers lazy initialization of
+ * the default database on first access.
+ */
+export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
+  return getDefaultSession().db
+}
+
+// Backward-compatible alias: importing `db` still works but now triggers
+// lazy init via the getter instead of eagerly at module load time.
+// NOTE: `db` is a getter on the module namespace — not a plain value.
+// Callers that destructure `import { db }` capture the getter result at
+// import time; callers that use `db` through the module object get lazy
+// evaluation. Either way, the first access triggers `getDefaultSession()`.
+
+let _dbProxy: ReturnType<typeof drizzle<typeof schema>> | undefined
+/** @deprecated Use `getDb()` or `getActiveSession().db` in new code. */
+export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
+  get(_target, prop, receiver) {
+    if (!_dbProxy) _dbProxy = getDefaultSession().db
+    return Reflect.get(_dbProxy, prop, receiver)
+  },
+})
+
+export { DB_PATH }
 
 /** @deprecated Prefer getActiveSession().rawDb in new code. */
 export function getRawDb(): InstanceType<typeof Database> {
-  return rawSqlite
+  return getDefaultSession().rawDb
 }
-
-let _defaultSession: DbSession
-
-function openDatabase(): ReturnType<typeof drizzle<typeof schema>> {
-  mkdirSync(DB_DIR, { recursive: true })
-  const sqlite = new Database(DB_PATH)
-  rawSqlite = sqlite
-  sqlite.pragma('journal_mode = WAL')
-
-  initTables(sqlite)
-  applyMigrations(sqlite)
-
-  const drizzleDb = drizzle(sqlite, { schema })
-  _defaultSession = { db: drizzleDb, rawDb: sqlite, dbPath: DB_PATH }
-  return drizzleDb
-}
-
-export const db = openDatabase()
-export { DB_PATH }
 
 // ---------------------------------------------------------------------------
 // AsyncLocalStorage session context (Phase 17)
@@ -798,7 +378,7 @@ const _sessionStorage = new AsyncLocalStorage<DbSession>()
  * Falls back to the default (module-level) session when no override is active.
  */
 export function getActiveSession(): DbSession {
-  return _sessionStorage.getStore() ?? _defaultSession
+  return _sessionStorage.getStore() ?? getDefaultSession()
 }
 
 /**
