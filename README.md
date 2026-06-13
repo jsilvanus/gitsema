@@ -219,17 +219,26 @@ Configure a narrator model with `gitsema models add <name> --narrator --http-url
 
 Interactive LLM chat that gathers repository context (recent commits, repo stats) and answers questions about the codebase. Falls back to the active narrator model if no guide model is configured, and prints the gathered context (without calling an LLM, no network access) if neither is configured.
 
-When a guide (or fallback narrator) model is configured, `guide` runs a real **agentic tool-calling loop** (via `@jsilvanus/chattydeer`'s `runAgentLoop`): the LLM can call gitsema tools to gather additional evidence before answering, up to **5 roundtrips**. Available tools:
+When a guide (or fallback narrator) model is configured, `guide` runs a real **agentic tool-calling loop** (via `@jsilvanus/chattydeer`'s `runAgentLoop`): the LLM can call gitsema tools to gather additional evidence before answering, up to **5 roundtrips**. The tool registry (`src/core/narrator/guideTools.ts`) wires the **full gitsema analysis toolset** — the same ~36 capabilities exposed as MCP tools — grouped by category:
 
-| Tool | Description |
+| Category | Tools |
 |---|---|
-| `repo_stats` | Branch/tag/commit counts and configured remotes |
-| `recent_commits` | Last N commits (hash, date, subject) |
-| `narrate_repo` | Commit evidence for a date range/focus (evidence-only, no nested LLM call) |
-| `explain_topic` | Commits matching a topic keyword (evidence-only, no nested LLM call) |
-| `semantic_search` | Vector similarity search over the `.gitsema` index (only available when an index exists and the embedding provider is reachable) |
+| Repository (git-only) | `repo_stats`, `recent_commits`, `narrate_repo`, `explain_topic` |
+| Search & discovery | `semantic_search`, `code_search`, `search_history`, `first_seen`, `multi_repo_search` |
+| History & temporal drift | `file_evolution`, `concept_evolution`, `change_points`, `file_change_points`, `health_timeline` |
+| Branch & merge | `branch_summary`, `merge_audit`, `merge_preview` |
+| Ownership & expertise | `author`, `experts`, `ownership`, `contributor_profile` |
+| Quality, debt & risk | `impact`, `dead_concepts`, `debt_score`, `doc_gap`, `security_scan` |
+| Diff & blame | `semantic_diff`, `semantic_blame` |
+| Clustering | `clusters`, `cluster_diff`, `cluster_timeline` |
+| Compound workflows | `triage`, `workflow_run`, `policy_check`, `eval` |
+| Administration | `index` |
 
-All outbound content (prompts, tool results) is passed through the same secret/PII redaction (`redactAll`) used by `narrate`/`explain` before it reaches the LLM. `file_evolution`, `concept_evolution`, and `branch_summary` are not yet wired as tools (see `docs/chattydeer_contract.md`).
+Each tool has a corresponding entry in `src/core/narrator/interpretations.ts` describing its result shape and how to interpret it; this catalog is embedded directly in the guide's system prompt so the LLM knows what each result means (significant values, thresholds, caveats) and is also used to generate the "Interpreting gitsema tool results" section of `skill/gitsema-ai-assistant.md` (`pnpm gen:skill`).
+
+Tools that require a `.gitsema` index (search, evolution, clustering, ownership, etc.) return `{"error": "..."}` gracefully if no index exists or the embedding provider is unreachable — the agent is instructed to fall back to git-only tools (`repo_stats`, `recent_commits`, `narrate_repo`, `explain_topic`) and tell the user to run `gitsema index` first. The `index` tool is mutating/expensive (admin category) and the agent is instructed to use it conservatively.
+
+All outbound content (prompts, tool results) is passed through the same secret/PII redaction (`redactAll`) used by `narrate`/`explain` before it reaches the LLM.
 
 | Flag | Description |
 |---|---|
@@ -239,6 +248,14 @@ All outbound content (prompts, tool results) is passed through the same secret/P
 | `-i, --interactive` | Start an interactive REPL session (one question per line, multi-turn — the agent session is reused across turns) |
 
 Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`.
+
+**Ollama:** Ollama's OpenAI-compatible endpoint works for `narrate`/`explain`/`guide` with no API key. Use `--http-url http://localhost:11434` (no trailing `/v1` — both the narrator and `@jsilvanus/chattydeer` append `/v1/chat/completions` themselves; a trailing `/v1` produces a broken `/v1/v1/...` path for `guide`). The agentic `guide` loop needs a tool-calling-capable model (e.g. `llama3.1`, `qwen2.5`):
+
+```bash
+ollama pull llama3.1
+gitsema models add ol-guide --guide --http-url http://localhost:11434 --activate
+gitsema guide "what changed recently?"
+```
 
 #### `gitsema policy-check [options]`
 
