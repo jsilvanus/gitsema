@@ -213,7 +213,7 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--narrate` | off | Call the configured LLM narrator and return prose (default: return evidence only) |
 | `--evidence-only` | on | Return raw commit evidence without calling the LLM (this is the default) |
 
-Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below).
+Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, with a local Ollama model (`gitsema models add <name> --narrator --provider ollama [--global-name <tag>] --activate`, see "Ollama" below), or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below).
 
 #### `gitsema guide [question] [options]`
 
@@ -249,12 +249,27 @@ All outbound content (prompts, tool results) is passed through the same secret/P
 
 Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`, or with a local CLI AI tool: `gitsema models add <name> --guide --provider cli --cli-command <tool> [--use-mcp] --activate` (see "CLI-based AI tool backends" below).
 
-**Ollama:** Ollama's OpenAI-compatible endpoint works for `narrate`/`explain`/`guide` with no API key. Use `--http-url http://localhost:11434` (no trailing `/v1` — both the narrator and `@jsilvanus/chattydeer` append `/v1/chat/completions` themselves; a trailing `/v1` produces a broken `/v1/v1/...` path for `guide`). The agentic `guide` loop needs a tool-calling-capable model (e.g. `llama3.1`, `qwen2.5`):
+**Ollama:** `--provider ollama` configures `narrate`/`explain`/`guide` against a local Ollama
+server with no API key. It defaults `--http-url` to `http://localhost:11434` (no trailing
+`/v1` — both the narrator and `@jsilvanus/chattydeer` append `/v1/chat/completions`
+themselves) and sends the local model name as the `model` field in chat requests, so the
+name (or `--global-name`) must match a pulled Ollama tag. The agentic `guide` loop needs a
+tool-calling-capable model (e.g. `llama3.1`, `qwen2.5`):
 
 ```bash
 ollama pull llama3.1
-gitsema models add ol-guide --guide --http-url http://localhost:11434 --activate
+gitsema models add llama3.1 --guide --provider ollama --activate
 gitsema guide "what changed recently?"
+
+# Or use a local alias mapped to the Ollama tag via --global-name:
+gitsema models add ol-guide --guide --provider ollama --global-name llama3.1 --activate
+```
+
+If you omit `<name>` with `--provider ollama`, gitsema lists the models available on your
+Ollama server:
+
+```bash
+gitsema models add --provider ollama
 ```
 
 #### CLI-based AI tool backends
