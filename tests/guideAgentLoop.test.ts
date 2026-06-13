@@ -11,7 +11,7 @@ import {
   saveGuideConfig,
   setActiveGuideConfig,
 } from '../src/core/narrator/resolveNarrator.js'
-import { GUIDE_TOOL_DEFINITIONS, executeTool } from '../src/core/narrator/guideTools.js'
+import { GUIDE_TOOL_DEFINITIONS, GUIDE_TOOLS, executeTool } from '../src/core/narrator/guideTools.js'
 
 // ---------------------------------------------------------------------------
 // chattydeer mock
@@ -50,8 +50,10 @@ afterEach(() => {
 
 describe('GUIDE_TOOL_DEFINITIONS', () => {
   it('has valid names and JSON-schema parameter shapes', () => {
-    const expectedNames = ['repo_stats', 'recent_commits', 'narrate_repo', 'explain_topic', 'semantic_search']
-    expect(GUIDE_TOOL_DEFINITIONS.map((t) => t.name)).toEqual(expectedNames)
+    expect(GUIDE_TOOL_DEFINITIONS.map((t) => t.name)).toEqual(Object.keys(GUIDE_TOOLS))
+    expect(GUIDE_TOOL_DEFINITIONS.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['repo_stats', 'recent_commits', 'narrate_repo', 'explain_topic', 'semantic_search']),
+    )
 
     for (const tool of GUIDE_TOOL_DEFINITIONS) {
       expect(typeof tool.name).toBe('string')

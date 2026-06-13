@@ -10,6 +10,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import type { CommitEvent, NarrateCommandOptions, ExplainCommandOptions, NarrationResult } from './types.js'
 import { redactAll } from './redact.js'
 import type { NarratorProvider } from './types.js'
+import { buildNarratorSystemPrompt } from './interpretations.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -150,7 +151,7 @@ async function summariseBatch(
   provider: NarratorProvider,
 ): Promise<string> {
   const userPrompt = buildBatchSummaryPrompt(events, { focus, batchIndex })
-  const res = await provider.narrate({ systemPrompt: 'You are a concise code history analyst.', userPrompt, maxTokens: 300 })
+  const res = await provider.narrate({ systemPrompt: buildNarratorSystemPrompt('narrate_repo'), userPrompt, maxTokens: 300 })
   return res.prose
 }
 
@@ -223,7 +224,7 @@ export async function runNarrate(
   for (const p of firedPatterns) { if (!allRedacted.includes(p)) allRedacted.push(p) }
 
   const finalRes = await provider.narrate({
-    systemPrompt: 'You are writing a development history narrative. Be factual, cite commit hashes.',
+    systemPrompt: buildNarratorSystemPrompt('narrate_repo'),
     userPrompt: redactedFinal,
     maxTokens: 600,
   })
@@ -313,7 +314,7 @@ export async function runExplain(
   const redactedPrompt = explainTexts[0]
 
   const res = await provider.narrate({
-    systemPrompt: 'You are a software incident analyst. Be factual and cite commit hashes for every claim.',
+    systemPrompt: buildNarratorSystemPrompt('explain_topic'),
     userPrompt: redactedPrompt,
     maxTokens: 512,
   })
