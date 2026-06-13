@@ -33,7 +33,8 @@ import {
   type ConfigScope,
 } from '../../core/config/configManager.js'
 import { ensureModelDownloadedAndOptimized } from '../../core/embedding/embedeer.js'
-import { isCliParams } from '../../core/narrator/types.js'
+import { isCliParams, type HttpNarratorParams } from '../../core/narrator/types.js'
+import { listOllamaModels, probeOllama } from '../lib/provider.js'
 
 // ---------------------------------------------------------------------------
 // Shared helper
@@ -44,6 +45,26 @@ function validateModelName(modelName: string): void {
     console.error('Error: model name is required')
     process.exit(1)
   }
+}
+
+/**
+ * Print the model names available on an Ollama server (via `/api/tags`) and a
+ * usage hint, for `models add` invocations that omit a model name. Exits with
+ * an error if Ollama is unreachable or has no models.
+ */
+async function printOllamaModelSuggestions(httpUrl: string | undefined, usageHint: (model: string) => string): Promise<void> {
+  const url = httpUrl ?? 'http://localhost:11434'
+  const models = await listOllamaModels(url)
+  if (models.length === 0) {
+    console.error(`Error: model name is required (no models found on Ollama at ${url}).`)
+    console.error('Pull a model first: ollama pull <model>')
+    process.exit(1)
+  }
+  console.log(`No model name given — available Ollama models at ${url}:`)
+  for (const m of models) console.log(`  ${m}`)
+  console.log('')
+  console.log('Re-run with one of these names, e.g.:')
+  console.log(`  ${usageHint(models[0])}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -363,10 +384,18 @@ function printProfile(profile: ModelProfile): void {
 }
 
 export async function modelsAddCommand(
-  modelName: string,
+  modelName: string | undefined,
   options: ModelsAddOptions,
 ): Promise<void> {
-  validateModelName(modelName)
+  if (!modelName || !modelName.trim()) {
+    const provider = options.provider ?? 'ollama'
+    if (provider === 'ollama') {
+      await printOllamaModelSuggestions(options.url, (m) => `gitsema models add ${m} --provider ollama ...`)
+      return
+    }
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
 
   const scope: ConfigScope = options.global ? 'global' : 'local'
   const filePath = scope === 'global' ? getGlobalConfigPath() : getLocalConfigPath()
@@ -631,7 +660,7 @@ export interface ModelsKindAddOptions {
   maxTokens?: string
   temperature?: string
   activate?: boolean
-  /** 'http' (default, OpenAI-compatible endpoint) | 'cli' (local CLI AI tool). */
+  /** 'http' (default, OpenAI-compatible endpoint) | 'cli' (local CLI AI tool) | 'ollama'. */
   provider?: string
   /** Required when --provider cli: the executable to spawn (e.g. "claude", "codex", "copilot"). */
   cliCommand?: string
@@ -639,14 +668,23 @@ export interface ModelsKindAddOptions {
   cliArgs?: string
   /** Guide-only: expose gitsema's MCP server to the CLI tool. */
   useMcp?: boolean
+  /** Actual model id sent to the chat-completions API (defaults to `name`). */
+  globalName?: string
 }
 
 export async function modelsKindAddCommand(
-  name: string,
+  name: string | undefined,
   kind: NarratorKind,
   opts: ModelsKindAddOptions,
 ): Promise<void> {
-  validateModelName(name)
+  if (!name || !name.trim()) {
+    if (opts.provider === 'ollama') {
+      await printOllamaModelSuggestions(opts.httpUrl, (m) => `gitsema models add ${m} --${kind} --provider ollama --activate`)
+      return
+    }
+    console.error('Error: model name is required')
+    process.exit(1)
+  }
 
   const { rawDb, resolver } = await getNarratorDb()
 
@@ -674,14 +712,36 @@ export async function modelsKindAddCommand(
     console.log(`  Provider:    cli`)
     console.log(`  CLI command: ${opts.cliCommand}${params.cliArgs ? ` ${params.cliArgs.join(' ')}` : ''}`)
     if (opts.useMcp) console.log(`  MCP:         enabled (gitsema tools exposed via --mcp-config)`)
+  } else if (opts.provider === 'ollama') {
+    const httpUrl = opts.httpUrl ?? 'http://localhost:11434'
+
+    const params: HttpNarratorParams = {
+      httpUrl,
+      ...(opts.globalName ? { model: opts.globalName } : {}),
+      ...(opts.key ? { apiKey: opts.key } : {}),
+      ...(opts.maxTokens ? { maxTokens: parseInt(opts.maxTokens, 10) } : {}),
+      ...(opts.temperature ? { temperature: parseFloat(opts.temperature) } : {}),
+    }
+
+    id = saveFn(rawDb, name.trim(), 'ollama', params)
+
+    console.log(`Saved ${kind} model config '${name}' (id=${id}).`)
+    console.log(`  Provider:  ollama`)
+    console.log(`  HTTP URL:  ${httpUrl}`)
+    console.log(`  Model:     ${params.model ?? name}`)
+
+    if (!(await probeOllama(httpUrl))) {
+      console.error(`Warning: could not reach Ollama at ${httpUrl}. Make sure it is running ('ollama serve').`)
+    }
   } else {
     if (!opts.httpUrl) {
-      console.error(`Error: --http-url is required for ${kind} models (or pass --provider cli --cli-command <tool>)`)
+      console.error(`Error: --http-url is required for ${kind} models (or pass --provider cli --cli-command <tool>, or --provider ollama)`)
       process.exit(1)
     }
 
-    const params = {
+    const params: HttpNarratorParams = {
       httpUrl: opts.httpUrl,
+      ...(opts.globalName ? { model: opts.globalName } : {}),
       ...(opts.key ? { apiKey: opts.key } : {}),
       ...(opts.maxTokens ? { maxTokens: parseInt(opts.maxTokens, 10) } : {}),
       ...(opts.temperature ? { temperature: parseFloat(opts.temperature) } : {}),

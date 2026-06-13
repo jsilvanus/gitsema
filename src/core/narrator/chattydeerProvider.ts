@@ -107,7 +107,7 @@ export class ChattydeerNarratorProvider implements NarratorProvider {
 
       // Build a generateFn that calls the configured HTTP endpoint
       // so we don't load local HuggingFace models at all.
-      const generateFn = buildHttpGenerateFn(params)
+      const generateFn = buildHttpGenerateFn(params, modelName)
 
       const explainer = await mod.Explainer.create(modelName, {
         generateFn,
@@ -164,8 +164,8 @@ export class ChattydeerNarratorProvider implements NarratorProvider {
 // HTTP generate function — calls an OpenAI-compatible chat completions API
 // ---------------------------------------------------------------------------
 
-function buildHttpGenerateFn(params: HttpNarratorParams) {
-  const { httpUrl, apiKey, temperature = 0.3 } = params
+function buildHttpGenerateFn(params: HttpNarratorParams, modelName: string) {
+  const { httpUrl, apiKey, model, temperature = 0.3 } = params
 
   return async (prompt: string, opts: { max_new_tokens?: number } = {}): Promise<{ text: string; raw: null }> => {
     const endpoint = new URL('/v1/chat/completions', httpUrl).toString()
@@ -173,7 +173,7 @@ function buildHttpGenerateFn(params: HttpNarratorParams) {
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 
     const body = JSON.stringify({
-      model: 'default',
+      model: model ?? modelName,
       messages: [{ role: 'user', content: prompt }],
       max_tokens: opts.max_new_tokens ?? 512,
       temperature,

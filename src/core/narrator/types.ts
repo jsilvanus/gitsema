@@ -50,6 +50,12 @@ export interface HttpNarratorParams {
   httpUrl: string
   /** Bearer token / API key. Optional. */
   apiKey?: string
+  /**
+   * Actual model id sent to the chat-completions API (the `model` field).
+   * Defaults to the config's local name when unset. Useful when the local
+   * alias differs from the provider's model id (e.g. an Ollama tag).
+   */
+  model?: string
   /** Max tokens per narration call (default 512). */
   maxTokens?: number
   /** Temperature (0 = deterministic, default 0.3). */

@@ -3395,6 +3395,47 @@ as an alternative to the existing HTTP/chattydeer path.
 
 **Status:** ✅ complete.
 
+### Phase 99 — `--provider ollama` for narrator/guide + Ollama model discovery
+
+**Goal:** Let `gitsema models add <name> --narrator|--guide --provider ollama` configure
+a local Ollama model as the LLM backend out of the box, and let `gitsema models add`
+(embedding, narrator, or guide) list locally-available Ollama models when no `<name>`
+is given.
+
+**Implemented scope:**
+
+- **`src/core/narrator/types.ts`**: `HttpNarratorParams` gains an optional `model` field —
+  the actual model id sent to the chat-completions API, defaulting to the config's local
+  name when unset (mirrors the embedding `globalName` concept).
+- **`src/core/narrator/chattydeerProvider.ts`**: fixed a long-standing bug where
+  `buildHttpGenerateFn` hardcoded `model: 'default'` in the `/v1/chat/completions`
+  request body — this broke Ollama (and any OpenAI-compatible API that validates the
+  `model` field). Now sends `params.model ?? modelName`.
+- **`src/cli/lib/provider.ts`**: new `listOllamaModels(url, timeoutMs)` queries
+  `/api/tags` and returns the list of locally pulled model names (`[]` on any error,
+  mirroring `probeOllama`).
+- **`gitsema models add [name] --narrator|--guide --provider ollama`**
+  (`src/cli/commands/models.ts`): new provider branch — defaults `--http-url` to
+  `http://localhost:11434`, stores `provider = 'ollama'` (still resolved by
+  `createNarratorProviderFor` via the existing `ChattydeerNarratorProvider`/httpUrl
+  path), supports `--global-name <tag>` to set `params.model` when the local alias
+  differs from the Ollama tag, and warns (non-fatal) if Ollama is unreachable.
+- **`gitsema models add [name]`** (embedding, narrator, guide): `<name>` is now optional
+  (`add [name]`). When omitted and the (effective) provider is `ollama`, gitsema calls
+  `listOllamaModels()` and prints the available models with a usage hint instead of
+  failing with "model name is required"; exits with an error if Ollama has no models /
+  is unreachable. Non-ollama providers still require an explicit name.
+- **`src/cli/register/setup.ts`**: `add <name>` → `add [name]`, updated `--provider`/
+  `--http-url`/`--global-name` help text and examples for the ollama narrator/guide path.
+- **Tests**: `tests/cliLib.test.ts` (`listOllamaModels`), `tests/narratorCliModels.test.ts`
+  (`--provider ollama` narrator/guide configs, `--global-name` → `params.model`, no-name
+  discovery), `tests/modelsAddOllamaDiscovery.test.ts` (embedding `models add` discovery),
+  `tests/chattydeerProvider.test.ts` (`model` field sent to `/v1/chat/completions`).
+
+**Tests:** `pnpm build && pnpm test` — all 967 tests pass.
+
+**Status:** ✅ complete.
+
 ## Long-Term Investments
 
 | Feature | Complexity | Notes |

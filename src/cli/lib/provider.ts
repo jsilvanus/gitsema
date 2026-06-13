@@ -87,3 +87,24 @@ export async function probeOllama(url = 'http://localhost:11434', timeoutMs = 20
     return false
   }
 }
+
+/**
+ * List model names available on an Ollama server by querying `/api/tags`.
+ * Returns an empty array on any error, non-OK response, or timeout.
+ */
+export async function listOllamaModels(url = 'http://localhost:11434', timeoutMs = 2000): Promise<string[]> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const resp = await fetch(`${url}/api/tags`, { signal: controller.signal })
+      if (!resp.ok) return []
+      const data = await resp.json() as { models?: Array<{ name?: string }> }
+      return (data.models ?? []).map((m) => m.name).filter((n): n is string => !!n)
+    } finally {
+      clearTimeout(timeout)
+    }
+  } catch {
+    return []
+  }
+}

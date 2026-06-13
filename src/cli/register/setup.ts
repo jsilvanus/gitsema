@@ -147,10 +147,10 @@ Examples:
     })
 
   modelsSub
-    .command('add <name>')
+    .command('add [name]')
     .description('Configure provider settings for a model (saved to .gitsema/config.json or global config)')
-    .option('--global-name <name>', 'remote model identifier sent to the provider (local name is the shorthand used in gitsema arguments)')
-    .option('--provider <type>', 'provider type: ollama, http or embedeer')
+    .option('--global-name <name>', 'remote model identifier sent to the provider (local name is the shorthand used in gitsema arguments; for --narrator/--guide this is the model id sent to the chat API)')
+    .option('--provider <type>', 'provider type: ollama, http or embedeer (embedding models); http (default), cli or ollama (--narrator/--guide)')
     .option('--url <url>', 'base URL for HTTP provider (e.g. https://api.openai.com)')
     .option('--key <apikey>', 'API key for HTTP provider')
     .option('--level <level>', 'default indexing/search granularity: file, function, fixed, chunk, symbol, module')
@@ -166,15 +166,24 @@ Examples:
     .option('--ext-role <ext=role>', 'custom extension-to-role mapping (can be repeated)', (v, acc) => { acc = acc || []; acc.push(v); return acc }, [] as string[])
     .option('--narrator', 'add an LLM narrator model config instead of an embedding model')
     .option('--guide', 'add an LLM guide model config instead of an embedding model')
-    .option('--http-url <url>', 'OpenAI-compatible chat-completions base URL (for --narrator/--guide)')
+    .option('--http-url <url>', 'OpenAI-compatible chat-completions base URL (for --narrator/--guide; defaults to http://localhost:11434 with --provider ollama)')
     .option('--max-tokens <n>', 'max tokens per LLM call (for --narrator/--guide, default: 512)')
     .option('--temperature <n>', 'sampling temperature (for --narrator/--guide, default: 0.3)')
     .option('--activate', 'activate this model immediately (for --narrator/--guide)')
     .option('--cli-command <tool>', 'with --provider cli: CLI AI tool to spawn (e.g. claude, codex, copilot) for --narrator/--guide')
     .option('--cli-args <args>', 'extra fixed args inserted before the prompt, space-separated (for --provider cli)')
     .option('--use-mcp', 'guide only: expose gitsema\'s MCP server to the CLI tool via --mcp-config (for --provider cli)')
+    .addHelpText(
+      'after',
+      '\nIf [name] is omitted and --provider ollama is set (or for embedding models, by default),\n' +
+      'gitsema queries the local Ollama server for available models and lists them.\n\n' +
+      'Examples:\n' +
+      '  gitsema models add --provider ollama\n' +
+      '  gitsema models add llama3.1:8b --narrator --provider ollama --activate\n' +
+      '  gitsema models add my-guide --guide --provider ollama --global-name llama3.1:8b --activate\n',
+    )
     .action(async (
-      name: string,
+      name: string | undefined,
       opts: { globalName?: string; provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
         prefixCode?: string; prefixText?: string; prefixQuery?: string; prefixOther?: string; prefixType?: string[]; extRole?: string[];
         narrator?: boolean; guide?: boolean; httpUrl?: string; maxTokens?: string; temperature?: string; activate?: boolean;
@@ -192,6 +201,7 @@ Examples:
           cliCommand: opts.cliCommand,
           cliArgs: opts.cliArgs,
           useMcp: opts.useMcp,
+          globalName: opts.globalName,
         })
       }
       await modelsAddCommand(name, opts)

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { resolveModels } from '../src/cli/lib/provider.js'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { resolveModels, listOllamaModels } from '../src/cli/lib/provider.js'
 import {
   EXIT_OK,
   EXIT_RUNTIME,
@@ -80,6 +80,33 @@ describe('resolveModels', () => {
     const result = resolveModels({ textModel: 'cli-text' })
     expect(result.textModel).toBe('cli-text')
     expect(result.codeModel).toBe('cli-text')
+  })
+})
+
+describe('listOllamaModels', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('returns model names from /api/tags', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ models: [{ name: 'llama3.1:8b' }, { name: 'nomic-embed-text:latest' }] }),
+    })))
+    const models = await listOllamaModels('http://localhost:11434')
+    expect(models).toEqual(['llama3.1:8b', 'nomic-embed-text:latest'])
+  })
+
+  it('returns an empty array on a non-OK response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })))
+    const models = await listOllamaModels('http://localhost:11434')
+    expect(models).toEqual([])
+  })
+
+  it('returns an empty array when fetch throws', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connection refused') }))
+    const models = await listOllamaModels('http://localhost:11434')
+    expect(models).toEqual([])
   })
 })
 
