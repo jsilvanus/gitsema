@@ -9,10 +9,11 @@
  */
 
 import type Database from 'better-sqlite3'
-import type { NarratorModelConfig, NarratorModelParams } from './types.js'
+import type { NarratorModelConfig, NarratorModelParams, NarratorProvider } from './types.js'
+import { isCliParams } from './types.js'
 import { createHash } from 'node:crypto'
 import { createChattydeerProvider, createDisabledProvider } from './chattydeerProvider.js'
-import type { ChattydeerNarratorProvider } from './chattydeerProvider.js'
+import { createCliProvider } from './cliProvider.js'
 import { getActiveSession } from '../db/sqlite.js'
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,26 @@ export function getActiveNarratorConfig(rawDb: InstanceType<typeof Database>): N
 // ---------------------------------------------------------------------------
 
 /**
+ * Build a NarratorProvider for a resolved config, dispatching on
+ * `config.provider` / the shape of `config.params`:
+ *   - `provider === 'cli'` (and CLI params) → CliNarratorProvider
+ *   - HTTP params with `httpUrl` set      → ChattydeerNarratorProvider
+ *   - otherwise (no config, or disabled)   → disabled placeholder provider
+ */
+export function createNarratorProviderFor(config: NarratorModelConfig | null): NarratorProvider {
+  if (!config) {
+    return createDisabledProvider()
+  }
+  if (config.provider === 'cli' && isCliParams(config.params)) {
+    return createCliProvider(config.name, config.params)
+  }
+  if (!isCliParams(config.params) && config.params.httpUrl) {
+    return createChattydeerProvider(config.name, config.params)
+  }
+  return createDisabledProvider()
+}
+
+/**
  * Resolve the active NarratorProvider from the DB session.
  *
  * Resolution order:
@@ -184,7 +205,7 @@ export function getActiveNarratorConfig(rawDb: InstanceType<typeof Database>): N
 export function resolveNarratorProvider(opts: {
   narratorModelId?: number
   modelName?: string
-} = {}): ChattydeerNarratorProvider {
+} = {}): NarratorProvider {
   const { rawDb } = getActiveSession()
 
   let config: NarratorModelConfig | null = null
@@ -197,11 +218,7 @@ export function resolveNarratorProvider(opts: {
     config = getActiveNarratorConfig(rawDb)
   }
 
-  if (!config) {
-    return createDisabledProvider()
-  }
-
-  return createChattydeerProvider(config.name, config.params)
+  return createNarratorProviderFor(config)
 }
 
 // ---------------------------------------------------------------------------
@@ -315,12 +332,7 @@ export function resolveGuideConfig(opts: {
 export function resolveGuideProvider(opts: {
   guideModelId?: number
   modelName?: string
-} = {}): ChattydeerNarratorProvider {
+} = {}): NarratorProvider {
   const config = resolveGuideConfig(opts)
-
-  if (!config) {
-    return createDisabledProvider()
-  }
-
-  return createChattydeerProvider(config.name, config.params)
+  return createNarratorProviderFor(config)
 }

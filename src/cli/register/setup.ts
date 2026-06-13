@@ -170,20 +170,28 @@ Examples:
     .option('--max-tokens <n>', 'max tokens per LLM call (for --narrator/--guide, default: 512)')
     .option('--temperature <n>', 'sampling temperature (for --narrator/--guide, default: 0.3)')
     .option('--activate', 'activate this model immediately (for --narrator/--guide)')
+    .option('--cli-command <tool>', 'with --provider cli: CLI AI tool to spawn (e.g. claude, codex, copilot) for --narrator/--guide')
+    .option('--cli-args <args>', 'extra fixed args inserted before the prompt, space-separated (for --provider cli)')
+    .option('--use-mcp', 'guide only: expose gitsema\'s MCP server to the CLI tool via --mcp-config (for --provider cli)')
     .action(async (
       name: string,
       opts: { globalName?: string; provider?: string; url?: string; key?: string; level?: string; setDefault?: boolean; setText?: boolean; setCode?: boolean; global?: boolean;
         prefixCode?: string; prefixText?: string; prefixQuery?: string; prefixOther?: string; prefixType?: string[]; extRole?: string[];
-        narrator?: boolean; guide?: boolean; httpUrl?: string; maxTokens?: string; temperature?: string; activate?: boolean },
+        narrator?: boolean; guide?: boolean; httpUrl?: string; maxTokens?: string; temperature?: string; activate?: boolean;
+        cliCommand?: string; cliArgs?: string; useMcp?: boolean },
     ) => {
       if (opts.narrator || opts.guide) {
         const kind = opts.narrator ? 'narrator' : 'guide'
         return modelsKindAddCommand(name, kind, {
-          httpUrl: opts.httpUrl ?? '',
+          httpUrl: opts.httpUrl,
           key: opts.key,
           maxTokens: opts.maxTokens,
           temperature: opts.temperature,
           activate: opts.activate,
+          provider: opts.provider,
+          cliCommand: opts.cliCommand,
+          cliArgs: opts.cliArgs,
+          useMcp: opts.useMcp,
         })
       }
       await modelsAddCommand(name, opts)

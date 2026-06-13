@@ -33,6 +33,7 @@ import {
   type ConfigScope,
 } from '../../core/config/configManager.js'
 import { ensureModelDownloadedAndOptimized } from '../../core/embedding/embedeer.js'
+import { isCliParams } from '../../core/narrator/types.js'
 
 // ---------------------------------------------------------------------------
 // Shared helper
@@ -607,26 +608,37 @@ export async function modelsKindListCommand(kind: NarratorKind, opts: ModelsKind
     console.log(`No ${kind} model configs found.`)
     console.log('')
     console.log(`Add one:  gitsema models add <name> --${kind} --http-url <url> [--key <token>]`)
+    console.log(`      or:  gitsema models add <name> --${kind} --provider cli --cli-command <tool> [--use-mcp]`)
     return
   }
 
-  console.log(`${'ID'.padEnd(4)}  ${'Name'.padEnd(30)}  ${'Provider'.padEnd(12)}  Active   HTTP URL`)
+  console.log(`${'ID'.padEnd(4)}  ${'Name'.padEnd(30)}  ${'Provider'.padEnd(12)}  Active   Endpoint`)
   console.log('-'.repeat(80))
   for (const c of configs) {
     const active = c.id === activeId ? '✓' : ' '
-    const url = c.params.httpUrl || '(not set)'
-    console.log(`${String(c.id).padEnd(4)}  ${c.name.padEnd(30)}  ${c.provider.padEnd(12)}  ${active.padEnd(7)}  ${url}`)
+    const endpoint = isCliParams(c.params)
+      ? `cli: ${c.params.cliCommand}${c.params.useMcp ? ' (--use-mcp)' : ''}`
+      : (c.params.httpUrl || '(not set)')
+    console.log(`${String(c.id).padEnd(4)}  ${c.name.padEnd(30)}  ${c.provider.padEnd(12)}  ${active.padEnd(7)}  ${endpoint}`)
   }
   console.log('')
   console.log(`${configs.length} ${kind} model(s). Active ID: ${activeId ?? '(none)'}`)
 }
 
 export interface ModelsKindAddOptions {
-  httpUrl: string
+  httpUrl?: string
   key?: string
   maxTokens?: string
   temperature?: string
   activate?: boolean
+  /** 'http' (default, OpenAI-compatible endpoint) | 'cli' (local CLI AI tool). */
+  provider?: string
+  /** Required when --provider cli: the executable to spawn (e.g. "claude", "codex", "copilot"). */
+  cliCommand?: string
+  /** Extra fixed args inserted before the prompt, space-separated. */
+  cliArgs?: string
+  /** Guide-only: expose gitsema's MCP server to the CLI tool. */
+  useMcp?: boolean
 }
 
 export async function modelsKindAddCommand(
@@ -635,28 +647,53 @@ export async function modelsKindAddCommand(
   opts: ModelsKindAddOptions,
 ): Promise<void> {
   validateModelName(name)
-  if (!opts.httpUrl) {
-    console.error(`Error: --http-url is required for ${kind} models`)
-    process.exit(1)
-  }
 
   const { rawDb, resolver } = await getNarratorDb()
 
-  const params = {
-    httpUrl: opts.httpUrl,
-    ...(opts.key ? { apiKey: opts.key } : {}),
-    ...(opts.maxTokens ? { maxTokens: parseInt(opts.maxTokens, 10) } : {}),
-    ...(opts.temperature ? { temperature: parseFloat(opts.temperature) } : {}),
-  }
-
   const saveFn = kind === 'narrator' ? resolver.saveNarratorConfig : resolver.saveGuideConfig
   const activateFn = kind === 'narrator' ? resolver.setActiveNarratorConfig : resolver.setActiveGuideConfig
-  const id = saveFn(rawDb, name.trim(), DEFAULT_NARRATOR_PROVIDER, params)
 
-  console.log(`Saved ${kind} model config '${name}' (id=${id}).`)
-  console.log(`  Provider:  ${DEFAULT_NARRATOR_PROVIDER}`)
-  console.log(`  HTTP URL:  ${opts.httpUrl}`)
-  if (opts.key) console.log(`  API key:   (set)`)
+  let id: number
+  if (opts.provider === 'cli') {
+    if (!opts.cliCommand) {
+      console.error(`Error: --cli-command is required when --provider cli is set`)
+      process.exit(1)
+    }
+
+    const params = {
+      cliCommand: opts.cliCommand,
+      ...(opts.cliArgs ? { cliArgs: opts.cliArgs.split(/\s+/).filter(Boolean) } : {}),
+      ...(opts.useMcp ? { useMcp: true } : {}),
+      ...(opts.maxTokens ? { maxTokens: parseInt(opts.maxTokens, 10) } : {}),
+      ...(opts.temperature ? { temperature: parseFloat(opts.temperature) } : {}),
+    }
+
+    id = saveFn(rawDb, name.trim(), 'cli', params)
+
+    console.log(`Saved ${kind} model config '${name}' (id=${id}).`)
+    console.log(`  Provider:    cli`)
+    console.log(`  CLI command: ${opts.cliCommand}${params.cliArgs ? ` ${params.cliArgs.join(' ')}` : ''}`)
+    if (opts.useMcp) console.log(`  MCP:         enabled (gitsema tools exposed via --mcp-config)`)
+  } else {
+    if (!opts.httpUrl) {
+      console.error(`Error: --http-url is required for ${kind} models (or pass --provider cli --cli-command <tool>)`)
+      process.exit(1)
+    }
+
+    const params = {
+      httpUrl: opts.httpUrl,
+      ...(opts.key ? { apiKey: opts.key } : {}),
+      ...(opts.maxTokens ? { maxTokens: parseInt(opts.maxTokens, 10) } : {}),
+      ...(opts.temperature ? { temperature: parseFloat(opts.temperature) } : {}),
+    }
+
+    id = saveFn(rawDb, name.trim(), DEFAULT_NARRATOR_PROVIDER, params)
+
+    console.log(`Saved ${kind} model config '${name}' (id=${id}).`)
+    console.log(`  Provider:  ${DEFAULT_NARRATOR_PROVIDER}`)
+    console.log(`  HTTP URL:  ${opts.httpUrl}`)
+    if (opts.key) console.log(`  API key:   (set)`)
+  }
 
   if (opts.activate) {
     activateFn(rawDb, id)

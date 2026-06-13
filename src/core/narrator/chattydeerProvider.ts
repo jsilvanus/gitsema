@@ -11,7 +11,7 @@
  * `narrate()` returns immediately with a placeholder — no network call is made.
  */
 
-import type { NarratorProvider, NarrateRequest, NarrateResponse, NarratorModelParams } from './types.js'
+import type { NarratorProvider, NarrateRequest, NarrateResponse, HttpNarratorParams } from './types.js'
 import { redact } from './redact.js'
 import { withAudit } from './audit.js'
 import { logger } from '../../utils/logger.js'
@@ -50,7 +50,7 @@ async function getExplainerClass(): Promise<typeof _explainerModule> {
 
 function disabledResponse(redactedFields: string[]): NarrateResponse {
   return {
-    prose: '[LLM narrator disabled — configure a narrator model via: gitsema models add <name> --narrator --http-url <url> --activate]',
+    prose: '[LLM narrator disabled — configure a narrator model via: gitsema models add <name> --narrator --http-url <url> --activate (or --provider cli --cli-command <tool>)]',
     tokensUsed: 0,
     redactedFields,
     llmEnabled: false,
@@ -70,12 +70,12 @@ function disabledResponse(redactedFields: string[]): NarrateResponse {
 export interface ChattydeerProviderOptions {
   modelName: string
   /** Narrator model params from the DB-backed config. Undefined → disabled. */
-  params?: NarratorModelParams
+  params?: HttpNarratorParams
 }
 
 export class ChattydeerNarratorProvider implements NarratorProvider {
   readonly modelName: string
-  private readonly _params: NarratorModelParams | undefined
+  private readonly _params: HttpNarratorParams | undefined
   private readonly _enabled: boolean
 
   constructor(opts: ChattydeerProviderOptions) {
@@ -164,7 +164,7 @@ export class ChattydeerNarratorProvider implements NarratorProvider {
 // HTTP generate function — calls an OpenAI-compatible chat completions API
 // ---------------------------------------------------------------------------
 
-function buildHttpGenerateFn(params: NarratorModelParams) {
+function buildHttpGenerateFn(params: HttpNarratorParams) {
   const { httpUrl, apiKey, temperature = 0.3 } = params
 
   return async (prompt: string, opts: { max_new_tokens?: number } = {}): Promise<{ text: string; raw: null }> => {
@@ -206,6 +206,6 @@ export function createDisabledProvider(name = 'narrator'): ChattydeerNarratorPro
 /**
  * Create a provider from narrator model params.
  */
-export function createChattydeerProvider(name: string, params: NarratorModelParams): ChattydeerNarratorProvider {
+export function createChattydeerProvider(name: string, params: HttpNarratorParams): ChattydeerNarratorProvider {
   return new ChattydeerNarratorProvider({ modelName: name, params })
 }
