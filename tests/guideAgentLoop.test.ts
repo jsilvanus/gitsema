@@ -28,6 +28,16 @@ vi.mock('@jsilvanus/chattydeer', () => ({
 }))
 
 // ---------------------------------------------------------------------------
+// node:child_process mock (for CLI-based guide providers)
+// ---------------------------------------------------------------------------
+
+const fakeExecFile = vi.fn()
+
+vi.mock('node:child_process', () => ({
+  execFile: (...args: unknown[]) => fakeExecFile(...args),
+}))
+
+// ---------------------------------------------------------------------------
 // Test DB session
 // ---------------------------------------------------------------------------
 
@@ -38,6 +48,7 @@ beforeEach(() => {
   fakeRunAgentLoop.mockReset()
   fakeCreateAgentSession.mockReset()
   fakeCreateChatProvider.mockReset()
+  fakeExecFile.mockReset()
 })
 
 afterEach(() => {
@@ -227,6 +238,73 @@ describe('runGuide — agent loop (model configured)', () => {
 
       expect(result.toolCallsUsed).toEqual(['repo_stats'])
       expect(result.answer).toBe('done')
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// (c2) CLI-based guide provider — spawns the configured CLI tool, no chattydeer
+// ---------------------------------------------------------------------------
+
+describe('runGuide — CLI provider', () => {
+  it('spawns the CLI tool and returns its prose without using chattydeer', async () => {
+    await withDbSession(session, async () => {
+      const id = saveGuideConfig(session.rawDb, 'cli-guide', 'cli', {
+        cliCommand: 'claude',
+      })
+      setActiveGuideConfig(session.rawDb, id)
+
+      fakeExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+        cb(null, JSON.stringify({ result: 'CLI answer.', session_id: 'sess-abc' }), '')
+      })
+
+      const { runGuide } = await import('../src/cli/commands/guide.js')
+      const result = await runGuide('What changed recently?', { includeContext: false })
+
+      expect(result.llmEnabled).toBe(true)
+      expect(result.answer).toBe('CLI answer.')
+
+      expect(fakeExecFile).toHaveBeenCalledTimes(1)
+      const [command, args] = fakeExecFile.mock.calls[0]
+      expect(command).toBe('claude')
+      expect(args).toEqual(['-p', expect.stringContaining('What changed recently?'), '--output-format', 'json'])
+
+      // chattydeer is not used for CLI providers
+      expect(fakeCreateChatProvider).not.toHaveBeenCalled()
+      expect(fakeCreateAgentSession).not.toHaveBeenCalled()
+      expect(fakeRunAgentLoop).not.toHaveBeenCalled()
+    })
+  })
+
+  it('passes --resume with the session id from a previous turn on the next turn', async () => {
+    await withDbSession(session, async () => {
+      const id = saveGuideConfig(session.rawDb, 'cli-guide-2', 'cli', {
+        cliCommand: 'claude',
+      })
+      setActiveGuideConfig(session.rawDb, id)
+
+      fakeExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+        cb(null, JSON.stringify({ result: 'first answer', session_id: 'sess-123' }), '')
+      })
+
+      const { runGuide, createGuideSession, destroyGuideSession } = await import('../src/cli/commands/guide.js')
+      const config = await import('../src/core/narrator/resolveNarrator.js').then((m) => m.resolveGuideConfig({}))
+      const guideSession = await createGuideSession(config!, 'system prompt')
+
+      const first = await runGuide('first question', { includeContext: false, session: guideSession })
+      expect(first.answer).toBe('first answer')
+
+      fakeExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+        cb(null, JSON.stringify({ result: 'second answer', session_id: 'sess-123' }), '')
+      })
+
+      const second = await runGuide('second question', { includeContext: false, session: guideSession })
+      expect(second.answer).toBe('second answer')
+
+      const [, secondArgs] = fakeExecFile.mock.calls[1]
+      expect(secondArgs).toEqual(expect.arrayContaining(['--resume', 'sess-123']))
+
+      await destroyGuideSession(guideSession)
     })
   })
 })

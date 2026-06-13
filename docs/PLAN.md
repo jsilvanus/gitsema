@@ -110,6 +110,7 @@
 |   [Phase 92 — review7 Improvement Bundle *(completed, 2026-04-09)*](#phase-92-—-review7-improvement-bundle-completed-2026-04-09) | 3101 |
 |   [Phase 93 — Time filter semantics & pagination stability](#phase-93-—-time-filter-semantics-pagination-stability) | 3143 |
 |   [Phase 95 — Flag unification (review8 §8.6/§8.9)](#phase-95-—-flag-unification-review8-§86§89) | 3232 |
+|   [Phase 98 — CLI-based AI tool backends for narrator/guide](#phase-98-—-cli-based-ai-tool-backends-for-narratorguide) | 3333 |
 | [Long-Term Investments](#long-term-investments) | 3173 |
 | [Non-goals for now (revisited later)](#non-goals-for-now-revisited-later) | 3186 |
 
@@ -3327,6 +3328,70 @@ for embedding, narrator, and guide.
 - Per-command `--narrate` flag using `interpretations.ts` entries (beyond `narrate`/`explain`/result-narrators).
 - `gitsema models add --provider ollama` shortcut and a custom Ollama embedding base-URL option.
 - Skill guidance on fine-tuning indexing (chunkers/models/extension filters) per project type.
+
+**Status:** ✅ complete.
+
+### Phase 98 — CLI-based AI tool backends for narrator/guide
+
+**Goal:** Let `gitsema narrate`/`explain`/`guide` use a locally-installed, already-authenticated
+CLI AI coding agent (Claude Code, Codex CLI, GitHub Copilot CLI, etc.) as the LLM backend,
+as an alternative to the existing HTTP/chattydeer path.
+
+**Implemented scope:**
+
+- **`src/core/narrator/types.ts`**: `NarratorModelParams` is now a discriminated union of
+  `HttpNarratorParams` (existing `httpUrl`/`apiKey`/`maxTokens`/`temperature`) and
+  `CliNarratorParams` (`cliCommand`, `cliArgs?`, `useMcp?`, `timeoutMs?`, `maxTokens?`,
+  `temperature?`), with an `isCliParams()` type guard. `params_json` storage is unchanged
+  (no schema migration needed).
+- **New `src/core/narrator/cliAdapters.ts`**: per-tool argv builders / output parsers
+  behind a small `CliAdapter` interface — `claude` (full support: `-p`/`--output-format
+  json`, `--mcp-config`/`--allowedTools mcp__gitsema__*` when `useMcp`, `--resume <id>`
+  for session continuity, JSON `{result, session_id}` parsing), `codex` (`codex exec
+  "<prompt>"`, best-effort/experimental — no MCP/session support), `copilot`/`gh`
+  (`copilot explain "<prompt>"`, one-shot only, no MCP/session support), and a generic
+  fallback (`<cliCommand> [cliArgs...] "<prompt>"`, raw stdout). `getCliAdapter()` resolves
+  by basename so full paths to the executable work too.
+- **New `src/core/narrator/cliProvider.ts`**: `CliNarratorProvider implements
+  NarratorProvider`, mirroring `ChattydeerNarratorProvider`'s safe-by-default /
+  redaction / audit pattern. Redacts system+user prompts, combines them into one prompt,
+  spawns the configured CLI tool via `execFile` (`runCli()`, exported, default 60s
+  timeout), and never throws — spawn errors / non-zero exit return a graceful
+  `(narrator error: ...)` response. `tokensUsed` is always `0`.
+- **New `src/core/narrator/cliMcpConfig.ts`**: `writeGitsemaMcpConfig(repoRoot)` writes a
+  temporary MCP config file exposing gitsema's own `tools mcp` server (re-using the
+  running gitsema binary and cwd), for guide's `--use-mcp` mode.
+- **`src/core/narrator/resolveNarrator.ts`**: new `createNarratorProviderFor(config)`
+  factory dispatches on `config.provider`/`config.params` shape — `'cli'` + CLI params →
+  `CliNarratorProvider`, HTTP params with `httpUrl` → `ChattydeerNarratorProvider`,
+  otherwise the disabled placeholder. `resolveNarratorProvider()`/`resolveGuideProvider()`
+  now return the `NarratorProvider` interface (widened from
+  `ChattydeerNarratorProvider`) and delegate to this factory.
+- **`gitsema models add <name> --narrator|--guide`** (`src/cli/commands/models.ts`,
+  `src/cli/register/setup.ts`): new `--provider cli --cli-command <tool> [--cli-args
+  "<args>"] [--use-mcp]` flags save `CliNarratorParams` with `provider = 'cli'`;
+  `--http-url` remains the default path (`provider = 'chattydeer'`). `models list` shows
+  `cli: <cliCommand> [(--use-mcp)]` instead of an HTTP URL for CLI-backed configs.
+- **`gitsema guide`** (`src/cli/commands/guide.ts`): `GuideSession` is now a union of
+  `ChattydeerGuideSession` (existing `runAgentLoop` path, extracted into
+  `runChattydeerGuideTurn()`) and `CliGuideSession` (`{ config, mcpConfigPath?,
+  sessionId? }`). For `provider === 'cli'`, `createGuideSession()` writes the gitsema MCP
+  config (if `useMcp`) and `runCliGuideTurn()` combines the system+user prompt, calls the
+  adapter's `buildGuideArgs()` (passing `mcpConfigPath`/`resumeSessionId`), spawns via
+  `runCli()`, and stores the returned `session_id` on the session for the next turn
+  (`-i/--interactive`) — replacing chattydeer's `agentSession.append/history` for CLI
+  providers. gitsema does **not** proxy tool calls for CLI providers; the CLI tool's own
+  agent loop talks to `gitsema tools mcp` directly via MCP.
+- **Tests**: `tests/cliAdapters.test.ts` (pure argv/parseOutput unit tests per adapter),
+  `tests/cliNarratorProvider.test.ts` (mocked `node:child_process`: disabled placeholder,
+  argv construction, redaction before spawn, graceful error on spawn failure, generic
+  adapter fallback), `tests/narratorCliModels.test.ts` (`models add --provider cli`
+  round-trips through `embed_config`/`params_json`, `models list` display,
+  `--cli-command` validation), and new cases in `tests/guideAgentLoop.test.ts` (CLI guide
+  turn spawns the configured tool and skips chattydeer entirely; `--resume <id>` passed
+  on the second turn of an interactive session).
+
+**Tests:** `pnpm build && pnpm test` — all 953 tests pass.
 
 **Status:** ✅ complete.
 

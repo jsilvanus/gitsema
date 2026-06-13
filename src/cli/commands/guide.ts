@@ -157,7 +157,7 @@ function isGuideConfigEnabled(config: NarratorModelConfig | null): boolean {
  * chattydeer providers a chat provider + agent session is created. Caller is
  * responsible for calling `destroyGuideSession()` when done.
  */
-async function createGuideSession(config: NarratorModelConfig, systemPrompt: string): Promise<GuideSession> {
+export async function createGuideSession(config: NarratorModelConfig, systemPrompt: string): Promise<GuideSession> {
   if (config.provider === 'cli' && isCliParams(config.params)) {
     const mcpConfigPath = config.params.useMcp ? writeGitsemaMcpConfig(process.cwd()) : undefined
     return { kind: 'cli', config, mcpConfigPath }
@@ -176,7 +176,7 @@ async function createGuideSession(config: NarratorModelConfig, systemPrompt: str
 }
 
 /** Release any resources held by a guide session. No-op for CLI sessions. */
-async function destroyGuideSession(session: GuideSession): Promise<void> {
+export async function destroyGuideSession(session: GuideSession): Promise<void> {
   if (session.kind === 'chattydeer') {
     await session.provider.destroy()
   }
