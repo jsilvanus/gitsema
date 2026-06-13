@@ -45,7 +45,7 @@ export interface NarratorProvider {
 // Narrator model config (stored in embed_config with kind='narrator')
 // ---------------------------------------------------------------------------
 
-export interface NarratorModelParams {
+export interface HttpNarratorParams {
   /** OpenAI-compatible base URL for the LLM endpoint. Required. */
   httpUrl: string
   /** Bearer token / API key. Optional. */
@@ -54,6 +54,28 @@ export interface NarratorModelParams {
   maxTokens?: number
   /** Temperature (0 = deterministic, default 0.3). */
   temperature?: number
+}
+
+export interface CliNarratorParams {
+  /** Executable to spawn, e.g. "claude", "copilot", "codex". */
+  cliCommand: string
+  /** Extra fixed args inserted before the prompt, e.g. ["--model", "opus"]. */
+  cliArgs?: string[]
+  /** Guide mode only: also expose gitsema's MCP server to the CLI tool. */
+  useMcp?: boolean
+  /** Subprocess timeout in milliseconds (default 60000). */
+  timeoutMs?: number
+  /** Max tokens per call, where the underlying tool supports it. */
+  maxTokens?: number
+  /** Temperature, where the underlying tool supports it. */
+  temperature?: number
+}
+
+export type NarratorModelParams = HttpNarratorParams | CliNarratorParams
+
+/** True when params describe a CLI-subprocess-backed provider. */
+export function isCliParams(p: NarratorModelParams): p is CliNarratorParams {
+  return 'cliCommand' in p
 }
 
 export interface NarratorModelConfig {

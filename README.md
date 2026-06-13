@@ -213,7 +213,7 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--narrate` | off | Call the configured LLM narrator and return prose (default: return evidence only) |
 | `--evidence-only` | on | Return raw commit evidence without calling the LLM (this is the default) |
 
-Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`.
+Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below).
 
 #### `gitsema guide [question] [options]`
 
@@ -247,7 +247,7 @@ All outbound content (prompts, tool results) is passed through the same secret/P
 | `--no-context` | Skip gathering git context (faster but less accurate) |
 | `-i, --interactive` | Start an interactive REPL session (one question per line, multi-turn — the agent session is reused across turns) |
 
-Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`.
+Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`, or with a local CLI AI tool: `gitsema models add <name> --guide --provider cli --cli-command <tool> [--use-mcp] --activate` (see "CLI-based AI tool backends" below).
 
 **Ollama:** Ollama's OpenAI-compatible endpoint works for `narrate`/`explain`/`guide` with no API key. Use `--http-url http://localhost:11434` (no trailing `/v1` — both the narrator and `@jsilvanus/chattydeer` append `/v1/chat/completions` themselves; a trailing `/v1` produces a broken `/v1/v1/...` path for `guide`). The agentic `guide` loop needs a tool-calling-capable model (e.g. `llama3.1`, `qwen2.5`):
 
@@ -256,6 +256,31 @@ ollama pull llama3.1
 gitsema models add ol-guide --guide --http-url http://localhost:11434 --activate
 gitsema guide "what changed recently?"
 ```
+
+#### CLI-based AI tool backends
+
+Instead of an HTTP endpoint, `narrate`/`explain`/`guide` can shell out to a local CLI AI coding agent (Claude Code, Codex CLI, GitHub Copilot CLI, or any other tool already installed and authenticated on your machine):
+
+```bash
+# One-shot narration via the local `claude` CLI
+gitsema models add claude-cli --narrator --provider cli --cli-command claude --activate
+gitsema narrate --narrate
+
+# Agentic guide, with gitsema's own MCP server exposed to the CLI tool's agent loop
+gitsema models add claude-cli --guide --provider cli --cli-command claude --use-mcp --activate
+gitsema guide "what changed recently?"
+```
+
+| Flag | Description |
+|---|---|
+| `--provider cli` | Use a local CLI tool instead of an HTTP endpoint |
+| `--cli-command <tool>` | Executable to spawn (e.g. `claude`, `codex`, `copilot`/`gh`); required with `--provider cli` |
+| `--cli-args "<args>"` | Extra fixed arguments inserted before the prompt (space-separated) |
+| `--use-mcp` | Guide only: write a temporary MCP config exposing gitsema's `tools mcp` server and pass `--mcp-config`/`--allowedTools mcp__gitsema__*`, so the CLI tool's own agent loop can call gitsema's analysis tools directly |
+
+For `narrate`/`explain`, the system+user prompt is combined, redacted, and passed one-shot (e.g. `claude -p "<prompt>" --output-format json`); the result is parsed from stdout. For `guide -i` (interactive, multi-turn), conversational context is preserved via the CLI tool's session-resume flag (e.g. Claude Code's `--resume <session-id>`), extracted from the previous turn's output.
+
+Built-in adapters: `claude` (full support, including `--mcp-config` and `--resume`), `codex` (`codex exec`, best-effort/experimental MCP support), `copilot`/`gh` (`copilot explain`, one-shot only — no MCP/session support). Any other `--cli-command` falls back to a generic adapter (`<tool> [cliArgs...] "<prompt>"`, raw stdout as prose).
 
 #### `gitsema policy-check [options]`
 

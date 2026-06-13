@@ -22,7 +22,10 @@ import { redactAll } from '../../core/narrator/redact.js'
 import { withAudit } from '../../core/narrator/audit.js'
 import { GUIDE_TOOL_DEFINITIONS, executeTool, repoStatsData, recentCommitsData } from '../../core/narrator/guideTools.js'
 import { buildGuideToolCatalog } from '../../core/narrator/interpretations.js'
-import type { NarratorModelConfig } from '../../core/narrator/types.js'
+import { isCliParams, type NarratorModelConfig } from '../../core/narrator/types.js'
+import { getCliAdapter } from '../../core/narrator/cliAdapters.js'
+import { runCli } from '../../core/narrator/cliProvider.js'
+import { writeGitsemaMcpConfig } from '../../core/narrator/cliMcpConfig.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -116,25 +119,67 @@ async function getChattydeerModule(): Promise<ChattydeerModule> {
   return _chattydeerModule
 }
 
-/** A reusable agent session across multiple turns (interactive mode). */
-export interface GuideSession {
+/** A reusable agent session across multiple turns (interactive mode), backed by chattydeer. */
+export interface ChattydeerGuideSession {
+  kind: 'chattydeer'
   agentSession: ReturnType<ChattydeerModule['createAgentSession']>
   provider: ReturnType<ChattydeerModule['createChatProvider']>
   config: NarratorModelConfig
 }
 
 /**
- * Create a chattydeer agent session + provider from a resolved guide model
- * config. Caller is responsible for calling `provider.destroy()` when done.
+ * A reusable session for a CLI-based guide provider. Conversational context
+ * across turns is delegated to the CLI tool's own session-resume mechanism
+ * (e.g. Claude Code's `--resume <session-id>`), tracked via `sessionId`.
  */
-async function createGuideSession(config: NarratorModelConfig, systemPrompt: string): Promise<GuideSession> {
+export interface CliGuideSession {
+  kind: 'cli'
+  config: NarratorModelConfig
+  /** Path to a temporary MCP config exposing gitsema's tools, if useMcp is set. */
+  mcpConfigPath?: string
+  /** Session id returned by the CLI tool, used to resume on the next turn. */
+  sessionId?: string
+}
+
+/** A reusable agent session across multiple turns (interactive mode). */
+export type GuideSession = ChattydeerGuideSession | CliGuideSession
+
+/** True when `config` describes an enabled (non-disabled) guide/narrator provider. */
+function isGuideConfigEnabled(config: NarratorModelConfig | null): boolean {
+  if (!config) return false
+  if (isCliParams(config.params)) return !!config.params.cliCommand
+  return !!config.params.httpUrl
+}
+
+/**
+ * Create a guide session from a resolved guide model config. For CLI
+ * providers no subprocess is started yet (one is spawned per turn); for
+ * chattydeer providers a chat provider + agent session is created. Caller is
+ * responsible for calling `destroyGuideSession()` when done.
+ */
+export async function createGuideSession(config: NarratorModelConfig, systemPrompt: string): Promise<GuideSession> {
+  if (config.provider === 'cli' && isCliParams(config.params)) {
+    const mcpConfigPath = config.params.useMcp ? writeGitsemaMcpConfig(process.cwd()) : undefined
+    return { kind: 'cli', config, mcpConfigPath }
+  }
+
   const mod = await getChattydeerModule()
   const params = config.params
+  if (isCliParams(params)) {
+    throw new Error(`guide model '${config.name}' has cli params but provider is '${config.provider}'`)
+  }
   const provider = mod.createChatProvider(params.httpUrl, config.name, params.apiKey, {
     timeoutMs: 30_000,
   })
   const agentSession = mod.createAgentSession({ systemPrompt })
-  return { agentSession, provider, config }
+  return { kind: 'chattydeer', agentSession, provider, config }
+}
+
+/** Release any resources held by a guide session. No-op for CLI sessions. */
+export async function destroyGuideSession(session: GuideSession): Promise<void> {
+  if (session.kind === 'chattydeer') {
+    await session.provider.destroy()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +197,99 @@ export interface RunGuideResult {
 }
 
 /**
+ * Run a single turn through a chattydeer-backed guide session, using the
+ * in-process `runAgentLoop` + `GUIDE_TOOL_DEFINITIONS` agentic tool loop.
+ */
+async function runChattydeerGuideTurn(
+  userPrompt: string,
+  session: ChattydeerGuideSession,
+  includeContext: boolean,
+  firedPatterns: string[],
+): Promise<RunGuideResult> {
+  session.agentSession.append({ role: 'user', content: userPrompt })
+
+  const mod = await getChattydeerModule()
+  const params = session.config.params
+  if (isCliParams(params)) {
+    throw new Error(`guide model '${session.config.name}' has cli params but a chattydeer session`)
+  }
+
+  const toolCallsUsed: string[] = []
+
+  const result = await withAudit('narrate', 'chattydeer', session.config.name, firedPatterns, async () => {
+    return mod.runAgentLoop(session.agentSession, {
+      provider: session.provider,
+      tools: GUIDE_TOOL_DEFINITIONS,
+      executeTool: async (call) => {
+        toolCallsUsed.push(call.name)
+        return executeTool(call)
+      },
+      maxRoundtrips: 5,
+      maxTokens: params.maxTokens ?? 1024,
+      temperature: params.temperature ?? 0.3,
+      redactContent: (text: string) => redactAll([text]).texts[0],
+    })
+  })
+
+  return {
+    answer: result.answer,
+    contextUsed: includeContext,
+    llmEnabled: true,
+    roundtrips: result.roundtrips,
+    toolCallsUsed,
+  }
+}
+
+/**
+ * Run a single turn through a CLI-based guide provider (e.g. Claude Code,
+ * Codex, Copilot CLI). The system prompt + user prompt are combined into a
+ * single prompt and handed to the CLI tool; if `useMcp` is set, the CLI tool
+ * is given `--mcp-config` pointing at gitsema's own MCP server so its own
+ * agent loop can call gitsema's tools directly. Multi-turn context is
+ * preserved via the CLI tool's session-resume mechanism (`session.sessionId`).
+ */
+async function runCliGuideTurn(
+  userPrompt: string,
+  session: CliGuideSession,
+  includeContext: boolean,
+  firedPatterns: string[],
+): Promise<RunGuideResult> {
+  const { config } = session
+  const params = config.params
+  if (!isCliParams(params)) {
+    throw new Error(`guide model '${config.name}' has a cli session but non-cli params`)
+  }
+
+  const adapter = getCliAdapter(params.cliCommand)
+  const prompt = `${buildSystemPrompt()}\n\n---\n\n${userPrompt}`
+  const args = adapter.buildGuideArgs(prompt, params, {
+    mcpConfigPath: session.mcpConfigPath,
+    resumeSessionId: session.sessionId,
+  })
+
+  const result = await withAudit('narrate', 'cli', config.name, firedPatterns, async () => {
+    const stdout = await runCli(params.cliCommand, args, params.timeoutMs ?? 60_000)
+    return adapter.parseOutput(stdout)
+  })
+
+  if (result.sessionId) {
+    session.sessionId = result.sessionId
+  }
+
+  return {
+    answer: result.prose,
+    contextUsed: includeContext,
+    llmEnabled: true,
+  }
+}
+
+/**
  * Run a single guide turn.
  *
- * When `session` is provided, the existing agent session/provider is reused
- * (multi-turn interactive mode) and the caller owns its lifecycle (no
- * `provider.destroy()` is called here). When `session` is omitted, a
- * single-shot session is created and destroyed within this call.
+ * When `session` is provided, the existing session is reused (multi-turn
+ * interactive mode) and the caller owns its lifecycle (no resources are
+ * released here). When `session` is omitted, a single-shot session is
+ * created and released within this call.
  */
 export async function runGuide(question: string, opts: {
   guideModelId?: number
@@ -179,8 +311,8 @@ export async function runGuide(question: string, opts: {
     config = resolveGuideConfig({ guideModelId: opts.guideModelId, modelName: opts.model })
   }
 
-  // Safe-by-default: no model configured — no network access.
-  if (!config || !config.params?.httpUrl) {
+  // Safe-by-default: no model configured — no network access / subprocess.
+  if (!isGuideConfigEnabled(config)) {
     const answer = [
       '# Repository Context',
       '',
@@ -190,7 +322,8 @@ export async function runGuide(question: string, opts: {
       '',
       `**Question:** ${question}`,
       '',
-      '> No guide or narrator model configured. Run `gitsema models add <name> --guide --http-url <url> --activate` to enable LLM answers.',
+      '> No guide or narrator model configured. Run `gitsema models add <name> --guide --http-url <url> --activate`',
+      '> or `gitsema models add <name> --guide --provider cli --cli-command <tool> --activate` to enable LLM answers.',
     ].join('\n')
     return { answer, contextUsed: includeContext, llmEnabled: false }
   }
@@ -210,39 +343,14 @@ export async function runGuide(question: string, opts: {
 
   const ownSession = !session
   if (!session) {
-    session = await createGuideSession(config, buildSystemPrompt())
+    session = await createGuideSession(config!, buildSystemPrompt())
   }
 
   try {
-    session.agentSession.append({ role: 'user', content: userPrompt })
-
-    const mod = await getChattydeerModule()
-    const params = config.params
-
-    const toolCallsUsed: string[] = []
-
-    const result = await withAudit('narrate', 'chattydeer', config.name, firedPatterns, async () => {
-      return mod.runAgentLoop(session!.agentSession, {
-        provider: session!.provider,
-        tools: GUIDE_TOOL_DEFINITIONS,
-        executeTool: async (call) => {
-          toolCallsUsed.push(call.name)
-          return executeTool(call)
-        },
-        maxRoundtrips: 5,
-        maxTokens: params.maxTokens ?? 1024,
-        temperature: params.temperature ?? 0.3,
-        redactContent: (text: string) => redactAll([text]).texts[0],
-      })
-    })
-
-    return {
-      answer: result.answer,
-      contextUsed: includeContext,
-      llmEnabled: true,
-      roundtrips: result.roundtrips,
-      toolCallsUsed,
+    if (session.kind === 'cli') {
+      return await runCliGuideTurn(userPrompt, session, includeContext, firedPatterns)
     }
+    return await runChattydeerGuideTurn(userPrompt, session, includeContext, firedPatterns)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     logger.error(`[guide] agent loop failed: ${msg}`)
@@ -255,7 +363,7 @@ export async function runGuide(question: string, opts: {
     }
   } finally {
     if (ownSession && session) {
-      await session.provider.destroy()
+      await destroyGuideSession(session)
     }
   }
 }
@@ -286,8 +394,8 @@ export async function guideCommand(
     // turn if a model is configured (safe-by-default if not).
     const config = resolveGuideConfig({ guideModelId, modelName: opts.model })
     let session: GuideSession | undefined
-    if (config && config.params?.httpUrl) {
-      session = await createGuideSession(config, buildSystemPrompt())
+    if (isGuideConfigEnabled(config)) {
+      session = await createGuideSession(config!, buildSystemPrompt())
     }
 
     rl.prompt()
@@ -303,7 +411,7 @@ export async function guideCommand(
     })
     rl.on('close', async () => {
       if (session) {
-        await session.provider.destroy()
+        await destroyGuideSession(session)
       }
       process.exit(0)
     })
@@ -321,7 +429,8 @@ export async function guideCommand(
   const { answer, llmEnabled } = await runGuide(q, { guideModelId, model: opts.model, includeContext })
   console.log(answer)
   if (!llmEnabled) {
-    console.error('\n(No LLM model configured — run `gitsema models add <name> --guide --http-url <url> --activate` to enable.)')
+    console.error('\n(No LLM model configured — run `gitsema models add <name> --guide --http-url <url> --activate`')
+    console.error(' or `gitsema models add <name> --guide --provider cli --cli-command <tool> --activate` to enable.)')
   }
 }
 
