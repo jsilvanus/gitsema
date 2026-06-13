@@ -68,7 +68,9 @@ function replaceBlock(content, block) {
 
 export function applyToFile(target, block) {
   const content = readFileSync(target, 'utf8')
-  return replaceBlock(content, block)
+  const usesCrlf = content.includes('\r\n')
+  const normalizedBlock = usesCrlf ? block.replace(/\r?\n/g, '\r\n') : block.replace(/\r\n/g, '\n')
+  return replaceBlock(content, normalizedBlock)
 }
 
 function main() {
