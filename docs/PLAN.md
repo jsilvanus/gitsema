@@ -3269,6 +3269,67 @@ Also fixed in this pass: `getActiveGuideConfig`/`resolveGuideConfig` previously 
 
 **Status:** ✅ complete — agentic `guide` loop wired with 5 of 8 contract tools (the remaining 3 are TODO, see above).
 
+### Phase 97 — Full-toolset guide, tool interpretation registry, skill generation, Ollama docs
+
+**Goal:** Wire the full ~36-capability gitsema toolset into `gitsema guide`'s agentic loop
+(closing the Phase 96 TODOs), introduce a single source of truth for how to interpret
+each tool's output, generate the agent-facing skill from it, and verify/document Ollama
+for embedding, narrator, and guide.
+
+**Implemented scope:**
+
+- **`src/core/narrator/guideTools.ts` restructured** into a single `GUIDE_TOOLS: Record<string, GuideToolEntry>`
+  registry (`{ definition, category, needsIndex, run }`), deriving `GUIDE_TOOL_DEFINITIONS`
+  and `executeTool` (map lookup, capped JSON, never throws) from it. Wires all ~36 capabilities
+  — the same set exposed as MCP tools — across categories: repo, search, history, branch,
+  ownership, quality, diff, clusters, workflow, admin (including the Phase 96 TODOs
+  `file_evolution`, `concept_evolution`, `branch_summary`, plus `merge_audit`/`merge_preview`,
+  `author`/`experts`/`ownership`/`contributor_profile`, `impact`/`dead_concepts`/`debt_score`/
+  `doc_gap`/`security_scan`, `semantic_diff`/`semantic_blame`, `clusters`/`cluster_diff`/
+  `cluster_timeline`, `triage`/`workflow_run`/`policy_check`/`eval`, and the admin `index` tool).
+  Shared helpers: `requireIndex()`, `embedFor()`, `toCappedJson()`, `errorResult()`, arg coercers.
+- **New `src/core/narrator/interpretations.ts`** — single source of truth for how to read
+  each capability's output (`TOOL_INTERPRETATIONS: Record<string, ToolInterpretation>`,
+  one entry per capability + `concept_lifecycle`). Exposes `buildNarratorSystemPrompt(name)`
+  (shared persona + per-tool interpretation) and `buildGuideToolCatalog()` (compact
+  per-tool catalog grouped by category).
+- **`gitsema guide`** (`src/cli/commands/guide.ts`): system prompt rewritten to be built
+  dynamically (role/goal, tool-use strategy, index-gating fallback, citation rules, plus
+  the embedded `buildGuideToolCatalog()`); deduped `gatherContext()` to reuse
+  `repoStatsData()`/`recentCommitsData()` from `guideTools.ts`.
+- **Narrator prompts** (`src/core/narrator/narrator.ts` `runNarrate`/`runExplain`/
+  `summariseBatch`, and all 11 `narrate*` functions in `src/core/llm/narrator.ts` via
+  `callLlm`'s new optional `systemPrompt` parameter) now use
+  `buildNarratorSystemPrompt('<tool>')` instead of hardcoded persona strings.
+- **Skill generation**: `scripts/gen-skill.mjs` (`pnpm gen:skill`) regenerates the
+  "Interpreting gitsema tool results" section of `skill/gitsema-ai-assistant.md` (and its
+  `.github/skills/gitsema.md` mirror) from `TOOL_INTERPRETATIONS`, between
+  `<!-- GENERATED:INTERPRETATIONS START/END -->` markers. Added a hand-written
+  "Using `gitsema guide`" section and an "Ollama for narrator / guide / explain" section.
+  `"skill"` added to `package.json` `files` so the skill ships with the npm package.
+- **Ollama verification (documented, no new flags):** confirmed both `src/core/llm/narrator.ts`
+  (`new URL('/v1/chat/completions', httpUrl)`) and `@jsilvanus/chattydeer`'s `createChatProvider`
+  (`base + '/v1/chat/completions'`) resolve correctly when `--http-url` is the bare
+  `http://localhost:11434` (no trailing `/v1`) — a trailing `/v1` breaks chattydeer
+  (`/v1/v1/chat/completions`) though it's harmless for the narrator's `URL`-based resolution.
+  Documented this caveat in README and the skill's Ollama section, with the
+  `gitsema models add ol-guide --guide --http-url http://localhost:11434 --activate` recipe.
+- **Tests**: `tests/guideAgentLoop.test.ts` updated for the new registry (tool name set
+  derived from `GUIDE_TOOLS`, still validates JSON-schema shapes and required params);
+  `tests/narrator.test.ts` updated for the new system-message-first `messages` array;
+  `tests/docsSync.test.ts` gained TOOL_INTERPRETATIONS coverage (every `GUIDE_TOOLS` entry
+  has an interpretation) and skill-generation drift checks (generated block + `.github`
+  mirror match committed files).
+
+**Tests:** `npx vitest run` — all 921 tests pass.
+
+**Backlog (deferred from this phase):**
+- Per-command `--narrate` flag using `interpretations.ts` entries (beyond `narrate`/`explain`/result-narrators).
+- `gitsema models add --provider ollama` shortcut and a custom Ollama embedding base-URL option.
+- Skill guidance on fine-tuning indexing (chunkers/models/extension filters) per project type.
+
+**Status:** ✅ complete.
+
 ## Long-Term Investments
 
 | Feature | Complexity | Notes |

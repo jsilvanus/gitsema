@@ -5,9 +5,10 @@
  * falling back to the active narrator model. It builds a context from gitsema
  * search results and recent git history, then runs a real agentic tool-calling
  * loop (via `@jsilvanus/chattydeer`'s `createAgentSession` + `runAgentLoop`) so
- * the LLM can call gitsema tools (repo_stats, recent_commits, narrate_repo,
- * explain_topic, semantic_search — see guideTools.ts) to gather additional
- * evidence before answering.
+ * the LLM can call the full set of gitsema analysis tools (see
+ * `guideTools.ts`'s `GUIDE_TOOLS` registry) to gather additional evidence
+ * before answering. The system prompt embeds a per-tool "how to interpret
+ * results" catalog from `interpretations.ts`.
  *
  * Safe-by-default: if no guide or narrator model is configured the command
  * prints the gathered context without calling an LLM or chattydeer — no
@@ -15,12 +16,12 @@
  */
 
 import type { Command } from 'commander'
-import { execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { resolveGuideConfig } from '../../core/narrator/resolveNarrator.js'
 import { redactAll } from '../../core/narrator/redact.js'
 import { withAudit } from '../../core/narrator/audit.js'
-import { GUIDE_TOOL_DEFINITIONS, executeTool, toolRepoStats } from '../../core/narrator/guideTools.js'
+import { GUIDE_TOOL_DEFINITIONS, executeTool, repoStatsData, recentCommitsData } from '../../core/narrator/guideTools.js'
+import { buildGuideToolCatalog } from '../../core/narrator/interpretations.js'
 import type { NarratorModelConfig } from '../../core/narrator/types.js'
 import { logger } from '../../utils/logger.js'
 
@@ -28,58 +29,16 @@ import { logger } from '../../utils/logger.js'
 // Context gathering helpers
 // ---------------------------------------------------------------------------
 
-interface GuideTool {
-  name: string
-  description: string
-  call: (args: Record<string, string>) => string
-}
-
-/** Registry of built-in gitsema tools available to the guide for context-gathering. */
-const GUIDE_TOOLS: GuideTool[] = [
-  {
-    name: 'recent_commits',
-    description: 'Fetch the N most recent git commits (subject + hash + date)',
-    call: ({ n = '20' }) => {
-      try {
-        return execSync(`git log --max-count=${n} --format="%H %ai %s"`, {
-          cwd: process.cwd(),
-          encoding: 'utf8',
-          maxBuffer: 2 * 1024 * 1024,
-        }).trim()
-      } catch {
-        return '(git log failed)'
-      }
-    },
-  },
-  {
-    name: 'repo_stats',
-    description: 'Basic repository statistics (branches, tags, total commits)',
-    call: () => {
-      // Reuse the portable repo_stats tool (no `wc -l`/`/dev/null` shellisms,
-      // which fail on Windows cmd).
-      try {
-        const stats = JSON.parse(toolRepoStats()) as {
-          branches?: number; tags?: number; commits?: number; remotes?: string[]
-        }
-        return `Branches: ${stats.branches ?? 0}  Tags: ${stats.tags ?? 0}  Commits: ${stats.commits ?? 0}\nRemotes:\n${(stats.remotes ?? []).join('\n')}`
-      } catch {
-        return '(stats unavailable)'
-      }
-    },
-  },
-]
-
 /** Gather quick context for the guide prompt. */
 function gatherContext(_question: string): string {
   const parts: string[] = []
 
-  // Recent commits
-  const recentTool = GUIDE_TOOLS.find((t) => t.name === 'recent_commits')!
-  parts.push(`## Recent commits\n${recentTool.call({ n: '15' })}`)
+  const recent = recentCommitsData(15)
+  const recentLines = recent.commits.map((c) => `${c.hash} ${c.date} ${c.subject}`).join('\n')
+  parts.push(`## Recent commits\n${recentLines || '(git log failed)'}`)
 
-  // Repo stats
-  const statsTool = GUIDE_TOOLS.find((t) => t.name === 'repo_stats')!
-  parts.push(`## Repository stats\n${statsTool.call({})}`)
+  const stats = repoStatsData()
+  parts.push(`## Repository stats\nBranches: ${stats.branches}  Tags: ${stats.tags}  Commits: ${stats.commits}\nRemotes:\n${stats.remotes.join('\n')}`)
 
   return parts.join('\n\n')
 }
@@ -88,15 +47,32 @@ function gatherContext(_question: string): string {
 // System prompt
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = [
-  'You are gitsema-guide, an expert assistant for the git repository the user is working in.',
-  'You have access to repository context gathered by gitsema tools, and you can call additional',
-  'gitsema tools (repo_stats, recent_commits, narrate_repo, explain_topic, semantic_search) to',
-  'gather more evidence before answering.',
-  'Answer questions about the codebase, history, and development patterns.',
-  'Always cite commit hashes when referencing specific changes.',
-  'Be concise, factual, and mention when you are uncertain.',
-].join('\n')
+/**
+ * Build the guide's system prompt dynamically: role/goal, tool-use strategy,
+ * and the full per-tool "how to interpret results" catalog from
+ * `interpretations.ts` (so the prompt never drifts from the actual tool set).
+ */
+function buildSystemPrompt(): string {
+  return [
+    'You are gitsema-guide, an expert assistant for the git repository the user is working in.',
+    'You have access to repository context gathered by gitsema tools, and you can call gitsema',
+    'tools to gather more evidence before answering — search broadly first, then drill into',
+    'specific files, concepts, or time ranges. Chain tool calls when one result suggests another',
+    '(e.g. a change point suggests inspecting that commit\'s author or impact). You have up to 5',
+    'tool-call roundtrips per turn — use them judiciously.',
+    '',
+    'Prefer evidence from tool results over speculation. If a tool returns `{"error": "..."}`,',
+    'read the message: if it says no index is available, fall back to git-only tools',
+    '(repo_stats, recent_commits, narrate_repo, explain_topic) and tell the user that semantic',
+    'search/analysis tools require running `gitsema index` first.',
+    '',
+    'Always cite commit hashes and/or blob hashes when referencing specific changes or files.',
+    'Be concise, factual, and clearly label any inference that goes beyond the evidence.',
+    '',
+    'Available tools and how to interpret their results:',
+    buildGuideToolCatalog(),
+  ].join('\n')
+}
 
 // ---------------------------------------------------------------------------
 // chattydeer provider/session construction (lazy import)
@@ -234,7 +210,7 @@ export async function runGuide(question: string, opts: {
 
   const ownSession = !session
   if (!session) {
-    session = await createGuideSession(config, SYSTEM_PROMPT)
+    session = await createGuideSession(config, buildSystemPrompt())
   }
 
   try {
@@ -311,7 +287,7 @@ export async function guideCommand(
     const config = resolveGuideConfig({ guideModelId, modelName: opts.model })
     let session: GuideSession | undefined
     if (config && config.params?.httpUrl) {
-      session = await createGuideSession(config, SYSTEM_PROMPT)
+      session = await createGuideSession(config, buildSystemPrompt())
     }
 
     rl.prompt()
@@ -359,8 +335,9 @@ export function registerGuideCommand(program: Command): void {
     .description(
       'Interactive LLM chat that answers questions about this repository. ' +
       'Uses the active guide model (or narrator model as fallback) with a real ' +
-      'agentic tool-calling loop (repo_stats, recent_commits, narrate_repo, ' +
-      'explain_topic, semantic_search; up to 5 roundtrips). ' +
+      'agentic tool-calling loop over the full gitsema toolset (search, history, ' +
+      'branch/merge, ownership, quality, diff/blame, clustering, and workflow ' +
+      'analyses; up to 5 roundtrips). ' +
       'Prints gathered context even when no LLM is configured.',
     )
     .option('--guide-model-id <id>', 'embed_config.id of the guide model to use')

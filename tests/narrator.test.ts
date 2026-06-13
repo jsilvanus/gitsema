@@ -128,7 +128,7 @@ describe('narrateEvolution', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse((init as RequestInit).body as string)
-    expect(body.messages[0].content).toContain('src/special/auth.ts')
+    expect(body.messages[1].content).toContain('src/special/auth.ts')
   })
 
   it('falls back gracefully on HTTP error', async () => {
@@ -198,7 +198,7 @@ describe('narrateClusters', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse((init as RequestInit).body as string)
-    expect(body.messages[0].content).toContain('2 clusters')
+    expect(body.messages[1].content).toContain('2 clusters')
   })
 })
 
@@ -249,7 +249,7 @@ describe('narrateSearchResults', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse((init as RequestInit).body as string)
-    expect(body.messages[0].content).toContain('authentication middleware')
+    expect(body.messages[1].content).toContain('authentication middleware')
   })
 })
 

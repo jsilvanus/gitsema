@@ -12,7 +12,8 @@
     "prepack": "pnpm build",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
-    "gen:toc": "node scripts/generate_toc.mjs"
+    "gen:toc": "node scripts/generate_toc.mjs",
+    "gen:skill": "tsx scripts/gen-skill.mjs"
   },
   "repository": {
     "type": "git",
@@ -30,7 +31,8 @@
     "dist",
     "README.md",
     "LICENSE",
-    "docs"
+    "docs",
+    "skill"
   ],
   "engines": {
     "node": ">=20"

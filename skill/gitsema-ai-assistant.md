@@ -388,6 +388,26 @@ ollama pull nomic-embed-text
 gitsema index start
 ```
 
+### Ollama for narrator / guide / explain
+
+Ollama's OpenAI-compatible endpoint also works for `narrate`, `explain`, and `guide`
+(no API key needed). Pull a tool-capable model (the agentic `guide` loop needs a model
+that supports tool/function calling, e.g. `llama3.1` or `qwen2.5`):
+
+```bash
+ollama pull llama3.1
+
+# IMPORTANT: use the bare host:port, WITHOUT a trailing /v1 — both the narrator
+# (src/core/llm/narrator.ts) and the guide (chattydeer) append /v1/chat/completions
+# themselves. A trailing /v1 in --http-url produces a double /v1/v1/... path for guide.
+gitsema models add ol-narr --narrator --http-url http://localhost:11434 --activate
+gitsema models add ol-guide --guide --http-url http://localhost:11434 --activate
+
+gitsema narrate --narrate
+gitsema explain "<topic>" --narrate
+gitsema guide "what changed recently?"
+```
+
 ### OpenAI quick start
 
 ```bash
@@ -597,6 +617,255 @@ Before proposing any code changes, follow this sequence:
 
 5. Summarize provenance: which paths, commits, and concepts informed the proposed patch.
 ```
+
+---
+
+## Interpreting gitsema tool results
+
+<!-- GENERATED:INTERPRETATIONS START -->
+
+This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm gen:skill` to regenerate). For each capability: what the result shape is, and how to read it — what is significant, thresholds, and caveats.
+
+### Repository (git-only, no index required)
+
+**`explain_topic`** — Commits whose subject/body match a topic, for incident/feature investigation.
+
+- Result shape: { commitCount, citations[], evidence: [{ hash, date, subject, body, tags[] }] }.
+- How to read it: Keyword-matched commit evidence for a topic — useful for "when was X introduced / fixed". Reconstruct a timeline (introduction → fixes → current status) from the matched commits and cite hashes; absence of matches is itself a signal (topic may be named differently).
+- Also known as: `explain`, `explain_issue_or_error`
+
+**`narrate_repo`** — Structured commit evidence for a date range / focus (no LLM call inside).
+
+- Result shape: { commitCount, citations[], evidence: [{ hash, date, authorName, subject, body, tags[] }] }.
+- How to read it: Raw, classified commit evidence — not a summary. `tags` group commits (bugfix, feature, security, deps, performance, ops). Build a narrative FROM this evidence and cite the hashes; do not assert anything the evidence does not support.
+- Also known as: `narrate`
+
+**`recent_commits`** — The N most recent commits (hash, date, subject).
+
+- Result shape: { commits: [{ hash, date, subject }] }.
+- How to read it: The latest activity. Subjects following conventional-commit prefixes (feat/fix/chore) hint at the change type. Cite the short hash when referencing any commit.
+
+**`repo_stats`** — Branch / tag / commit counts and configured remotes.
+
+- Result shape: { branches, tags, commits, remotes[] }.
+- How to read it: A quick size/shape orientation for the repo. High commit counts with few branches suggest trunk-based development; many branches may indicate long-lived feature work. Use it to size follow-up queries (e.g. how far back to narrate).
+
+### Search & discovery
+
+**`code_search`** — Symbol/chunk-level search using the code embedding model.
+
+- Result shape: Rendered "score  path  [blobHash]" lines (symbol level by default).
+- How to read it: Like semantic_search but embeds with the code model and targets symbols/chunks — better for finding specific functions/classes from a code snippet than from prose. Higher scores mean closer code-level similarity.
+
+**`first_seen`** — Find when a concept first appeared (results sorted earliest-first).
+
+- Result shape: Lines "<date>  path  [blobHash]  (score: …)", oldest first.
+- How to read it: The earliest dated row is the best evidence for a concept's origin, but only among semantically-matching blobs — confirm relevance via the score before claiming an origin date. Cite the date and short blob hash.
+
+**`multi_repo_search`** — Semantic search across multiple registered gitsema repos.
+
+- Result shape: Lines "[repoId] score  path".
+- How to read it: Same scoring as semantic_search but spanning repos registered via `gitsema repos add`. The repoId prefix tells you which repo each hit came from; compare scores across repos with care since indexes may use different models.
+
+**`search_history`** — Semantic search enriched with first-seen date / commit, optionally date-sorted.
+
+- Result shape: Rendered "score  path  [blobHash]  first: <date>" lines.
+- How to read it: Use when the time dimension matters. Score still ranks relevance; the first-seen date tells you when that content entered history. Date-sorted output surfaces the earliest occurrences.
+
+**`semantic_search`** — Vector similarity search over indexed history.
+
+- Result shape: { query, results: [{ paths[], score, blobHash }] }.
+- How to read it: Ranked by cosine similarity (0–1): roughly >0.75 is a strong match, 0.5–0.75 is related, <0.5 is weak. Each result is a content-addressed blob; the same blob can appear under several paths. Use the top paths as the most relevant files; cite the short blob hash.
+
+### History & temporal drift
+
+**`change_points`** — The largest historical shifts of a concept across the codebase.
+
+- Result shape: { points: [{ before, after, distance }] } sorted by distance.
+- How to read it: Each point is a before→after jump; larger `distance` (cosine) = bigger semantic shift. The top points are the moments the concept changed most — cite the after-commit hash and inspect those commits to explain what changed. Few/no points means the concept has been stable.
+
+**`concept_evolution`** — How a semantic concept evolved across the whole codebase.
+
+- Result shape: Chronological entries with paths, score, distFromPrev per step.
+- How to read it: Traces a concept (not one file) over time. `score` is relevance to the query; `distFromPrev` flags where the concept's representation shifted (≥ threshold = large change). Read it as the concept's storyline: where it emerged, where it was reworked, and into which files it spread.
+
+**`concept_lifecycle`** — A concept's lifecycle stage over time: emergence, growth, maturity, decline.
+
+- Result shape: { query, bornTimestamp, peakTimestamp, peakCount, currentStage, isDead, points[] }.
+- How to read it: Each point has a date, lifecycle `stage`, match count, and growth rate. Read it as a story: when the concept was born, when it peaked, and its current stage/growth trend. `isDead` flags concepts with no recent matches — useful for spotting abandoned ideas vs. ones still actively developed.
+- Also known as: `lifecycle`, `concept-lifecycle`
+
+**`file_change_points`** — Inflection points in a single file's semantic history.
+
+- Result shape: { points: [{ before, after, distance }] } per file.
+- How to read it: File-scoped version of change_points: the dates where the file changed most in meaning. Use the before/after blob hashes to diff what actually changed at each inflection.
+
+**`file_evolution`** — Semantic drift timeline of a single file across its history.
+
+- Result shape: Timeline of versions with distFromPrev / distFromOrigin per step.
+- How to read it: Each step is a version; `distFromPrev` (cosine, 0–2) is how much it changed from the prior version and `distFromOrigin` is cumulative drift. Steps at/above the threshold (default 0.3) are large changes worth explaining — correlate their dates/commits with what happened. Steady small distances mean incremental change; a spike means a rewrite or repurposing.
+- Also known as: `evolution`
+
+**`health_timeline`** — Time-bucketed codebase health: active blobs, churn rate, dead-concept ratio.
+
+- Result shape: Per-bucket rows: active count, semanticChurnRate, deadConceptRatio.
+- How to read it: Rising churn means more concept turnover; a rising dead-concept ratio means more stale/removed code. Read the trend, not single buckets — sustained high churn or a growing dead ratio are health concerns; stable low values indicate maturity.
+
+### Branch & merge analysis
+
+**`branch_summary`** — What a branch is semantically about vs its base.
+
+- Result shape: { branch, baseBranch, mergeBase, exclusiveBlobCount, nearestConcepts[], topChangedPaths[] }.
+- How to read it: Describes a branch from its base-exclusive blobs. `nearestConcepts` (with similarity) name what the branch is about; `topChangedPaths` (with drift) are where it diverges most. exclusiveBlobCount=0 means the branch adds nothing new vs base (or is not indexed).
+
+**`merge_audit`** — Semantic collisions between two branches (same concept, different files).
+
+- Result shape: { blobCountA/B, centroidSimilarity, collisionZones[], collisionPairs[] }.
+- How to read it: Collision pairs are files on each branch that are semantically close (similarity ≥ threshold, default 0.85) even without shared lines — likely conflict/duplication risks at merge. High centroid similarity means the branches overlap broadly. Review the top pairs before merging.
+
+**`merge_preview`** — Predicted concept-cluster landscape shift after a merge.
+
+- Result shape: { before/after totals, new/removed/moved/stable counts, changes[] }.
+- How to read it: Forecasts how clusters change post-merge. [NEW]/[DISSOLVED] clusters and high centroid drift indicate the merge meaningfully reshapes the architecture; mostly-stable clusters indicate a low-impact merge.
+
+### Ownership & expertise
+
+**`author`** — Which authors contributed most to a concept.
+
+- Result shape: Authors with totalScore and blobCount for the query.
+- How to read it: `totalScore` aggregates relevance-weighted contribution to the concept; `blobCount` is how many matching blobs they touched. The top author is the best person to ask about that concept — but attribution is by indexed blobs, so it reflects content, not lines of code.
+
+**`contributor_profile`** — What a contributor specialises in (centroid of their work).
+
+- Result shape: Top blobs nearest the semantic centroid of the author's touched blobs.
+- How to read it: The returned blobs characterise the author's focus area. Treat it as "what this person works on", not an exhaustive list of their commits.
+
+**`experts`** — Top contributors by semantic area (which clusters they work on).
+
+- Result shape: Contributors with blobCount and their top clusters.
+- How to read it: Maps people to the concept clusters they own. Requires clusters to exist (run `clusters` first). Use it to route work or find reviewers by area rather than by file paths.
+
+**`ownership`** — Ownership heatmap: authors ranked by share of a concept.
+
+- Result shape: Authors with their share (0–1) of touched blobs for the query.
+- How to read it: A high share for one author means concentrated ownership (bus-factor risk); a flat distribution means shared ownership. The window_days option biases toward recent activity.
+
+### Quality, debt & risk
+
+**`dead_concepts`** — Blobs that existed historically but are no longer reachable from HEAD.
+
+- Result shape: Removed blobs with last-seen date and last-seen commit message.
+- How to read it: These are deleted/removed concepts. Useful for "what did we used to have" and for spotting capabilities that were dropped. The last-seen date/commit explains when and (often) why it went away.
+
+**`debt_score`** — Technical-debt ranking by isolation, age, and low change frequency.
+
+- Result shape: Blobs with debtScore plus isolationScore, ageScore, changeFrequency.
+- How to read it: Higher debtScore = more likely neglected/risky. It combines semantic isolation (few neighbours), age, and rarely-changed status — so old, lonely, untouched code rises to the top. It is a heuristic prioritiser for review, not proof of a defect.
+
+**`doc_gap`** — Code blobs with the least documentation coverage.
+
+- Result shape: Code blobs with their maximum similarity to any doc blob (lower = worse).
+- How to read it: A low max-doc-similarity means no documentation blob resembles this code — a documentation gap. Prioritise the lowest-scoring, most-important files for docs.
+
+**`impact`** — Blobs most semantically coupled to a file.
+
+- Result shape: Neighbours with similarity score for the target file.
+- How to read it: The high-score neighbours are what else is likely affected by changing this file, even without an import edge. Use it to scope a change's blast radius and pick what to test/review alongside it.
+
+**`security_scan`** — Blobs semantically similar to common vulnerability patterns.
+
+- Result shape: Findings with patternName, similarity score, and path.
+- How to read it: These are SIMILARITY scores, NOT confirmed vulnerabilities — every finding needs manual review. Treat higher scores as "review this first" and group by patternName to see which risk classes dominate. Never report a finding as a confirmed CVE.
+
+### Diff & blame
+
+**`semantic_blame`** — Per-block nearest-neighbour attribution for a file.
+
+- Result shape: Per logical block: nearest indexed blobs with similarity, commit, author.
+- How to read it: For each block it shows the most semantically similar indexed blobs and their commits/authors — i.e. where that block's ideas come from, which can differ from git blame (line authorship). High similarity points to the true conceptual origin even after refactors.
+
+**`semantic_diff`** — Conceptual diff of a topic across two refs (gained / lost / stable).
+
+- Result shape: { topic, ref1, ref2, gained[], lost[], stable[] }.
+- How to read it: `gained` are blobs relevant to the topic that appear by ref2, `lost` are ones present at ref1 but gone by ref2, `stable` persist. Read it as how the topic's footprint changed between the two points; cite the blob hashes and dates.
+
+### Clustering
+
+**`cluster_diff`** — Compare cluster structure at two refs.
+
+- Result shape: JSON report of new/removed/moved/stable blobs and per-cluster changes.
+- How to read it: Shows how the concept map reorganised between two points: new/dissolved clusters and blobs that migrated between concepts. Large movements indicate architectural restructuring.
+
+**`cluster_timeline`** — Multi-step cluster drift over commit history.
+
+- Result shape: JSON report with per-step cluster snapshots and movement stats.
+- How to read it: A sequence of cluster snapshots. Read it for trends — acceleration (lots of movement) vs stabilisation (little) — to characterise the project's structural trajectory over time.
+
+**`clusters`** — K-means grouping of all blobs into semantic clusters.
+
+- Result shape: Clusters with label, size, keywords, representative paths.
+- How to read it: A bird's-eye map of the codebase's concept areas. Large clusters are dominant concerns; the keywords/representative paths name each area. Use it for onboarding and to see whether the code is cleanly separated or tangled. `k` controls granularity.
+
+### Compound workflows
+
+**`eval`** — Retrieval evaluation: precision@k, recall@k, MRR for a test set.
+
+- Result shape: Aggregate P@k / R@k / MRR plus per-case metrics.
+- How to read it: Measures index retrieval quality against expected paths. Higher is better (1.0 = perfect). Low precision means noisy results; low recall means relevant files are missed; low MRR means correct hits rank too far down. Use it to compare models/chunkers.
+
+**`policy_check`** — CI gate: debt, security, and drift thresholds → pass/fail.
+
+- Result shape: { passed, checks: { debt?, security?, drift? } }.
+- How to read it: Each gate reports its measured value and pass/fail vs the threshold you set. `passed:false` on any gate fails the check (exit code 3 on the CLI). Report which gate failed and by how much.
+
+**`triage`** — Incident bundle: first-seen, change points, experts (+ optional file evolution).
+
+- Result shape: Sections: firstSeen, changePoints, experts, optional fileEvolution.
+- How to read it: A one-shot investigation bundle. Cross-reference the sections: first-seen tells you where the concept lives, change points tell you when it shifted (suspect commits), experts tell you who to ask. Synthesize across sections rather than reporting each in isolation.
+
+**`workflow_run`** — Run a named template (pr-review | incident | release-audit).
+
+- Result shape: Template-specific sections (impact / changePoints / experts / firstSeen …).
+- How to read it: Bundles several analyses for a scenario. Read each section per its own capability's guidance (impact, change_points, experts, etc.) and combine into one narrative for the template's purpose.
+
+### Administration
+
+**`index`** — Index / incrementally re-index the repo (mutating, can be slow/expensive).
+
+- Result shape: Stats: seen, indexed, skipped, oversized, filtered, failed, commits.
+- How to read it: A WRITE operation that embeds blobs — only run it when the index is missing or stale, and prefer asking the user first for large repos. `indexed` is new work done; a high `failed` count points to an unreachable embedding provider.
+
+<!-- GENERATED:INTERPRETATIONS END -->
+
+## Using `gitsema guide` (agentic Q&A)
+
+`gitsema guide [question]` is an interactive LLM chat that answers questions about
+this repository. It always prints gathered git context (recent commits, repo stats);
+if a guide (or fallback narrator) model is configured, it also runs a real
+**agentic tool-calling loop** (`@jsilvanus/chattydeer` `runAgentLoop`, up to 5
+roundtrips) that can call the **full gitsema toolset** — every capability listed
+above in "Interpreting gitsema tool results" — to gather evidence before answering.
+
+```bash
+# Single-shot question
+gitsema guide "what changed in the auth module recently?"
+
+# Multi-turn REPL — one agent session reused across turns
+gitsema guide --interactive
+
+# Skip git-context gathering (faster, less grounded)
+gitsema guide "..." --no-context
+```
+
+- **Safe-by-default:** with no guide/narrator model configured, `guide` prints the
+  gathered context and exits — no network access occurs.
+- **Index-gated tools:** capabilities that need a `.gitsema` index (search, evolution,
+  clustering, ownership, etc.) return `{"error": "..."}` gracefully if no index exists;
+  the agent falls back to git-only tools (`repo_stats`, `recent_commits`, `narrate_repo`,
+  `explain_topic`) and tells the user to run `gitsema index` first.
+- **Redaction:** every prompt and tool result is passed through the same secret/PII
+  redaction (`redactAll`) as `narrate`/`explain` before reaching the LLM.
+- Configure a guide model: `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`.
 
 ---
 

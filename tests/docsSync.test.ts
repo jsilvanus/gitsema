@@ -11,6 +11,9 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
+import { GUIDE_TOOLS } from '../src/core/narrator/guideTools.js'
+import { TOOL_INTERPRETATIONS } from '../src/core/narrator/interpretations.js'
+import { buildInterpretationsBlock, applyToFile } from '../scripts/gen-skill.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 
@@ -99,7 +102,33 @@ describe('canonical docs exist', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 4. package.json version is semver and present in git tags (soft check)
+// 4. Tool interpretation registry coverage + skill generation drift
+// ---------------------------------------------------------------------------
+describe('TOOL_INTERPRETATIONS coverage', () => {
+  it('every guide tool has a TOOL_INTERPRETATIONS entry', () => {
+    const missing = Object.keys(GUIDE_TOOLS).filter((name) => !TOOL_INTERPRETATIONS[name])
+    expect(missing, `missing TOOL_INTERPRETATIONS entries: ${missing.join(', ')}`).toEqual([])
+  })
+})
+
+describe('skill generation drift', () => {
+  it('skill/gitsema-ai-assistant.md matches the generated interpretations block', () => {
+    const block = buildInterpretationsBlock()
+    const target = join(ROOT, 'skill', 'gitsema-ai-assistant.md')
+    const current = readFileSync(target, 'utf8')
+    const regenerated = applyToFile(target, block)
+    expect(current, 'run `pnpm gen:skill` to regenerate skill/gitsema-ai-assistant.md').toBe(regenerated)
+  })
+
+  it('.github/skills/gitsema.md is in sync with skill/gitsema-ai-assistant.md', () => {
+    const a = read('skill/gitsema-ai-assistant.md')
+    const b = read('.github/skills/gitsema.md')
+    expect(b, 'run `pnpm gen:skill` to keep .github/skills/gitsema.md in sync').toBe(a)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5. package.json version is semver and present in git tags (soft check)
 // ---------------------------------------------------------------------------
 describe('package.json', () => {
   it('has a valid semver version', () => {

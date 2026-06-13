@@ -19,6 +19,7 @@ import type { SearchResult } from '../models/types.js'
 import type { ConceptChangePointReport, FileChangePointReport } from '../search/temporal/changePoints.js'
 import type { HealthSnapshot } from '../search/temporal/healthTimeline.js'
 import type { ConceptLifecycleResult } from '../search/conceptLifecycle.js'
+import { buildNarratorSystemPrompt } from '../narrator/interpretations.js'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -46,8 +47,8 @@ function resolveLlmUrl(): { parsedUrl: URL; model: string; apiKey: string } | { 
   }
 }
 
-/** Call the chat completion endpoint with a prompt. */
-async function callLlm(parsedUrl: URL, model: string, apiKey: string, prompt: string, maxTokens = 300): Promise<string> {
+/** Call the chat completion endpoint with a prompt and an optional system prompt. */
+async function callLlm(parsedUrl: URL, model: string, apiKey: string, prompt: string, maxTokens = 300, systemPrompt?: string): Promise<string> {
   const endpoint = new URL('/v1/chat/completions', parsedUrl).toString()
   const timeoutMs = (() => {
     const raw = process.env.GITSEMA_LLM_TIMEOUT
@@ -73,7 +74,10 @@ async function callLlm(parsedUrl: URL, model: string, apiKey: string, prompt: st
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: prompt }],
+          messages: [
+            ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+            { role: 'user', content: prompt },
+          ],
           max_tokens: maxTokens,
           temperature: 0.3,
         }),
@@ -139,7 +143,7 @@ Total versions: ${entries.length}
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300, buildNarratorSystemPrompt('file_evolution'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -166,7 +170,7 @@ ${clusterLines.join('\n')}
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300, buildNarratorSystemPrompt('clusters'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -198,7 +202,7 @@ Note: these are similarity scores, not confirmed vulnerabilities. Focus on relat
 Provide a concise triage summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt, 350)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 350, buildNarratorSystemPrompt('security_scan'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -226,7 +230,7 @@ ${resultLines.join('\n')}
 Provide a concise summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 250, buildNarratorSystemPrompt('semantic_search'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -264,7 +268,7 @@ In 2-4 sentences, describe what this diff reveals about how the codebase archite
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300, buildNarratorSystemPrompt('cluster_diff'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -300,7 +304,7 @@ In 2-4 sentences, summarize the dominant trends in how the codebase's conceptual
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300, buildNarratorSystemPrompt('cluster_timeline'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -330,7 +334,7 @@ In 2-3 sentences, summarize when and how the concept "${report.query}" changed m
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 250, buildNarratorSystemPrompt('change_points'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -360,7 +364,7 @@ In 2-3 sentences, summarize the key inflection points in this file's history. Wh
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 250, buildNarratorSystemPrompt('file_change_points'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -401,7 +405,7 @@ In 2-3 sentences, interpret what this semantic distance and the neighbor shift s
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt, 250)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 250, buildNarratorSystemPrompt('semantic_diff'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -434,7 +438,7 @@ In 2-4 sentences, summarize the overall health trajectory of this codebase. Note
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt, 300)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300, buildNarratorSystemPrompt('health_timeline'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
@@ -469,7 +473,7 @@ In 2-4 sentences, narrate the lifecycle story of this concept in the codebase. W
 Provide a concise narrative summary:`
 
   try {
-    return await callLlm(parsedUrl, model, apiKey, prompt, 300)
+    return await callLlm(parsedUrl, model, apiKey, prompt, 300, buildNarratorSystemPrompt('concept_lifecycle'))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }
