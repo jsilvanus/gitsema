@@ -66,11 +66,15 @@ afterEach(() => {
   delete process.env.GITSEMA_SERVE_KEY
 })
 
-afterAll(() => {
+afterAll(async () => {
   delete process.env.GITSEMA_DATA_DIR
-  // Close the registry's sqlite handle first — on Windows, an open
-  // WAL-mode database file cannot be unlinked while held open.
+  // Close all open sqlite handles first — on Windows, an open WAL-mode
+  // database file cannot be unlinked while held open. This includes the
+  // registry DB and any per-repo index.db sessions opened by the route
+  // handler/middleware during the tests above.
+  const { closeAllPathSessions } = await import('../src/core/db/sqlite.js')
   closeRegistrySession()
+  closeAllPathSessions()
   rmSync(dataDir, { recursive: true, force: true })
 })
 

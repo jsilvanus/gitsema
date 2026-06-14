@@ -480,3 +480,15 @@ export function closeSessionAtPath(dbPath: string): void {
   existing.rawDb.close()
   _pathSessions.delete(dbPath)
 }
+
+/**
+ * Closes and evicts all cached path-keyed DB sessions, releasing their
+ * underlying sqlite file handles. Used in tests on Windows, where an open
+ * WAL-mode database file cannot be deleted while held open.
+ */
+export function closeAllPathSessions(): void {
+  for (const session of _pathSessions.values()) {
+    session.rawDb.close()
+  }
+  _pathSessions.clear()
+}
