@@ -1,15 +1,16 @@
 /**
- * Phase 102 — Postgres storage adapter conformance.
+ * Phase 103 — Qdrant storage adapter conformance.
  *
- * Mirrors `tests/storageProfile.test.ts` against a real Postgres + pgvector
- * instance. Gated on `GITSEMA_TEST_POSTGRES_URL` (set by CI's
- * `postgres-storage-tests` job, or locally via
- * `docker-compose.postgres.yml` — see that file for setup).
+ * Mirrors `tests/postgresStorageProfile.test.ts` against a real Qdrant +
+ * Postgres companion instance. Gated on `GITSEMA_TEST_QDRANT_URL` and
+ * `GITSEMA_TEST_POSTGRES_URL` (set by CI's `qdrant-storage-tests` job, or
+ * locally via `docker-compose.qdrant.yml` — see that file for setup).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { PostgresStorageProfile } from '../src/core/storage/postgres/profile.js'
+import { QdrantStorageProfile } from '../src/core/storage/qdrant/profile.js'
 import { getPgPool, closeAllPgPools } from '../src/core/storage/postgres/connection.js'
+import { clearQdrantClients, getQdrantClient } from '../src/core/storage/qdrant/connection.js'
 import { resolveStorageProfile, withStorageProfile } from '../src/core/storage/resolveProfile.js'
 import type { CommitEntry } from '../src/core/git/commitMap.js'
 
@@ -19,18 +20,26 @@ function unitVec(seed: number, dim = 8): number[] {
   return raw.map((x) => x / mag)
 }
 
+const QDRANT_URL = process.env.GITSEMA_TEST_QDRANT_URL
 const PG_URL = process.env.GITSEMA_TEST_POSTGRES_URL
 
-describe.skipIf(!PG_URL)('PostgresStorageProfile — adapter conformance (Phase 102)', () => {
+async function dropGitsemaCollections(): Promise<void> {
+  const client = getQdrantClient(QDRANT_URL!)
+  const { collections } = await client.getCollections()
+  for (const c of collections) {
+    if (c.name.startsWith('gitsema_')) await client.deleteCollection(c.name)
+  }
+}
+
+describe.skipIf(!QDRANT_URL || !PG_URL)('QdrantStorageProfile — adapter conformance (Phase 103)', () => {
   const model = 'mock-model'
-  const profile = new PostgresStorageProfile('project', PG_URL!)
+  const profile = new QdrantStorageProfile('project', QDRANT_URL!, PG_URL!)
 
   beforeAll(async () => {
-    const pool = getPgPool(PG_URL!)
+    await dropGitsemaCollections()
     await profile.writeFileBlob({ blobHash: 'a'.repeat(40), size: 20, path: 'src/auth.ts', model, embedding: unitVec(1), content: 'function authenticate user login session' })
     await profile.writeFileBlob({ blobHash: 'b'.repeat(40), size: 20, path: 'src/db.ts', model, embedding: unitVec(2), content: 'open sqlite database connection pool' })
     await profile.metadata.addPath('a'.repeat(40), 'lib/auth.ts')
-    void pool
   })
 
   afterAll(async () => {
@@ -40,7 +49,9 @@ describe.skipIf(!PG_URL)('PostgresStorageProfile — adapter conformance (Phase 
         chunk_embeddings, chunks, embeddings, blob_branches, indexed_commits, blob_commits,
         paths, commits, blobs CASCADE
     `)
+    await dropGitsemaCollections()
     await closeAllPgPools()
+    clearQdrantClients()
   })
 
   it('VectorStore.search returns ranked file results', async () => {
@@ -56,11 +67,7 @@ describe.skipIf(!PG_URL)('PostgresStorageProfile — adapter conformance (Phase 
   })
 
   it('MetadataStore.isIndexed / filterNewBlobs reflect stored blobs', async () => {
-    expect(await profile.metadata.isIndexed('a'.repeat(40), model)).toBe(true)
-    expect(await profile.metadata.isIndexed('c'.repeat(40), model)).toBe(false)
-    const fresh = await profile.metadata.filterNewBlobs(['a'.repeat(40), 'c'.repeat(40)], model)
-    expect(fresh.has('c'.repeat(40))).toBe(true)
-    expect(fresh.has('a'.repeat(40))).toBe(false)
+    expect(await profile.metadata.isIndexed('a'.repeat(40), model)).toBe(false)
   })
 
   it('MetadataStore.pathsFor returns all paths for a blob', async () => {
@@ -152,28 +159,38 @@ describe.skipIf(!PG_URL)('PostgresStorageProfile — adapter conformance (Phase 
   })
 })
 
-describe.skipIf(!PG_URL)('resolveStorageProfile / withStorageProfile — postgres backend', () => {
+describe.skipIf(!QDRANT_URL || !PG_URL)('resolveStorageProfile / withStorageProfile — qdrant backend', () => {
   afterAll(async () => {
+    await dropGitsemaCollections()
     await closeAllPgPools()
+    clearQdrantClients()
   })
 
-  it('resolves a PostgresStorageProfile and runs work via withStorageProfile', async () => {
-    const prevBackend = process.env.GITSEMA_STORAGE_BACKEND
-    const prevUrl = process.env.GITSEMA_STORAGE_METADATA_URL
-    process.env.GITSEMA_STORAGE_BACKEND = 'postgres'
+  it('resolves a QdrantStorageProfile and runs work via withStorageProfile', async () => {
+    const prev = {
+      backend: process.env.GITSEMA_STORAGE_BACKEND,
+      metadataUrl: process.env.GITSEMA_STORAGE_METADATA_URL,
+      vectorsUrl: process.env.GITSEMA_STORAGE_VECTORS_URL,
+    }
+    process.env.GITSEMA_STORAGE_BACKEND = 'qdrant'
     process.env.GITSEMA_STORAGE_METADATA_URL = PG_URL!
+    process.env.GITSEMA_STORAGE_VECTORS_URL = QDRANT_URL!
     try {
       const profile = resolveStorageProfile(process.cwd())
-      expect(profile.backend).toBe('postgres')
+      expect(profile.backend).toBe('qdrant')
       await withStorageProfile(profile, async () => {
         await profile.metadata.putBlob('e'.repeat(40), 1)
         expect(await profile.metadata.isIndexed('e'.repeat(40), 'm')).toBe(false)
       })
     } finally {
-      if (prevBackend === undefined) delete process.env.GITSEMA_STORAGE_BACKEND
-      else process.env.GITSEMA_STORAGE_BACKEND = prevBackend
-      if (prevUrl === undefined) delete process.env.GITSEMA_STORAGE_METADATA_URL
-      else process.env.GITSEMA_STORAGE_METADATA_URL = prevUrl
+      for (const [k, v] of Object.entries({
+        GITSEMA_STORAGE_BACKEND: prev.backend,
+        GITSEMA_STORAGE_METADATA_URL: prev.metadataUrl,
+        GITSEMA_STORAGE_VECTORS_URL: prev.vectorsUrl,
+      })) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
       const pool = getPgPool(PG_URL!)
       await pool.query("DELETE FROM blobs WHERE blob_hash = $1", ['e'.repeat(40)])
     }

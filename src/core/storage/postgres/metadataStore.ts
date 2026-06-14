@@ -8,7 +8,7 @@
 import type { Pool } from 'pg'
 import { ensurePostgresSchema } from './migrations.js'
 import type { CommitEntry } from '../../git/commitMap.js'
-import type { MetadataStore } from '../types.js'
+import type { MetadataStore, StorageStats } from '../types.js'
 
 export class PostgresMetadataStore implements MetadataStore {
   constructor(private readonly pool: Pool) {}
@@ -132,5 +132,20 @@ export class PostgresMetadataStore implements MetadataStore {
       'SELECT commit_hash FROM indexed_commits ORDER BY indexed_at DESC LIMIT 1',
     )
     return rows[0]?.commit_hash
+  }
+
+  async getStats(): Promise<StorageStats> {
+    const pool = await this.ready()
+    const count = async (sql: string): Promise<number> => {
+      const { rows } = await pool.query<{ c: string }>(sql)
+      return parseInt(rows[0]?.c ?? '0', 10)
+    }
+    const blobCount = await count('SELECT COUNT(*) AS c FROM blobs')
+    const pathCount = await count('SELECT COUNT(*) AS c FROM paths')
+    const commitCount = await count('SELECT COUNT(*) AS c FROM commits')
+    const indexedCommitCount = await count('SELECT COUNT(*) AS c FROM indexed_commits')
+    const branchCount = await count('SELECT COUNT(DISTINCT branch_name) AS c FROM blob_branches')
+    const lastIndexedCommit = await this.getLastIndexedCommit()
+    return { blobCount, pathCount, commitCount, indexedCommitCount, branchCount, lastIndexedCommit }
   }
 }

@@ -9,6 +9,8 @@ import { vacuumCommand } from '../commands/vacuum.js'
 import { rebuildFtsCliCommand } from '../commands/rebuildFts.js'
 import { clearModelCommand } from '../commands/clearModel.js'
 import { buildVssCommand } from '../commands/buildVss.js'
+import { storageMigrateCommand } from '../commands/storageMigrate.js'
+import { storageInfoCommand } from '../commands/storageInfo.js'
 
 export function registerIndexing(program: Command) {
   program
@@ -327,4 +329,35 @@ export function registerIndexing(program: Command) {
         M: opts.M,
       })
     })
+
+  // ── `gitsema storage` — pluggable storage backend management (Phase 103) ──
+  const storageSub = program
+    .command('storage')
+    .description('Manage the pluggable storage backend (sqlite | postgres | qdrant)')
+    .action(storageInfoCommand)
+
+  storageSub
+    .command('info')
+    .description('Show the resolved storage backend/scope/location (no connections opened)')
+    .action(storageInfoCommand)
+
+  storageSub
+    .command('migrate')
+    .description('Copy the active index into another storage backend (resumable; safe to re-run)')
+    .requiredOption('--to <backend>', 'destination backend: sqlite | postgres | qdrant')
+    .option('--to-path <file>', 'destination SQLite database file (for --to sqlite)')
+    .option('--to-metadata-url <url>', 'destination postgres:// connection string (for --to postgres | qdrant)')
+    .option('--to-vectors-url <url>', 'destination Qdrant http(s):// URL (for --to qdrant)')
+    .option('--to-vectors-api-key <key>', 'Qdrant API key (for --to qdrant)')
+    .option('--to-fts-backend <backend>', 'destination FTS backend: tsvector | pg_search | none (default: tsvector)')
+    .addHelpText(
+      'after',
+      '\nThe source is the index resolved from the current storage.* configuration\n' +
+      '(GITSEMA_STORAGE_BACKEND / `gitsema config set storage.backend ...`). Only\n' +
+      'sqlite sources are supported today.\n\n' +
+      'Examples:\n' +
+      '  gitsema storage migrate --to postgres --to-metadata-url postgres://user:pass@host/db\n' +
+      '  gitsema storage migrate --to qdrant --to-metadata-url postgres://... --to-vectors-url http://localhost:6333\n',
+    )
+    .action(storageMigrateCommand)
 }

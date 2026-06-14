@@ -1,4 +1,5 @@
 import { remoteStatus } from '../../client/remoteClient.js'
+import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { getActiveSession, DB_PATH, getRawDb } from '../../core/db/sqlite.js'
 import { blobs, embeddings, paths, chunks, chunkEmbeddings, symbols, symbolEmbeddings, commitEmbeddings, moduleEmbeddings } from '../../core/db/schema.js'
 import { eq } from 'drizzle-orm'
@@ -17,6 +18,23 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Reads the package version from `package.json` (for the `gitsema vX.Y.Z` status header). */
+function readPkgVersion(): string {
+  try {
+    const pkgPath = new URL('../../../package.json', import.meta.url)
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+    if (pkg && typeof pkg.version === 'string') return pkg.version
+  } catch {
+    // fall back
+  }
+  return '0.0.0'
+}
+
+function printKV(key: string, value: string | number): void {
+  const k = key.padEnd(20)
+  logger.info(`${k} ${value}`)
 }
 
 export interface StatusCommandOptions {
@@ -41,6 +59,26 @@ export async function statusCommand(filePath: string | undefined, options: Statu
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)
     }
+    return
+  }
+
+  // Non-sqlite backends have no single database file/active session to
+  // inspect — report counts via the StorageProfile seam instead.
+  const profile = getCachedStorageProfile(process.cwd())
+  if (profile.backend !== 'sqlite') {
+    const stats = await profile.metadata.getStats()
+    const fileEmbeddingCount = await profile.vectors.countFileEmbeddings()
+    printKV(`gitsema v${readPkgVersion()}`, '')
+    printKV('Backend:', `${profile.backend} (scope: ${profile.scope})`)
+    printKV('Location:', profile.location)
+    printKV('Blobs indexed:', stats.blobCount)
+    printKV('File embeddings:', fileEmbeddingCount)
+    printKV('Path entries:', stats.pathCount)
+    printKV('Commits mapped:', stats.commitCount)
+    printKV('Commits indexed:', stats.indexedCommitCount)
+    printKV('Branches tracked:', stats.branchCount)
+    printKV('FTS/hybrid:', profile.fts ? 'enabled' : 'disabled')
+    if (stats.lastIndexedCommit) printKV('Last indexed:', stats.lastIndexedCommit)
     return
   }
 
@@ -72,22 +110,8 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   const codeModel = process.env.GITSEMA_CODE_MODEL ?? textModel
   const dualModel = codeModel !== textModel
 
-  // Read package.json version dynamically so status shows accurate version
-  let pkgVersion = '0.0.0'
-  try {
-    const pkgPath = new URL('../../../package.json', import.meta.url)
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
-    if (pkg && typeof pkg.version === 'string') pkgVersion = pkg.version
-  } catch {
-    // fall back
-  }
-
-  function printKV(key: string, value: string | number): void {
-    const k = key.padEnd(20)
-    const line = `${k} ${value}`
-    logger.info(line)
-  }
-  printKV(`gitsema v${pkgVersion}`, '')
+  printKV(`gitsema v${readPkgVersion()}`, '')
+  printKV('Backend:', `${profile.backend} (scope: ${profile.scope})`)
   printKV('DB:', DB_PATH)
   printKV('Provider:', providerType)
   if (dualModel) {

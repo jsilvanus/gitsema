@@ -13,6 +13,7 @@ import { homedir, tmpdir } from 'node:os'
 import { openDatabaseAt, withDbSession, closeSessionAtPath, type DbSession } from '../src/core/db/sqlite.js'
 import { storeBlob } from '../src/core/indexing/blobStore.js'
 import { SqliteStorageProfile } from '../src/core/storage/sqlite/profile.js'
+import { runStorageDoctor } from '../src/core/storage/doctor.js'
 import { resolveStorageProfile, resolveSqliteDbPath, withStorageProfile } from '../src/core/storage/resolveProfile.js'
 import type { CommitEntry } from '../src/core/git/commitMap.js'
 
@@ -27,6 +28,8 @@ const STORAGE_ENV = [
   'GITSEMA_STORAGE_SCOPE',
   'GITSEMA_STORAGE_NAME',
   'GITSEMA_STORAGE_METADATA_URL',
+  'GITSEMA_STORAGE_VECTORS_URL',
+  'GITSEMA_STORAGE_VECTORS_API_KEY',
   'GITSEMA_STORAGE_FTS_BACKEND',
 ] as const
 
@@ -111,6 +114,38 @@ describe('SqliteStorageProfile — store conformance', () => {
   it('null fts store disables keyword search', () => {
     const noFts = new SqliteStorageProfile('project', ':memory:', false)
     expect(noFts.fts).toBeNull()
+  })
+
+  it('MetadataStore.getStats reports row counts', async () => {
+    await withDbSession(session, async () => {
+      const stats = await profile.metadata.getStats()
+      expect(stats.blobCount).toBe(2)
+      expect(stats.pathCount).toBe(3)
+      expect(stats.commitCount).toBe(0)
+      expect(stats.indexedCommitCount).toBe(0)
+      expect(stats.branchCount).toBe(0)
+      expect(stats.lastIndexedCommit).toBeUndefined()
+    })
+  })
+
+  it('runStorageDoctor reports cross-store counts and warnings', async () => {
+    await withDbSession(session, async () => {
+      const report = await runStorageDoctor(profile)
+      expect(report.backend).toBe('sqlite')
+      expect(report.blobCount).toBe(2)
+      expect(report.fileEmbeddingCount).toBe(2)
+      expect(report.ftsEnabled).toBe(true)
+      expect(report.warnings).toEqual([])
+    })
+  })
+
+  it('runStorageDoctor warns when FTS is disabled', async () => {
+    const noFts = new SqliteStorageProfile('project', ':memory:', false)
+    await withDbSession(session, async () => {
+      const report = await runStorageDoctor(noFts)
+      expect(report.ftsEnabled).toBe(false)
+      expect(report.warnings.some((w) => w.includes('FTS/hybrid search is disabled'))).toBe(true)
+    })
   })
 })
 
@@ -300,11 +335,13 @@ describe('resolveStorageProfile — config driven', () => {
     expect(resolveStorageProfile(cwd).fts).toBeNull()
   })
 
-  it('postgres backend requires storage.metadata.url; qdrant is not yet implemented', () => {
+  it('postgres backend requires storage.metadata.url; qdrant requires metadata.url and vectors.url', () => {
     process.env.GITSEMA_STORAGE_BACKEND = 'postgres'
     expect(() => resolveStorageProfile(cwd)).toThrow(/storage\.metadata\.url/)
     process.env.GITSEMA_STORAGE_BACKEND = 'qdrant'
-    expect(() => resolveStorageProfile(cwd)).toThrow(/Phase 103/)
+    expect(() => resolveStorageProfile(cwd)).toThrow(/storage\.metadata\.url/)
+    process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
+    expect(() => resolveStorageProfile(cwd)).toThrow(/storage\.vectors\.url/)
   })
 
   it('postgres backend resolves a PostgresStorageProfile when metadata.url is set', () => {
@@ -321,6 +358,16 @@ describe('resolveStorageProfile — config driven', () => {
     process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
     process.env.GITSEMA_STORAGE_FTS_BACKEND = 'bm25'
     expect(() => resolveStorageProfile(cwd)).toThrow(/Invalid storage\.fts\.backend/)
+  })
+
+  it('qdrant backend resolves a QdrantStorageProfile when metadata.url and vectors.url are set', () => {
+    process.env.GITSEMA_STORAGE_BACKEND = 'qdrant'
+    process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
+    process.env.GITSEMA_STORAGE_VECTORS_URL = 'http://localhost:6333'
+    const p = resolveStorageProfile(cwd)
+    expect(p.backend).toBe('qdrant')
+    expect(p.location).toBe('http://localhost:6333')
+    expect(p.fts).not.toBeNull()
   })
 
   it('invalid backend / scope are rejected', () => {

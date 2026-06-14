@@ -8,111 +8,118 @@
 
 | Section | Line |
 |---|---:|
-| [Vision](#vision) | 107 |
-| [Guiding principles](#guiding-principles) | 113 |
-| [Architecture overview](#architecture-overview) | 123 |
-| [Project structure](#project-structure) | 143 |
-| [Section I - Phases](#section-i-phases) | 195 |
-|   [Phase 1 — Foundation](#phase-1-—-foundation) | 197 |
-|   [Phase 2 — Git walking](#phase-2-—-git-walking) | 239 |
-|   [Phase 3 — Embedding system](#phase-3-—-embedding-system) | 263 |
-|   [Phase 4 — Indexing](#phase-4-—-indexing) | 301 |
-|   [Phase 5 — Search  ·  *MVP deliverable*](#phase-5-—-search-·-mvp-deliverable) | 327 |
-|   [Phase 6 — Commit mapping](#phase-6-—-commit-mapping) | 360 |
-|   [Phase 7 — Time-aware queries  ·  *Phase 2 deliverable*](#phase-7-—-time-aware-queries-·-phase-2-deliverable) | 397 |
-|   [Phase 8 — File-type-aware embedding models](#phase-8-—-file-type-aware-embedding-models) | 430 |
-|   [Phase 9 — Performance](#phase-9-—-performance) | 468 |
-|   [Phase 10 — Smarter semantics](#phase-10-—-smarter-semantics) | 506 |
-|   [Phase 11 — Advanced features + MCP](#phase-11-—-advanced-features-mcp) | 551 |
-|   [Phase 11b — Content access and semantic concept tracking](#phase-11b-—-content-access-and-semantic-concept-tracking) | 622 |
-| [Key technical decisions](#key-technical-decisions) | 739 |
-| [Risk register](#risk-register) | 751 |
-|   [Phase 12 — CLI consolidation & robust per-file indexing](#phase-12-—-cli-consolidation-robust-per-file-indexing) | 763 |
-|   [Recent progress (snapshot: 2026-04-01)](#recent-progress-snapshot-2026-04-01) | 793 |
-|   [Phase 13 — Standalone model server for embeddings](#phase-13-—-standalone-model-server-for-embeddings) | 809 |
-|   [Phase 14 — Infrastructure, tooling, and maintenance](#phase-14-—-infrastructure-tooling-and-maintenance) | 892 |
-|   [Phase 14b — Search result deduplication](#phase-14b-—-search-result-deduplication) | 949 |
-|   [Phase 15 — Branch awareness](#phase-15-—-branch-awareness) | 983 |
-|   [Phase 16 — Remote-repository indexing (server-managed clone, RAM-backed working tree, persistent DB)](#phase-16-—-remote-repository-indexing-server-managed-clone-ram-backed-working-tree-persistent-db) | 1055 |
-|   [Phase 17 — Remote-indexing hardening and SSH support](#phase-17-—-remote-indexing-hardening-and-ssh-support) | 1313 |
-|   [Phase 18 — Reliability, tests, and query caching](#phase-18-—-reliability-tests-and-query-caching) | 1384 |
-|   [Phase 19 — Smarter chunking, semantic blame & symbol-level embeddings](#phase-19-—-smarter-chunking-semantic-blame-symbol-level-embeddings) | 1398 |
-|   [Phase 20 — Dead-concept detection & refactor impact analysis](#phase-20-—-dead-concept-detection-refactor-impact-analysis) | 1463 |
-|   [Phase 21 — Semantic clustering & concept graph](#phase-21-—-semantic-clustering-concept-graph) | 1476 |
-|   [Phase 22 — Temporal cluster diff](#phase-22-—-temporal-cluster-diff) | 1489 |
-|   [Phase 23 — Cluster timeline](#phase-23-—-cluster-timeline) | 1502 |
-|   [Phase 24 — Enhanced cluster labeling](#phase-24-—-enhanced-cluster-labeling) | 1516 |
-|   [Phase 25 — Interactive HTML visualizations](#phase-25-—-interactive-html-visualizations) | 1530 |
-|   [Phase 26 — CLI naming consolidation & conceptual diff](#phase-26-—-cli-naming-consolidation-conceptual-diff) | 1545 |
-|   [Phase 27 — Semantic change-point detection](#phase-27-—-semantic-change-point-detection) | 1586 |
-|   [Phase 28 — Persistent configuration management](#phase-28-—-persistent-configuration-management) | 1646 |
-|   [Phase 29 — Automated indexing via Git hooks](#phase-29-—-automated-indexing-via-git-hooks) | 1673 |
-|   [Phase 30 — Commit message semantic indexing](#phase-30-—-commit-message-semantic-indexing) | 1689 |
-|   [Phase 31 — Semantic concept authorship ranking](#phase-31-—-semantic-concept-authorship-ranking) | 1740 |
-|   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | 1790 |
-|   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | 1851 |
-|   [Phase 34 — Feature adoption & cross-cutting improvements](#phase-34-—-feature-adoption-cross-cutting-improvements) | 1907 |
-|   [Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search](#phase-35-—-multi-model-db-per-command-model-flags-clear-model-multi-model-search) | 1945 |
-|   [Phase 36 — Vector Index (VSS), Int8 Quantization, ANN Search](#phase-36-—-vector-index-vss-int8-quantization-ann-search) | 1983 |
-|   [Phase 37 — Quick Wins: Selective Indexing, Code-to-Code Search, Negative Examples, Result Explanation](#phase-37-—-quick-wins-selective-indexing-code-to-code-search-negative-examples-result-explanation) | 2057 |
-|   [Phase 38 — Medium Effort: Documentation Gap Analysis, Semantic Bisect, GC, Boolean Queries](#phase-38-—-medium-effort-documentation-gap-analysis-semantic-bisect-gc-boolean-queries) | 2082 |
-|   [Phase 39 — Analysis Features: Contributor Profiles, Refactoring, Lifecycle, CI Diff](#phase-39-—-analysis-features-contributor-profiles-refactoring-lifecycle-ci-diff) | 2107 |
-|   [Phase 40 — Visualization & Scale: Codebase Map, Temporal Heatmap, Remote Index, Cherry-Pick](#phase-40-—-visualization-scale-codebase-map-temporal-heatmap-remote-index-cherry-pick) | 2132 |
-|   [Phase 41 — Multi-Repo Unified Index *(completed v0.43.0)*](#phase-41-—-multi-repo-unified-index-completed-v0430) | 2163 |
-|   [Phase 42 — IDE / LSP Integration *(completed v0.44.0)*](#phase-42-—-ide-lsp-integration-completed-v0440) | 2179 |
-|   [Phase 43 — Security Pattern Detection *(completed v0.45.0)*](#phase-43-—-security-pattern-detection-completed-v0450) | 2195 |
-|   [Phase 44 — Codebase Health Timeline *(completed v0.46.0)*](#phase-44-—-codebase-health-timeline-completed-v0460) | 2210 |
-|   [Phase 45 — Technical Debt Scoring *(completed v0.47.0)*](#phase-45-—-technical-debt-scoring-completed-v0470) | 2225 |
-|   [Phase 46 — Evolution Alerts and Commit URL Construction *(completed v0.48.0)*](#phase-46-—-evolution-alerts-and-commit-url-construction-completed-v0480) | 2242 |
-|   [Phase 47 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging](#phase-47-—-richer-indexing-progress-embed-latency-stats-and-incremental-by-default-messaging) | 2257 |
-|   [Phase 48 — Batch Embedding and Provider Throughput ✅ Implemented](#phase-48-—-batch-embedding-and-provider-throughput-✅-implemented) | 2287 |
-|   [Phase 49 — Auto-VSS Default Path ✅ Implemented (v0.51.0)](#phase-49-—-auto-vss-default-path-✅-implemented-v0510) | 2302 |
-|   [Phase 50 — Real Multi-Repo Search ✅ Implemented (v0.52.0)](#phase-50-—-real-multi-repo-search-✅-implemented-v0520) | 2314 |
-|   [Phase 51 — LSP Completion of the Protocol ✅ Implemented (v0.53.0)](#phase-51-—-lsp-completion-of-the-protocol-✅-implemented-v0530) | 2326 |
-|   [Phase 52 — Query Expansion ✅ Implemented (v0.54.0)](#phase-52-—-query-expansion-✅-implemented-v0540) | 2339 |
-|   [Phase 53 — Saved Searches and Watch Mode ✅ Implemented (v0.55.0)](#phase-53-—-saved-searches-and-watch-mode-✅-implemented-v0550) | 2351 |
-|   [Phase 54 — Index Bundle Export / Import ✅ Implemented (v0.56.0)](#phase-54-—-index-bundle-export-import-✅-implemented-v0560) | 2363 |
-|   [Phase 55 — Embedding Space Explorer (Web UI) ✅ Implemented (v0.57.0)](#phase-55-—-embedding-space-explorer-web-ui-✅-implemented-v0570) | 2374 |
-|   [Phase 56 — LLM-Powered Evolution Narration ✅ Implemented (v0.58.0)](#phase-56-—-llm-powered-evolution-narration-✅-implemented-v0580) | 2385 |
-|   [Phase 57 — GitHub Actions Integration for CI Diff ✅ Implemented (v0.59.0)](#phase-57-—-github-actions-integration-for-ci-diff-✅-implemented-v0590) | 2396 |
-|   [Phase 58 — Structured Security Scan (Static + Semantic) ✅ Implemented (v0.60.0)](#phase-58-—-structured-security-scan-static-semantic-✅-implemented-v0600) | 2407 |
-|   [Phase 59 — `gitsema tools` Subcommand Group (Protocol Servers) ✅ Implemented (v0.61.0)](#phase-59-—-gitsema-tools-subcommand-group-protocol-servers-✅-implemented-v0610) | 2419 |
-|   [Phase 60 — Uniform Column Headers + `--no-headings` Across All Commands ✅ Implemented (v.0.62.0)](#phase-60-—-uniform-column-headers-no-headings-across-all-commands-✅-implemented-v0620) | 2460 |
-|   [Phase 61 — MCP/HTTP Parity + Semantic PR Report *(completed v0.64.0)*](#phase-61-—-mcphttp-parity-semantic-pr-report-completed-v0640) | 2525 |
-|   [Phase 62 — Heavy Batching for Ollama + HTTP Providers *(completed v0.67.0)*](#phase-62-—-heavy-batching-for-ollama-http-providers-completed-v0670) | 2545 |
-|   [Phase 63 — Indexing Auto-Defaults and Adaptive Tuning *(completed v0.65.0)*](#phase-63-—-indexing-auto-defaults-and-adaptive-tuning-completed-v0650) | 2559 |
-|   [Phase 64 — Search Scalability + AI Retrieval Reliability *(completed v0.66.0)*](#phase-64-—-search-scalability-ai-retrieval-reliability-completed-v0660) | 2575 |
-|   [Phase 65 — Incident Triage Bundle *(completed v0.68.0)*](#phase-65-—-incident-triage-bundle-completed-v0680) | 2589 |
-|   [Phase 66 — Policy Checks for CI *(completed v0.68.0)*](#phase-66-—-policy-checks-for-ci-completed-v0680) | 2597 |
-|   [Phase 67 — Ownership Heatmap by Concept *(completed v0.68.0)*](#phase-67-—-ownership-heatmap-by-concept-completed-v0680) | 2605 |
-|   [Phase 68 — Persistent Workflow Templates *(completed v0.68.0)*](#phase-68-—-persistent-workflow-templates-completed-v0680) | 2613 |
-|   [Phase 69 — Pipelined Batch Indexing *(completed v0.68.0)*](#phase-69-—-pipelined-batch-indexing-completed-v0680) | 2621 |
-|   [Phase 70 — Unified Output System *(completed v0.69.0)*](#phase-70-—-unified-output-system-completed-v0690) | 2629 |
-|   [Phase 71 — Index Status Dashboard + Model Management *(completed v0.71.0)*](#phase-71-—-index-status-dashboard-model-management-completed-v0710) | 2646 |
-|   [Planned Phases (72+)](#planned-phases-72) | 2668 |
-|   [Phase 71 — Operational Readiness: Metrics, Rate Limiting, and OpenAPI *(completed v0.71.0)*](#phase-71-—-operational-readiness-metrics-rate-limiting-and-openapi-completed-v0710) | 2674 |
-|   [Phase 72 — HTTP Route Parity for All Analysis Commands *(completed v0.72.0)*](#phase-72-—-http-route-parity-for-all-analysis-commands-completed-v0720) | 2687 |
-|   [Phase 73 — Deployment Guide and Docker Infrastructure](#phase-73-—-deployment-guide-and-docker-infrastructure) | 2699 |
-|   [Phase 74 — `gitsema status` Scale Warnings + Extended `gitsema doctor` Pre-flight](#phase-74-—-gitsema-status-scale-warnings-extended-gitsema-doctor-pre-flight) | 2712 |
-|   [Phase 75 — Per-Repo Access Control on HTTP Server](#phase-75-—-per-repo-access-control-on-http-server) | 2725 |
-|   [Phase 76 — Complete `htmlRenderer.ts` Modularisation](#phase-76-—-complete-htmlrendererts-modularisation) | 2739 |
-|   [Phase 77 — Unified Indexing + Search Level Concept](#phase-77-—-unified-indexing-search-level-concept) | 2752 |
-|   [Phase 82 — Auto-cap Search Memory *(completed v0.79.0)*](#phase-82-—-auto-cap-search-memory-completed-v0790) | 2768 |
-|   [Phase 83 — Parallel Commit-Message Embedding *(completed v0.80.0)*](#phase-83-—-parallel-commit-message-embedding-completed-v0800) | 2780 |
-|   [Phase 84 — LSP: documentSymbol + Improved definition/references *(completed v0.81.0)*](#phase-84-—-lsp-documentsymbol-improved-definitionreferences-completed-v0810) | 2794 |
-|   [Phase 85 — Tier-1 Reliability: Test Isolation, SQL Sampling, Batch Dedup *(completed v0.84.0)*](#phase-85-—-tier-1-reliability-test-isolation-sql-sampling-batch-dedup-completed-v0840) | 2808 |
-|   [Phase 86 — Tier-2 Code Organisation: MCP Modularization + Search Module Split + CLI Register Split *(completed v0.85.0)*](#phase-86-—-tier-2-code-organisation-mcp-modularization-search-module-split-cli-register-split-completed-v0850) | 2836 |
-|   [Phase 87 — Tier-3 Robustness: Embed Retry, Queue Backpressure, Atomic FTS5, Body Limit *(completed v0.86.0)*](#phase-87-—-tier-3-robustness-embed-retry-queue-backpressure-atomic-fts5-body-limit-completed-v0860) | 2864 |
-|   [Phase 88 — Tier-4 Scale/Features: LLM Narrator Tests + Docs Sync Check *(completed v0.87.0)*](#phase-88-—-tier-4-scalefeatures-llm-narrator-tests-docs-sync-check-completed-v0870) | 2896 |
-|   [Phase 89 — Tier-5 Code Quality: review6 §11 Detailed Findings *(completed v0.88.0)*](#phase-89-—-tier-5-code-quality-review6-§11-detailed-findings-completed-v0880) | 2920 |
-|   [Phase 90 — Model Local Names (Shorthand / globalName) *(completed v0.89.0)*](#phase-90-—-model-local-names-shorthand-globalname-completed-v0890) | 3000 |
-|   [Phase 91 — 8 Productized Usage Patterns (review7 §5) *(completed v0.90.0)*](#phase-91-—-8-productized-usage-patterns-review7-§5-completed-v0900) | 3055 |
-|   [Phase 92 — review7 Improvement Bundle *(completed, 2026-04-09)*](#phase-92-—-review7-improvement-bundle-completed-2026-04-09) | 3101 |
-|   [Phase 93 — Time filter semantics & pagination stability](#phase-93-—-time-filter-semantics-pagination-stability) | 3143 |
-|   [Phase 95 — Flag unification (review8 §8.6/§8.9)](#phase-95-—-flag-unification-review8-§86§89) | 3232 |
-|   [Phase 98 — CLI-based AI tool backends for narrator/guide](#phase-98-—-cli-based-ai-tool-backends-for-narratorguide) | 3333 |
-| [Long-Term Investments](#long-term-investments) | 3173 |
-| [Non-goals for now (revisited later)](#non-goals-for-now-revisited-later) | 3186 |
+| [Vision](#vision) | 126 |
+| [Guiding principles](#guiding-principles) | 132 |
+| [Architecture overview](#architecture-overview) | 142 |
+| [Project structure](#project-structure) | 162 |
+| [Section I - Phases](#section-i-phases) | 214 |
+|   [Phase 1 — Foundation](#phase-1-—-foundation) | 216 |
+|   [Phase 2 — Git walking](#phase-2-—-git-walking) | 258 |
+|   [Phase 3 — Embedding system](#phase-3-—-embedding-system) | 282 |
+|   [Phase 4 — Indexing](#phase-4-—-indexing) | 320 |
+|   [Phase 5 — Search  ·  *MVP deliverable*](#phase-5-—-search-·-mvp-deliverable) | 346 |
+|   [Phase 6 — Commit mapping](#phase-6-—-commit-mapping) | 379 |
+|   [Phase 7 — Time-aware queries  ·  *Phase 2 deliverable*](#phase-7-—-time-aware-queries-·-phase-2-deliverable) | 416 |
+|   [Phase 8 — File-type-aware embedding models](#phase-8-—-file-type-aware-embedding-models) | 449 |
+|   [Phase 9 — Performance](#phase-9-—-performance) | 487 |
+|   [Phase 10 — Smarter semantics](#phase-10-—-smarter-semantics) | 525 |
+|   [Phase 11 — Advanced features + MCP](#phase-11-—-advanced-features-mcp) | 570 |
+|   [Phase 11b — Content access and semantic concept tracking](#phase-11b-—-content-access-and-semantic-concept-tracking) | 641 |
+| [Key technical decisions](#key-technical-decisions) | 758 |
+| [Risk register](#risk-register) | 770 |
+|   [Phase 12 — CLI consolidation & robust per-file indexing](#phase-12-—-cli-consolidation-robust-per-file-indexing) | 782 |
+|   [Recent progress (snapshot: 2026-04-01)](#recent-progress-snapshot-2026-04-01) | 812 |
+|   [Phase 13 — Standalone model server for embeddings](#phase-13-—-standalone-model-server-for-embeddings) | 828 |
+|   [Phase 14 — Infrastructure, tooling, and maintenance](#phase-14-—-infrastructure-tooling-and-maintenance) | 911 |
+|   [Phase 14b — Search result deduplication](#phase-14b-—-search-result-deduplication) | 968 |
+|   [Phase 15 — Branch awareness](#phase-15-—-branch-awareness) | 1002 |
+|   [Phase 16 — Remote-repository indexing (server-managed clone, RAM-backed working tree, persistent DB)](#phase-16-—-remote-repository-indexing-server-managed-clone-ram-backed-working-tree-persistent-db) | 1074 |
+|   [Phase 17 — Remote-indexing hardening and SSH support](#phase-17-—-remote-indexing-hardening-and-ssh-support) | 1332 |
+|   [Phase 18 — Reliability, tests, and query caching](#phase-18-—-reliability-tests-and-query-caching) | 1403 |
+|   [Phase 19 — Smarter chunking, semantic blame & symbol-level embeddings](#phase-19-—-smarter-chunking-semantic-blame-symbol-level-embeddings) | 1417 |
+|   [Phase 20 — Dead-concept detection & refactor impact analysis](#phase-20-—-dead-concept-detection-refactor-impact-analysis) | 1482 |
+|   [Phase 21 — Semantic clustering & concept graph](#phase-21-—-semantic-clustering-concept-graph) | 1495 |
+|   [Phase 22 — Temporal cluster diff](#phase-22-—-temporal-cluster-diff) | 1508 |
+|   [Phase 23 — Cluster timeline](#phase-23-—-cluster-timeline) | 1521 |
+|   [Phase 24 — Enhanced cluster labeling](#phase-24-—-enhanced-cluster-labeling) | 1535 |
+|   [Phase 25 — Interactive HTML visualizations](#phase-25-—-interactive-html-visualizations) | 1549 |
+|   [Phase 26 — CLI naming consolidation & conceptual diff](#phase-26-—-cli-naming-consolidation-conceptual-diff) | 1564 |
+|   [Phase 27 — Semantic change-point detection](#phase-27-—-semantic-change-point-detection) | 1605 |
+|   [Phase 28 — Persistent configuration management](#phase-28-—-persistent-configuration-management) | 1665 |
+|   [Phase 29 — Automated indexing via Git hooks](#phase-29-—-automated-indexing-via-git-hooks) | 1692 |
+|   [Phase 30 — Commit message semantic indexing](#phase-30-—-commit-message-semantic-indexing) | 1708 |
+|   [Phase 31 — Semantic concept authorship ranking](#phase-31-—-semantic-concept-authorship-ranking) | 1759 |
+|   [Phase 32 — Branch and merge awareness](#phase-32-—-branch-and-merge-awareness) | 1809 |
+|   [Phase 33 — Multi-level hierarchical indexing](#phase-33-—-multi-level-hierarchical-indexing) | 1870 |
+|   [Phase 34 — Feature adoption & cross-cutting improvements](#phase-34-—-feature-adoption-cross-cutting-improvements) | 1926 |
+|   [Phase 35 — Multi-model DB, per-command model flags, clear-model, multi-model search](#phase-35-—-multi-model-db-per-command-model-flags-clear-model-multi-model-search) | 1964 |
+|   [Phase 36 — Vector Index (VSS), Int8 Quantization, ANN Search](#phase-36-—-vector-index-vss-int8-quantization-ann-search) | 2002 |
+|   [Phase 37 — Quick Wins: Selective Indexing, Code-to-Code Search, Negative Examples, Result Explanation](#phase-37-—-quick-wins-selective-indexing-code-to-code-search-negative-examples-result-explanation) | 2076 |
+|   [Phase 38 — Medium Effort: Documentation Gap Analysis, Semantic Bisect, GC, Boolean Queries](#phase-38-—-medium-effort-documentation-gap-analysis-semantic-bisect-gc-boolean-queries) | 2101 |
+|   [Phase 39 — Analysis Features: Contributor Profiles, Refactoring, Lifecycle, CI Diff](#phase-39-—-analysis-features-contributor-profiles-refactoring-lifecycle-ci-diff) | 2126 |
+|   [Phase 40 — Visualization & Scale: Codebase Map, Temporal Heatmap, Remote Index, Cherry-Pick](#phase-40-—-visualization-scale-codebase-map-temporal-heatmap-remote-index-cherry-pick) | 2151 |
+|   [Phase 41 — Multi-Repo Unified Index *(completed v0.43.0)*](#phase-41-—-multi-repo-unified-index-completed-v0430) | 2182 |
+|   [Phase 42 — IDE / LSP Integration *(completed v0.44.0)*](#phase-42-—-ide-lsp-integration-completed-v0440) | 2198 |
+|   [Phase 43 — Security Pattern Detection *(completed v0.45.0)*](#phase-43-—-security-pattern-detection-completed-v0450) | 2214 |
+|   [Phase 44 — Codebase Health Timeline *(completed v0.46.0)*](#phase-44-—-codebase-health-timeline-completed-v0460) | 2229 |
+|   [Phase 45 — Technical Debt Scoring *(completed v0.47.0)*](#phase-45-—-technical-debt-scoring-completed-v0470) | 2244 |
+|   [Phase 46 — Evolution Alerts and Commit URL Construction *(completed v0.48.0)*](#phase-46-—-evolution-alerts-and-commit-url-construction-completed-v0480) | 2261 |
+|   [Phase 47 — Richer Indexing Progress, Embed Latency Stats, and Incremental-by-Default Messaging](#phase-47-—-richer-indexing-progress-embed-latency-stats-and-incremental-by-default-messaging) | 2276 |
+|   [Phase 48 — Batch Embedding and Provider Throughput ✅ Implemented](#phase-48-—-batch-embedding-and-provider-throughput-✅-implemented) | 2306 |
+|   [Phase 49 — Auto-VSS Default Path ✅ Implemented (v0.51.0)](#phase-49-—-auto-vss-default-path-✅-implemented-v0510) | 2321 |
+|   [Phase 50 — Real Multi-Repo Search ✅ Implemented (v0.52.0)](#phase-50-—-real-multi-repo-search-✅-implemented-v0520) | 2333 |
+|   [Phase 51 — LSP Completion of the Protocol ✅ Implemented (v0.53.0)](#phase-51-—-lsp-completion-of-the-protocol-✅-implemented-v0530) | 2345 |
+|   [Phase 52 — Query Expansion ✅ Implemented (v0.54.0)](#phase-52-—-query-expansion-✅-implemented-v0540) | 2358 |
+|   [Phase 53 — Saved Searches and Watch Mode ✅ Implemented (v0.55.0)](#phase-53-—-saved-searches-and-watch-mode-✅-implemented-v0550) | 2370 |
+|   [Phase 54 — Index Bundle Export / Import ✅ Implemented (v0.56.0)](#phase-54-—-index-bundle-export-import-✅-implemented-v0560) | 2382 |
+|   [Phase 55 — Embedding Space Explorer (Web UI) ✅ Implemented (v0.57.0)](#phase-55-—-embedding-space-explorer-web-ui-✅-implemented-v0570) | 2393 |
+|   [Phase 56 — LLM-Powered Evolution Narration ✅ Implemented (v0.58.0)](#phase-56-—-llm-powered-evolution-narration-✅-implemented-v0580) | 2404 |
+|   [Phase 57 — GitHub Actions Integration for CI Diff ✅ Implemented (v0.59.0)](#phase-57-—-github-actions-integration-for-ci-diff-✅-implemented-v0590) | 2415 |
+|   [Phase 58 — Structured Security Scan (Static + Semantic) ✅ Implemented (v0.60.0)](#phase-58-—-structured-security-scan-static-semantic-✅-implemented-v0600) | 2426 |
+|   [Phase 59 — `gitsema tools` Subcommand Group (Protocol Servers) ✅ Implemented (v0.61.0)](#phase-59-—-gitsema-tools-subcommand-group-protocol-servers-✅-implemented-v0610) | 2438 |
+|   [Phase 60 — Uniform Column Headers + `--no-headings` Across All Commands ✅ Implemented (v.0.62.0)](#phase-60-—-uniform-column-headers-no-headings-across-all-commands-✅-implemented-v0620) | 2479 |
+|   [Phase 61 — MCP/HTTP Parity + Semantic PR Report *(completed v0.64.0)*](#phase-61-—-mcphttp-parity-semantic-pr-report-completed-v0640) | 2544 |
+|   [Phase 62 — Heavy Batching for Ollama + HTTP Providers *(completed v0.67.0)*](#phase-62-—-heavy-batching-for-ollama-http-providers-completed-v0670) | 2564 |
+|   [Phase 63 — Indexing Auto-Defaults and Adaptive Tuning *(completed v0.65.0)*](#phase-63-—-indexing-auto-defaults-and-adaptive-tuning-completed-v0650) | 2578 |
+|   [Phase 64 — Search Scalability + AI Retrieval Reliability *(completed v0.66.0)*](#phase-64-—-search-scalability-ai-retrieval-reliability-completed-v0660) | 2594 |
+|   [Phase 65 — Incident Triage Bundle *(completed v0.68.0)*](#phase-65-—-incident-triage-bundle-completed-v0680) | 2608 |
+|   [Phase 66 — Policy Checks for CI *(completed v0.68.0)*](#phase-66-—-policy-checks-for-ci-completed-v0680) | 2616 |
+|   [Phase 67 — Ownership Heatmap by Concept *(completed v0.68.0)*](#phase-67-—-ownership-heatmap-by-concept-completed-v0680) | 2624 |
+|   [Phase 68 — Persistent Workflow Templates *(completed v0.68.0)*](#phase-68-—-persistent-workflow-templates-completed-v0680) | 2632 |
+|   [Phase 69 — Pipelined Batch Indexing *(completed v0.68.0)*](#phase-69-—-pipelined-batch-indexing-completed-v0680) | 2640 |
+|   [Phase 70 — Unified Output System *(completed v0.69.0)*](#phase-70-—-unified-output-system-completed-v0690) | 2648 |
+|   [Phase 71 — Index Status Dashboard + Model Management *(completed v0.71.0)*](#phase-71-—-index-status-dashboard-model-management-completed-v0710) | 2665 |
+|   [Planned Phases (72+)](#planned-phases-72) | 2687 |
+|   [Phase 71 — Operational Readiness: Metrics, Rate Limiting, and OpenAPI *(completed v0.71.0)*](#phase-71-—-operational-readiness-metrics-rate-limiting-and-openapi-completed-v0710) | 2693 |
+|   [Phase 72 — HTTP Route Parity for All Analysis Commands *(completed v0.72.0)*](#phase-72-—-http-route-parity-for-all-analysis-commands-completed-v0720) | 2706 |
+|   [Phase 73 — Deployment Guide and Docker Infrastructure](#phase-73-—-deployment-guide-and-docker-infrastructure) | 2718 |
+|   [Phase 74 — `gitsema status` Scale Warnings + Extended `gitsema doctor` Pre-flight](#phase-74-—-gitsema-status-scale-warnings-extended-gitsema-doctor-pre-flight) | 2731 |
+|   [Phase 75 — Per-Repo Access Control on HTTP Server](#phase-75-—-per-repo-access-control-on-http-server) | 2744 |
+|   [Phase 76 — Complete `htmlRenderer.ts` Modularisation](#phase-76-—-complete-htmlrendererts-modularisation) | 2758 |
+|   [Phase 77 — Unified Indexing + Search Level Concept](#phase-77-—-unified-indexing-search-level-concept) | 2771 |
+|   [Phase 82 — Auto-cap Search Memory *(completed v0.79.0)*](#phase-82-—-auto-cap-search-memory-completed-v0790) | 2787 |
+|   [Phase 83 — Parallel Commit-Message Embedding *(completed v0.80.0)*](#phase-83-—-parallel-commit-message-embedding-completed-v0800) | 2799 |
+|   [Phase 84 — LSP: documentSymbol + Improved definition/references *(completed v0.81.0)*](#phase-84-—-lsp-documentsymbol-improved-definitionreferences-completed-v0810) | 2813 |
+|   [Phase 85 — Tier-1 Reliability: Test Isolation, SQL Sampling, Batch Dedup *(completed v0.84.0)*](#phase-85-—-tier-1-reliability-test-isolation-sql-sampling-batch-dedup-completed-v0840) | 2827 |
+|   [Phase 86 — Tier-2 Code Organisation: MCP Modularization + Search Module Split + CLI Register Split *(completed v0.85.0)*](#phase-86-—-tier-2-code-organisation-mcp-modularization-search-module-split-cli-register-split-completed-v0850) | 2855 |
+|   [Phase 87 — Tier-3 Robustness: Embed Retry, Queue Backpressure, Atomic FTS5, Body Limit *(completed v0.86.0)*](#phase-87-—-tier-3-robustness-embed-retry-queue-backpressure-atomic-fts5-body-limit-completed-v0860) | 2883 |
+|   [Phase 88 — Tier-4 Scale/Features: LLM Narrator Tests + Docs Sync Check *(completed v0.87.0)*](#phase-88-—-tier-4-scalefeatures-llm-narrator-tests-docs-sync-check-completed-v0870) | 2915 |
+|   [Phase 89 — Tier-5 Code Quality: review6 §11 Detailed Findings *(completed v0.88.0)*](#phase-89-—-tier-5-code-quality-review6-§11-detailed-findings-completed-v0880) | 2939 |
+|   [Phase 90 — Model Local Names (Shorthand / globalName) *(completed v0.89.0)*](#phase-90-—-model-local-names-shorthand-globalname-completed-v0890) | 3019 |
+|   [Phase 91 — 8 Productized Usage Patterns (review7 §5) *(completed v0.90.0)*](#phase-91-—-8-productized-usage-patterns-review7-§5-completed-v0900) | 3074 |
+|   [Phase 92 — review7 Improvement Bundle *(completed, 2026-04-09)*](#phase-92-—-review7-improvement-bundle-completed-2026-04-09) | 3120 |
+|   [Phase 93 — Time filter semantics & pagination stability](#phase-93-—-time-filter-semantics-pagination-stability) | 3162 |
+|   [Phase 94 — review8 CLI Wiring & Documentation Restoration *(completed v0.91.0)*](#phase-94-—-review8-cli-wiring-documentation-restoration-completed-v0910) | 3192 |
+|   [Phase 95 — Flag unification (review8 §8.6/§8.9) *(completed v0.92.0)*](#phase-95-—-flag-unification-review8-§86§89-completed-v0920) | 3224 |
+|   [Phase 96 — LLM Narrator/Explainer/Guide via chattydeer *(completed v0.93.0)*](#phase-96-—-llm-narratorexplainerguide-via-chattydeer-completed-v0930) | 3247 |
+|   [Phase 97 — Full-toolset guide, tool interpretation registry, skill generation, Ollama docs](#phase-97-—-full-toolset-guide-tool-interpretation-registry-skill-generation-ollama-docs) | 3280 |
+|   [Phase 98 — CLI-based AI tool backends for narrator/guide](#phase-98-—-cli-based-ai-tool-backends-for-narratorguide) | 3341 |
+|   [Phase 99 — `--provider ollama` for narrator/guide + Ollama model discovery](#phase-99-—-provider-ollama-for-narratorguide-ollama-model-discovery) | 3405 |
+|   [Phase 100 — Persistent, registry-backed server-side repo storage](#phase-100-—-persistent-registry-backed-server-side-repo-storage) | 3471 |
+|   [Phases 101–103 — Pluggable storage backends & index scoping](#phases-101103-—-pluggable-storage-backends-index-scoping) | 3539 |
+|   [Phase 104 — Full-toolset guide coverage, per-command `--narrate`, and a guided `gitsema setup` wizard](#phase-104-—-full-toolset-guide-coverage-per-command-narrate-and-a-guided-gitsema-setup-wizard) | 3741 |
+| [Long-Term Investments](#long-term-investments) | 3446 |
+| [Non-goals for now (revisited later)](#non-goals-for-now-revisited-later) | 3463 |
 
 ---
 
@@ -768,7 +775,7 @@ entire codebase history — not just within a single file.
 | Embedding cost / latency | Blob dedup (Phase 4), batching (Phase 9) |
 | Model change invalidates index | `model` column on embeddings, re-index detection |
 | SQLite write contention | Single writer pattern, WAL mode |
-| Slow cosine search at scale | KNN index with `sqlite-vss` or `pgvector` migration |
+| Slow cosine search at scale | ✅ Resolved: usearch HNSW VSS (Phase 36/49) for SQLite; `pgvector`/Qdrant ANN backends (Phases 102-103) for postgres/qdrant |
 
 ---
 
@@ -3440,8 +3447,12 @@ is given.
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
-| DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
+
+> **Note:** the "pgvector migration path for >500K blobs" item formerly listed
+> here was implemented by Phases 101-103 (`storage.backend=postgres\|qdrant`,
+> see [Phases 101-103](#phases-101–103-—-pluggable-storage-backends-index-scoping)).
+> SQLite remains the default for new projects.
 
 **Scale notes (updated for v0.81.0):**
 
@@ -3642,8 +3653,218 @@ interface.
   to the write-path seam (Postgres *and* Qdrant — carried from 102);
   `gitsema storage migrate`, doctor orphan checks, status backend reporting.
 
+  **Implemented:**
+  - **Indexer write-path rewiring (carried from 102):** `indexer.ts` now writes
+    blobs/embeddings/paths/FTS via `profile.writeFileBlob`/`.writeBlobRecord`,
+    commit/branch links via `profile.metadata.linkBlobCommits`/
+    `.setBlobBranches`/`.markCommitIndexed`/`.getLastIndexedCommit`, and
+    chunk/symbol/commit-message embeddings via `profile.vectors.upsert`,
+    instead of calling the synchronous SQLite-only `blobStore.ts` functions
+    directly — `gitsema index` is now backend-agnostic for postgres and qdrant.
+    **Deviations:** (1) module (directory centroid) embeddings remain
+    SQLite-only (`moduleEmbeddingsSupported = profile.backend === 'sqlite'`) —
+    their running-mean update needs a read-modify-write that isn't part of the
+    `VectorStore` seam; (2) `gitsema index --file <path>` (`indexFileCommand` in
+    `src/cli/commands/index.ts`) still calls `storeBlob`/`storeBlobRecord`
+    directly and so only writes to the SQLite backend regardless of
+    `storage.backend` — fixing this is a documented follow-up.
+  - **Qdrant `VectorStore` + `StorageProfile`**
+    (`src/core/storage/qdrant/{connection,vectorStore,profile}.ts`, using
+    `@qdrant/js-client-rest`): one collection per `(kind, model, dimensions)`
+    tuple (`gitsema_<kind>_<model>_<dims>`), created lazily on first `upsert`.
+    Deterministic sha1-derived UUID point ids keyed on the natural id (plus
+    line range for chunk/symbol). `search()`/`searchCommits()` fetch a wide
+    ANN candidate pool then re-rank in JS with `pathRelevanceScore` +
+    `computeRecencyScores`, mirroring `PgVectorStore`. Reuses Phase 102's
+    `PostgresMetadataStore`/`PostgresFtsStore` as the relational companion for
+    paths/commits/branches/FTS (`storage.metadata.url`, a `postgres://...`
+    string, is required alongside `storage.vectors.url`).
+    **Deviation:** `first_seen`/`last_seen` are *not* denormalized into the
+    Qdrant payload (despite §6.5) — `search()`/`searchCommits()` instead join
+    through the Postgres companion's `blob_commits`/`commits` tables, exactly
+    like `PgVectorStore`, to avoid plumbing a new field through `VectorRecord`
+    and the indexer. Cross-store writes (Postgres metadata + Qdrant vectors)
+    are not atomic — a partial write self-heals on the next incremental
+    `index` run via the existing dedup check (per §8).
+  - **`resolveStorageProfile()`** now resolves `storage.backend=qdrant` from
+    `storage.vectors.url` (Qdrant `http(s)://` URL, required) +
+    `storage.metadata.url` (postgres companion, required) +
+    `storage.vectors.apiKey` (optional) + `storage.fts.backend`.
+    `withStorageProfile()` no-ops for qdrant (own client/pool).
+  - **`gitsema storage migrate --to <backend> [...]`**
+    (`src/core/storage/migrate.ts`, `src/cli/commands/storageMigrate.ts`):
+    copies an index between backends — reads every table from the *source*
+    sqlite database directly (`better-sqlite3`) and re-`upsert`s/inserts into
+    the destination via `profile.metadata`/`profile.vectors`/`profile.fts`.
+    All destination writes use content-addressed/idempotent paths
+    (`ON CONFLICT DO NOTHING`, deterministic point ids), so a migration is
+    safe to re-run/resume after an interruption.
+    **Deviation:** only `sqlite` sources are supported (`--to` selects
+    sqlite/postgres/qdrant destinations) — migrating *from* postgres/qdrant
+    would need new "list all rows" methods on `MetadataStore`/`VectorStore`
+    that don't exist yet; documented as a follow-up rather than blocking this
+    phase, since sqlite → {postgres, qdrant} is the primary "move my existing
+    index" use case.
+  - **Doctor / status backend reporting:** `MetadataStore.getStats()` (row
+    counts: blobs, paths, commits, indexed commits, branches, last indexed
+    commit) is implemented for SQLite and Postgres (and therefore Qdrant, via
+    the Postgres companion). `gitsema doctor` and `gitsema status` detect
+    non-sqlite profiles and report backend/scope/location plus these counts
+    via the new `runStorageDoctor()` (`src/core/storage/doctor.ts`), which also
+    cross-checks the vector store's file-embedding count against the metadata
+    store's blob count and flags disabled FTS.
+    **Deviation:** the deep sqlite-only checks in `gitsema doctor`
+    (`PRAGMA integrity_check`, schema-version check, FTS5-backfill count, the
+    `--extended` model-reachability/freshness/latency checks) remain
+    sqlite-specific — there is no equivalent single-file integrity check for
+    postgres/qdrant.
+  - **Infra:** `docker-compose.qdrant.yml` (qdrant/qdrant image, dev/test);
+    `.github/workflows/ci.yml` gained a `qdrant-storage-tests` job (postgres +
+    qdrant service containers) running `tests/qdrantStorageProfile.test.ts`,
+    gated on `GITSEMA_TEST_QDRANT_URL`/`GITSEMA_TEST_POSTGRES_URL`.
+  - **Tests:** `tests/qdrantStorageProfile.test.ts` mirrors
+    `tests/postgresStorageProfile.test.ts` (adapter conformance +
+    `resolveStorageProfile`/`withStorageProfile`); `tests/storageProfile.test.ts`
+    gained `getStats`/`runStorageDoctor` coverage and replaced the old
+    "qdrant throws" test with the new validation/resolution tests.
+
 **Status:** Phase 101 ✅ complete (seam + SQLite adapter + config + read-path
 async migration); Phase 102 ✅ complete (read-path dispatch, write-path
 interface + SQLite/Postgres implementations, pgvector `VectorStore`, Postgres
-`MetadataStore`/`FtsStore`, CI Postgres service) with the indexer write-path
-rewiring carried to Phase 103; Phase 103 📋 planned.
+`MetadataStore`/`FtsStore`, CI Postgres service); Phase 103 ✅ complete (indexer
+write-path rewiring, Qdrant `VectorStore`/`StorageProfile`, `gitsema storage
+migrate`, doctor/status cross-store reporting, CI Qdrant service) — see
+deviations above.
+
+---
+
+### Phase 104 — Full-toolset guide coverage, per-command `--narrate`, and a guided `gitsema setup` wizard
+
+**Goal:** Close the remaining gaps between the CLI's ~50 analysis/workflow
+commands and the `gitsema guide`/`narrate`/`explain` LLM layer (Phases 96-99),
+and give new users (and new backends from Phases 101-103) a single guided
+setup path. Three independently-shippable slices:
+
+**Slice 1 — Wire the remaining read-path analysis commands into `gitsema guide`.**
+`src/core/narrator/guideTools.ts` currently exposes 37 tools in `GUIDE_TOOLS`.
+The following read-only analysis commands have no `GUIDE_TOOLS` entry and
+should get one (reusing the same `core` functions the CLI commands call —
+do not duplicate logic):
+- `bisect` (`semanticBisect` / `runSemanticBisect`-style core fn used by
+  `semanticBisectCommand`)
+- `refactor-candidates` (`findRefactorCandidates`)
+- `cherry-pick-suggest` (`suggestCherryPicks`)
+- `heatmap` (`computeHeatmap`)
+- `map` (`computeSemanticMap` / whatever backs `mapCommand`)
+- `file-diff` (`computeFileDiff`/`computeSemanticDiff`-for-a-single-file, used
+  by `diffCommand`)
+- `diff <ref1> <ref2> <query>` (conceptual diff across two refs — name it
+  `ref_diff` or `concept_diff` in `GUIDE_TOOLS` to avoid clashing with the
+  existing `semantic_diff` tool, used by `remoteIndexCommand`'s sibling
+  — verify the actual handler, `src/cli/register/all.ts` around `'diff <ref1> <ref2> <query>'`)
+- `lifecycle <query>` (`computeConceptLifecycle`, used by
+  `conceptLifecycleCommand`)
+- `cluster-change-points` (`computeClusterChangePoints`)
+- `cross-repo-similarity <query>` (used by `crossRepoSimilarityCommand` in
+  `src/cli/register/analysis.ts`)
+- `pr-report` (used by `prReportCommand`)
+
+For each: add a `GuideToolEntry` (category, `needsIndex`, JSON-schema
+`definition`, `run` handler returning a size-capped JSON-safe object, mirroring
+the existing entries' style — wrap in try/catch, never throw), add a matching
+entry to `src/core/narrator/interpretations.ts` (`TOOL_INTERPRETATIONS`)
+describing the result shape/significant fields/thresholds, then run
+`pnpm gen:skill` to regenerate `skill/gitsema-ai-assistant.md` and its
+`.github/skills/gitsema.md` mirror. `tests/docsSync.test.ts` enforces that every
+`GUIDE_TOOLS` entry has an interpretation and that the generated skill matches
+committed files — keep it green. Extend `tests/guideAgentLoop.test.ts` with
+coverage for the new tool names (tool-name-set assertions + at least one
+executed-tool-result test per new tool, following the existing pattern).
+Admin/infra commands (`config`, `models`, `doctor`, `status`, `storage`,
+`repos`, `tools mcp/lsp/serve`, `gc`/`vacuum`/`check`, `export`/`import`,
+`backfill-fts`, `build-vss`, `update-modules`) remain intentionally excluded
+from `GUIDE_TOOLS`, per existing precedent — do not wire these.
+
+**Slice 2 — Generic per-command `--narrate` support.**
+Phase 97's backlog noted "Per-command `--narrate` flag using
+`interpretations.ts` entries (beyond `narrate`/`explain`/result-narrators)" as
+deferred. 10 commands already have a bespoke `--narrate` flag (`search`,
+`evolution`, `file-evolution`, `lifecycle`, `file-diff`, `clusters`,
+`cluster-diff`, `cluster-timeline`, `change-points`, `file-change-points`),
+each calling its own `narrate*` function in `src/core/llm/narrator.ts`. Add a
+**generic** narration path so the remaining commands can opt in without a
+bespoke `narrate*` function per command:
+- New helper in `src/core/llm/narrator.ts`, e.g.
+  `narrateToolResult(toolKey: string, result: unknown, opts?: { focus?: string })`
+  — looks up `TOOL_INTERPRETATIONS[toolKey]` (added/extended in Slice 1) for
+  the "how to read this" guidance, builds a system prompt from
+  `buildNarratorSystemPrompt(name)` + the interpretation text, sends the
+  (redacted, size-capped) JSON result as the user payload to the active
+  narrator model, and returns a short prose summary. Must remain
+  safe-by-default: no network call unless `--narrate` is passed **and** a
+  narrator model is configured (mirror the existing guard in
+  `runNarrate`/`runExplain` and the bespoke `narrate*` functions — same
+  "no narrator configured" placeholder message).
+- Add `--narrate` to a first batch of commands that lack it and have a
+  `TOOL_INTERPRETATIONS` entry already or added in Slice 1: `first-seen`,
+  `branch-summary`, `merge-audit`, `merge-preview`, `dead-concepts`,
+  `debt-score`, `doc-gap`, `security-scan`, `blame`/`semantic-blame`, `triage`,
+  `impact`, `ownership`, `experts`, `author`, `contributor-profile`, `bisect`,
+  `refactor-candidates`, `cherry-pick-suggest`, `heatmap`. Each wires
+  `--narrate` → `narrateToolResult('<tool_key>', result)` → print the summary
+  after the normal text/JSON output (same placement convention as the existing
+  bespoke `--narrate` flags).
+- `workflow run` and `policy-check`/`ci-diff`/`regression-gate` are
+  out of scope for `--narrate` (workflow already composes narrated sections
+  where relevant; policy gates are machine-consumed and must stay
+  deterministic).
+- Add unit tests for `narrateToolResult` (mocked chattydeer provider, no
+  network) and at least one integration-style test per newly-wired command
+  verifying `--narrate` without a configured model prints the existing
+  safe placeholder (no crash, no network).
+
+**Slice 3 — Guided `gitsema setup` wizard.**
+`gitsema quickstart` (`src/cli/commands/quickstart.ts`) already walks a new
+user through repo detection → provider/model selection → config write →
+initial index, but predates Phases 101-103 and only ever configures the
+default SQLite backend. Add a guided storage-backend step:
+- Insert a new step into the wizard (between provider/model selection and
+  config write) that asks: "Storage backend: sqlite (default) / postgres /
+  qdrant?" — for `postgres`, prompt for `storage.metadata.url` and optional
+  `storage.fts.backend`; for `qdrant`, prompt for `storage.vectors.url`,
+  `storage.metadata.url`, and optional `storage.vectors.apiKey`. Persist via
+  `setConfigValue('storage.backend', ...)` etc. (extend
+  `src/core/config/configManager.ts`'s supported-keys list if any
+  `storage.*` keys aren't already settable via `gitsema config set`).
+  Validate with `resolveStorageProfile()`/`getCachedStorageProfile()` before
+  writing, surfacing connection errors before the wizard proceeds to indexing.
+- Add `gitsema setup` as the primary discoverable name for this wizard
+  (`gitsema quickstart` remains as a backward-compat alias, same as the
+  `tools mcp`/`mcp` precedent) — register both in
+  `src/cli/register/analysis.ts`, both calling the same `quickstartCommand`
+  (renaming the exported function is optional; an alias registration is
+  sufficient).
+- Optional final step (skippable): offer to configure a narrator/guide model
+  via the existing `gitsema models add <name> --narrator|--guide --provider
+  ollama` flow (Phase 99) if Ollama is detected, so `gitsema narrate`/`guide`
+  work out of the box too.
+- Update README.md's quick-start section and `docs/features.md` to mention
+  `gitsema setup`/`gitsema quickstart` covers backend selection; add a
+  changeset.
+
+**Out of scope / explicit non-goals for Phase 104:**
+- No new storage backends or `StorageStats`/`doctor` changes (Phases 101-103
+  are complete).
+- No changes to `GUIDE_TOOLS`/`interpretations.ts` for admin/infra commands.
+- No change to the safe-by-default behavior of `narrate`/`explain`/`guide`
+  (no network without an explicit `--narrate`/configured model).
+
+**Suggested sequencing:** Slice 1 (guide tool coverage) is the most
+mechanical and lowest-risk — do it first to validate the
+`GUIDE_TOOLS`/`interpretations.ts`/`gen:skill`/`docsSync` loop still holds for
+new entries. Slice 2 depends on the `TOOL_INTERPRETATIONS` entries added in
+Slice 1 for the new tools (though it can proceed independently for commands
+whose interpretations already exist). Slice 3 is independent and can be done
+in parallel or last.
+
+**Status:** 📋 planned.

@@ -41,6 +41,16 @@ export interface Bm25Hit {
   score: number
 }
 
+/** Basic row counts used for `gitsema status` / `gitsema doctor` reporting. */
+export interface StorageStats {
+  blobCount: number
+  pathCount: number
+  commitCount: number
+  indexedCommitCount: number
+  branchCount: number
+  lastIndexedCommit?: string
+}
+
 /** Which embedding table a `VectorStore.upsert`/`delete` call targets. */
 export type VectorKind = 'file' | 'chunk' | 'symbol' | 'module' | 'commit'
 
@@ -91,6 +101,8 @@ export interface MetadataStore {
   markCommitIndexed(commitHash: string): Promise<void>
   /** Returns the most recently indexed commit hash, or undefined if never indexed. */
   getLastIndexedCommit(): Promise<string | undefined>
+  /** Basic row counts for `gitsema status` / `gitsema doctor` reporting. */
+  getStats(): Promise<StorageStats>
 }
 
 /** Vector similarity search + counts over the embedding tables. */

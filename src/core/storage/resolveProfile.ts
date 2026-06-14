@@ -14,6 +14,7 @@ import { getConfigValue } from '../config/configManager.js'
 import { getOrOpenSessionAtPath, withDbSession } from '../db/sqlite.js'
 import { SqliteStorageProfile } from './sqlite/profile.js'
 import { PostgresStorageProfile } from './postgres/profile.js'
+import { QdrantStorageProfile } from './qdrant/profile.js'
 import type { StorageBackend, StorageProfile, StorageScope } from './types.js'
 
 function readString(key: string, cwd: string): string | undefined {
@@ -112,14 +113,6 @@ export function clearStorageProfileCache(): void {
 
 export function resolveStorageProfile(cwd: string = process.cwd()): StorageProfile {
   const backend = resolveBackend(cwd)
-
-  if (backend === 'qdrant') {
-    throw new Error(
-      `storage.backend 'qdrant' is not yet implemented (planned for Phase 103). ` +
-        `Use 'sqlite' or 'postgres' for now — see docs/storage-backends-plan.md.`,
-    )
-  }
-
   const scope = resolveScope(cwd)
   const metadataUrl = readString('storage.metadata.url', cwd)
   const name = readString('storage.name', cwd)
@@ -137,6 +130,26 @@ export function resolveStorageProfile(cwd: string = process.cwd()): StorageProfi
     return new PostgresStorageProfile(scope, metadataUrl, ftsBackend !== 'none', ftsBackend === 'pg_search' ? 'pg_search' : 'tsvector')
   }
 
+  if (backend === 'qdrant') {
+    if (!metadataUrl || !metadataUrl.includes('://')) {
+      throw new Error(
+        "storage.backend 'qdrant' requires storage.metadata.url to be set to a postgres:// connection string (relational companion store)",
+      )
+    }
+    const vectorsUrl = readString('storage.vectors.url', cwd)
+    if (!vectorsUrl || !vectorsUrl.includes('://')) {
+      throw new Error(
+        "storage.backend 'qdrant' requires storage.vectors.url to be set to a Qdrant http(s):// URL",
+      )
+    }
+    const vectorsApiKey = readString('storage.vectors.apiKey', cwd)
+    const ftsBackend = (readString('storage.fts.backend', cwd) ?? 'tsvector').toLowerCase()
+    if (ftsBackend !== 'none' && ftsBackend !== 'tsvector' && ftsBackend !== 'pg_search') {
+      throw new Error(`Invalid storage.fts.backend '${ftsBackend}' for qdrant (expected: tsvector | pg_search | none)`)
+    }
+    return new QdrantStorageProfile(scope, vectorsUrl, metadataUrl, vectorsApiKey, ftsBackend !== 'none', ftsBackend === 'pg_search' ? 'pg_search' : 'tsvector')
+  }
+
   const ftsBackend = (readString('storage.fts.backend', cwd) ?? 'fts5').toLowerCase()
   const ftsEnabled = ftsBackend !== 'none'
   const dbPath = resolveSqliteDbPath(scope, cwd, { metadataUrl, name })
@@ -152,12 +165,9 @@ export function resolveStorageProfile(cwd: string = process.cwd()): StorageProfi
  * CLI uses, so behavior is unchanged.
  */
 export function withStorageProfile<T>(profile: StorageProfile, fn: () => Promise<T>): Promise<T> {
-  if (profile.backend === 'postgres') {
-    // Postgres stores hold their own connection pool — no global session to activate.
+  if (profile.backend === 'postgres' || profile.backend === 'qdrant') {
+    // Postgres/Qdrant stores hold their own connections/clients — no global session to activate.
     return fn()
-  }
-  if (profile.backend !== 'sqlite') {
-    throw new Error(`withStorageProfile: backend '${profile.backend}' is not yet implemented`)
   }
   const session = getOrOpenSessionAtPath(profile.location)
   return withDbSession(session, fn)

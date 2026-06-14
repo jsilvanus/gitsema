@@ -1,8 +1,8 @@
 import { revList, type BlobEntry } from '../git/revList.js'
 import { showBlob, DEFAULT_MAX_SIZE } from '../git/showBlob.js'
 import { streamCommitMap, type CommitEntry, type CommitMapEvent } from '../git/commitMap.js'
-import { isIndexed, filterNewBlobs } from './deduper.js'
-import { storeBlob, storeBlobRecord, storeChunk, storeSymbol, storeCommitWithBlobs, markCommitIndexed, getLastIndexedCommit, storeBlobBranches, storeCommitEmbedding, storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
+import { storeModuleEmbedding, getModuleEmbedding } from './blobStore.js'
+import { getCachedStorageProfile } from '../storage/resolveProfile.js'
 import { resolveEmbedBatchSize } from './adaptiveTuning.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { Embedding } from '../models/types.js'
@@ -253,11 +253,23 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     profileBatchSize: options.profileBatchSize,
   })
 
+  // Resolve the active storage profile once for this run. All blob/commit/vector
+  // writes go through `profile.metadata` / `profile.vectors` / `profile.writeFileBlob`
+  // / `profile.writeBlobRecord` (see docs/storage-backends-plan.md). For the sqlite
+  // backend these delegate to the same synchronous code as before (wrapped in
+  // resolved promises), so behavior is unchanged.
+  const profile = getCachedStorageProfile(repoPath)
+  // Module (directory) centroid embeddings require a read-modify-write of a
+  // running mean that is not part of the VectorStore seam — keep this on the
+  // direct SQLite session for now (see docs/PLAN.md Phase 103 deviations) and
+  // skip it for non-sqlite backends.
+  const moduleEmbeddingsSupported = profile.backend === 'sqlite'
+
   // Resolve --since: use provided value, or fall back to the last indexed commit
   // for automatic incremental indexing. The special value 'all' forces a full re-index.
   let { since } = options
   if (!since || since === '') {
-    const last = getLastIndexedCommit()
+    const last = await profile.metadata.getLastIndexedCommit()
     if (last) {
       since = last
     }
@@ -535,7 +547,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   const newHashSets = new Map<string, Set<string>>()
   for (const [m, hashes] of byModel) {
-    const newSet = await filterNewBlobs(hashes, m)
+    const newSet = await profile.metadata.filterNewBlobs(hashes, m)
     newHashSets.set(m, newSet)
   }
 
@@ -687,7 +699,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
         const fileType = getFileCategory(entry.path)
         try {
-          storeBlob({ blobHash: entry.blobHash, size: content.length, path: entry.path, model: provider.model, embedding, fileType, content: text, quantize })
+          await profile.writeFileBlob({ blobHash: entry.blobHash, size: content.length, path: entry.path, model: provider.model, embedding, fileType, content: text, quantize })
           stats.indexed++
         } catch (err) {
           logger.error(`Failed to store blob ${entry.blobHash}: ${err instanceof Error ? err.message : String(err)}`)
@@ -697,7 +709,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           continue
         }
 
-        if (computeModuleEmbedding) {
+        if (computeModuleEmbedding && moduleEmbeddingsSupported) {
           try {
             const dir = dirname(entry.path)
             const existing = getModuleEmbedding(dir, provider.model)
@@ -772,9 +784,9 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
           try {
             if (wholeEmbedding !== null) {
-              storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding: wholeEmbedding, fileType, content: text, quantize })
+              await profile.writeFileBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding: wholeEmbedding, fileType, content: text, quantize })
             } else {
-              storeBlobRecord({ blobHash, size: content.length, path, content: text })
+              await profile.writeBlobRecord({ blobHash, size: content.length, path, content: text })
             }
           } catch (err) {
             logger.error(`Failed to store blob record ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
@@ -785,7 +797,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           }
 
           // Update module centroid running mean when Level-1 embedding was produced.
-          if (wholeEmbedding !== null) {
+          if (wholeEmbedding !== null && moduleEmbeddingsSupported) {
             try {
               const dir = dirname(path)
               const existing = getModuleEmbedding(dir, activeProvider.model)
@@ -815,9 +827,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               continue
             }
 
-            let chunkId: number | undefined
             try {
-              chunkId = storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding, quantize })
+              await profile.vectors.upsert('chunk', [{ id: blobHash, model: activeProvider.model, dimensions: chunkEmbedding.length, embedding: chunkEmbedding, startLine: chunk.startLine, endLine: chunk.endLine, quantize }])
               stats.chunks++
             } catch (err) {
               logger.error(`Failed to store chunk for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err instanceof Error ? err.message : String(err)}`)
@@ -844,12 +855,12 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 continue
               }
               try {
-                storeSymbol({
-                  blobHash, startLine: chunk.startLine, endLine: chunk.endLine,
+                await profile.vectors.upsert('symbol', [{
+                  id: blobHash, startLine: chunk.startLine, endLine: chunk.endLine,
                   symbolName: chunk.symbolName, symbolKind: chunk.symbolKind ?? 'function',
-                  language: lang, model: activeProvider.model, embedding: symbolEmbedding, chunkId,
+                  language: lang, model: activeProvider.model, dimensions: symbolEmbedding.length, embedding: symbolEmbedding,
                   quantize,
-                })
+                }])
                 stats.symbols++
               } catch (err) {
                 logger.error(`Failed to store symbol ${path} ${chunk.symbolName}: ${err instanceof Error ? err.message : String(err)}`)
@@ -882,7 +893,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
               let allOk = true
 
               try {
-                storeBlobRecord({ blobHash, size: content.length, path, content: text })
+                await profile.writeBlobRecord({ blobHash, size: content.length, path, content: text })
               } catch (err2) {
                 logger.error(`Failed to store blob record (fallback) ${blobHash}: ${err2 instanceof Error ? err2.message : String(err2)}`)
                 stats.failed++
@@ -930,7 +941,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                         try {
                           const absStart = chunk.startLine + sub.startLine - 1
                           const absEnd = chunk.startLine + sub.endLine - 1
-                          storeChunk({ blobHash, startLine: absStart, endLine: absEnd, model: activeProvider.model, embedding: subEmb!, quantize })
+                          await profile.vectors.upsert('chunk', [{ id: blobHash, model: activeProvider.model, dimensions: subEmb!.length, embedding: subEmb!, startLine: absStart, endLine: absEnd, quantize }])
                           stats.chunks++
                         } catch (err6) {
                           logger.error(`Failed to store subchunk for blob ${blobHash} subchunk ${chunk.startLine + sub.startLine - 1}-${chunk.startLine + sub.endLine - 1}: ${err6 instanceof Error ? err6.message : String(err6)}`)
@@ -962,7 +973,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                 }
 
                 try {
-                  storeChunk({ blobHash, startLine: chunk.startLine, endLine: chunk.endLine, model: activeProvider.model, embedding: chunkEmbedding, quantize })
+                  await profile.vectors.upsert('chunk', [{ id: blobHash, model: activeProvider.model, dimensions: chunkEmbedding.length, embedding: chunkEmbedding, startLine: chunk.startLine, endLine: chunk.endLine, quantize }])
                   stats.chunks++
                 } catch (err4) {
                   logger.error(`Failed to store chunk (fallback) for blob ${blobHash} chunk ${chunk.startLine}-${chunk.endLine}: ${err4 instanceof Error ? err4.message : String(err4)}`)
@@ -988,7 +999,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
           // Persist blob + embedding + path in one transaction
           try {
-            storeBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType, content: text, quantize })
+            await profile.writeFileBlob({ blobHash, size: content.length, path, model: activeProvider.model, embedding, fileType, content: text, quantize })
             stats.indexed++
           } catch (err) {
             logger.error(`Failed to store blob ${blobHash}: ${err instanceof Error ? err.message : String(err)}`)
@@ -999,7 +1010,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
           }
 
           // Update module centroid running mean for whole-file mode.
-          if (computeModuleEmbedding) {
+          if (computeModuleEmbedding && moduleEmbeddingsSupported) {
             try {
               const dir = dirname(path)
               const existing = getModuleEmbedding(dir, activeProvider.model)
@@ -1030,11 +1041,11 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   // Phase B: Walk commit history, persist to commits/blobCommits.
   //
-  // The stream loop now only does synchronous SQLite work (storeCommitWithBlobs,
-  // storeBlobBranches).  Commit-message embedding — previously an awaited call
-  // inside the loop — is collected into `toEmbed` and fanned out in parallel
-  // after the stream finishes.  This converts the serial O(commits × embedLatency)
-  // wall-clock time into O(commits / concurrency × embedLatency).
+  // The stream loop now does its writes via `profile.metadata` (putCommit,
+  // linkBlobCommits, setBlobBranches). Commit-message embedding — previously an
+  // awaited call inside the loop — is collected into `toEmbed` and fanned out in
+  // parallel after the stream finishes. This converts the serial
+  // O(commits × embedLatency) wall-clock time into O(commits / concurrency × embedLatency).
   const commitStream = streamCommitMap(repoPath, { maxCommits, branch: branchFilter }) as AsyncIterable<CommitMapEvent>
 
   interface PendingEmbed { commitHash: string; message: string }
@@ -1043,16 +1054,17 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   let pendingCommit: CommitEntry | null = null
   let pendingBlobHashes: string[] = []
 
-  function flushPendingCommitSync(): void {
+  async function flushPendingCommit(): Promise<void> {
     if (!pendingCommit) return
-    const stored = storeCommitWithBlobs(pendingCommit, pendingBlobHashes)
+    await profile.metadata.putCommit(pendingCommit)
+    const stored = await profile.metadata.linkBlobCommits(pendingCommit.commitHash, pendingBlobHashes)
     stats.commits++
     stats.blobCommits += stored
 
     // Write branch associations for every blob introduced by this commit
     if (pendingCommit.branches.length > 0) {
       for (const blobHash of pendingBlobHashes) {
-        storeBlobBranches(blobHash, pendingCommit.branches)
+        await profile.metadata.setBlobBranches(blobHash, pendingCommit.branches)
       }
     }
 
@@ -1061,7 +1073,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       toEmbed.push({ commitHash: pendingCommit.commitHash, message: pendingCommit.message })
     } else {
       // No message to embed — mark indexed immediately
-      markCommitIndexed(pendingCommit.commitHash)
+      await profile.metadata.markCommitIndexed(pendingCommit.commitHash)
     }
 
     pendingCommit = null
@@ -1070,7 +1082,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
 
   for await (const event of commitStream) {
     if (event.type === 'commit') {
-      flushPendingCommitSync()
+      await flushPendingCommit()
       pendingCommit = event.data
       pendingBlobHashes = []
     } else if (event.type === 'blob') {
@@ -1079,7 +1091,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     onProgress?.({ ...stats, elapsed: Date.now() - start })
   }
 
-  flushPendingCommitSync()
+  await flushPendingCommit()
 
   // Fan-out commit-message embeddings in parallel (same concurrency as blob embedding)
   const embedLimit = createLimiter(concurrency)
@@ -1088,13 +1100,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
       embedLimit(async () => {
         try {
           const msgEmbedding = await timedEmbed(provider, message)
-          storeCommitEmbedding({ commitHash, model: provider.model, embedding: msgEmbedding, quantize })
+          await profile.vectors.upsert('commit', [{ id: commitHash, model: provider.model, dimensions: msgEmbedding.length, embedding: msgEmbedding, quantize }])
           stats.commitEmbeddings++
         } catch (err) {
           logger.debug?.(`Failed to embed commit message ${commitHash}: ${err instanceof Error ? err.message : String(err)}`)
           stats.commitEmbedFailed++
         }
-        markCommitIndexed(commitHash)
+        await profile.metadata.markCommitIndexed(commitHash)
       }),
     ),
   )

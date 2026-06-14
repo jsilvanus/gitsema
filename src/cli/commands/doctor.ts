@@ -1,5 +1,7 @@
 import { getRawDb } from '../../core/db/sqlite.js'
 import { runDoctor } from '../../core/db/doctor.js'
+import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
+import { runStorageDoctor } from '../../core/storage/doctor.js'
 import { verifyLspStartup } from '../../core/lsp/server.js'
 import { execSync } from 'node:child_process'
 
@@ -8,6 +10,36 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } 
     const result = verifyLspStartup()
     console.log(`LSP startup check: ${result.ok ? '✓' : '✗'}  ${result.message}`)
     if (!result.ok) process.exit(1)
+    return
+  }
+
+  // Non-sqlite backends have no single database file to inspect — run the
+  // cross-store checks available through the StorageProfile seam instead.
+  const profile = getCachedStorageProfile(process.cwd())
+  if (profile.backend !== 'sqlite') {
+    const report = await runStorageDoctor(profile)
+
+    console.log('=== gitsema doctor ===')
+    console.log('')
+    console.log(`Backend:           ${report.backend} (scope: ${report.scope})`)
+    console.log(`Location:          ${report.location}`)
+    console.log(`Blobs indexed:     ${report.blobCount}`)
+    console.log(`File embeddings:   ${report.fileEmbeddingCount}`)
+    console.log(`Path entries:      ${report.pathCount}`)
+    console.log(`Commits mapped:    ${report.commitCount}`)
+    console.log(`Commits indexed:   ${report.indexedCommitCount}`)
+    console.log(`Branches tracked:  ${report.branchCount}`)
+    console.log(`FTS/hybrid:        ${report.ftsEnabled ? 'enabled' : 'disabled'}`)
+    if (report.lastIndexedCommit) console.log(`Last indexed:      ${report.lastIndexedCommit}`)
+
+    if (report.warnings.length > 0) {
+      console.log('')
+      console.log('Warnings:')
+      for (const w of report.warnings) console.log(`  ⚠  ${w}`)
+    } else {
+      console.log('')
+      console.log('No issues detected. Index looks healthy.')
+    }
     return
   }
 
