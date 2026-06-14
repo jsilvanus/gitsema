@@ -84,6 +84,31 @@ export function resolveSqliteDbPath(
  * non-default path the active session — wrap work in `withStorageProfile()` (or
  * the future CLI entrypoint wiring) to activate it.
  */
+const profileCache = new Map<string, StorageProfile>()
+
+/**
+ * Cached variant of `resolveStorageProfile()`.
+ *
+ * Config files and env vars are read once per `cwd` and the resulting profile
+ * is memoized — this is what lets hot loops (search/indexing) call
+ * `getCachedStorageProfile()` on every iteration without re-reading config.
+ * Call `clearStorageProfileCache()` after changing storage config at runtime
+ * (tests, `gitsema config set`).
+ */
+export function getCachedStorageProfile(cwd: string = process.cwd()): StorageProfile {
+  let profile = profileCache.get(cwd)
+  if (!profile) {
+    profile = resolveStorageProfile(cwd)
+    profileCache.set(cwd, profile)
+  }
+  return profile
+}
+
+/** Clears the `getCachedStorageProfile()` memoization cache (tests / `config set`). */
+export function clearStorageProfileCache(): void {
+  profileCache.clear()
+}
+
 export function resolveStorageProfile(cwd: string = process.cwd()): StorageProfile {
   const backend = resolveBackend(cwd)
 

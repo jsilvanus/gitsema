@@ -1,18 +1,22 @@
-import { getActiveSession } from '../../db/sqlite.js'
-import { paths } from '../../db/schema.js'
-import { inArray } from 'drizzle-orm'
 import { vectorSearch, type VectorSearchOptions } from './vectorSearch.js'
 import type { SearchResult, Embedding } from '../../models/types.js'
+import { getCachedStorageProfile } from '../../storage/resolveProfile.js'
+import type { Bm25Hit } from '../../storage/types.js'
 
 export interface HybridSearchOptions extends VectorSearchOptions {
   bm25Weight?: number
 }
 
-interface Bm25Row {
-  blob_hash: string
-  bm25_score: number
-}
-
+/**
+ * Combines vector similarity with BM25 keyword matching, routed through the
+ * active `StorageProfile` (Phase 102 §1). Vector candidates come from
+ * `profile.vectors.search()` (sqlite / pgvector / Qdrant, via `vectorSearch`)
+ * and keyword candidates from `profile.fts.search()` (FTS5 / tsvector /
+ * pg_search). Score fusion stays backend-independent: both signals are
+ * normalised to [0,1] before blending, so the math is identical regardless of
+ * which `FtsStore`/`VectorStore` produced the raw scores. When `profile.fts`
+ * is `null` (no keyword store configured), hybrid degrades to vector-only.
+ */
 export async function hybridSearch(
   query: string,
   queryEmbedding: Embedding,
@@ -25,41 +29,34 @@ export async function hybridSearch(
 
   if (vectorResults.length === 0) return []
 
-  const { db, rawDb: raw } = getActiveSession()
+  const profile = getCachedStorageProfile()
+  if (!profile.fts) return vectorResults.slice(0, topK)
 
-  let bm25Rows: Bm25Row[] = []
+  let bm25Hits: Bm25Hit[] = []
   try {
-    bm25Rows = raw
-      .prepare(
-        `SELECT blob_hash, bm25(blob_fts) AS bm25_score
-         FROM blob_fts
-         WHERE blob_fts MATCH ?
-         ORDER BY bm25_score
-         LIMIT ?`,
-      )
-      .all(sanitizeFtsQuery(query), vectorK) as Bm25Row[]
+    bm25Hits = await profile.fts.search(query, vectorK)
   } catch {
     return vectorResults.slice(0, topK)
   }
 
   const bm25Map = new Map<string, number>()
-  if (bm25Rows.length > 0) {
+  if (bm25Hits.length > 0) {
     let minScore = Infinity
     let maxScore = -Infinity
-    for (const row of bm25Rows) {
-      const s = -row.bm25_score
+    for (const hit of bm25Hits) {
+      const s = -hit.score
       if (s < minScore) minScore = s
       if (s > maxScore) maxScore = s
     }
     const range = maxScore - minScore
 
-    for (const row of bm25Rows) {
+    for (const hit of bm25Hits) {
       // §11.2 — when all candidates share an identical BM25 score (common
       // with small hit sets), `range === 0` used to set every normalised
       // score to 1.0, which inflated hybrid scores beyond the intended
       // weight distribution. 0.5 is the neutral midpoint.
-      const normalised = range === 0 ? 0.5 : (-row.bm25_score - minScore) / range
-      bm25Map.set(row.blob_hash, normalised)
+      const normalised = range === 0 ? 0.5 : (-hit.score - minScore) / range
+      bm25Map.set(hit.blobHash, normalised)
     }
   }
 
@@ -79,22 +76,13 @@ export async function hybridSearch(
 
   const allHashes = new Set<string>([
     ...vectorResults.map((r) => r.blobHash),
-    ...bm25Rows.map((r) => r.blob_hash),
+    ...bm25Hits.map((h) => h.blobHash),
   ])
 
   const missingHashes = [...allHashes].filter((h) => !vectorMap.has(h))
-  const pathsByBlob = new Map<string, string[]>()
+  let pathsByBlob = new Map<string, string[]>()
   if (missingHashes.length > 0) {
-    const rows = db
-      .select({ blobHash: paths.blobHash, path: paths.path })
-      .from(paths)
-      .where(inArray(paths.blobHash, missingHashes))
-      .all()
-    for (const row of rows) {
-      const list = pathsByBlob.get(row.blobHash) ?? []
-      list.push(row.path)
-      pathsByBlob.set(row.blobHash, list)
-    }
+    pathsByBlob = await profile.metadata.pathsFor(missingHashes)
   }
 
   const merged: Array<SearchResult & { hybridScore: number }> = []
@@ -117,13 +105,4 @@ export async function hybridSearch(
 
   merged.sort((a, b) => b.hybridScore - a.hybridScore)
   return merged.slice(0, topK).map(({ hybridScore: _h, ...r }) => r)
-}
-
-function sanitizeFtsQuery(query: string): string {
-  const tokens = query
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((t) => `"${t.replace(/"/g, '""')}"`)
-  return tokens.join(' ')
 }

@@ -10,6 +10,7 @@ import { bufferToFloat32 } from '../../../utils/embedding.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { logger } from '../../../utils/logger.js'
+import { getCachedStorageProfile } from '../../storage/resolveProfile.js'
 
 // ---------------------------------------------------------------------------
 // HNSW / ANN search support
@@ -176,7 +177,20 @@ export interface VectorSearchOptions {
   allowedHashes?: Set<string>
 }
 
+/**
+ * Vector similarity search, routed through the active `StorageProfile`
+ * (Phase 102 §1). For the default `sqlite` backend this function *is* the
+ * implementation (`SqliteVectorStore.search` delegates back here, so the
+ * branch below short-circuits to avoid recursion). For `postgres`/`qdrant`
+ * profiles, the call is delegated to that backend's `VectorStore.search()`
+ * (pgvector / Qdrant), which mirrors this function's options contract.
+ */
 export async function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOptions = {}): Promise<SearchResult[]> {
+  const profile = getCachedStorageProfile()
+  if (profile.backend !== 'sqlite') {
+    return profile.vectors.search(queryEmbedding, options)
+  }
+
   const {
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',

@@ -3,6 +3,7 @@ import { commitEmbeddings, commits, blobCommits, paths, blobs } from '../db/sche
 import { eq, inArray } from 'drizzle-orm'
 import type { Embedding } from '../models/types.js'
 import { cosineSimilarity } from './analysis/vectorSearch.js'
+import { getCachedStorageProfile } from '../storage/resolveProfile.js'
 
 /**
  * A single result from `searchCommits()`.
@@ -41,6 +42,11 @@ export async function searchCommits(
   queryEmbedding: Embedding,
   options: CommitSearchOptions = {},
 ): Promise<CommitSearchResult[]> {
+  const profile = getCachedStorageProfile()
+  if (profile.backend !== 'sqlite') {
+    return profile.vectors.searchCommits(queryEmbedding, options)
+  }
+
   const { topK = 10, model } = options
   const { db, rawDb } = getActiveSession()
 
