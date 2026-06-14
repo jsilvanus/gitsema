@@ -3522,3 +3522,31 @@ and an enterprise isolating repos/indexes per team via existing per-repo token s
 **Tests:** `pnpm build && pnpm test` — all 990 tests pass.
 
 **Status:** ✅ complete.
+
+---
+
+### Phases 101–103 — Pluggable storage backends & index scoping
+
+**Goal:** Let users run gitsema against alternative storage backends (Postgres +
+pgvector, Qdrant) instead of only local SQLite, with a clear index-scoping model
+(project / user / named) and local-or-remote locations.
+
+**Design:** Full design and rationale (axes, abstraction-option trade-offs,
+async strategy, table→store mapping, BM25 per backend, consistency/portability)
+live in [`docs/storage-backends-plan.md`](storage-backends-plan.md). Chosen
+direction: split into a **`MetadataStore` + `VectorStore`** seam (relational
+metadata always present; vector store pluggable), migrated behind an **async**
+interface.
+
+**Phases:**
+- **Phase 101 — Async storage seam (foundation):** introduce
+  `src/core/storage/` async interfaces + SQLite adapter; migrate the vector
+  read path and indexing write path to the seam; add `storage.*` config and the
+  scope model. No new backend, no behavior change.
+- **Phase 102 — Postgres metadata + pgvector:** Postgres `MetadataStore`
+  (`tsvector` BM25) + pgvector `VectorStore`.
+- **Phase 103 — Qdrant + portability/ops:** Qdrant `VectorStore` with a
+  relational companion store; `gitsema storage migrate`, doctor orphan checks,
+  status backend reporting.
+
+**Status:** 📋 planned.
