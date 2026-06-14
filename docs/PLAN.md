@@ -768,7 +768,7 @@ entire codebase history — not just within a single file.
 | Embedding cost / latency | Blob dedup (Phase 4), batching (Phase 9) |
 | Model change invalidates index | `model` column on embeddings, re-index detection |
 | SQLite write contention | Single writer pattern, WAL mode |
-| Slow cosine search at scale | KNN index with `sqlite-vss` or `pgvector` migration |
+| Slow cosine search at scale | ✅ Resolved: usearch HNSW VSS (Phase 36/49) for SQLite; `pgvector`/Qdrant ANN backends (Phases 102-103) for postgres/qdrant |
 
 ---
 
@@ -3440,8 +3440,12 @@ is given.
 
 | Feature | Complexity | Notes |
 |---------|:----------:|-------|
-| DuckDB / pgvector migration path | High | For corpora >500K blobs; keep SQLite as default |
 | Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
+
+> **Note:** the "pgvector migration path for >500K blobs" item formerly listed
+> here was implemented by Phases 101-103 (`storage.backend=postgres\|qdrant`,
+> see [Phases 101-103](#phases-101–103-—-pluggable-storage-backends-index-scoping)).
+> SQLite remains the default for new projects.
 
 **Scale notes (updated for v0.81.0):**
 
