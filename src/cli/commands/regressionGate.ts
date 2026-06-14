@@ -114,8 +114,8 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
     // vectorSearch restricts to blobs indexed on that branch (via blob_branches table).
     // For commit hashes or tags, blob_branches may have no match and the filter is
     // effectively a no-op (returns all blobs), which is safe but less precise.
-    const baseResults = vectorSearch(embedding, { topK, branch: baseRef })
-    const headResults = vectorSearch(embedding, { topK, branch: headRef })
+    const baseResults = await vectorSearch(embedding, { topK, branch: baseRef })
+    const headResults = await vectorSearch(embedding, { topK, branch: headRef })
 
     const baseScore = baseResults.length > 0 ? baseResults[0].score : 0
     const headScore = headResults.length > 0 ? headResults[0].score : 0

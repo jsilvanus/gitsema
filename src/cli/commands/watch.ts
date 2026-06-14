@@ -106,7 +106,7 @@ export function watchCommand(): Command {
         }
 
         const afterTs = row.last_run_ts ?? undefined
-        const results = vectorSearch(emb, {
+        const results = await vectorSearch(emb, {
           topK,
           model,
           after: afterTs,

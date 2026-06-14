@@ -72,7 +72,7 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
   // When --hybrid is set, use hybrid search to get pre-scored candidates
   let candidateBlobs: Array<{ blobHash: string; score: number }> | undefined
   if (useHybrid) {
-    const hybridResults = hybridSearch(query.trim(), queryEmbedding, {
+    const hybridResults = await hybridSearch(query.trim(), queryEmbedding, {
       topK: 50,
       bm25Weight,
       branch: options.branch,
@@ -92,7 +92,7 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
   // Optionally include commit search results
   let commitResults: CommitSearchResult[] | undefined
   if (options.includeCommits) {
-    commitResults = searchCommits(queryEmbedding, { topK: 50, model: textModel })
+    commitResults = await searchCommits(queryEmbedding, { topK: 50, model: textModel })
   }
 
   const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })

@@ -37,10 +37,10 @@ export interface CommitSearchOptions {
  * @param queryEmbedding - pre-computed embedding of the search query
  * @param options        - optional filters / topK
  */
-export function searchCommits(
+export async function searchCommits(
   queryEmbedding: Embedding,
   options: CommitSearchOptions = {},
-): CommitSearchResult[] {
+): Promise<CommitSearchResult[]> {
   const { topK = 10, model } = options
   const { db, rawDb } = getActiveSession()
 

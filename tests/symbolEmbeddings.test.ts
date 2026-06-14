@@ -363,7 +363,7 @@ describe('indexer — symbol-level embeddings (integration)', () => {
     const queryEmbedding = await provider.embed('mathematical operations addition subtraction')
 
     const results = await withDbSession(session, async () =>
-      vectorSearch(queryEmbedding, { topK: 10, searchSymbols: true }),
+      await vectorSearch(queryEmbedding, { topK: 10, searchSymbols: true }),
     )
 
     expect(results.length).toBeGreaterThan(0)

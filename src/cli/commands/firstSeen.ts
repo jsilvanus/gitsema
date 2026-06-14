@@ -112,8 +112,8 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
   // renderFirstSeenResults re-sorts by earliest date so the output shows when each
   // concept first appeared in the codebase.
   let results = useHybrid
-    ? hybridSearch(query.trim(), queryEmbedding, { topK, bm25Weight, branch: options.branch })
-    : vectorSearch(queryEmbedding, { topK, branch: options.branch })
+    ? await hybridSearch(query.trim(), queryEmbedding, { topK, bm25Weight, branch: options.branch })
+    : await vectorSearch(queryEmbedding, { topK, branch: options.branch })
 
   // --repos: merge results across registered repositories
   if (options.repos) {
@@ -138,7 +138,7 @@ export async function firstSeenCommand(query: string, options: FirstSeenCommandO
   // Optionally include commit-message results (sorted chronologically)
   let commitResults: CommitSearchResult[] | undefined
   if (options.includeCommits) {
-    commitResults = searchCommits(queryEmbedding, { topK, model })
+    commitResults = await searchCommits(queryEmbedding, { topK, model })
   }
 
   const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })

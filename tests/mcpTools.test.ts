@@ -136,20 +136,20 @@ describe('MCP debt_score tool (core function)', () => {
 // vectorSearch (semantic_search) — empty DB
 // ===========================================================================
 describe('MCP semantic_search (vectorSearch) on empty DB', () => {
-  it('returns empty array for any query embedding', () => {
-    const results = vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 10 })
+  it('returns empty array for any query embedding', async () => {
+    const results = await vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 10 })
     expect(Array.isArray(results)).toBe(true)
     expect(results.length).toBe(0)
   })
 
-  it('returns empty array with branch filter', () => {
-    const results = vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 5, branch: 'main' })
+  it('returns empty array with branch filter', async () => {
+    const results = await vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 5, branch: 'main' })
     expect(Array.isArray(results)).toBe(true)
     expect(results.length).toBe(0)
   })
 
-  it('returns empty array with time filter', () => {
-    const results = vectorSearch([0.1, 0.2, 0.3, 0.4], {
+  it('returns empty array with time filter', async () => {
+    const results = await vectorSearch([0.1, 0.2, 0.3, 0.4], {
       topK: 5,
       before: Date.now() / 1000,
     })
@@ -157,14 +157,14 @@ describe('MCP semantic_search (vectorSearch) on empty DB', () => {
     expect(results.length).toBe(0)
   })
 
-  it('returns empty array with searchChunks=true', () => {
-    const results = vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 5, searchChunks: true })
+  it('returns empty array with searchChunks=true', async () => {
+    const results = await vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 5, searchChunks: true })
     expect(Array.isArray(results)).toBe(true)
     expect(results.length).toBe(0)
   })
 
-  it('returns empty array with searchSymbols=true', () => {
-    const results = vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 5, searchSymbols: true })
+  it('returns empty array with searchSymbols=true', async () => {
+    const results = await vectorSearch([0.1, 0.2, 0.3, 0.4], { topK: 5, searchSymbols: true })
     expect(Array.isArray(results)).toBe(true)
     expect(results.length).toBe(0)
   })

@@ -70,6 +70,6 @@ export async function computeContributorProfile(author: string, opts: Contributo
   for (let d = 0; d < dim; d++) centroid[d] /= vectors.length
 
   // 4. Use vectorSearch to find top-K most similar blobs to centroid
-  const results = vectorSearch(Array.from(centroid), { topK, branch })
+  const results = await vectorSearch(Array.from(centroid), { topK, branch })
   return results
 }

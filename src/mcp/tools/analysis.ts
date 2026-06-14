@@ -784,7 +784,7 @@ export function registerAnalysisTools(server: McpServer) {
       if (!eRes.ok) return eRes.resp
       const emb = eRes.embedding!
       try {
-        const heatmap = computeOwnershipHeatmap({ embedding: emb, topK: top, windowDays: window_days })
+        const heatmap = await computeOwnershipHeatmap({ embedding: emb, topK: top, windowDays: window_days })
         if (heatmap.length === 0) {
           return { content: [{ type: 'text', text: 'No ownership data found.' }] }
         }
@@ -823,7 +823,7 @@ export function registerAnalysisTools(server: McpServer) {
           continue
         }
         const emb = eRes.embedding!
-        const hits = vectorSearch(emb, { topK: top })
+        const hits = await vectorSearch(emb, { topK: top })
         const topPaths = hits.flatMap((h) => h.paths ?? []).slice(0, top)
         const expected = new Set(c.expected_paths)
         const hits_ = topPaths.filter((p) => expected.has(p))

@@ -133,7 +133,7 @@ describe('module embeddings — integration', () => {
     const queryEmbedding = await provider.embed('math operations')
 
     const results = await withDbSession(session, async () =>
-      vectorSearch(queryEmbedding, { topK: 10, searchModules: true }),
+      await vectorSearch(queryEmbedding, { topK: 10, searchModules: true }),
     )
 
     expect(results.length).toBeGreaterThan(0)

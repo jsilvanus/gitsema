@@ -168,7 +168,7 @@ describe('indexer integration', () => {
     const queryEmbedding = await provider.embed('authentication token')
 
     const results = await withDbSession(session, async () =>
-      vectorSearch(queryEmbedding, { topK: 5 }),
+      await vectorSearch(queryEmbedding, { topK: 5 }),
     )
 
     expect(results.length).toBeGreaterThan(0)
@@ -188,7 +188,7 @@ describe('indexer integration', () => {
     const queryEmbedding = await provider.embed('project')
 
     const results = await withDbSession(session, async () =>
-      vectorSearch(queryEmbedding, { topK: 10 }),
+      await vectorSearch(queryEmbedding, { topK: 10 }),
     )
 
     // Filter results that have a firstSeen timestamp

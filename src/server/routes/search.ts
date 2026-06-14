@@ -94,7 +94,7 @@ export function searchRouter(deps: SearchRouterDeps): Router {
 
     let results
     if (opts.hybrid) {
-      results = hybridSearch(opts.query, textEmbedding, { ...searchOpts, bm25Weight: opts.bm25Weight, branch: opts.branch })
+      results = await hybridSearch(opts.query, textEmbedding, { ...searchOpts, bm25Weight: opts.bm25Weight, branch: opts.branch })
     } else if (codeProvider) {
       let codeEmbedding: Embedding
       try {
@@ -105,11 +105,11 @@ export function searchRouter(deps: SearchRouterDeps): Router {
       }
       const textModel = textProvider.model
       const codeModel = codeProvider.model
-      const textResults = vectorSearch(textEmbedding, { ...searchOpts, model: textModel })
-      const codeResults = vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel })
+      const textResults = await vectorSearch(textEmbedding, { ...searchOpts, model: textModel })
+      const codeResults = await vectorSearch(codeEmbedding, { ...searchOpts, model: codeModel })
       results = mergeSearchResults(textResults, codeResults, opts.top)
     } else {
-      results = vectorSearch(textEmbedding, searchOpts)
+      results = await vectorSearch(textEmbedding, searchOpts)
     }
 
     if (opts.group) {
@@ -117,7 +117,7 @@ export function searchRouter(deps: SearchRouterDeps): Router {
     }
 
     if (opts.includeCommits) {
-      const commitResults = searchCommits(textEmbedding, { topK: opts.top, model: textProvider.model })
+      const commitResults = await searchCommits(textEmbedding, { topK: opts.top, model: textProvider.model })
       if (opts.rendered) {
         const blobText = renderResults(results)
         const commitLines = commitResults.map((c) => `${c.score.toFixed(3)}  [commit ${c.commitHash.slice(0, 7)}]  ${c.paths[0] ?? ''}  ${c.message}`).join('\n')
@@ -153,15 +153,15 @@ export function searchRouter(deps: SearchRouterDeps): Router {
 
     let results
     if (opts.hybrid) {
-      results = hybridSearch(opts.query, queryEmbedding, { topK: opts.top, bm25Weight: opts.bm25Weight, branch: opts.branch })
+      results = await hybridSearch(opts.query, queryEmbedding, { topK: opts.top, bm25Weight: opts.bm25Weight, branch: opts.branch })
     } else {
-      results = vectorSearch(queryEmbedding, { topK: opts.top, branch: opts.branch })
+      results = await vectorSearch(queryEmbedding, { topK: opts.top, branch: opts.branch })
     }
     // Sort chronologically (first-seen semantics)
     const sorted = [...results].sort((a, b) => (a.firstSeen ?? 0) - (b.firstSeen ?? 0))
 
     if (opts.includeCommits) {
-      const commitResults = searchCommits(queryEmbedding, { topK: opts.top, model: textProvider.model })
+      const commitResults = await searchCommits(queryEmbedding, { topK: opts.top, model: textProvider.model })
       if (opts.rendered) {
         const blobText = renderFirstSeenResults(sorted, !opts.noHeadings)
         const commitLines = commitResults.map((c) => `${c.score.toFixed(3)}  [commit ${c.commitHash.slice(0, 7)}]  ${c.paths[0] ?? ''}  ${c.message}`).join('\n')

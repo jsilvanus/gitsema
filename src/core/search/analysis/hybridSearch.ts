@@ -13,15 +13,15 @@ interface Bm25Row {
   bm25_score: number
 }
 
-export function hybridSearch(
+export async function hybridSearch(
   query: string,
   queryEmbedding: Embedding,
   options: HybridSearchOptions = {},
-): SearchResult[] {
+): Promise<SearchResult[]> {
   const { bm25Weight = 0.3, topK = 10, ...vectorOptions } = options
 
   const vectorK = Math.max(topK * 3, 50)
-  const vectorResults = vectorSearch(queryEmbedding, { ...vectorOptions, topK: vectorK })
+  const vectorResults = await vectorSearch(queryEmbedding, { ...vectorOptions, topK: vectorK })
 
   if (vectorResults.length === 0) return []
 

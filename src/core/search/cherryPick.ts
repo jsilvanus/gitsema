@@ -13,9 +13,9 @@ export interface CherryPickOptions {
  * Query embedding is expected to be precomputed by the caller, or callers can
  * embed via embedQuery when a provider is available.
  */
-export function suggestCherryPicks(queryEmbedding: Embedding, options: CherryPickOptions = {}) {
+export async function suggestCherryPicks(queryEmbedding: Embedding, options: CherryPickOptions = {}) {
   const { topK = 10, model } = options
   // Delegate to existing commitSearch
-  const results = searchCommits(queryEmbedding, { topK, model })
+  const results = await searchCommits(queryEmbedding, { topK, model })
   return results
 }

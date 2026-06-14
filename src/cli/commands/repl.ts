@@ -115,8 +115,8 @@ export async function replCommand(options: ReplOptions = {}): Promise<void> {
         searchModules: level === 'module',
       }
       const results = hybridMode
-        ? hybridSearch(trimmed, embedding, searchOpts)
-        : vectorSearch(embedding, searchOpts)
+        ? await hybridSearch(trimmed, embedding, searchOpts)
+        : await vectorSearch(embedding, searchOpts)
       process.stdout.write('           \r')
       if (results.length === 0) {
         console.log('No results.')

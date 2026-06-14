@@ -3522,3 +3522,62 @@ and an enterprise isolating repos/indexes per team via existing per-repo token s
 **Tests:** `pnpm build && pnpm test` — all 990 tests pass.
 
 **Status:** ✅ complete.
+
+---
+
+### Phases 101–103 — Pluggable storage backends & index scoping
+
+**Goal:** Let users run gitsema against alternative storage backends (Postgres +
+pgvector, Qdrant) instead of only local SQLite, with a clear index-scoping model
+(project / user / named) and local-or-remote locations.
+
+**Design:** Full design and rationale (axes, abstraction-option trade-offs,
+async strategy, table→store mapping, BM25 per backend, consistency/portability)
+live in [`docs/storage-backends-plan.md`](storage-backends-plan.md). Chosen
+direction: split into a **`MetadataStore` + `VectorStore` + `FtsStore`** seam
+(relational metadata always present; vector store and keyword/BM25 store each
+independently pluggable, `FtsStore` optional), migrated behind an **async**
+interface.
+
+**Phases:**
+- **Phase 101 — Async storage seam (foundation):** introduce
+  `src/core/storage/` async interfaces (`MetadataStore`/`VectorStore`/`FtsStore`)
+  + SQLite adapter; make the vector read path async; add `storage.*` config and
+  the scope model. No new backend, no behavior change.
+
+  **Implemented (foundation slice):**
+  - `src/core/storage/types.ts` — the three async store interfaces +
+    `StorageProfile` (`backend`, `scope`, `location`).
+  - `src/core/storage/sqlite/profile.ts` — `SqliteStorageProfile` implementing
+    all three interfaces by delegating to existing code (`vectorSearch`,
+    `searchCommits`, deduper, `storeFtsContent`/`getBlobContent`, a BM25 FTS5
+    query). Stateless: resolves `getActiveSession()` per call, so it cooperates
+    with `withDbSession()`.
+  - `src/core/storage/resolveProfile.ts` — `resolveStorageProfile()`,
+    `resolveSqliteDbPath()` (project/user/named → path), and
+    `withStorageProfile()`. `postgres`/`qdrant` throw a clear
+    "planned for Phase 102/103" error.
+  - `storage.*` config keys + `GITSEMA_STORAGE_*` env mappings in
+    `configManager.ts`.
+  - `tests/storageProfile.test.ts` — 16 conformance/resolution tests.
+
+  **Read-path async migration (done):** `vectorSearch`/`hybridSearch`/
+  `searchCommits` are now `async`, with `await` threaded through ~37 caller files
+  (CLI, MCP, server, core search, tests). Pure mechanical change; build clean,
+  1006 tests green.
+
+  **Deferred to Phase 102:** (1) production call sites still invoke the async
+  search functions *directly* rather than via `profile.vectors.*`/`profile.fts.*`
+  — routing them through the profile is what makes the backend actually
+  swappable; (2) the indexing **write-path** migration (`blobStore`/`indexer`/
+  `deduper`) with its cross-store transaction boundary. ✅ Phase 101 complete.
+- **Phase 102 — Postgres metadata + pgvector:** route consumers through
+  `profile.vectors.*`/`profile.fts.*`; migrate the indexing write path (both
+  carried from 101); Postgres `MetadataStore` + `FtsStore` (`tsvector` BM25) +
+  pgvector `VectorStore`.
+- **Phase 103 — Qdrant + portability/ops:** Qdrant `VectorStore` with a
+  relational companion store; `gitsema storage migrate`, doctor orphan checks,
+  status backend reporting.
+
+**Status:** Phase 101 ✅ complete (seam + SQLite adapter + config + read-path
+async migration); Phases 102–103 📋 planned.

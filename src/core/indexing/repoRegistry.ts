@@ -101,7 +101,7 @@ export async function multiRepoSearch(
       const session = openDatabaseAt(repo.dbPath)
       // Temporarily set the session context so vectorSearch works
       // We pass the session directly via the rawDb approach in vectorSearch
-      const results = vectorSearch(queryEmbedding, { topK, model })
+      const results = await vectorSearch(queryEmbedding, { topK, model })
       for (const r of results) {
         allResults.push({ ...r, repoId: repo.id, repoName: repo.name })
       }

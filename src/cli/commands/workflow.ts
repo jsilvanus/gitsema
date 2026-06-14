@@ -131,7 +131,7 @@ export async function workflowCommand(
       process.exit(1)
     }
     try {
-      sections.topChangedConcepts = vectorSearch(emb!, { topK: top })
+      sections.topChangedConcepts = await vectorSearch(emb!, { topK: top })
     } catch (err) {
       sections.topChangedConcepts = { error: err instanceof Error ? err.message : String(err) }
     }
@@ -157,7 +157,7 @@ export async function workflowCommand(
       process.exit(1)
     }
     try {
-      sections.relevantBlobs = vectorSearch(emb!, { topK: top })
+      sections.relevantBlobs = await vectorSearch(emb!, { topK: top })
     } catch (err) {
       sections.relevantBlobs = { error: err instanceof Error ? err.message : String(err) }
     }
@@ -186,7 +186,7 @@ export async function workflowCommand(
       process.exit(1)
     }
     try {
-      sections.firstSeen = vectorSearch(emb!, { topK: top })
+      sections.firstSeen = await vectorSearch(emb!, { topK: top })
     } catch (err) {
       sections.firstSeen = { error: err instanceof Error ? err.message : String(err) }
     }
@@ -226,7 +226,7 @@ export async function workflowCommand(
       sections.suggestedReviewers = { error: err instanceof Error ? err.message : String(err) }
     }
     try {
-      sections.topResults = vectorSearch(emb!, { topK: top })
+      sections.topResults = await vectorSearch(emb!, { topK: top })
     } catch (err) {
       sections.topResults = { error: err instanceof Error ? err.message : String(err) }
     }
@@ -269,7 +269,7 @@ export async function workflowCommand(
       process.exit(1)
     }
     try {
-      sections.results = vectorSearch(emb!, { topK: top })
+      sections.results = await vectorSearch(emb!, { topK: top })
     } catch (err) {
       sections.results = { error: err instanceof Error ? err.message : String(err) }
     }
@@ -299,7 +299,7 @@ export async function workflowCommand(
     }
     // Current neighbourhood (HEAD)
     try {
-      sections.currentNeighbourhood = vectorSearch(emb!, { topK: top })
+      sections.currentNeighbourhood = await vectorSearch(emb!, { topK: top })
     } catch (err) {
       sections.currentNeighbourhood = { error: err instanceof Error ? err.message : String(err) }
     }

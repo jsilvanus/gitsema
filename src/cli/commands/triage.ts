@@ -58,7 +58,7 @@ export async function triageCommand(query: string, options: TriageOptions): Prom
 
   // First Seen — show top matching blobs sorted by first-seen date
   try {
-    const hits = vectorSearch(queryEmbedding!, { topK: top })
+    const hits = await vectorSearch(queryEmbedding!, { topK: top })
     sections.firstSeen = hits
   } catch (err) {
     sections.firstSeen = { error: err instanceof Error ? err.message : String(err) }

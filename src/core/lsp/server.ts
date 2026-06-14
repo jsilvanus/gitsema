@@ -59,7 +59,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
       const provider = buildProvider(providerType, model)
       const queryEmb = await embedQuery(provider, q)
-      const results = vectorSearch(queryEmb, { topK: 5, model, query: q })
+      const results = await vectorSearch(queryEmb, { topK: 5, model, query: q })
       // Return proper MarkupContent with Markdown hover card
       const lines = results.map((r: any) => {
         const path = r.paths?.[0] ?? r.blobHash
@@ -142,7 +142,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       }
 
       // 4. File-level vector search as last resort
-      const results = vectorSearch(queryEmb, { topK: 3, model, query: q })
+      const results = await vectorSearch(queryEmb, { topK: 3, model, query: q })
       const locations = results.map((r: any) => ({
         uri: `file://${r.paths?.[0] ?? r.blobHash}`,
         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },

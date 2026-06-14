@@ -54,6 +54,15 @@ export const ENV_KEY_MAP: Record<string, string> = {
   remoteKey:    'GITSEMA_REMOTE_KEY',
   llmUrl:       'GITSEMA_LLM_URL',
   llmModel:     'GITSEMA_LLM_MODEL',
+  // Storage backend & scoping (Phase 101)
+  'storage.backend':      'GITSEMA_STORAGE_BACKEND',
+  'storage.scope':        'GITSEMA_STORAGE_SCOPE',
+  'storage.name':         'GITSEMA_STORAGE_NAME',
+  'storage.metadata.url': 'GITSEMA_STORAGE_METADATA_URL',
+  'storage.vectors.url':  'GITSEMA_STORAGE_VECTORS_URL',
+  'storage.vectors.apiKey': 'GITSEMA_STORAGE_VECTORS_API_KEY',
+  'storage.fts.backend':  'GITSEMA_STORAGE_FTS_BACKEND',
+  'storage.fts.url':      'GITSEMA_STORAGE_FTS_URL',
 }
 
 /**
@@ -80,6 +89,15 @@ export const ALL_KEYS: ReadonlyArray<string> = [
   // Remote
   'remoteUrl',
   'remoteKey',
+  // Storage backend & scoping (Phase 101)
+  'storage.backend',
+  'storage.scope',
+  'storage.name',
+  'storage.metadata.url',
+  'storage.vectors.url',
+  'storage.vectors.apiKey',
+  'storage.fts.backend',
+  'storage.fts.url',
   // index command defaults
   'index.concurrency',
   'index.maxCommits',

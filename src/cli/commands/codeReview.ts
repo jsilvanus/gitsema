@@ -139,7 +139,7 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
       continue
     }
 
-    const results = vectorSearch(embedding, { topK, searchChunks: true })
+    const results = await vectorSearch(embedding, { topK, searchChunks: true })
     const analogues = results
       .filter((r) => r.score >= threshold)
       .map((r) => ({ path: r.paths?.[0] ?? r.blobHash.slice(0, 12), score: r.score }))
@@ -150,7 +150,7 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
       const removedText = hunk.removedLines.join('\n').slice(0, 2000)
       try {
         const removedEmbedding = await embedQuery(provider, removedText) as number[]
-        const removedResults = vectorSearch(removedEmbedding, { topK: 3 })
+        const removedResults = await vectorSearch(removedEmbedding, { topK: 3 })
         const maxRemovedScore = removedResults[0]?.score ?? 0
         if (maxRemovedScore >= 0.9) regressionRisk = 'high'
         else if (maxRemovedScore >= 0.75) regressionRisk = 'medium'
