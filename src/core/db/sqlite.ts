@@ -355,6 +355,16 @@ function getDefaultSession(): DbSession {
 }
 
 /**
+ * Test-only: override (or clear) the lazily-created default session.
+ * Lets tests that exercise `getActiveSession()`'s default-session fallback
+ * (e.g. HTTP routes with no per-request session override) avoid creating a
+ * real `.gitsema/index.db` in the current working directory.
+ */
+export function __setDefaultSessionForTesting(session: DbSession | undefined): void {
+  _defaultSession = session
+}
+
+/**
  * @deprecated Prefer `getActiveSession().db` in new code.
  *
  * Returns the default Drizzle ORM handle. Triggers lazy initialization of

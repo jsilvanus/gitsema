@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { parseMessage, serializeMessage, handleRequest } from '../src/core/lsp/server.js'
-import { openDatabaseAt } from '../src/core/db/sqlite.js'
+import { openDatabaseAt, withDbSession } from '../src/core/db/sqlite.js'
 
 describe('lsp server framing', () => {
   it('parses and serializes messages', () => {
@@ -22,12 +22,12 @@ describe('lsp server framing', () => {
 
   it('handles textDocument/references with empty db gracefully', async () => {
     const session = openDatabaseAt(':memory:')
-    const res = await handleRequest(session, {
+    const res = await withDbSession(session, () => handleRequest(session, {
       jsonrpc: '2.0',
       id: 11,
       method: 'textDocument/references',
       params: { text: 'authenticate' },
-    })
+    }))
     expect(res).not.toBeNull()
     // With empty DB it should return an empty array (no error)
     expect(res?.result).toBeDefined()
@@ -36,12 +36,12 @@ describe('lsp server framing', () => {
 
   it('handles textDocument/definition with empty db gracefully', async () => {
     const session = openDatabaseAt(':memory:')
-    const res = await handleRequest(session, {
+    const res = await withDbSession(session, () => handleRequest(session, {
       jsonrpc: '2.0',
       id: 12,
       method: 'textDocument/definition',
       params: { text: 'myFunction' },
-    })
+    }))
     expect(res).not.toBeNull()
     expect(res?.id).toBe(12)
     // With empty DB, result should be an empty array (no symbols) or an error
