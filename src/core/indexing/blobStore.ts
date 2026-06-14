@@ -12,7 +12,7 @@ import { invalidateResultCache } from '../search/analysis/resultCache.js'
  * Serializes a float32 embedding to a SQLite-ready Buffer, optionally quantizing to Int8.
  * Returns the vector buffer along with quantization metadata for the DB columns.
  */
-function serializeEmbedding(embedding: Embedding, quantize?: boolean): {
+export function serializeEmbedding(embedding: Embedding, quantize?: boolean): {
   vector: Buffer
   quantized: number
   quantMin: number | null
