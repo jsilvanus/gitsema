@@ -111,6 +111,16 @@ describe.skipIf(!QDRANT_URL || !PG_URL)('QdrantStorageProfile — adapter confor
     expect(await profile.metadata.getLastIndexedCommit()).toBe('c'.repeat(40))
   })
 
+  it('MetadataStore.getStats reports row counts', async () => {
+    const stats = await profile.metadata.getStats()
+    expect(stats.blobCount).toBe(2)
+    expect(stats.pathCount).toBe(3)
+    expect(stats.commitCount).toBe(1)
+    expect(stats.indexedCommitCount).toBe(1)
+    expect(stats.branchCount).toBe(2)
+    expect(stats.lastIndexedCommit).toBe('c'.repeat(40))
+  })
+
   it('VectorStore.upsert/delete for chunk/symbol/module/commit kinds', async () => {
     await profile.vectors.upsert('chunk', [{ id: 'a'.repeat(40), model, dimensions: 8, embedding: unitVec(6), startLine: 1, endLine: 10 }])
     await profile.vectors.upsert('symbol', [{

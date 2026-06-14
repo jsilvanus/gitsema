@@ -29,6 +29,7 @@ import type {
   MetadataStore,
   StorageProfile,
   StorageScope,
+  StorageStats,
   VectorKind,
   VectorRecord,
   VectorStore,
@@ -117,6 +118,17 @@ class SqliteMetadataStore implements MetadataStore {
 
   async getLastIndexedCommit(): Promise<string | undefined> {
     return sqliteGetLastIndexedCommit()
+  }
+
+  async getStats(): Promise<StorageStats> {
+    const { db } = getActiveSession()
+    const blobCount = db.select({ n: sql<number>`count(*)` }).from(blobs).get()?.n ?? 0
+    const pathCount = db.select({ n: sql<number>`count(*)` }).from(paths).get()?.n ?? 0
+    const commitCount = db.select({ n: sql<number>`count(*)` }).from(commits).get()?.n ?? 0
+    const indexedCommitCount = db.select({ n: sql<number>`count(*)` }).from(indexedCommits).get()?.n ?? 0
+    const branchCount = db.select({ n: sql<number>`count(distinct branch_name)` }).from(blobBranches).get()?.n ?? 0
+    const lastIndexedCommit = await sqliteGetLastIndexedCommit()
+    return { blobCount, pathCount, commitCount, indexedCommitCount, branchCount, lastIndexedCommit }
   }
 }
 

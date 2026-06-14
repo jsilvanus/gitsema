@@ -13,6 +13,7 @@ import { homedir, tmpdir } from 'node:os'
 import { openDatabaseAt, withDbSession, closeSessionAtPath, type DbSession } from '../src/core/db/sqlite.js'
 import { storeBlob } from '../src/core/indexing/blobStore.js'
 import { SqliteStorageProfile } from '../src/core/storage/sqlite/profile.js'
+import { runStorageDoctor } from '../src/core/storage/doctor.js'
 import { resolveStorageProfile, resolveSqliteDbPath, withStorageProfile } from '../src/core/storage/resolveProfile.js'
 import type { CommitEntry } from '../src/core/git/commitMap.js'
 
@@ -113,6 +114,38 @@ describe('SqliteStorageProfile — store conformance', () => {
   it('null fts store disables keyword search', () => {
     const noFts = new SqliteStorageProfile('project', ':memory:', false)
     expect(noFts.fts).toBeNull()
+  })
+
+  it('MetadataStore.getStats reports row counts', async () => {
+    await withDbSession(session, async () => {
+      const stats = await profile.metadata.getStats()
+      expect(stats.blobCount).toBe(2)
+      expect(stats.pathCount).toBe(3)
+      expect(stats.commitCount).toBe(0)
+      expect(stats.indexedCommitCount).toBe(0)
+      expect(stats.branchCount).toBe(0)
+      expect(stats.lastIndexedCommit).toBeUndefined()
+    })
+  })
+
+  it('runStorageDoctor reports cross-store counts and warnings', async () => {
+    await withDbSession(session, async () => {
+      const report = await runStorageDoctor(profile)
+      expect(report.backend).toBe('sqlite')
+      expect(report.blobCount).toBe(2)
+      expect(report.fileEmbeddingCount).toBe(2)
+      expect(report.ftsEnabled).toBe(true)
+      expect(report.warnings).toEqual([])
+    })
+  })
+
+  it('runStorageDoctor warns when FTS is disabled', async () => {
+    const noFts = new SqliteStorageProfile('project', ':memory:', false)
+    await withDbSession(session, async () => {
+      const report = await runStorageDoctor(noFts)
+      expect(report.ftsEnabled).toBe(false)
+      expect(report.warnings.some((w) => w.includes('FTS/hybrid search is disabled'))).toBe(true)
+    })
   })
 })
 
