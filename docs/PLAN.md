@@ -3542,9 +3542,8 @@ interface.
 **Phases:**
 - **Phase 101 — Async storage seam (foundation):** introduce
   `src/core/storage/` async interfaces (`MetadataStore`/`VectorStore`/`FtsStore`)
-  + SQLite adapter; migrate the vector read path and indexing write path to the
-  seam; add `storage.*` config and the scope model. No new backend, no behavior
-  change.
+  + SQLite adapter; make the vector read path async; add `storage.*` config and
+  the scope model. No new backend, no behavior change.
 
   **Implemented (foundation slice):**
   - `src/core/storage/types.ts` — the three async store interfaces +
@@ -3562,17 +3561,23 @@ interface.
     `configManager.ts`.
   - `tests/storageProfile.test.ts` — 16 conformance/resolution tests.
 
-  **Deviation:** the existing synchronous read/write call sites
-  (`vectorSearch`/`hybridSearch`/`commitSearch`, `indexer`/`blobStore`) are **not
-  yet rewritten** to call the seam — doing so forces async propagation through
-  ~115 sites and is the next, mechanical slice of Phase 101. The seam is built,
-  fully tested against real SQLite, and behavior-preserving so adoption is
-  incremental. ⏳ in progress.
-- **Phase 102 — Postgres metadata + pgvector:** Postgres `MetadataStore` +
-  `FtsStore` (`tsvector` BM25) + pgvector `VectorStore`.
+  **Read-path async migration (done):** `vectorSearch`/`hybridSearch`/
+  `searchCommits` are now `async`, with `await` threaded through ~37 caller files
+  (CLI, MCP, server, core search, tests). Pure mechanical change; build clean,
+  1006 tests green.
+
+  **Deferred to Phase 102:** (1) production call sites still invoke the async
+  search functions *directly* rather than via `profile.vectors.*`/`profile.fts.*`
+  — routing them through the profile is what makes the backend actually
+  swappable; (2) the indexing **write-path** migration (`blobStore`/`indexer`/
+  `deduper`) with its cross-store transaction boundary. ✅ Phase 101 complete.
+- **Phase 102 — Postgres metadata + pgvector:** route consumers through
+  `profile.vectors.*`/`profile.fts.*`; migrate the indexing write path (both
+  carried from 101); Postgres `MetadataStore` + `FtsStore` (`tsvector` BM25) +
+  pgvector `VectorStore`.
 - **Phase 103 — Qdrant + portability/ops:** Qdrant `VectorStore` with a
   relational companion store; `gitsema storage migrate`, doctor orphan checks,
   status backend reporting.
 
-**Status:** Phase 101 foundation ⏳ in progress (seam + SQLite adapter + config
-landed); Phases 102–103 📋 planned.
+**Status:** Phase 101 ✅ complete (seam + SQLite adapter + config + read-path
+async migration); Phases 102–103 📋 planned.

@@ -439,11 +439,11 @@ gitsema scope-aware.
 - Implement the **SQLite adapter** for all three interfaces wrapping today's
   code (sync calls returned as resolved promises — zero real cost; `FtsStore` =
   FTS5).
-- Migrate the **vector read path** (`vectorSearch`/`hybridSearch`/`commitSearch`)
-  and the **indexing write path** (`blobStore`/`indexer`/`deduper`) to the seam,
-  slice by slice, behind the green test suite. Long-tail relational queries stay
-  on the direct SQLite session (gated `metadata=sqlite`) until Phase 102 needs
-  them.
+- Make the **vector read path** async: convert `vectorSearch`/`hybridSearch`/
+  `searchCommits` to `async` and thread `await` through their callers (done).
+  The **indexing write path** moves to Phase 102 (see below). Long-tail
+  relational queries stay on the direct SQLite session (gated `metadata=sqlite`)
+  until Phase 102 needs them.
 - Add `storage.*` config keys, `resolveStorageProfile()`, and the
   `project`/`user`/`named` scope model (§7) — still SQLite-only, but now the
   *one* place that decides which index a command runs against.
@@ -451,6 +451,17 @@ gitsema scope-aware.
 
 ### Phase 102 — Postgres metadata + pgvector
 
+- **Route consumers through the profile** (carried over from 101): production
+  call sites still invoke the now-async `vectorSearch`/`hybridSearch`/
+  `searchCommits` *directly*. Point them at `profile.vectors.*` / `profile.fts.*`
+  (via `resolveStorageProfile()` / `withStorageProfile()`) so the backend is
+  actually swappable — otherwise pgvector would force `vectorSearch` itself to
+  branch on backend, defeating the seam.
+- **Indexing write-path migration** (moved from 101): route
+  `blobStore`/`indexer`/`deduper` writes through the seam, including the
+  cross-store transaction boundary (SQLite/Postgres commit blob + embedding +
+  FTS atomically; Qdrant relies on idempotent re-index instead). Prerequisite
+  for a *writable* Postgres backend.
 - Postgres `MetadataStore` + Postgres `FtsStore` (`tsvector`/`ts_rank_cd` BM25,
   `pg_search` BM25 as opt-in).
 - pgvector `VectorStore` (HNSW index, wider ANN candidate pool re-ranked by the
