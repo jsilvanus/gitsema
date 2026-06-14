@@ -7,6 +7,7 @@ import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { shortHash } from '../../core/search/ranking.js'
 import { renderDeadConceptsHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface DeadConceptsCommandOptions {
   /** Number of results to return (default 10). */
@@ -30,6 +31,7 @@ export interface DeadConceptsCommandOptions {
   branch?: string
   noHeadings?: boolean
   out?: string[]
+  narrate?: boolean
 }
 
 function formatDate(timestamp: number | null): string {
@@ -129,4 +131,10 @@ export async function deadConceptsCommand(
   }
 
   console.log(renderResults(results, !options.noHeadings))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('dead_concepts', { results }))
+  }
 }

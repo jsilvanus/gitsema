@@ -8,6 +8,7 @@ import { computeConceptChangePoints } from '../../core/search/temporal/changePoi
 import { computeSemanticBisect } from '../../core/search/semanticBisect.js'
 import { computeEvolution } from '../../core/search/temporal/evolution.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface TriageOptions {
   ref1?: string
@@ -20,6 +21,7 @@ export interface TriageOptions {
   model?: string
   textModel?: string
   codeModel?: string
+  narrate?: boolean
 }
 
 export async function triageCommand(query: string, options: TriageOptions): Promise<void> {
@@ -175,4 +177,10 @@ export async function triageCommand(query: string, options: TriageOptions): Prom
   }
 
   console.log('')
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('triage', output))
+  }
 }

@@ -6,6 +6,7 @@ import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { scoreDebt } from '../../core/search/debtScoring.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { resolveOutputs, hasSinkFormat, getSink, collectOut } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export function debtCommand(): Command {
   return new Command('debt')
@@ -16,7 +17,8 @@ export function debtCommand(): Command {
     .option('--dump [file]', 'output JSON to file or stdout (legacy: prefer --out json)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print column header row")
-    .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean; noHeadings?: boolean; out?: string[] }) => {
+    .option('--narrate', 'generate an LLM narrative of the debt scoring results (requires GITSEMA_LLM_URL)')
+    .action(async (opts: { top?: string; model?: string; branch?: string; dump?: string | boolean; noHeadings?: boolean; narrate?: boolean; out?: string[] }) => {
       let top: number
       try {
         top = parsePositiveInt(opts.top ?? '20', '--top')
@@ -61,6 +63,12 @@ export function debtCommand(): Command {
       }
       for (const r of results) {
         console.log(`${r.blobHash.slice(0, 8)}\t${r.debtScore.toFixed(3)}\t${r.paths.join(',')}`)
+      }
+
+      if (opts.narrate) {
+        console.log('')
+        console.log('=== LLM Narrative ===')
+        console.log(await narrateToolResult('debt_score', { results }))
       }
     })
 }

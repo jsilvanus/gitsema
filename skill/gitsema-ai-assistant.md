@@ -657,6 +657,11 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 - Result shape: Rendered "score  path  [blobHash]" lines (symbol level by default).
 - How to read it: Like semantic_search but embeds with the code model and targets symbols/chunks — better for finding specific functions/classes from a code snippet than from prose. Higher scores mean closer code-level similarity.
 
+**`cross_repo_similarity`** — Compare semantic search results for the same query across two separate repos.
+
+- Result shape: { query, repoA: { path, results[] }, repoB: { path, results[] } }, results: { path, score, blobHash }.
+- How to read it: Each side is an independent semantic_search run against its own index — scores are not directly comparable across repos if they use different embedding models. Use it to spot shared concepts, forked/duplicated code, or divergence between two repositories on the same topic.
+
 **`first_seen`** — Find when a concept first appeared (results sorted earliest-first).
 
 - Result shape: Lines "<date>  path  [blobHash]  (score: …)", oldest first.
@@ -678,6 +683,11 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 - How to read it: Ranked by cosine similarity (0–1): roughly >0.75 is a strong match, 0.5–0.75 is related, <0.5 is weak. Each result is a content-addressed blob; the same blob can appear under several paths. Use the top paths as the most relevant files; cite the short blob hash.
 
 ### History & temporal drift
+
+**`activity_heatmap`** — Commit-count activity buckets over time (weekly or monthly).
+
+- Result shape: { period, buckets: [{ period, count }] } — most-recent up to 52 buckets.
+- How to read it: A simple commit-frequency timeline. Spikes indicate bursts of activity (releases, crunch periods, large refactors); long flat/zero stretches indicate dormancy. Use alongside narrate_repo or change_points to explain what drove a spike.
 
 **`change_points`** — The largest historical shifts of a concept across the codebase.
 
@@ -710,6 +720,11 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 
 - Result shape: Per-bucket rows: active count, semanticChurnRate, deadConceptRatio.
 - How to read it: Rising churn means more concept turnover; a rising dead-concept ratio means more stale/removed code. Read the trend, not single buckets — sustained high churn or a growing dead ratio are health concerns; stable low values indicate maturity.
+
+**`semantic_bisect`** — Binary search over commit history for where a concept shifted most from a "good" baseline.
+
+- Result shape: { query, goodRef, badRef, culpritRef, maxShift, steps: [{ ref, date, blobCount, distanceFromGood }] }.
+- How to read it: `culpritRef` is the bisection's best guess for when the concept diverged from the good baseline; `maxShift` (cosine distance) is the size of the largest jump found. Steps show the search path — higher `distanceFromGood` values mark candidates closer to the regression. Treat the culprit as a narrowed time window to investigate further (e.g. with change_points or file_evolution), not a definitive single commit.
 
 ### Branch & merge analysis
 
@@ -772,12 +787,22 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 - Result shape: Neighbours with similarity score for the target file.
 - How to read it: The high-score neighbours are what else is likely affected by changing this file, even without an import edge. Use it to scope a change's blast radius and pick what to test/review alongside it.
 
+**`refactor_candidates`** — Pairs of symbols/chunks/files that are near-duplicates by embedding similarity.
+
+- Result shape: { threshold, level, totalScanned, pairs: [{ similarity, a, b }] } (top 20 by similarity).
+- How to read it: High `similarity` (near the threshold, default 0.88, max 1.0) means the two items (`a`/`b`, shown as `path::symbolName` or `path`) are likely duplicated or near-duplicated logic — candidates for extraction into a shared helper. `level` (symbol/chunk/file) sets the granularity. Not every pair is worth merging — check whether the duplication is incidental (e.g. boilerplate) or meaningful.
+
 **`security_scan`** — Blobs semantically similar to common vulnerability patterns.
 
 - Result shape: Findings with patternName, similarity score, and path.
 - How to read it: These are SIMILARITY scores, NOT confirmed vulnerabilities — every finding needs manual review. Treat higher scores as "review this first" and group by patternName to see which risk classes dominate. Never report a finding as a confirmed CVE.
 
 ### Diff & blame
+
+**`file_diff`** — Cosine distance between two versions of a single file at two refs, with optional neighbours.
+
+- Result shape: { ref1, ref2, path, blobHash1, blobHash2, cosineDistance, neighbors1?, neighbors2? }, neighbors: { path, blobHash, distance }.
+- How to read it: `cosineDistance` (0–2) measures how much the file changed in meaning between the two refs — near 0 means semantically unchanged (even if the text differs), higher values mean substantive rewrites. `neighbors1`/`neighbors2` (if requested) show the closest other blobs to each version — useful for spotting that a file was effectively replaced by, or merged from, another file.
 
 **`semantic_blame`** — Per-block nearest-neighbour attribution for a file.
 
@@ -790,6 +815,11 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 - How to read it: `gained` are blobs relevant to the topic that appear by ref2, `lost` are ones present at ref1 but gone by ref2, `stable` persist. Read it as how the topic's footprint changed between the two points; cite the blob hashes and dates.
 
 ### Clustering
+
+**`cluster_change_points`** — Detects commits where the cluster/concept landscape shifted most.
+
+- Result shape: { k, threshold, range, points: [{ before: {ref, clusters}, after: {ref, clusters}, shiftScore, topMovingPairs }] }.
+- How to read it: Each point is a before/after pair of cluster snapshots with a `shiftScore` — higher means a bigger reorganisation of the concept map at that point. `topMovingPairs` names which clusters grew/shrank most. Use the highest-scoring points as candidates for "this is when the architecture changed".
 
 **`cluster_diff`** — Compare cluster structure at two refs.
 
@@ -806,7 +836,17 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 - Result shape: Clusters with label, size, keywords, representative paths.
 - How to read it: A bird's-eye map of the codebase's concept areas. Large clusters are dominant concerns; the keywords/representative paths name each area. Use it for onboarding and to see whether the code is cleanly separated or tangled. `k` controls granularity.
 
+**`semantic_map`** — Snapshot of the current cluster layout (requires a prior `clusters` run).
+
+- Result shape: { clusters: [{ id, label, size, representativePaths(top 3), assignedBlobCount }] } or { error } if no snapshot exists.
+- How to read it: A static view of the most recent cluster snapshot — `label` and `representativePaths` name each concept area, `size`/`assignedBlobCount` show its weight. If `error` is returned, no snapshot exists yet; suggest running `gitsema clusters` first. Use this for a quick "what areas exist" overview without recomputing clusters.
+
 ### Compound workflows
+
+**`cherry_pick_suggest`** — Suggests commits most semantically relevant to a query, as cherry-pick candidates.
+
+- Result shape: { query, results: [{ commitHash, score, message, paths[] }] }.
+- How to read it: Ranked by relevance to the query (higher `score` = more relevant). Each result is a candidate commit to cherry-pick onto another branch — check `paths` for what it touches and `message` for intent before recommending it; relevance does not guarantee the commit applies cleanly elsewhere.
 
 **`eval`** — Retrieval evaluation: precision@k, recall@k, MRR for a test set.
 
@@ -817,6 +857,11 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 
 - Result shape: { passed, checks: { debt?, security?, drift? } }.
 - How to read it: Each gate reports its measured value and pass/fail vs the threshold you set. `passed:false` on any gate fails the check (exit code 3 on the CLI). Report which gate failed and by how much.
+
+**`pr_report`** — Compound PR-review bundle: semantic diff, impacted modules, change points, and reviewer suggestions.
+
+- Result shape: { ref1, ref2, semanticDiff?, impactedModules?, changePoints?, reviewerSuggestions }; sections may be { error } if unavailable.
+- How to read it: Combine the sections into a review summary: `semanticDiff` (gained/lost/stable concepts between refs) frames what changed conceptually, `impactedModules` shows blast radius, `changePoints` flags any large historical shifts in the affected area, and `reviewerSuggestions` names people to involve. A section returning `{error}` just means that part could not be computed (e.g. no query given) — report on the remaining sections.
 
 **`triage`** — Incident bundle: first-seen, change points, experts (+ optional file evolution).
 

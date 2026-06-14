@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    setupFiles: ['./tests/setup/defaultSession.ts'],
   },
   resolve: {
     // Resolve TypeScript .ts files when imports use .js extensions

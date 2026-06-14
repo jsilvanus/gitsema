@@ -1,12 +1,14 @@
 /**
- * `gitsema quickstart` — guided onboarding wizard.
+ * `gitsema quickstart` (alias: `gitsema setup`) — guided onboarding wizard.
  *
  * Walks a new user through:
  * 1. Detecting the current Git repository
  * 2. Detecting available embedding providers (Ollama / HTTP)
  * 3. Selecting a model
- * 4. Optionally writing the config
- * 5. Running `gitsema index start` on HEAD to get a working index quickly
+ * 4. Selecting a storage backend (sqlite / postgres / qdrant)
+ * 5. Writing the config
+ * 6. Running `gitsema index start` on HEAD to get a working index quickly
+ * 7. Optionally configuring a narrator/guide model (for `narrate`/`guide`)
  *
  * Designed to get a new user from zero to first search result in < 5 minutes.
  */
@@ -17,7 +19,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { setConfigValue, getLocalConfigPath } from '../../core/config/configManager.js'
 import { indexStartCommand } from './index.js'
+import { modelsKindAddCommand } from './models.js'
 import { probeOllama } from '../lib/provider.js'
+import { getCachedStorageProfile, clearStorageProfileCache } from '../../core/storage/resolveProfile.js'
 
 function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve))
@@ -28,7 +32,7 @@ function step(n: number, total: number, msg: string): void {
 }
 
 export async function quickstartCommand(): Promise<void> {
-  const TOTAL_STEPS = 5
+  const TOTAL_STEPS = 7
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
 
   console.log('╔══════════════════════════════════════════════════╗')
@@ -59,10 +63,8 @@ export async function quickstartCommand(): Promise<void> {
   let providerType = process.env.GITSEMA_PROVIDER ?? ''
   let modelName = process.env.GITSEMA_MODEL ?? ''
 
+  const ollamaOk = await probeOllama()
   if (!providerType) {
-    // Try Ollama (check if the API responds without using shell)
-    const ollamaOk = await probeOllama()
-
     if (ollamaOk) {
       console.log('  ✓ Ollama detected at http://localhost:11434')
       providerType = 'ollama'
@@ -89,20 +91,77 @@ export async function quickstartCommand(): Promise<void> {
     }
   }
 
-  // Step 4: Write config
-  step(4, TOTAL_STEPS, `Writing config to ${getLocalConfigPath(repoRoot)}…`)
+  // Step 4: Select storage backend
+  step(4, TOTAL_STEPS, 'Selecting storage backend…')
+  const backendAnswer = (await prompt(rl, '  Storage backend [sqlite] (sqlite / postgres / qdrant): ')).trim().toLowerCase() || 'sqlite'
+
+  let storageBackend: 'sqlite' | 'postgres' | 'qdrant' = 'sqlite'
+  let storageMetadataUrl = ''
+  let storageVectorsUrl = ''
+  let storageVectorsApiKey = ''
+  let storageFtsBackend = ''
+
+  if (backendAnswer === 'postgres') {
+    storageBackend = 'postgres'
+    storageMetadataUrl = (await prompt(rl, '  Postgres connection string (storage.metadata.url, e.g. postgres://user:pass@host:5432/db): ')).trim()
+    if (!storageMetadataUrl) {
+      console.error('  ✗ storage.metadata.url is required for the postgres backend.')
+      rl.close(); process.exit(1)
+    }
+    storageFtsBackend = (await prompt(rl, '  FTS backend [tsvector] (tsvector / pg_search / none): ')).trim().toLowerCase()
+  } else if (backendAnswer === 'qdrant') {
+    storageBackend = 'qdrant'
+    storageVectorsUrl = (await prompt(rl, '  Qdrant URL (storage.vectors.url, e.g. http://localhost:6333): ')).trim()
+    if (!storageVectorsUrl) {
+      console.error('  ✗ storage.vectors.url is required for the qdrant backend.')
+      rl.close(); process.exit(1)
+    }
+    storageMetadataUrl = (await prompt(rl, '  Postgres connection string for metadata (storage.metadata.url, e.g. postgres://user:pass@host:5432/db): ')).trim()
+    if (!storageMetadataUrl) {
+      console.error('  ✗ storage.metadata.url is required for the qdrant backend (relational companion store).')
+      rl.close(); process.exit(1)
+    }
+    storageVectorsApiKey = (await prompt(rl, '  Qdrant API key (optional, press enter to skip): ')).trim()
+    storageFtsBackend = (await prompt(rl, '  FTS backend [tsvector] (tsvector / pg_search / none): ')).trim().toLowerCase()
+  } else {
+    console.log('  ✓ Using default sqlite storage backend.')
+  }
+
+  // Step 5: Write config
+  step(5, TOTAL_STEPS, `Writing config to ${getLocalConfigPath(repoRoot)}…`)
   try {
     setConfigValue('provider', providerType, 'local', repoRoot)
     setConfigValue('model', pickedModel, 'local', repoRoot)
     if (httpUrl) setConfigValue('httpUrl', httpUrl, 'local', repoRoot)
+
+    if (storageBackend !== 'sqlite') {
+      setConfigValue('storage.backend', storageBackend, 'local', repoRoot)
+      if (storageMetadataUrl) setConfigValue('storage.metadata.url', storageMetadataUrl, 'local', repoRoot)
+      if (storageVectorsUrl) setConfigValue('storage.vectors.url', storageVectorsUrl, 'local', repoRoot)
+      if (storageVectorsApiKey) setConfigValue('storage.vectors.apiKey', storageVectorsApiKey, 'local', repoRoot)
+      if (storageFtsBackend) setConfigValue('storage.fts.backend', storageFtsBackend, 'local', repoRoot)
+
+      // Validate the new storage config before proceeding to indexing.
+      clearStorageProfileCache()
+      try {
+        const profile = getCachedStorageProfile(repoRoot)
+        await profile.metadata.getLastIndexedCommit()
+        console.log(`  ✓ Connected to ${storageBackend} storage backend.`)
+      } catch (err) {
+        console.warn(`  ⚠  Could not validate ${storageBackend} storage backend: ${err instanceof Error ? err.message : String(err)}`)
+        console.warn('  ⚠  Reverting to the default sqlite storage backend. Fix the connection and run `gitsema config set storage.backend ...` to switch later.')
+        setConfigValue('storage.backend', 'sqlite', 'local', repoRoot)
+        clearStorageProfileCache()
+      }
+    }
+
     console.log('  ✓ Config saved.')
   } catch (err) {
     console.warn(`  ⚠  Could not save config: ${err instanceof Error ? err.message : String(err)}`)
   }
-  rl.close()
 
-  // Step 5: Index HEAD
-  step(5, TOTAL_STEPS, 'Indexing HEAD (file-level, this may take a few minutes)…')
+  // Step 6: Index HEAD
+  step(6, TOTAL_STEPS, 'Indexing HEAD (file-level, this may take a few minutes)…')
   process.env.GITSEMA_PROVIDER = providerType
   process.env.GITSEMA_MODEL = pickedModel
   if (httpUrl) process.env.GITSEMA_HTTP_URL = httpUrl
@@ -113,7 +172,7 @@ export async function quickstartCommand(): Promise<void> {
       maxCommits: '1',
       concurrency: '4',
     })
-    console.log('\n✓ Done! You can now search your code:')
+    console.log('\n✓ Index ready. You can now search your code:')
     console.log('    gitsema search "your concept here"')
     console.log('    gitsema repl')
     console.log('    gitsema status')
@@ -123,4 +182,32 @@ export async function quickstartCommand(): Promise<void> {
     console.log('  Check your provider is running and the model is available.')
     console.log('  Then run: gitsema index start')
   }
+
+  // Step 7 (optional): Narrator/guide model
+  step(7, TOTAL_STEPS, 'Optional: configure a narrator/guide model for `gitsema narrate`/`guide`…')
+  if (ollamaOk) {
+    const wantNarrator = (await prompt(rl, '  Configure a local Ollama model for narrate/guide now? [y/N]: ')).trim().toLowerCase()
+    if (wantNarrator === 'y' || wantNarrator === 'yes') {
+      const narratorModel = (await prompt(rl, '  Ollama model name (e.g. llama3.1:8b): ')).trim()
+      if (narratorModel) {
+        try {
+          await modelsKindAddCommand(narratorModel, 'narrator', { provider: 'ollama', activate: true })
+          await modelsKindAddCommand(narratorModel, 'guide', { provider: 'ollama', activate: true })
+          console.log('  ✓ Narrator and guide models configured and activated.')
+          console.log('    Try: gitsema narrate --narrate')
+          console.log('    Try: gitsema guide "what does this repo do?"')
+        } catch (err) {
+          console.warn(`  ⚠  Could not configure narrator/guide model: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      } else {
+        console.log('  Skipped (no model name given).')
+      }
+    } else {
+      console.log('  Skipped.')
+    }
+  } else {
+    console.log('  Skipped (Ollama not detected — configure later with `gitsema models add <name> --narrator --provider ollama`).')
+  }
+
+  rl.close()
 }

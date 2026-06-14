@@ -8,6 +8,7 @@ import { shortHash } from '../../core/search/ranking.js'
 import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { emitJsonSink } from '../lib/output.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface SemanticBlameCommandOptions {
   /** Number of nearest-neighbor blobs per block (default 3). */
@@ -24,6 +25,7 @@ export interface SemanticBlameCommandOptions {
   codeModel?: string
   branch?: string
   out?: string[]
+  narrate?: boolean
 }
 
 function formatDate(timestamp: number | null): string {
@@ -130,4 +132,10 @@ export async function semanticBlameCommand(
   }).handled) return
 
   console.log(renderResults(filePath.trim(), entries))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('semantic_blame', { filePath: filePath.trim(), entries }))
+  }
 }

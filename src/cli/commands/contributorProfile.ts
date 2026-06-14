@@ -2,12 +2,14 @@ import { writeFileSync } from 'node:fs'
 import { computeContributorProfile } from '../../core/search/contributorProfile.js'
 import { renderResults } from '../../core/search/ranking.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface ContributorProfileOptions {
   top?: string
   branch?: string
   dump?: string | boolean
   out?: string[]
+  narrate?: boolean
 }
 
 export async function contributorProfileCommand(author: string, options: ContributorProfileOptions): Promise<void> {
@@ -52,4 +54,10 @@ export async function contributorProfileCommand(author: string, options: Contrib
     return
   }
   console.log(renderResults(results as any))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('contributor_profile', { author, results }))
+  }
 }

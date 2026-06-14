@@ -5,12 +5,14 @@ import { formatScore } from '../../core/search/ranking.js'
 import type { Embedding } from '../../core/models/types.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { emitJsonSink } from '../lib/output.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface CherryPickOptions {
   top?: string
   model?: string
   dump?: string | boolean
   out?: string[]
+  narrate?: boolean
 }
 
 export async function cherryPickSuggestCommand(query: string, options: CherryPickOptions): Promise<void> {
@@ -58,4 +60,10 @@ export async function cherryPickSuggestCommand(query: string, options: CherryPic
   results.forEach((r, idx) => {
     console.log(`${idx + 1}. ${formatScore(r.score)}  ${r.commitHash.slice(0, 7)}  ${r.message}`)
   })
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('cherry_pick_suggest', { query, results }))
+  }
 }

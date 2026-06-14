@@ -23,14 +23,14 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fetchCommitEvents, runNarrate, runExplain } from './narrator.js'
 import { createDisabledProvider } from './chattydeerProvider.js'
-import { getActiveSession, DB_PATH } from '../db/sqlite.js'
+import { getActiveSession, openDatabaseAt, DB_PATH } from '../db/sqlite.js'
 import { getTextProvider, getCodeProvider, buildProvider } from '../embedding/providerFactory.js'
 import { embedQuery } from '../embedding/embedQuery.js'
 import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import { hybridSearch } from '../search/analysis/hybridSearch.js'
 import { searchCommits } from '../search/commitSearch.js'
 import { multiRepoSearch } from '../indexing/repoRegistry.js'
-import { computeEvolution, computeConceptEvolution } from '../search/temporal/evolution.js'
+import { computeEvolution, computeConceptEvolution, computeDiff } from '../search/temporal/evolution.js'
 import { computeConceptChangePoints, computeFileChangePoints } from '../search/temporal/changePoints.js'
 import { computeHealthTimeline } from '../search/temporal/healthTimeline.js'
 import { computeBranchSummary } from '../search/branchSummary.js'
@@ -51,13 +51,19 @@ import {
   computeClusterSnapshot,
   compareClusterSnapshots,
   computeClusterTimeline,
+  computeClusterChangePoints,
   resolveRefToTimestamp,
   getBlobHashesUpTo,
   getBlobHashesOnBranch,
 } from '../search/clustering/clustering.js'
+import { computeSemanticBisect } from '../search/semanticBisect.js'
+import { computeRefactorCandidates } from '../search/refactorCandidates.js'
+import { suggestCherryPicks } from '../search/cherryPick.js'
+import { computeConceptLifecycle } from '../search/conceptLifecycle.js'
 import { parseDateArg } from '../search/temporal/timeSearch.js'
 import { runIndex } from '../indexing/indexer.js'
 import { DEFAULT_MAX_SIZE } from '../git/showBlob.js'
+import { vectorSearchWithSession } from '../search/analysis/vectorSearch.js'
 import type { ToolCategory } from './interpretations.js'
 import { logger } from '../../utils/logger.js'
 
@@ -1204,6 +1210,355 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
         aggregate: { precisionAtK: sumPrecision / n, recallAtK: sumRecall / n, mrr: sumMrr / n },
         cases: caseResults,
       }
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // Bisect, refactoring, cherry-picks, activity & maps (Phase 104)
+  // -------------------------------------------------------------------------
+  semantic_bisect: {
+    category: 'history',
+    needsIndex: true,
+    definition: {
+      name: 'semantic_bisect',
+      description: 'Binary search over commit history to find where a concept diverged from a "good" baseline (semantic git bisect).',
+      parameters: obj({
+        good_ref: str('A git ref known to be "good" (baseline) — branch, tag, commit hash, or date.'),
+        bad_ref: str('A git ref known to be "bad" (where the concept has drifted).'),
+        query: str('Natural-language concept to track.'),
+        top_k: int('Top-K blobs used to compute the concept centroid at each step (default 20).', { min: 1, max: 50 }),
+        max_steps: int('Maximum bisect steps (default 10).', { min: 1, max: 25 }),
+      }, ['good_ref', 'bad_ref', 'query']),
+    },
+    run: async (args) => {
+      const goodRef = strArg(args, 'good_ref')
+      const badRef = strArg(args, 'bad_ref')
+      const query = strArg(args, 'query')
+      if (!goodRef || !badRef || !query) return errorResult('semantic_bisect requires "good_ref", "bad_ref", and "query" arguments')
+      const topK = numArg(args, 'top_k', 20, 1, 50)
+      const maxSteps = numArg(args, 'max_steps', 10, 1, 25)
+      const { embedding } = await embedFor(query)
+      const result = computeSemanticBisect(embedding, query, goodRef, badRef, { topK, maxSteps })
+      return {
+        query: result.query,
+        goodRef: result.goodRef,
+        badRef: result.badRef,
+        culpritRef: result.culpritRef,
+        maxShift: result.maxShift,
+        steps: result.steps.map((s) => ({
+          ref: s.ref,
+          date: new Date(s.timestamp * 1000).toISOString().slice(0, 10),
+          blobCount: s.blobCount,
+          distanceFromGood: s.distanceFromGood,
+        })),
+      }
+    },
+  },
+  refactor_candidates: {
+    category: 'quality',
+    needsIndex: true,
+    definition: {
+      name: 'refactor_candidates',
+      description: 'Find pairs of symbols/chunks/files that are semantically similar enough to be refactoring candidates.',
+      parameters: obj({
+        threshold: { type: 'number', description: 'Cosine similarity threshold for a candidate pair (0-1, default 0.88).' },
+        top_k: int('Maximum pairs to return (default 50, max 50).', { min: 1, max: 50 }),
+        level: { type: 'string', enum: ['symbol', 'chunk', 'file'], description: 'Search granularity (default "symbol").' },
+      }),
+    },
+    run: (args) => {
+      const threshold = typeof args.threshold === 'number' ? args.threshold : 0.88
+      const topK = numArg(args, 'top_k', 50, 1, 50)
+      const levelRaw = strArg(args, 'level')
+      const level = levelRaw === 'chunk' || levelRaw === 'file' ? levelRaw : 'symbol'
+      const report = computeRefactorCandidates({ threshold, topK, level })
+      return {
+        threshold: report.threshold,
+        level: report.level,
+        totalScanned: report.totalScanned,
+        pairs: report.pairs.slice(0, 20).map((p) => ({
+          similarity: p.similarity,
+          a: p.nameA ? `${p.pathA}::${p.nameA}` : p.pathA,
+          b: p.nameB ? `${p.pathB}::${p.nameB}` : p.pathB,
+        })),
+      }
+    },
+  },
+  cherry_pick_suggest: {
+    category: 'workflow',
+    needsIndex: true,
+    definition: {
+      name: 'cherry_pick_suggest',
+      description: 'Suggest commits to cherry-pick based on semantic similarity of their commit messages to a query.',
+      parameters: obj({
+        query: str('Natural-language description of the change to find.'),
+        top_k: int('Number of results to return (default 10, max 25).', { min: 1, max: 25 }),
+      }, ['query']),
+    },
+    run: async (args) => {
+      const query = strArg(args, 'query')
+      if (!query) return errorResult('cherry_pick_suggest requires a non-empty "query" argument')
+      const topK = numArg(args, 'top_k', 10, 1, 25)
+      const { provider, embedding } = await embedFor(query)
+      const results = await suggestCherryPicks(embedding, { topK, model: provider.model })
+      return {
+        query,
+        results: results.map((r) => ({ commitHash: r.commitHash, score: r.score, message: r.message, paths: r.paths })),
+      }
+    },
+  },
+  activity_heatmap: {
+    category: 'history',
+    needsIndex: true,
+    definition: {
+      name: 'activity_heatmap',
+      description: 'Semantic activity heatmap: count of distinct blob changes per time period (week or month).',
+      parameters: obj({
+        period: { type: 'string', enum: ['week', 'month'], description: 'Aggregation period (default "week").' },
+      }),
+    },
+    run: (args) => {
+      const period = strArg(args, 'period') === 'month' ? 'month' : 'week'
+      const { rawDb } = getActiveSession()
+      const fmt = period === 'month' ? `'%Y-%m'` : `'%Y-%W'`
+      const rows = rawDb.prepare(
+        `SELECT strftime(${fmt}, datetime(c.timestamp, 'unixepoch')) AS period, COUNT(DISTINCT b.blob_hash) AS cnt
+         FROM blob_commits b JOIN commits c ON b.commit_hash = c.commit_hash
+         GROUP BY period ORDER BY period`,
+      ).all() as Array<{ period: string; cnt: number }>
+      return { period, buckets: rows.slice(-52).map((r) => ({ period: r.period, count: r.cnt })) }
+    },
+  },
+  semantic_map: {
+    category: 'clusters',
+    needsIndex: true,
+    definition: {
+      name: 'semantic_map',
+      description: 'Semantic codebase map: the most recent k-means cluster snapshot (labels, sizes, representative paths) and blob-assignment counts per cluster.',
+      parameters: obj({}),
+    },
+    run: () => {
+      const { rawDb } = getActiveSession()
+      const clusters = rawDb.prepare('SELECT id, label, size, representative_paths FROM blob_clusters').all() as Array<{ id: number; label: string; size: number; representative_paths: string | null }>
+      if (clusters.length === 0) return errorResult('no cluster snapshot found — run `gitsema clusters` first')
+      const assignmentRows = rawDb.prepare('SELECT cluster_id, COUNT(*) AS cnt FROM cluster_assignments GROUP BY cluster_id').all() as Array<{ cluster_id: number; cnt: number }>
+      const assignmentCounts: Record<number, number> = {}
+      for (const r of assignmentRows) assignmentCounts[r.cluster_id] = r.cnt
+      return {
+        clusters: clusters.map((c) => ({
+          id: c.id,
+          label: c.label,
+          size: c.size,
+          representativePaths: c.representative_paths ? (JSON.parse(c.representative_paths) as string[]).slice(0, 3) : [],
+          assignedBlobCount: assignmentCounts[c.id] ?? 0,
+        })),
+      }
+    },
+  },
+  file_diff: {
+    category: 'diff',
+    needsIndex: true,
+    definition: {
+      name: 'file_diff',
+      description: 'Compute the semantic diff (cosine distance) between two versions of a single file at two git refs.',
+      parameters: obj({
+        ref1: str('Earlier git ref (branch, tag, commit hash, or date).'),
+        ref2: str('Later git ref.'),
+        path: str('File path relative to the repo root.'),
+        neighbors: int('Number of nearest-neighbour blobs to show for each version (default 0).', { min: 0, max: 10 }),
+      }, ['ref1', 'ref2', 'path']),
+    },
+    run: async (args) => {
+      const ref1 = strArg(args, 'ref1')
+      const ref2 = strArg(args, 'ref2')
+      const path = strArg(args, 'path')
+      if (!ref1 || !ref2 || !path) return errorResult('file_diff requires "ref1", "ref2", and "path" arguments')
+      const neighbors = numArg(args, 'neighbors', 0, 0, 10)
+      const result = await computeDiff(ref1, ref2, path, { neighbors })
+      return {
+        ref1: result.ref1,
+        ref2: result.ref2,
+        path,
+        blobHash1: result.blobHash1,
+        blobHash2: result.blobHash2,
+        cosineDistance: result.cosineDistance,
+        neighbors1: result.neighbors1?.map((n) => ({ path: n.paths[0] ?? null, blobHash: n.blobHash, distance: n.distance })),
+        neighbors2: result.neighbors2?.map((n) => ({ path: n.paths[0] ?? null, blobHash: n.blobHash, distance: n.distance })),
+      }
+    },
+  },
+  concept_lifecycle: {
+    category: 'history',
+    needsIndex: true,
+    definition: {
+      name: 'concept_lifecycle',
+      description: 'Analyze the lifecycle stages (born → growing → mature → declining → dead) of a semantic concept across Git history.',
+      parameters: obj({
+        query: str('Natural-language concept to trace.'),
+        steps: int('Number of time windows to sample (default 10).', { min: 2, max: 50 }),
+        threshold: { type: 'number', description: 'Cosine similarity threshold for a "match" (0-1, default 0.7).' },
+      }, ['query']),
+    },
+    run: async (args) => {
+      const query = strArg(args, 'query')
+      if (!query) return errorResult('concept_lifecycle requires a non-empty "query" argument')
+      const steps = numArg(args, 'steps', 10, 2, 50)
+      const threshold = typeof args.threshold === 'number' ? args.threshold : 0.7
+      const { embedding } = await embedFor(query)
+      const result = computeConceptLifecycle(embedding, query, { steps, threshold })
+      return {
+        query: result.query,
+        currentStage: result.currentStage,
+        isDead: result.isDead,
+        peakCount: result.peakCount,
+        peakDate: new Date(result.peakTimestamp * 1000).toISOString().slice(0, 10),
+        bornDate: result.bornTimestamp ? new Date(result.bornTimestamp * 1000).toISOString().slice(0, 10) : null,
+        points: result.points.map((p) => ({ date: p.date, matchCount: p.matchCount, growthRate: p.growthRate, stage: p.stage })),
+      }
+    },
+  },
+  cluster_change_points: {
+    category: 'clusters',
+    needsIndex: true,
+    definition: {
+      name: 'cluster_change_points',
+      description: "Detect change points in the repo's cluster structure across commit history.",
+      parameters: obj({
+        k: int('Number of clusters per step (default 8).', { min: 2, max: 25 }),
+        threshold: { type: 'number', description: 'Mean centroid shift threshold to flag a change point (cosine distance, 0-2, default 0.3).' },
+        top_points: int('Number of change points to return (default 5).', { min: 1, max: 25 }),
+        since: str('Limit commits from this point; date or git-recognized expression.'),
+        until: str('Limit commits up to this point; date or git-recognized expression.'),
+        max_commits: int('Cap the number of commits evaluated (sampled evenly across the range).', { min: 2, max: 500 }),
+      }),
+    },
+    run: async (args) => {
+      const k = numArg(args, 'k', 8, 2, 25)
+      const threshold = typeof args.threshold === 'number' ? args.threshold : 0.3
+      const topPoints = numArg(args, 'top_points', 5, 1, 25)
+      const since = dateArg(strArg(args, 'since'))
+      const until = dateArg(strArg(args, 'until'))
+      const maxCommits = args.max_commits !== undefined ? numArg(args, 'max_commits', 20, 2, 500) : undefined
+      const report = await computeClusterChangePoints({ k, threshold, topPoints, since, until, maxCommits })
+      return {
+        k: report.k,
+        threshold: report.threshold,
+        range: report.range,
+        points: report.points.map((p) => ({
+          before: { ref: p.before.ref, clusters: p.before.clusters.map((c) => ({ label: c.label, size: c.size })) },
+          after: { ref: p.after.ref, clusters: p.after.clusters.map((c) => ({ label: c.label, size: c.size })) },
+          shiftScore: p.shiftScore,
+          topMovingPairs: p.topMovingPairs,
+        })),
+      }
+    },
+  },
+  cross_repo_similarity: {
+    category: 'search',
+    needsIndex: false,
+    definition: {
+      name: 'cross_repo_similarity',
+      description: 'Compare semantic similarity of a concept across two separately indexed gitsema repos by their index.db paths.',
+      parameters: obj({
+        query: str('Natural-language concept to compare.'),
+        repo_a: str('Path to repo A\'s .gitsema/index.db.'),
+        repo_b: str('Path to repo B\'s .gitsema/index.db.'),
+        top_k: int('Top results per repo (default 5, max 25).', { min: 1, max: 25 }),
+      }, ['query', 'repo_a', 'repo_b']),
+    },
+    run: async (args) => {
+      const query = strArg(args, 'query')
+      const repoA = strArg(args, 'repo_a')
+      const repoB = strArg(args, 'repo_b')
+      if (!query || !repoA || !repoB) return errorResult('cross_repo_similarity requires "query", "repo_a", and "repo_b" arguments')
+      if (!existsSync(repoA)) return errorResult(`repo_a not found: ${repoA}`)
+      if (!existsSync(repoB)) return errorResult(`repo_b not found: ${repoB}`)
+      const topK = numArg(args, 'top_k', 5, 1, 25)
+      const { embedding } = await embedFor(query)
+      const sessionA = openDatabaseAt(repoA)
+      const sessionB = openDatabaseAt(repoB)
+      try {
+        const resultsA = vectorSearchWithSession(sessionA.rawDb, embedding, { topK })
+        const resultsB = vectorSearchWithSession(sessionB.rawDb, embedding, { topK })
+        return {
+          query,
+          repoA: { path: repoA, results: resultsA.map((r) => ({ path: r.paths?.[0] ?? null, score: r.score, blobHash: r.blobHash })) },
+          repoB: { path: repoB, results: resultsB.map((r) => ({ path: r.paths?.[0] ?? null, score: r.score, blobHash: r.blobHash })) },
+        }
+      } finally {
+        sessionA.rawDb.close()
+        sessionB.rawDb.close()
+      }
+    },
+  },
+  pr_report: {
+    category: 'workflow',
+    needsIndex: true,
+    definition: {
+      name: 'pr_report',
+      description: 'Compose a semantic PR report: diff summary and impacted modules for a file, change-point highlights for a concept query, and suggested reviewers.',
+      parameters: obj({
+        ref1: str('Base ref (default "HEAD~1").'),
+        ref2: str('Head ref (default "HEAD").'),
+        file: str('File path to analyze for semantic diff and impact.'),
+        query: str('Concept query for change-point highlights.'),
+        top: int('Result limit per section (default 10, max 25).', { min: 1, max: 25 }),
+        since: str('Filter reviewer activity since this date.'),
+        until: str('Filter reviewer activity until this date.'),
+      }),
+    },
+    run: async (args) => {
+      const ref1 = strArg(args, 'ref1') ?? 'HEAD~1'
+      const ref2 = strArg(args, 'ref2') ?? 'HEAD'
+      const file = strArg(args, 'file')
+      const query = strArg(args, 'query')
+      const top = numArg(args, 'top', 10, 1, 25)
+      const since = dateArg(strArg(args, 'since'))
+      const until = dateArg(strArg(args, 'until'))
+      const report: Record<string, unknown> = { ref1, ref2 }
+
+      if (file || query) {
+        const provider = getTextProvider()
+        if (file) {
+          try {
+            const diffEmbedding = await embedQuery(provider, file)
+            const diff = computeSemanticDiff(diffEmbedding, file, ref1, ref2, top)
+            report.semanticDiff = { gained: diff.gained.length, lost: diff.lost.length, stable: diff.stable.length }
+          } catch (err) {
+            report.semanticDiff = { error: err instanceof Error ? err.message : String(err) }
+          }
+
+          try {
+            const impactReport = await computeImpact(file, provider, { topK: top })
+            report.impactedModules = impactReport.results.map((r) => ({ path: r.paths[0] ?? null, score: r.score }))
+          } catch (err) {
+            report.impactedModules = { error: err instanceof Error ? err.message : String(err) }
+          }
+        }
+
+        if (query) {
+          try {
+            const queryEmbedding = await embedQuery(provider, query)
+            const cpReport = computeConceptChangePoints(query, queryEmbedding, { topK: top, topPoints: 5 })
+            report.changePoints = cpReport.points.map((p) => ({
+              distance: p.distance,
+              before: { commit: p.before.commit, date: p.before.date },
+              after: { commit: p.after.commit, date: p.after.date },
+            }))
+          } catch (err) {
+            report.changePoints = { error: err instanceof Error ? err.message : String(err) }
+          }
+        }
+      }
+
+      try {
+        report.reviewerSuggestions = computeExperts({ topN: 5, since, until, minBlobs: 1, topClusters: 3 })
+          .map((e) => ({ authorName: e.authorName, authorEmail: e.authorEmail, blobCount: e.blobCount }))
+      } catch (err) {
+        report.reviewerSuggestions = { error: err instanceof Error ? err.message : String(err) }
+      }
+
+      return report
     },
   },
 

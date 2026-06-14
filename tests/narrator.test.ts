@@ -11,6 +11,7 @@ import {
   narrateSecurityFindings,
   narrateSearchResults,
   narrateChangePoints,
+  narrateToolResult,
 } from '../src/core/llm/narrator.js'
 
 // ---------------------------------------------------------------------------
@@ -284,6 +285,74 @@ describe('narrateChangePoints', () => {
 
     const result = await narrateChangePoints(report)
     expect(result).toBe('One major shift in auth detected.')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// narrateToolResult (Phase 104)
+// ---------------------------------------------------------------------------
+
+describe('narrateToolResult', () => {
+  it('returns unavailable message when GITSEMA_LLM_URL is not set', async () => {
+    const result = await narrateToolResult('debt_score', { results: [] })
+    expect(result).toContain('LLM narration unavailable')
+    expect(result).toContain('GITSEMA_LLM_URL')
+  })
+
+  it('calls the chat completions endpoint with the result JSON', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    const fetchMock = mockFetch(cannedCompletion('Debt is concentrated in two modules.'))
+
+    const result = await narrateToolResult('debt_score', { results: [{ blobHash: 'abc123', debtScore: 0.8, paths: ['src/x.ts'] }] })
+
+    expect(result).toBe('Debt is concentrated in two modules.')
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:11434/v1/chat/completions')
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.messages[1].content).toContain('src/x.ts')
+  })
+
+  it('redacts secrets from the result JSON before sending', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    const fetchMock = mockFetch(cannedCompletion('ok'))
+
+    await narrateToolResult('debt_score', { note: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUV' })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.messages[1].content).not.toContain('sk-ant-api03')
+  })
+
+  it('truncates very large results with a truncation marker', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    const fetchMock = mockFetch(cannedCompletion('ok'))
+
+    const bigResults = Array.from({ length: 500 }, (_, i) => ({ blobHash: `blob${i}`, debtScore: 0.5, paths: [`src/file${i}.ts`] }))
+    await narrateToolResult('debt_score', { results: bigResults })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.messages[1].content).toContain('…truncated')
+  })
+
+  it('falls back gracefully on HTTP error', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    mockFetch({ error: { message: 'unauthorized' } }, 401)
+
+    const result = await narrateToolResult('debt_score', { results: [] })
+    expect(result).toContain('LLM narration failed')
+  })
+
+  it('falls back to the raw tool key when no interpretation exists', async () => {
+    process.env.GITSEMA_LLM_URL = 'http://localhost:11434'
+    const fetchMock = mockFetch(cannedCompletion('ok'))
+
+    await narrateToolResult('totally_unknown_tool', { foo: 'bar' })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.messages[1].content).toContain('totally_unknown_tool')
   })
 })
 

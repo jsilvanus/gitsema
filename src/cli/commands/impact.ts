@@ -10,6 +10,7 @@ import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.j
 import { shortHash } from '../../core/search/ranking.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { emitJsonSink } from '../lib/output.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface ImpactCommandOptions {
   /** Number of similar blobs to return (default 10). */
@@ -31,6 +32,7 @@ export interface ImpactCommandOptions {
   html?: string | boolean
   noHeadings?: boolean
   out?: string[]
+  narrate?: boolean
 }
 
 /**
@@ -155,4 +157,10 @@ export async function impactCommand(
   }
 
   console.log(renderReport(report, !options.noHeadings))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('impact', report))
+  }
 }
