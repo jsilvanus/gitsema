@@ -477,6 +477,12 @@ partial write self-heals on the next incremental `index` run via the existing
 dedup check. Module (directory centroid) embeddings remain SQLite-only for
 postgres/qdrant backends.
 
+**`gitsema storage` / `gitsema storage info`:** prints the resolved
+`storage.*` configuration (backend, scope, location, FTS status) without
+opening any connections — the quick way to confirm which backend/scope a
+command will operate against before running `index`, `storage migrate`,
+`doctor`, or `status`. Bare `gitsema storage` is an alias for `storage info`.
+
 **`gitsema storage migrate --to <backend> [options]`:** copies the active
 index into another storage backend (sqlite/postgres/qdrant), using
 content-addressed/idempotent writes so a migration is safe to re-run/resume.

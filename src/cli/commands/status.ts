@@ -111,6 +111,7 @@ export async function statusCommand(filePath: string | undefined, options: Statu
   const dualModel = codeModel !== textModel
 
   printKV(`gitsema v${readPkgVersion()}`, '')
+  printKV('Backend:', `${profile.backend} (scope: ${profile.scope})`)
   printKV('DB:', DB_PATH)
   printKV('Provider:', providerType)
   if (dualModel) {

@@ -130,6 +130,10 @@ The indexer applies a multi-level fallback chain: whole-file → function chunke
 
 Other `index` subcommands: `index export` / `index import` (bundle transfer), `index update-modules` (directory-centroid embeddings), `index build-vss` (build the ANN index).
 
+#### `gitsema storage [info]`
+
+Prints the resolved `storage.*` configuration — backend, scope, location, and FTS status — without opening any connections. Bare `gitsema storage` is an alias for `gitsema storage info`. Use `gitsema status`/`gitsema doctor` for row counts and health checks.
+
 #### `gitsema storage migrate --to <backend> [options]`
 
 Copies the active index into another storage backend (sqlite/postgres/qdrant) via the `StorageProfile` seam. Content-addressed and idempotent, so a migration is safe to re-run/resume after an interruption. Only `sqlite` sources are supported today.

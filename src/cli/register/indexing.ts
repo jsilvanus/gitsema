@@ -10,6 +10,7 @@ import { rebuildFtsCliCommand } from '../commands/rebuildFts.js'
 import { clearModelCommand } from '../commands/clearModel.js'
 import { buildVssCommand } from '../commands/buildVss.js'
 import { storageMigrateCommand } from '../commands/storageMigrate.js'
+import { storageInfoCommand } from '../commands/storageInfo.js'
 
 export function registerIndexing(program: Command) {
   program
@@ -333,6 +334,12 @@ export function registerIndexing(program: Command) {
   const storageSub = program
     .command('storage')
     .description('Manage the pluggable storage backend (sqlite | postgres | qdrant)')
+    .action(storageInfoCommand)
+
+  storageSub
+    .command('info')
+    .description('Show the resolved storage backend/scope/location (no connections opened)')
+    .action(storageInfoCommand)
 
   storageSub
     .command('migrate')
