@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
-import { openDatabaseAt, withDbSession, type DbSession } from '../src/core/db/sqlite.js'
+import { openDatabaseAt, withDbSession, closeSessionAtPath, type DbSession } from '../src/core/db/sqlite.js'
 import { storeBlob } from '../src/core/indexing/blobStore.js'
 import { SqliteStorageProfile } from '../src/core/storage/sqlite/profile.js'
 import { resolveStorageProfile, resolveSqliteDbPath, withStorageProfile } from '../src/core/storage/resolveProfile.js'
@@ -175,13 +175,19 @@ describe('resolveStorageProfile — config driven', () => {
 
 describe('withStorageProfile — activates the profile database', () => {
   let dir: string
+  let dbPath: string
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'gitsema-withprofile-'))
+    dbPath = join(dir, 'scoped.db')
   })
-  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+  afterAll(() => {
+    // withStorageProfile opens a cached session via getOrOpenSessionAtPath;
+    // close it before removing the dir or Windows fails with EBUSY (WAL lock).
+    closeSessionAtPath(dbPath)
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   it('routes the stores to the profile location', async () => {
-    const dbPath = join(dir, 'scoped.db')
     const profile = new SqliteStorageProfile('named', dbPath)
     await withStorageProfile(profile, async () => {
       storeBlob({ blobHash: 'd'.repeat(40), size: 5, path: 'x.ts', model: 'm', embedding: unitVec(3), content: 'scoped content sample' })
