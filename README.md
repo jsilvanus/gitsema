@@ -78,6 +78,7 @@ Configuration is read from environment variables or persisted via `gitsema confi
 | `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema tools serve` |
 | `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
 | `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
+| `GITSEMA_DATA_DIR` | `~/.gitsema/data` | Root directory where `gitsema tools serve` persists cloned repos + index DBs (`repos/<repoId>/{repo,index.db}`, `registry.db`) |
 
 Run `gitsema config list` to see every active key and where its value came from (env, repo config, global config, or default). Supported dot-notation keys include `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, and more.
 
@@ -136,6 +137,17 @@ Other `index` subcommands: `index export` / `index import` (bundle transfer), `i
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
 The old top-level `gitsema mcp`, `gitsema lsp`, `gitsema serve`, and `gitsema backfill-fts` still work as hidden backward-compat aliases.
+
+`gitsema tools serve` defaults `POST /api/v1/remote/index` to **persistent** mode:
+the cloned repo and its index are stored under `GITSEMA_DATA_DIR` (default
+`~/.gitsema/data`) and reused on subsequent requests (fetch + incremental index
+instead of a fresh clone + full reindex). The response includes a `repoId` you can
+pass to `/api/v1/search`, `/api/v1/evolution/*`, `/api/v1/analysis/*`, and other
+query routes to run them against that repo's index. Pass `persist: false` to fall
+back to the legacy ephemeral (temp-dir, `GITSEMA_CLONE_KEEP`-governed) behavior.
+Manage persisted repos with `gitsema repos list-persisted` and
+`gitsema repos remove <repoId> [--purge]`. See
+[`docs/features.md`](docs/features.md#persistent-server-side-repo-storage) for details.
 
 ### Search & Discovery
 

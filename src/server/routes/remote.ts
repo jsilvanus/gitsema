@@ -35,7 +35,19 @@ import {
   getCloneSemaphore,
   sanitiseUrl,
 } from '../../core/git/cloneRepo.js'
-import { getOrOpenLabeledDb, withDbSession } from '../../core/db/sqlite.js'
+import { getOrOpenLabeledDb, getOrOpenSessionAtPath, withDbSession } from '../../core/db/sqlite.js'
+import {
+  getRegistrySession,
+  getRepoClonePath,
+  getRepoDbPath,
+  normalizeRepoUrl,
+  deriveRepoId,
+  findRepoByNormalizedUrl,
+  getRepo,
+  registerPersistedRepo,
+  touchLastIndexed,
+  withRepoLock,
+} from '../../core/indexing/repoRegistry.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -75,13 +87,26 @@ const DbLabelSchema = z.string().regex(/^[a-zA-Z0-9-]{1,64}$/, {
   message: 'dbLabel must be 1–64 alphanumeric characters or hyphens',
 })
 
+/** Repo IDs are derived as a 16-char hex digest of the normalized URL. */
+const RepoIdSchema = z.string().regex(/^[a-f0-9]{16}$/, {
+  message: 'repoId must be a 16-character hex string',
+})
+
 const RemoteIndexBodySchema = z.object({
   repoUrl: z.string().max(2048),
   credentials: CredentialsSchema.optional(),
   cloneDepth: z.number().int().positive().nullable().optional(),
   indexOptions: IndexOptionsSchema.optional(),
-  /** Optional label — routes indexing to .gitsema/<label>.db instead of the default DB. */
+  /** Optional label — routes indexing to .gitsema/<label>.db instead of the default DB. Only used when persist=false. */
   dbLabel: DbLabelSchema.optional(),
+  /**
+   * Persist the clone + index under GITSEMA_DATA_DIR and reuse it on
+   * subsequent requests for the same repoUrl (fetch + incremental index
+   * instead of a fresh clone + full index). Defaults to true.
+   */
+  persist: z.boolean().optional().default(true),
+  /** Target a specific already-registered persisted repo explicitly. */
+  repoId: RepoIdSchema.optional(),
 }).strict()
 
 // ---------------------------------------------------------------------------
@@ -289,6 +314,16 @@ function scheduleJobCleanup(jobId: string): void {
 // Core job runner
 // ---------------------------------------------------------------------------
 
+/** Context for persisting a clone + index under GITSEMA_DATA_DIR (default mode). */
+interface PersistentJobContext {
+  repoId: string
+  name: string
+  url: string
+  normalizedUrl: string
+  clonePath: string
+  dbPath: string
+}
+
 async function runIndexJob(
   job: Job,
   options: {
@@ -297,6 +332,7 @@ async function runIndexJob(
     cloneDepth: number | null | undefined
     indexOptions: z.infer<typeof IndexOptionsSchema>
     dbLabel: string | undefined
+    persistent: PersistentJobContext | undefined
     textProvider: EmbeddingProvider
     codeProvider: EmbeddingProvider | undefined
     serverChunker: ChunkStrategy
@@ -305,7 +341,7 @@ async function runIndexJob(
 ): Promise<void> {
   const {
     repoUrl, credentials, cloneDepth, indexOptions,
-    dbLabel, textProvider, codeProvider, serverChunker, serverConcurrency,
+    dbLabel, persistent, textProvider, codeProvider, serverChunker, serverConcurrency,
   } = options
 
   const safeUrl = sanitiseUrl(repoUrl)
@@ -313,12 +349,15 @@ async function runIndexJob(
   let succeeded = false
 
   try {
-    logger.info(`Starting remote index of ${safeUrl}${dbLabel ? ` (db: ${dbLabel})` : ''}`)
-    const cloneResult = await obtainClone({
-      repoUrl,
-      credentials,
-      depth: cloneDepth ?? null,
-    })
+    logger.info(
+      `Starting remote index of ${safeUrl}` +
+      (persistent ? ` (repo: ${persistent.repoId})` : dbLabel ? ` (db: ${dbLabel})` : ''),
+    )
+    const cloneResult = await obtainClone(
+      persistent
+        ? { repoUrl, credentials, depth: cloneDepth ?? null, mode: 'persistent', targetDir: persistent.clonePath }
+        : { repoUrl, credentials, depth: cloneDepth ?? null },
+    )
     clonePath = cloneResult.clonePath
 
     const maxBlobSize = indexOptions.maxSize ? parseMaxSize(indexOptions.maxSize) : undefined
@@ -350,7 +389,12 @@ async function runIndexJob(
 
     let stats: IndexStats
 
-    if (dbLabel) {
+    if (persistent) {
+      // Persistent server-side repo: all indexer writes go to
+      // $GITSEMA_DATA_DIR/repos/<repoId>/index.db
+      const session = getOrOpenSessionAtPath(persistent.dbPath)
+      stats = await withDbSession(session, () => runIndex(indexerOptions))
+    } else if (dbLabel) {
       // Per-repo DB session: all indexer writes go to .gitsema/<label>.db
       const session = getOrOpenLabeledDb(dbLabel)
       stats = await withDbSession(session, () => runIndex(indexerOptions))
@@ -364,6 +408,20 @@ async function runIndexJob(
     job.completedAt = Date.now()
     persistJob(job)
     notifySubscribers(job, { type: 'done', stats })
+
+    if (persistent) {
+      const registrySession = getRegistrySession()
+      registerPersistedRepo(registrySession, {
+        id: persistent.repoId,
+        name: persistent.name,
+        url: persistent.url,
+        normalizedUrl: persistent.normalizedUrl,
+        clonePath: persistent.clonePath,
+        dbPath: persistent.dbPath,
+        ephemeral: false,
+      })
+      touchLastIndexed(registrySession, persistent.repoId)
+    }
 
     logger.info(
       `Remote index of ${safeUrl} complete: ` +
@@ -382,9 +440,28 @@ async function runIndexJob(
   } finally {
     getCloneSemaphore().release()
     scheduleJobCleanup(job.id)
-    if (clonePath) {
+    // Persistent clones are reused across requests — never delete them.
+    if (clonePath && !persistent) {
       await cleanupClone(clonePath, succeeded)
     }
+  }
+}
+
+/**
+ * Derives a human-readable repo name from its normalized URL —
+ * the last non-empty path segment (or the whole string as a fallback).
+ */
+function deriveRepoName(normalizedUrl: string): string {
+  try {
+    if (normalizedUrl.includes('://')) {
+      const segments = new URL(normalizedUrl).pathname.split('/').filter(Boolean)
+      return segments[segments.length - 1] || normalizedUrl
+    }
+    // SCP-style: git@host:owner/repo
+    const segments = normalizedUrl.split(/[:/]/).filter(Boolean)
+    return segments[segments.length - 1] || normalizedUrl
+  } catch {
+    return normalizedUrl
   }
 }
 
@@ -424,7 +501,7 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       return
     }
 
-    const { repoUrl, credentials, cloneDepth, indexOptions = {}, dbLabel } = parsed.data
+    const { repoUrl, credentials, cloneDepth, indexOptions = {}, dbLabel, persist, repoId: requestedRepoId } = parsed.data
 
     // --- 2. SSRF guard -------------------------------------------------------
     try {
@@ -433,6 +510,48 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       const msg = err instanceof Error ? err.message : String(err)
       res.status(422).json({ error: msg })
       return
+    }
+
+    // --- 2b. Resolve persistent repo registration (default mode) ------------
+    let persistent: PersistentJobContext | undefined
+    if (persist) {
+      const normalizedUrl = normalizeRepoUrl(repoUrl)
+      const registrySession = getRegistrySession()
+      const existing = requestedRepoId
+        ? getRepo(registrySession, requestedRepoId)
+        : findRepoByNormalizedUrl(registrySession, normalizedUrl)
+
+      if (requestedRepoId && !existing) {
+        res.status(404).json({ error: `repoId '${requestedRepoId}' not found` })
+        return
+      }
+      if (existing && existing.normalizedUrl && existing.normalizedUrl !== normalizedUrl) {
+        res.status(409).json({ error: 'repoId does not match repoUrl' })
+        return
+      }
+
+      // Scoped tokens (req.repoId set by per-repo auth) may only operate on
+      // their own repo and may not register new repos.
+      if (req.repoId) {
+        if (existing && existing.id !== req.repoId) {
+          res.status(403).json({ error: 'Token is not authorized for this repo' })
+          return
+        }
+        if (!existing) {
+          res.status(403).json({ error: 'Scoped tokens cannot register new repos' })
+          return
+        }
+      }
+
+      const repoId = existing?.id ?? deriveRepoId(normalizedUrl)
+      persistent = {
+        repoId,
+        name: existing?.name ?? deriveRepoName(normalizedUrl),
+        url: repoUrl,
+        normalizedUrl,
+        clonePath: existing?.clonePath ?? getRepoClonePath(repoId),
+        dbPath: existing?.dbPath ?? getRepoDbPath(repoId),
+      }
     }
 
     // --- 3. Acquire concurrency semaphore ------------------------------------
@@ -450,20 +569,24 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
 
     // --- 4. Create job and return jobId immediately -------------------------
     const job = createJob()
-    res.status(202).json({ jobId: job.id })
+    res.status(202).json({ jobId: job.id, ...(persistent ? { repoId: persistent.repoId } : {}) })
 
     // --- 5. Run indexing asynchronously (semaphore released inside runner) --
-    void runIndexJob(job, {
+    const runJob = (): Promise<void> => runIndexJob(job, {
       repoUrl,
       credentials,
       cloneDepth,
       indexOptions,
       dbLabel,
+      persistent,
       textProvider,
       codeProvider,
       serverChunker,
       serverConcurrency,
     })
+
+    // Serialize clone/fetch/index for the same persisted repo across requests.
+    void (persistent ? withRepoLock(persistent.repoId, runJob) : runJob())
   })
 
   /**

@@ -261,6 +261,50 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 
 Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`. Per-repo scoped tokens can be minted with `gitsema repos token add <repo-id>` and are stored as **SHA-256 hashes** at rest (review7 §4.1) — the plaintext is never persisted in the database.
 
+### Persistent server-side repo storage
+
+`POST /api/v1/remote/index` **persists** the clone + index by default (`persist: true`),
+storing them under `GITSEMA_DATA_DIR` (default `~/.gitsema/data`) so subsequent requests
+for the same `repoUrl` reuse the existing clone (`git fetch` instead of a fresh clone)
+and run an incremental re-index against the existing `index.db`, instead of starting
+from scratch:
+
+```
+$GITSEMA_DATA_DIR/
+  registry.db              # persisted-repo registry (repos + repo_tokens)
+  repos/
+    <repoId>/
+      repo/                 # persistent git clone (working copy)
+      index.db              # this repo's gitsema index
+```
+
+- `repoId` is a 16-character hex digest derived from the normalized `repoUrl`
+  (credentials, trailing `.git`, and trailing slashes stripped, host lowercased) —
+  repeated registrations of the same URL resolve to the same `repoId` and on-disk
+  directory.
+- The `202 Accepted` response includes `repoId`; pass it as `repoId` on
+  `/api/v1/search`, `/api/v1/search/first-seen`, `/api/v1/evolution/*`,
+  `/api/v1/analysis/*`, `/api/v1/watch/*`, `/api/v1/projections/*`, `/api/v1/narrate`,
+  `/api/v1/explain`, and `/api/v1/guide` (body field for `POST`, query string for `GET`)
+  to run the request against that repo's persisted index instead of the default
+  cwd `.gitsema/index.db`.
+- Per-repo scoped tokens (`gitsema repos token add <repo-id>`) restrict requests to
+  their own `repoId`: a mismatched `repoId` returns `403`, and scoped tokens cannot
+  register new repos.
+- Pass `repoId` explicitly to target an already-registered repo without
+  re-supplying `repoUrl`'s exact form; `404` if unknown, `409` if it doesn't match
+  the normalized `repoUrl`.
+- Set `persist: false` to fall back to the legacy ephemeral behavior (clone to a
+  temp dir, governed by `GITSEMA_CLONE_KEEP`/`GITSEMA_CLONE_DIR`, optionally with
+  `dbLabel` for an ad-hoc named DB). Failed re-index attempts on a persisted repo
+  never deregister it or delete its clone — search keeps serving the last-good index.
+- **SSH agent forwarding**: when a persistent clone/fetch needs SSH and no explicit
+  `credentials` are supplied in the request, the server forwards its own
+  `SSH_AUTH_SOCK` (if set) to `git`, so operators can re-index private repos on a
+  recurring basis without sending per-request keys.
+- Manage persisted repos with `gitsema repos list-persisted` and
+  `gitsema repos remove <repoId> [--purge]`.
+
 ### Operational features (P2)
 
 - **Prometheus metrics** (`GET /metrics`): exposes HTTP latency histograms, index size gauges, embedding error counters, query cache hit/miss counters, and Node.js default metrics. Protected by auth by default; set `GITSEMA_METRICS_PUBLIC=1` to allow unauthenticated scraping.

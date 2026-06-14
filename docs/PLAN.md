@@ -3456,3 +3456,69 @@ is given.
 | Python model server (GPU Docker) | We already have Node.js embedeer and if we want Docker+python, we can use ollama. |
 
 ---
+
+### Phase 100 — Persistent, registry-backed server-side repo storage
+
+**Goal:** Make `gitsema tools serve`'s `POST /api/v1/remote/index` persist cloned
+repos and their indexes by default (instead of cloning to a temp dir and discarding
+them), so the server supports three deployments without code forks: a single dev
+running gitsema + repo storage on one box, a team sharing one clone+index per repo,
+and an enterprise isolating repos/indexes per team via existing per-repo token scoping.
+
+**Implemented scope:**
+
+- **Schema v22 → v23** (`src/core/db/sqlite.ts`, `src/core/db/schema.ts`,
+  `src/core/db/migrations/023_repos_persistent_storage.ts`): added `normalized_url`
+  (unique index), `clone_path`, `last_indexed_at`, `ephemeral` columns to `repos`.
+- **`src/core/indexing/repoRegistry.ts`**: new `GITSEMA_DATA_DIR`-based persistent
+  storage layout (`repos/<repoId>/{repo/, index.db}`, `registry.db`):
+  `getDataDir`, `getRepoDir`/`getRepoClonePath`/`getRepoDbPath`, `getRegistrySession`,
+  `normalizeRepoUrl` (strips credentials/`.git`/trailing slashes, lowercases host),
+  `deriveRepoId` (sha256-based 16-hex-char id, stable per normalized URL),
+  `findRepoByNormalizedUrl`, `registerPersistedRepo` (upsert), `touchLastIndexed`,
+  `removeRepo`, and a per-repo mutex (`withRepoLock`) serializing concurrent
+  clone/fetch/index operations on the same repo.
+- **`src/core/db/sqlite.ts`**: new `getOrOpenSessionAtPath(dbPath)` — cached,
+  path-keyed `DbSession` factory (used for both `registry.db` and per-repo
+  `index.db` files).
+- **`src/core/git/cloneRepo.ts`**: `obtainClone({ mode: 'persistent', targetDir })`
+  reuses an existing valid clone via `git fetch` (re-cloning if missing/corrupted)
+  instead of always cloning to a temp dir; `cloneToPath`/`isValidGitDir` helpers
+  shared with the ephemeral path. SSH agent forwarding: when no explicit
+  `credentials.sshKey`/`token` is supplied and `SSH_AUTH_SOCK` is set, it (and a safe
+  `GIT_SSH_COMMAND`, no `-i`) are forwarded to `git` so the server can re-index
+  private repos on a schedule without per-request keys.
+- **`src/server/routes/remote.ts`**: `POST /api/v1/remote/index` request schema gains
+  `persist` (default `true`) and `repoId`. Default flow: normalize `repoUrl` →
+  look up/derive `repoId` → `withRepoLock(repoId, ...)` → persistent clone/fetch →
+  incremental `runIndex` against `$GITSEMA_DATA_DIR/repos/<repoId>/index.db` →
+  `registerPersistedRepo` + `touchLastIndexed` on success. `404` for unknown explicit
+  `repoId`, `409` for a `repoId`/`repoUrl` mismatch, `403` for scoped-token misuse
+  (wrong repo or attempting to register a new one). `persist: false` preserves the
+  legacy ephemeral (`GITSEMA_CLONE_KEEP`/`GITSEMA_CLONE_DIR`, `dbLabel`) behavior.
+  Failed re-index of a persisted repo never deregisters it or deletes its clone.
+- **`src/server/middleware/repoSession.ts`** (new) + wiring in `src/server/app.ts`:
+  resolves an optional `repoId` (body for `POST` / query string for `GET`, or the
+  scope of a per-repo auth token) to a persisted repo's `index.db` and makes it the
+  active `DbSession` for the request via `withDbSession`; `403` on scoped-token
+  mismatch, `404` for unknown `repoId`. Applied to search, evolution, analysis,
+  watch, projections, narrator, and guide routers. With no `repoId`, behavior is
+  unchanged (default cwd `.gitsema/index.db`).
+- **CLI** (`src/cli/commands/repos.ts`): `gitsema repos list-persisted` and
+  `gitsema repos remove <repoId> [--purge]` manage the `GITSEMA_DATA_DIR` registry.
+- **Tests**: `tests/repoRegistry.test.ts` (normalize/derive/register/find/lock),
+  `tests/repoSessionMiddleware.test.ts` (repoId resolution, 403/404 paths),
+  `tests/remoteIndexPersistence.test.ts` (repoId derivation/reuse, 404/409/403 on
+  `/api/v1/remote/index`, `persist: false`).
+
+**Deviations from the original plan:**
+- Persistent re-fetch is `git fetch` only (no checkout/reset) — gitsema's indexer
+  reads via `git rev-list`/`git cat-file` at the object level, so a working-tree
+  checkout isn't needed.
+- `runIndex` already resolves `since` to the last indexed commit when omitted, so no
+  extra "last indexed ref" bookkeeping was needed beyond `last_indexed_at` (used for
+  `repos list-persisted` display).
+
+**Tests:** `pnpm build && pnpm test` — all 990 tests pass.
+
+**Status:** ✅ complete.
