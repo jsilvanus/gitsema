@@ -50,8 +50,10 @@ export interface DbSession {
  * 20 — Enforce uniqueness of (blob_hash, path) in paths table (review6 §11.6)
  * 21 — Hash repo tokens at rest: token_hash + token_prefix replace plaintext token (review7 §4.1)
  * 22 — Added kind + params_json columns to embed_config; added settings table (narrator model config)
+ * 23 — Added normalized_url, clone_path, last_indexed_at, ephemeral columns to repos table for
+ *       persistent server-side repo storage (GITSEMA_DATA_DIR registry)
  */
-export const CURRENT_SCHEMA_VERSION = 22
+export const CURRENT_SCHEMA_VERSION = 23
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -256,13 +258,19 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       last_attempt_at INTEGER NOT NULL
     );
 
-    -- Multi-repo registry (Phase 41 / v14); db_path added in v15
+    -- Multi-repo registry (Phase 41 / v14); db_path added in v15;
+    -- normalized_url, clone_path, last_indexed_at, ephemeral added in v23
+    -- (persistent server-side repo storage)
     CREATE TABLE IF NOT EXISTS repos (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       url TEXT,
       db_path TEXT,
-      added_at INTEGER NOT NULL
+      added_at INTEGER NOT NULL,
+      normalized_url TEXT,
+      clone_path TEXT,
+      last_indexed_at INTEGER,
+      ephemeral INTEGER NOT NULL DEFAULT 0
     );
 
     -- Per-repo access control tokens (review7 §4.1 / v21): token is stored as SHA-256 hash.
@@ -321,6 +329,10 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     sqlite.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_paths_blob_path_unique
         ON paths(blob_hash, path);
+    `)
+    sqlite.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_normalized_url
+        ON repos(normalized_url);
     `)
   }
 }
@@ -435,4 +447,48 @@ export function getOrOpenLabeledDb(label: string): DbSession {
   const session = openDatabaseAt(dbPath)
   _labeledDbs.set(label, session)
   return session
+}
+
+// ---------------------------------------------------------------------------
+// Per-path database cache (persistent repo storage — server registry)
+// ---------------------------------------------------------------------------
+
+/** Cache of open DB sessions keyed by absolute file path. */
+const _pathSessions = new Map<string, DbSession>()
+
+/**
+ * Returns a cached DbSession for the given absolute path, opening it on
+ * first use. Unlike `openDatabaseAt`, repeated calls with the same path
+ * return the same session (and the same underlying sqlite connection).
+ */
+export function getOrOpenSessionAtPath(dbPath: string): DbSession {
+  const existing = _pathSessions.get(dbPath)
+  if (existing) return existing
+  const session = openDatabaseAt(dbPath)
+  _pathSessions.set(dbPath, session)
+  return session
+}
+
+/**
+ * Closes and evicts a cached path-keyed DB session (if open), releasing its
+ * underlying sqlite file handle. Used in tests on Windows, where an open
+ * WAL-mode database file cannot be deleted while held open.
+ */
+export function closeSessionAtPath(dbPath: string): void {
+  const existing = _pathSessions.get(dbPath)
+  if (!existing) return
+  existing.rawDb.close()
+  _pathSessions.delete(dbPath)
+}
+
+/**
+ * Closes and evicts all cached path-keyed DB sessions, releasing their
+ * underlying sqlite file handles. Used in tests on Windows, where an open
+ * WAL-mode database file cannot be deleted while held open.
+ */
+export function closeAllPathSessions(): void {
+  for (const session of _pathSessions.values()) {
+    session.rawDb.close()
+  }
+  _pathSessions.clear()
 }

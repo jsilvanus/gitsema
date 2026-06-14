@@ -317,6 +317,7 @@ Configuration is via environment variables or the `gitsema config` command (pers
 | `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema tools serve` HTTP server |
 | `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
 | `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
+| `GITSEMA_DATA_DIR` | `~/.gitsema/data` | Root directory for `gitsema tools serve`'s persisted repo clones + index DBs (`repos/<repoId>/{repo,index.db}`, `registry.db`) |
 
 **Ollama quick start:**
 ```bash
@@ -344,7 +345,7 @@ gitsema index
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
 
-**Schema overview (current schema v22):**
+**Schema overview (current schema v23):**
 
 | Table | Purpose |
 |---|---|
@@ -358,7 +359,7 @@ gitsema index
 | `indexed_commits` | Tracks which commits have been fully processed (incremental resume) |
 | `blob_fts` | FTS5 virtual table for BM25 hybrid search |
 | `blob_branches` | Maps blobs to branch names |
-| `repos` | Multi-repo registry (Phase 41) |
+| `repos` | Multi-repo registry (Phase 41); persistent server-side repo storage columns (normalized_url, clone_path, last_indexed_at, ephemeral) added in v23 |
 | `query_embeddings` | Query embedding cache (avoids re-embedding identical queries) |
 | `symbols` | Symbol-level index entries (function/class boundaries) |
 | `symbol_embeddings` | Per-symbol embedding |
@@ -384,7 +385,8 @@ gitsema index
 - v19 → v20: Added `UNIQUE (blob_hash, path)` index on `paths` table (review6 §11.6 / Phase 89)
 - v20 → v21: Hashed repo tokens at rest — `token_hash` + `token_prefix` replace plaintext `token` in `repo_tokens` (review7 §4.1)
 - v21 → v22: Added `kind` + `params_json` columns to `embed_config`, and a `settings` key-value table, for LLM narrator/guide model configs (Phase 91)
-- **Current version: 22**
+- v22 → v23: Added `normalized_url`, `clone_path`, `last_indexed_at`, `ephemeral` columns to `repos` table for persistent server-side repo storage (`GITSEMA_DATA_DIR`)
+- **Current version: 23**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

@@ -39,7 +39,17 @@ export const repos = sqliteTable('repos', {
   url: text('url'),
   dbPath: text('db_path'),
   addedAt: integer('added_at').notNull(),
-})
+  /** Normalized repo URL (credentials/trailing slash/`.git` stripped) — unique for persisted repos (v23). */
+  normalizedUrl: text('normalized_url'),
+  /** Filesystem path to the persistent git clone working copy (v23). */
+  clonePath: text('clone_path'),
+  /** Unix timestamp (seconds) of the last successful (re-)index (v23). */
+  lastIndexedAt: integer('last_indexed_at'),
+  /** 1 if this repo was registered as ephemeral (not reused across requests) (v23). */
+  ephemeral: integer('ephemeral').notNull().default(0),
+}, (table) => ({
+  uniqNormalizedUrl: uniqueIndex('idx_repos_normalized_url').on(table.normalizedUrl),
+}))
 
 export const savedQueries = sqliteTable('saved_queries', {
   id: integer('id').primaryKey({ autoIncrement: true }),

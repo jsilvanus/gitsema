@@ -9,7 +9,8 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile, unlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, unlink } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { lookup } from 'node:dns/promises'
@@ -307,6 +308,15 @@ export interface CloneOptions {
   repoUrl: string
   credentials?: CloneCredentials
   depth?: number | null
+  /**
+   * `'ephemeral'` (default): clone into a temp directory, governed by
+   * `GITSEMA_CLONE_KEEP`/`GITSEMA_CLONE_DIR`.
+   * `'persistent'`: clone/fetch into `targetDir`, a fixed directory that is
+   * reused on subsequent calls (server-side persistent repo storage).
+   */
+  mode?: 'ephemeral' | 'persistent'
+  /** Required when `mode: 'persistent'` — the fixed clone directory to reuse. */
+  targetDir?: string
 }
 
 export interface CloneResult {
@@ -345,32 +355,61 @@ async function buildCredentialEnv(
 }
 
 /**
- * Creates a unique temp directory under `cloneDir`, runs `git clone`, and
- * returns the path. Size monitoring kills the process if it exceeds the limit.
+ * Returns extra env vars for SSH agent forwarding when no explicit
+ * credentials were supplied and the server has its own SSH agent
+ * (`SSH_AUTH_SOCK`) configured. Lets the server admin manage deploy keys
+ * via a long-running ssh-agent instead of supplying key material per
+ * request — used for persistent (re-indexable) clones of private repos.
  */
-async function freshClone(options: CloneOptions): Promise<string> {
+function buildAgentForwardingEnv(credentials: CloneCredentials | undefined): Record<string, string> {
+  if (credentials) return {}
+  const authSock = process.env.SSH_AUTH_SOCK
+  if (!authSock) return {}
+  return {
+    SSH_AUTH_SOCK: authSock,
+    GIT_SSH_COMMAND: 'ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes',
+  }
+}
+
+/**
+ * Clones `repoUrl` into `targetDir` (which must not exist or must be empty).
+ * Size monitoring kills the process if it exceeds the limit.
+ */
+async function cloneToPath(targetDir: string, options: CloneOptions): Promise<void> {
   const { repoUrl, credentials, depth } = options
-  const base = cloneDir()
-  const clonePath = await mkdtemp(join(base, 'gitsema-'))
   const safeUrl = sanitiseUrl(repoUrl)
 
   const args: string[] = ['clone', '--quiet']
   if (depth != null && depth > 0) {
     args.push('--depth', String(depth))
   }
-  args.push(repoUrl, clonePath)
+  args.push(repoUrl, targetDir)
 
-  logger.info(`Cloning ${safeUrl} into ${clonePath}`)
+  logger.info(`Cloning ${safeUrl} into ${targetDir}`)
 
-  const { extraEnv, tempFiles } = await buildCredentialEnv(credentials)
+  const { extraEnv: credEnv, tempFiles } = await buildCredentialEnv(credentials)
+  const extraEnv = { ...buildAgentForwardingEnv(credentials), ...credEnv }
   try {
-    await runGitCommand(args, clonePath, safeUrl, extraEnv)
+    // git clone requires the parent directory to exist, but the target
+    // itself must not (or must be empty).
+    await mkdir(join(targetDir, '..'), { recursive: true })
+    await runGitCommand(args, join(targetDir, '..'), safeUrl, extraEnv)
   } finally {
     for (const f of tempFiles) {
       await unlink(f).catch(() => {})
     }
   }
+}
 
+/**
+ * Creates a unique temp directory under `cloneDir`, runs `git clone`, and
+ * returns the path. Size monitoring kills the process if it exceeds the limit.
+ */
+async function freshClone(options: CloneOptions): Promise<string> {
+  const base = cloneDir()
+  const clonePath = await mkdtemp(join(base, 'gitsema-'))
+  await rm(clonePath, { recursive: true, force: true })
+  await cloneToPath(clonePath, options)
   return clonePath
 }
 
@@ -382,7 +421,8 @@ async function updateClone(clonePath: string, options: CloneOptions): Promise<vo
   const safeUrl = sanitiseUrl(repoUrl)
   logger.info(`Fetching updates for ${safeUrl} in ${clonePath}`)
 
-  const { extraEnv, tempFiles } = await buildCredentialEnv(credentials)
+  const { extraEnv: credEnv, tempFiles } = await buildCredentialEnv(credentials)
+  const extraEnv = { ...buildAgentForwardingEnv(credentials), ...credEnv }
   try {
     await runGitCommand(['fetch', '--all', '--quiet'], clonePath, safeUrl, extraEnv)
   } finally {
@@ -390,6 +430,15 @@ async function updateClone(clonePath: string, options: CloneOptions): Promise<vo
       await unlink(f).catch(() => {})
     }
   }
+}
+
+/**
+ * Returns true if `dir` looks like a usable git repository (has a `.git`
+ * entry — directory for a normal clone, or file for a worktree/gitdir
+ * pointer).
+ */
+function isValidGitDir(dir: string): boolean {
+  return existsSync(join(dir, '.git'))
 }
 
 /**
@@ -471,13 +520,41 @@ function runGitCommand(
 // ---------------------------------------------------------------------------
 
 /**
- * Obtains a local clone of `repoUrl`, respecting `GITSEMA_CLONE_KEEP`:
+ * Obtains a local clone of `repoUrl`.
+ *
+ * `mode: 'persistent'` (server-side persistent repo storage): clones into
+ * `targetDir` on first use; on subsequent calls, runs `git fetch` in
+ * `targetDir` to bring it up to date. If `targetDir` exists but is not a
+ * valid git directory (e.g. a corrupted/partial clone from a crashed
+ * previous run), it is wiped and re-cloned.
+ *
+ * `mode: 'ephemeral'` (default) respects `GITSEMA_CLONE_KEEP`:
  *  - `always` / `on-success`: always do a fresh clone
  *  - `keep`: reuse existing clone (fetch updates); create new clone if not registered
  *
  * Returns the local clone path.
  */
 export async function obtainClone(options: CloneOptions): Promise<CloneResult> {
+  if (options.mode === 'persistent') {
+    const { targetDir } = options
+    if (!targetDir) throw new Error('obtainClone: targetDir is required when mode is "persistent"')
+
+    if (isValidGitDir(targetDir)) {
+      try {
+        await updateClone(targetDir, options)
+        return { clonePath: targetDir, fresh: false }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        logger.warn(`Failed to fetch existing persistent clone at ${targetDir}: ${msg}. Re-cloning.`)
+      }
+    }
+
+    // Missing or corrupted — wipe and re-clone into the same fixed path.
+    await rm(targetDir, { recursive: true, force: true })
+    await cloneToPath(targetDir, options)
+    return { clonePath: targetDir, fresh: true }
+  }
+
   const keep = cloneKeep()
   const key = normaliseUrl(options.repoUrl)
 

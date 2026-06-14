@@ -45,6 +45,7 @@ import type { Express } from 'express'
 import type { EmbeddingProvider } from '../core/embedding/provider.js'
 import type { ChunkStrategy } from '../core/chunking/chunker.js'
 import { authMiddleware } from './middleware/auth.js'
+import { repoSessionMiddleware } from './middleware/repoSession.js'
 import { requestTimingMiddleware, metricsRegistry, refreshIndexGauges, syncProcessCounters } from './middleware/metrics.js'
 import { buildRateLimiter } from './middleware/rateLimiter.js'
 import { statusRouter } from './routes/status.js'
@@ -152,24 +153,28 @@ export function createApp(options: AppOptions): Express {
 
   app.use(`${base}/commits`, commitsRouter())
 
-  app.use(`${base}/search`, searchRouter({ textProvider, codeProvider }))
+  // repoSessionMiddleware resolves an optional `repoId` (body/query, or the
+  // repo scope of a per-repo auth token) to a persisted repo's index DB and
+  // makes it the active DB session for the request. With no repoId, requests
+  // fall through to the default cwd `.gitsema/index.db` session unchanged.
+  app.use(`${base}/search`, repoSessionMiddleware, searchRouter({ textProvider, codeProvider }))
 
-  app.use(`${base}/evolution`, evolutionRouter({ textProvider }))
+  app.use(`${base}/evolution`, repoSessionMiddleware, evolutionRouter({ textProvider }))
 
   app.use(
     `${base}/remote`,
     remoteRouter({ textProvider, codeProvider, chunkerStrategy, concurrency }),
   )
 
-  app.use(`${base}/analysis`, analysisRouter({ textProvider }))
+  app.use(`${base}/analysis`, repoSessionMiddleware, analysisRouter({ textProvider }))
 
-  app.use(`${base}/watch`, watchRouter({ textProvider }))
+  app.use(`${base}/watch`, repoSessionMiddleware, watchRouter({ textProvider }))
 
-  app.use(`${base}/projections`, projectionsRouter())
+  app.use(`${base}/projections`, repoSessionMiddleware, projectionsRouter())
 
   // Narrator/explainer endpoints (POST /narrate, POST /explain) and guide chat
-  app.use(base, narratorRouter)
-  app.use(`${base}/guide`, guideRouter)
+  app.use(base, repoSessionMiddleware, narratorRouter)
+  app.use(`${base}/guide`, repoSessionMiddleware, guideRouter)
 
   // Phase 64: Capabilities manifest — machine-readable list of server capabilities
   app.get(`${base}/capabilities`, (_req, res) => {

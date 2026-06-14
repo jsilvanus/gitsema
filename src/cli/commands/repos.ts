@@ -1,7 +1,8 @@
 import { Command } from 'commander'
 import { createHash, randomBytes } from 'node:crypto'
+import { rmSync } from 'node:fs'
 import { getActiveSession, getRawDb } from '../../core/db/sqlite.js'
-import { addRepo, listRepos, multiRepoSearch } from '../../core/indexing/repoRegistry.js'
+import { addRepo, listRepos, multiRepoSearch, getRegistrySession, getRepo, getRepoDir, removeRepo } from '../../core/indexing/repoRegistry.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { parsePositiveInt } from '../../utils/parse.js'
@@ -79,6 +80,46 @@ export function reposCommand(): Command {
       for (const r of results) {
         const path = r.paths?.[0] ?? r.blobHash.slice(0, 8)
         console.log(`[${r.repoId}] ${r.score.toFixed(3)}  ${path}`)
+      }
+    })
+
+  cmd
+    .command('list-persisted')
+    .description('List repos persisted under GITSEMA_DATA_DIR (server-side registry)')
+    .option('--no-headings', "don't print column header row")
+    .action((opts: { noHeadings?: boolean }) => {
+      const session = getRegistrySession()
+      const repos = listRepos(session).filter((r) => r.clonePath || r.dbPath)
+      if (repos.length === 0) {
+        console.log('No persisted repos. They are registered automatically by `gitsema tools serve` on first remote index.')
+        return
+      }
+      if (!opts.noHeadings) {
+        console.log(`${'ID'.padEnd(18)}\t${'URL'.padEnd(40)}\t${'Last Indexed'.padEnd(20)}\tClone Path`)
+      }
+      for (const r of repos) {
+        const lastIndexed = r.lastIndexedAt ? new Date(r.lastIndexedAt * 1000).toISOString() : '(never)'
+        console.log(`${r.id}\t${r.url ?? '(no url)'}\t${lastIndexed}\t${r.clonePath ?? '(no path)'}`)
+      }
+    })
+
+  cmd
+    .command('remove <repoId>')
+    .description('Remove a persisted repo from the server-side registry')
+    .option('--purge', 'also delete the on-disk clone + index directory')
+    .action((repoId: string, opts: { purge?: boolean }) => {
+      const session = getRegistrySession()
+      const repo = getRepo(session, repoId)
+      if (!repo) {
+        console.error(`Error: repo '${repoId}' not found in registry`)
+        process.exit(1)
+      }
+      removeRepo(session, repoId)
+      console.log(`Removed repo ${repoId} from registry`)
+      if (opts.purge) {
+        const dir = getRepoDir(repoId)
+        rmSync(dir, { recursive: true, force: true })
+        console.log(`Purged on-disk data at ${dir}`)
       }
     })
 
