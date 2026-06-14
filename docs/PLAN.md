@@ -3545,10 +3545,34 @@ interface.
   + SQLite adapter; migrate the vector read path and indexing write path to the
   seam; add `storage.*` config and the scope model. No new backend, no behavior
   change.
+
+  **Implemented (foundation slice):**
+  - `src/core/storage/types.ts` — the three async store interfaces +
+    `StorageProfile` (`backend`, `scope`, `location`).
+  - `src/core/storage/sqlite/profile.ts` — `SqliteStorageProfile` implementing
+    all three interfaces by delegating to existing code (`vectorSearch`,
+    `searchCommits`, deduper, `storeFtsContent`/`getBlobContent`, a BM25 FTS5
+    query). Stateless: resolves `getActiveSession()` per call, so it cooperates
+    with `withDbSession()`.
+  - `src/core/storage/resolveProfile.ts` — `resolveStorageProfile()`,
+    `resolveSqliteDbPath()` (project/user/named → path), and
+    `withStorageProfile()`. `postgres`/`qdrant` throw a clear
+    "planned for Phase 102/103" error.
+  - `storage.*` config keys + `GITSEMA_STORAGE_*` env mappings in
+    `configManager.ts`.
+  - `tests/storageProfile.test.ts` — 16 conformance/resolution tests.
+
+  **Deviation:** the existing synchronous read/write call sites
+  (`vectorSearch`/`hybridSearch`/`commitSearch`, `indexer`/`blobStore`) are **not
+  yet rewritten** to call the seam — doing so forces async propagation through
+  ~115 sites and is the next, mechanical slice of Phase 101. The seam is built,
+  fully tested against real SQLite, and behavior-preserving so adoption is
+  incremental. ⏳ in progress.
 - **Phase 102 — Postgres metadata + pgvector:** Postgres `MetadataStore` +
   `FtsStore` (`tsvector` BM25) + pgvector `VectorStore`.
 - **Phase 103 — Qdrant + portability/ops:** Qdrant `VectorStore` with a
   relational companion store; `gitsema storage migrate`, doctor orphan checks,
   status backend reporting.
 
-**Status:** 📋 planned.
+**Status:** Phase 101 foundation ⏳ in progress (seam + SQLite adapter + config
+landed); Phases 102–103 📋 planned.

@@ -432,6 +432,24 @@ gitsema config list                     # show all active values + sources
 
 Environment variables always override config-file values. See [`README.md`](README.md) for the full env-var reference.
 
+### Storage backends & scoping (experimental — Phase 101)
+
+A pluggable storage seam splits persisted data into three async stores —
+`MetadataStore` (relational facts), `VectorStore` (embeddings + similarity), and
+an optional `FtsStore` (keyword/BM25) — so each can later be backed by a
+different technology. Phase 101 ships the seam plus a SQLite adapter that
+preserves existing behavior.
+
+| Key | Values | Notes |
+|---|---|---|
+| `storage.backend` | `sqlite` (default) · `postgres` · `qdrant` | only `sqlite` implemented; others planned (Phases 102–103) |
+| `storage.scope` | `project` (default) · `user` · `named` | which index a command resolves to |
+| `storage.name` | string | required when `scope=named` |
+| `storage.metadata.url` | path / URL | metadata store location (a file path for SQLite) |
+| `storage.vectors.url` / `storage.fts.backend` | — | per-store overrides (vectors / keyword) |
+
+See [`docs/storage-backends-plan.md`](storage-backends-plan.md) for the full design.
+
 ---
 
 ## Strategic Productization Backlog
