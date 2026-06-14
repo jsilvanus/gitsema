@@ -8,6 +8,7 @@ import {
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { renderMergeAuditHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface MergeAuditCommandOptions {
   base?: string
@@ -17,6 +18,7 @@ export interface MergeAuditCommandOptions {
   html?: string | boolean
   enhancedLabels?: boolean
   out?: string[]
+  narrate?: boolean
 }
 
 /**
@@ -103,6 +105,12 @@ export async function mergeAuditCommand(
     }
 
     printReport(report, threshold, options.enhancedLabels ?? false)
+
+    if (options.narrate) {
+      console.log('')
+      console.log('=== LLM Narrative ===')
+      console.log(await narrateToolResult('merge_audit', report))
+    }
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

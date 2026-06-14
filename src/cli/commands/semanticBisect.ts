@@ -5,6 +5,7 @@ import { formatDate } from '../../core/search/ranking.js'
 import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { emitJsonSink } from '../lib/output.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface SemanticBisectCommandOptions {
   top?: string
@@ -14,6 +15,7 @@ export interface SemanticBisectCommandOptions {
   textModel?: string
   codeModel?: string
   out?: string[]
+  narrate?: boolean
 }
 
 function renderBisectResult(result: BisectResult): string {
@@ -84,4 +86,10 @@ export async function semanticBisectCommand(
   }).handled) return
 
   console.log(renderBisectResult(result))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('semantic_bisect', result))
+  }
 }

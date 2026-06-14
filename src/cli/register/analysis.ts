@@ -39,7 +39,8 @@ export function registerAnalysis(program: Command) {
     .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump)', collectOut, [] as string[])
     .option('-k, --top <n>', 'number of top results per section', '5')
-    .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, out: opts.out, top: opts.top }) })
+    .option('--narrate', 'generate an LLM narrative of the triage bundle (requires GITSEMA_LLM_URL)')
+    .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, out: opts.out, top: opts.top, narrate: opts.narrate }) })
 
   const policyCheckAction = async (opts: any) => {
     await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump, out: opts.out })
@@ -79,7 +80,8 @@ export function registerAnalysis(program: Command) {
     .option('--window <days>', 'compare ownership in last N days vs before (default 90)', '90')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[])
-    .action(async (query: string, opts: any) => { await ownershipCommand(query, { top: opts.top, window: opts.window, dump: opts.dump, out: opts.out }) })        
+    .option('--narrate', 'generate an LLM narrative of the ownership heatmap (requires GITSEMA_LLM_URL)')
+    .action(async (query: string, opts: any) => { await ownershipCommand(query, { top: opts.top, window: opts.window, dump: opts.dump, out: opts.out, narrate: opts.narrate }) })
 
   program
     .command('eval <file>')

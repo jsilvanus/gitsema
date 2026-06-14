@@ -1,12 +1,14 @@
 import { writeFileSync } from 'node:fs'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface HeatmapOptions {
   period?: string // 'week' or 'month'
   dump?: string | boolean
   noHeadings?: boolean
   out?: string[]
+  narrate?: boolean
 }
 
 export async function heatmapCommand(options: HeatmapOptions): Promise<void> {
@@ -44,6 +46,12 @@ export async function heatmapCommand(options: HeatmapOptions): Promise<void> {
     }
     for (const k of Object.keys(out)) {
       console.log(`${k}: ${out[k]}`)
+    }
+
+    if (options.narrate) {
+      console.log('')
+      console.log('=== LLM Narrative ===')
+      console.log(await narrateToolResult('activity_heatmap', { period, buckets: out }))
     }
   } catch (err) {
     console.error(`Error computing heatmap: ${err instanceof Error ? err.message : String(err)}`)

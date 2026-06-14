@@ -19,7 +19,8 @@ import type { SearchResult } from '../models/types.js'
 import type { ConceptChangePointReport, FileChangePointReport } from '../search/temporal/changePoints.js'
 import type { HealthSnapshot } from '../search/temporal/healthTimeline.js'
 import type { ConceptLifecycleResult } from '../search/conceptLifecycle.js'
-import { buildNarratorSystemPrompt } from '../narrator/interpretations.js'
+import { buildNarratorSystemPrompt, getInterpretation } from '../narrator/interpretations.js'
+import { redactAll } from '../narrator/redact.js'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -474,6 +475,60 @@ Provide a concise narrative summary:`
 
   try {
     return await callLlm(parsedUrl, model, apiKey, prompt, 300, buildNarratorSystemPrompt('concept_lifecycle'))
+  } catch (e) {
+    return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// narrateToolResult — generic narration for any TOOL_INTERPRETATIONS-backed result
+// ---------------------------------------------------------------------------
+
+const NARRATE_RESULT_MAX_CHARS = 4000
+
+export interface NarrateToolResultOptions {
+  maxTokens?: number
+}
+
+/**
+ * Generic LLM narration for a tool result, looked up by its
+ * `TOOL_INTERPRETATIONS` key (or alias). Redacts and size-caps the JSON
+ * before sending it to the narrator model. Safe-by-default: returns a
+ * placeholder string (no network call) when `GITSEMA_LLM_URL` is not set.
+ */
+export async function narrateToolResult(
+  toolKey: string,
+  result: unknown,
+  opts: NarrateToolResultOptions = {},
+): Promise<string> {
+  const resolved = resolveLlmUrl()
+  if ('error' in resolved) return resolved.error
+
+  const { parsedUrl, model, apiKey } = resolved
+
+  let json: string
+  try {
+    json = JSON.stringify(result)
+  } catch (err) {
+    return `(LLM narration unavailable — could not serialize result: ${err instanceof Error ? err.message : String(err)})`
+  }
+  if (json.length > NARRATE_RESULT_MAX_CHARS) {
+    json = `${json.slice(0, NARRATE_RESULT_MAX_CHARS)}…truncated`
+  }
+  json = redactAll([json]).texts[0]
+
+  const interpretation = getInterpretation(toolKey)
+  const label = interpretation?.name ?? toolKey
+
+  const prompt = `Below is the JSON result of the gitsema "${label}" capability. Using the interpretation guidance in your system prompt, write a concise 2-4 sentence narrative summary for a developer: what is significant, and what it suggests about the codebase.
+
+Result JSON:
+${json}
+
+Provide a concise narrative summary:`
+
+  try {
+    return await callLlm(parsedUrl, model, apiKey, prompt, opts.maxTokens ?? 300, buildNarratorSystemPrompt(toolKey))
   } catch (e) {
     return `(LLM narration failed: ${e instanceof Error ? e.message : String(e)})`
   }

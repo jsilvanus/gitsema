@@ -4,6 +4,7 @@ import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { emitJsonSink } from '../lib/output.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface ExpertsCommandOptions {
   top?: string
@@ -15,6 +16,7 @@ export interface ExpertsCommandOptions {
   html?: string | boolean
   /** Unified output spec (repeatable) */
   out?: string[]
+  narrate?: boolean
 }
 
 export async function expertsCommand(options: ExpertsCommandOptions): Promise<void> {
@@ -137,5 +139,11 @@ export async function expertsCommand(options: ExpertsCommandOptions): Promise<vo
       console.log('   Semantic areas: (no cluster data — run `gitsema clusters` first)')
     }
     console.log()
+  }
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('experts', { experts, since, until }))
   }
 }

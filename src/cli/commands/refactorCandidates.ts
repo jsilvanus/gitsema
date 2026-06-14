@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { computeRefactorCandidates, type RefactorReport, type RefactorPair } from '../../core/search/refactorCandidates.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface RefactorCandidatesCommandOptions {
   threshold?: string
@@ -9,6 +10,7 @@ export interface RefactorCandidatesCommandOptions {
   dump?: string | boolean
   noHeadings?: boolean
   out?: string[]
+  narrate?: boolean
 }
 
 function renderReport(report: RefactorReport, showHeadings = true): string {
@@ -63,4 +65,10 @@ export async function refactorCandidatesCommand(options: RefactorCandidatesComma
   }
 
   console.log(renderReport(report, !options.noHeadings))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('refactor_candidates', report))
+  }
 }

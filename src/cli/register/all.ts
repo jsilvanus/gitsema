@@ -115,6 +115,7 @@ export function registerAll(program: Command) {
     .option('--code-model <model>', 'override code embedding model')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option('--narrate', 'generate an LLM narrative of the bisect result (requires GITSEMA_LLM_URL)')
     .action(semanticBisectCommand)
 
   program
@@ -126,6 +127,7 @@ export function registerAll(program: Command) {
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print report header")
+    .option('--narrate', 'generate an LLM narrative of the refactor candidates (requires GITSEMA_LLM_URL)')
     .action(refactorCandidatesCommand)
 
   program
@@ -165,6 +167,7 @@ export function registerAll(program: Command) {
     .option('--branch <name>', 'restrict to blobs seen on this branch')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option('--narrate', 'generate an LLM narrative of the documentation gap results (requires GITSEMA_LLM_URL)')
     .action(docGapCommand)
 
   program
@@ -174,6 +177,7 @@ export function registerAll(program: Command) {
     .option('--branch <name>', 'restrict to blobs seen on this branch')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option('--narrate', 'generate an LLM narrative of the contributor profile (requires GITSEMA_LLM_URL)')
     .action(contributorProfileCommand)
 
   // Register a single `workflow` parent command and add `run`/`list` subcommands
@@ -221,6 +225,7 @@ export function registerAll(program: Command) {
     .option('--model <model>', 'embedding model to use')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option('--narrate', 'generate an LLM narrative of the cherry-pick suggestions (requires GITSEMA_LLM_URL)')
     .action(cherryPickSuggestCommand)
 
   program
@@ -235,7 +240,8 @@ export function registerAll(program: Command) {
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print column header row")
-    .action(async (opts: { period?: string; dump?: string | boolean; noHeadings?: boolean }) => { await heatmapCommand({ period: opts.period, dump: opts.dump, noHeadings: opts.noHeadings }) })
+    .option('--narrate', 'generate an LLM narrative of the activity heatmap (requires GITSEMA_LLM_URL)')
+    .action(async (opts: { period?: string; dump?: string | boolean; noHeadings?: boolean; out?: string[]; narrate?: boolean }) => { await heatmapCommand({ period: opts.period, dump: opts.dump, noHeadings: opts.noHeadings, out: opts.out, narrate: opts.narrate }) })
 
   program
     .command('file-diff <ref1> <ref2> <path>')
@@ -306,6 +312,7 @@ export function registerAll(program: Command) {
     .option('--branch <name>', 'restrict neighbor search to blobs seen on this branch')
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option('--narrate', 'generate an LLM narrative of the semantic blame results (requires GITSEMA_LLM_URL)')
     .action(semanticBlameCommand)
 
   program
@@ -318,6 +325,7 @@ export function registerAll(program: Command) {
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--branch <name>', 'restrict dead-concept candidates to blobs seen on this branch')
     .option('--no-headings', "don't print section header")
+    .option('--narrate', 'generate an LLM narrative of dead concepts (requires GITSEMA_LLM_URL)')
     .action(deadConceptsCommand)
 
   program
@@ -334,6 +342,7 @@ export function registerAll(program: Command) {
     .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise impact.html (legacy: prefer --out html)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print section header")
+    .option('--narrate', 'generate an LLM narrative of the impact report (requires GITSEMA_LLM_URL)')
     .action(impactCommand)
 
   program
@@ -456,6 +465,7 @@ export function registerAll(program: Command) {
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'show more keyword detail for concept clusters in the output')
     .option('--enhanced-keywords-n <n>', 'number of keywords to display per cluster when --enhanced-labels is set (default 8)', '8')
+    .option('--narrate', 'generate an LLM narrative of the branch summary (requires GITSEMA_LLM_URL)')
     .action(branchSummaryCommand)
 
   program
@@ -468,6 +478,7 @@ export function registerAll(program: Command) {
     .option('--html [file]', 'output an interactive HTML visualization; writes to <file> if given, otherwise merge-audit.html (legacy: prefer --out html)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'show top keywords alongside cluster labels in collision output')
+    .option('--narrate', 'generate an LLM narrative of the merge audit (requires GITSEMA_LLM_URL)')
     .action(mergeAuditCommand)
 
   program
@@ -483,6 +494,7 @@ export function registerAll(program: Command) {
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--enhanced-labels', 'enhance cluster labels using TF-IDF path and identifier analysis')
     .option('--enhanced-keywords-n <n>', 'number of enhanced keywords to compute per cluster (default 5)', '5')
+    .option('--narrate', 'generate an LLM narrative of the merge preview (requires GITSEMA_LLM_URL)')
     .action(mergePreviewCommand)
 
   program
@@ -513,6 +525,7 @@ export function registerAll(program: Command) {
     .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise author.html (legacy: prefer --out html)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
     .option('--no-headings', "don't print query title header")
+    .option('--narrate', 'generate an LLM narrative of the author attribution results (requires GITSEMA_LLM_URL)')
     .action(authorCommand)
 
   program
@@ -536,6 +549,7 @@ export function registerAll(program: Command) {
     .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
     .option('--html [file]', 'output an interactive HTML report; writes to <file> if given, otherwise experts.html (legacy: prefer --out html)')
     .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+    .option('--narrate', 'generate an LLM narrative of the experts results (requires GITSEMA_LLM_URL)')
     .action(async (opts: Parameters<typeof expertsCommand>[0]) => {
       await expertsCommand(opts)
     })

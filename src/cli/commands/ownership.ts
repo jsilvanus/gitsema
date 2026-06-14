@@ -4,6 +4,7 @@ import { buildProvider, applyModelOverrides } from '../../core/embedding/provide
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { computeOwnershipHeatmap } from '../../core/search/ownershipHeatmap.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface OwnershipOptions {
   top?: string
@@ -11,6 +12,7 @@ export interface OwnershipOptions {
   dump?: string | boolean
   /** Unified output spec (repeatable) */
   out?: string[]
+  narrate?: boolean
 }
 
 export async function ownershipCommand(query: string, options: OwnershipOptions): Promise<void> {
@@ -55,6 +57,12 @@ export async function ownershipCommand(query: string, options: OwnershipOptions)
     for (const e of heatmap) {
       console.log(`${e.authorName} <${e.authorEmail}>  score=${e.ownershipScore.toFixed(2)}  total=${e.totalBlobs} recent=${e.recentBlobs} trend=${e.trend}`)
       for (const p of e.topPaths) console.log(`   ${p}`)
+    }
+
+    if (options.narrate) {
+      console.log('')
+      console.log('=== LLM Narrative ===')
+      console.log(await narrateToolResult('ownership', { query, heatmap }))
     }
   } catch (err) {
     console.error(`Error computing ownership heatmap: ${err instanceof Error ? err.message : String(err)}`)

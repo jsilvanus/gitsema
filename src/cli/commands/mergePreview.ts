@@ -6,6 +6,7 @@ import {
 } from '../../core/search/clustering/clustering.js'
 import { renderClusterDiffHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface MergePreviewCommandOptions {
   into?: string
@@ -18,6 +19,7 @@ export interface MergePreviewCommandOptions {
   enhancedLabels?: boolean
   enhancedKeywordsN?: string
   out?: string[]
+  narrate?: boolean
 }
 
 /**
@@ -93,6 +95,12 @@ export async function mergePreviewCommand(
     }
 
     printReport(report, branch, baseBranch)
+
+    if (options.narrate) {
+      console.log('')
+      console.log('=== LLM Narrative ===')
+      console.log(await narrateToolResult('merge_preview', report))
+    }
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

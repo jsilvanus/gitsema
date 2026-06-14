@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { computeDocGap, type DocGapResult } from '../../core/search/docGap.js'
 import { shortHash, formatScore } from '../../core/search/ranking.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface DocGapCommandOptions {
   top?: string
@@ -9,6 +10,7 @@ export interface DocGapCommandOptions {
   branch?: string
   dump?: string | boolean
   out?: string[]
+  narrate?: boolean
 }
 
 function renderResults(results: DocGapResult[]): string {
@@ -69,4 +71,10 @@ export async function docGapCommand(options: DocGapCommandOptions): Promise<void
   }
 
   console.log(renderResults(results))
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('doc_gap', { results }))
+  }
 }

@@ -9,6 +9,7 @@ import { searchCommits, type CommitSearchResult } from '../../core/search/commit
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { emitJsonSink } from '../lib/output.js'
+import { narrateToolResult } from '../../core/llm/narrator.js'
 
 export interface AuthorCommandOptions {
   top?: string
@@ -28,6 +29,7 @@ export interface AuthorCommandOptions {
   html?: string | boolean
   noHeadings?: boolean
   out?: string[]
+  narrate?: boolean
 }
 
 export async function authorCommand(query: string, options: AuthorCommandOptions): Promise<void> {
@@ -159,4 +161,10 @@ export async function authorCommand(query: string, options: AuthorCommandOptions
     }
     console.log()
   })
+
+  if (options.narrate) {
+    console.log('')
+    console.log('=== LLM Narrative ===')
+    console.log(await narrateToolResult('author', { query, authors: results, commits: commitResults }))
+  }
 }
