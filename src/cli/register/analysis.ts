@@ -106,7 +106,14 @@ export function registerAnalysis(program: Command) {
 
   program
     .command('quickstart')
-    .description('Guided onboarding wizard: detect provider, configure model, and index HEAD in one step')
+    .description('Guided onboarding wizard: detect provider, configure model, select storage backend, and index HEAD in one step (alias: `gitsema setup`)')
+    .action(async () => {
+      await quickstartCommand()
+    })
+
+  program
+    .command('setup')
+    .description('Guided onboarding wizard: detect provider, configure model, select storage backend, and index HEAD in one step (alias of `gitsema quickstart`)')
     .action(async () => {
       await quickstartCommand()
     })

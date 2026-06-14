@@ -3867,4 +3867,17 @@ Slice 1 for the new tools (though it can proceed independently for commands
 whose interpretations already exist). Slice 3 is independent and can be done
 in parallel or last.
 
-**Status:** 📋 planned.
+**Status:** ✅ complete.
+
+**Deviations from spec:**
+- Slice 1's `diff <ref1> <ref2> <query>` entry was deferred: the existing
+  `semantic_diff` `GUIDE_TOOLS` entry (used by the conceptual `diff` command)
+  already covers this case, so no separate `ref_diff`/`concept_diff` tool was
+  added.
+- Slice 2 incidentally fixed a pre-existing bug in `heatmap`'s CLI
+  registration (`src/cli/register/all.ts`): `--out <spec>` was a registered
+  option but was never forwarded to `heatmapCommand`. The action wrapper now
+  forwards both `out` and the new `narrate` option.
+- Slice 3's optional narrator/guide step (step 7) only offers local Ollama
+  configuration, matching the spec's "if Ollama is detected" framing; HTTP/CLI
+  narrator backends are configured separately via `gitsema models add`.

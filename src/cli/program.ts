@@ -90,6 +90,7 @@ export const COMMAND_GROUPS: Record<string, string> = {
   eval: 'Analysis',
   repl: 'Search & Discovery',
   quickstart: 'Setup & Infrastructure',
+  setup: 'Setup & Infrastructure',
 }
 
 /**

@@ -41,10 +41,11 @@ gitsema index start
 gitsema search "authentication middleware"
 ```
 
-Or run the guided wizard, which detects your provider, configures a model, and indexes HEAD in one step:
+Or run the guided wizard, which detects your provider, configures a model and storage backend (sqlite/postgres/qdrant), optionally configures a narrator/guide model, and indexes HEAD in one step:
 
 ```bash
-gitsema quickstart
+gitsema setup
+# (gitsema quickstart is a backward-compat alias)
 ```
 
 ### OpenAI-compatible HTTP example
@@ -102,7 +103,7 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema models` | Manage embedding model configurations (list, add, remove, info); also manages LLM narrator/guide model configs via `--narrator`/`--guide` |
 | `gitsema index` | Show index coverage (blob counts per model) |
 | `gitsema index start [options]` | Perform indexing — walk Git history and embed all blobs |
-| `gitsema quickstart` | Guided onboarding wizard: detect provider, configure model, and index HEAD |
+| `gitsema setup` (alias: `gitsema quickstart`) | Guided onboarding wizard: detect provider, configure embedding model, select storage backend (sqlite/postgres/qdrant), index HEAD, and optionally configure a narrator/guide model |
 | `gitsema remote-index <repoUrl>` | Ask a remote gitsema server to clone and index a Git repository |
 
 #### `gitsema index start [options]`
@@ -248,6 +249,10 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--evidence-only` | on | Return raw commit evidence without calling the LLM (this is the default) |
 
 Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, with a local Ollama model (`gitsema models add <name> --narrator --provider ollama [--global-name <tag>] --activate`, see "Ollama" below), or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below).
+
+#### `--narrate` on other commands
+
+The same safe-by-default narration (no network unless `--narrate` is passed and a narrator model is configured) is also available as a `--narrate` flag on: `first-seen`, `branch-summary`, `merge-audit`, `merge-preview`, `dead-concepts`, `debt`, `doc-gap`, `security-scan`, `blame`/`semantic-blame`, `triage`, `impact`, `ownership`, `experts`, `author`, `contributor-profile`, `bisect`, `refactor-candidates`, `cherry-pick-suggest`, and `heatmap`. Each prints its normal output followed by an `=== LLM Narrative ===` section summarizing the result using the active narrator model.
 
 #### `gitsema guide [question] [options]`
 
