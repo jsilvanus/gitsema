@@ -35,3 +35,47 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  postgres-storage-tests:
+    # Postgres + pgvector conformance suite for the `postgres` storage backend
+    # (Phase 102). Linux-only service container; the main build-and-test job
+    # runs everything else (and skips these tests, since
+    # GITSEMA_TEST_POSTGRES_URL is unset there).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gitsema
+          POSTGRES_PASSWORD: gitsema
+          POSTGRES_DB: gitsema
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gitsema"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm build
+
+      - name: Postgres storage tests
+        run: pnpm test -- postgres
+        env:
+          GITSEMA_TEST_POSTGRES_URL: postgres://gitsema:gitsema@localhost:5432/gitsema

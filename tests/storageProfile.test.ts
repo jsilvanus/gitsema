@@ -300,11 +300,27 @@ describe('resolveStorageProfile — config driven', () => {
     expect(resolveStorageProfile(cwd).fts).toBeNull()
   })
 
-  it('postgres and qdrant backends are not yet implemented', () => {
+  it('postgres backend requires storage.metadata.url; qdrant is not yet implemented', () => {
     process.env.GITSEMA_STORAGE_BACKEND = 'postgres'
-    expect(() => resolveStorageProfile(cwd)).toThrow(/Phase 102/)
+    expect(() => resolveStorageProfile(cwd)).toThrow(/storage\.metadata\.url/)
     process.env.GITSEMA_STORAGE_BACKEND = 'qdrant'
     expect(() => resolveStorageProfile(cwd)).toThrow(/Phase 103/)
+  })
+
+  it('postgres backend resolves a PostgresStorageProfile when metadata.url is set', () => {
+    process.env.GITSEMA_STORAGE_BACKEND = 'postgres'
+    process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
+    const p = resolveStorageProfile(cwd)
+    expect(p.backend).toBe('postgres')
+    expect(p.location).toBe('postgres://user:pass@localhost:5432/gitsema_test')
+    expect(p.fts).not.toBeNull()
+  })
+
+  it('postgres backend rejects an invalid storage.fts.backend', () => {
+    process.env.GITSEMA_STORAGE_BACKEND = 'postgres'
+    process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
+    process.env.GITSEMA_STORAGE_FTS_BACKEND = 'bm25'
+    expect(() => resolveStorageProfile(cwd)).toThrow(/Invalid storage\.fts\.backend/)
   })
 
   it('invalid backend / scope are rejected', () => {
