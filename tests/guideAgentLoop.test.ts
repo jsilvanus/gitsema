@@ -65,6 +65,20 @@ describe('GUIDE_TOOL_DEFINITIONS', () => {
     expect(GUIDE_TOOL_DEFINITIONS.map((t) => t.name)).toEqual(
       expect.arrayContaining(['repo_stats', 'recent_commits', 'narrate_repo', 'explain_topic', 'semantic_search']),
     )
+    expect(GUIDE_TOOL_DEFINITIONS.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'semantic_bisect',
+        'refactor_candidates',
+        'cherry_pick_suggest',
+        'activity_heatmap',
+        'semantic_map',
+        'file_diff',
+        'concept_lifecycle',
+        'cluster_change_points',
+        'cross_repo_similarity',
+        'pr_report',
+      ]),
+    )
 
     for (const tool of GUIDE_TOOL_DEFINITIONS) {
       expect(typeof tool.name).toBe('string')
@@ -141,6 +155,50 @@ describe('executeTool', () => {
     // tool that can produce large output: narrate_repo over a wide range.
     const result = await executeTool({ id: '7', name: 'narrate_repo', arguments: {} })
     expect(result.length).toBeLessThanOrEqual(4000 + '…truncated'.length)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// (b2) Phase 104 — new index-gated tools return structured errors without an index
+// ---------------------------------------------------------------------------
+
+describe('executeTool — Phase 104 tools (no index present)', () => {
+  const indexGatedCases: Array<{ id: string; name: string; arguments: Record<string, unknown> }> = [
+    { id: 'p1', name: 'semantic_bisect', arguments: { good_ref: 'HEAD~5', bad_ref: 'HEAD', query: 'auth' } },
+    { id: 'p2', name: 'refactor_candidates', arguments: {} },
+    { id: 'p3', name: 'cherry_pick_suggest', arguments: { query: 'fix bug' } },
+    { id: 'p4', name: 'activity_heatmap', arguments: {} },
+    { id: 'p5', name: 'semantic_map', arguments: {} },
+    { id: 'p6', name: 'file_diff', arguments: { ref1: 'HEAD~1', ref2: 'HEAD', path: 'README.md' } },
+    { id: 'p7', name: 'concept_lifecycle', arguments: { query: 'caching' } },
+    { id: 'p8', name: 'cluster_change_points', arguments: {} },
+    { id: 'p9', name: 'pr_report', arguments: {} },
+  ]
+
+  for (const call of indexGatedCases) {
+    it(`${call.name} returns a structured error when no index exists`, async () => {
+      const result = await executeTool(call)
+      const parsed = JSON.parse(result)
+      expect(parsed).toHaveProperty('error')
+      expect(typeof parsed.error).toBe('string')
+    })
+  }
+
+  it('cross_repo_similarity returns a structured error for a missing repo path (no needsIndex gate)', async () => {
+    const result = await executeTool({
+      id: 'p10',
+      name: 'cross_repo_similarity',
+      arguments: { query: 'auth', repo_a: '/nonexistent/repo-a/index.db', repo_b: '/nonexistent/repo-b/index.db' },
+    })
+    const parsed = JSON.parse(result)
+    expect(parsed).toHaveProperty('error')
+    expect(typeof parsed.error).toBe('string')
+  })
+
+  it('cross_repo_similarity returns a structured error when required arguments are missing', async () => {
+    const result = await executeTool({ id: 'p11', name: 'cross_repo_similarity', arguments: {} })
+    const parsed = JSON.parse(result)
+    expect(parsed).toHaveProperty('error')
   })
 })
 

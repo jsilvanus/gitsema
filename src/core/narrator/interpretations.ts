@@ -181,6 +181,16 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
       'repoId prefix tells you which repo each hit came from; compare scores across repos with care ' +
       'since indexes may use different models.',
   },
+  cross_repo_similarity: {
+    name: 'cross_repo_similarity',
+    category: 'search',
+    summary: 'Compare semantic search results for the same query across two separate repos.',
+    resultShape: '{ query, repoA: { path, results[] }, repoB: { path, results[] } }, results: { path, score, blobHash }.',
+    interpretation:
+      'Each side is an independent semantic_search run against its own index — scores are not directly ' +
+      'comparable across repos if they use different embedding models. Use it to spot shared concepts, ' +
+      'forked/duplicated code, or divergence between two repositories on the same topic.',
+  },
 
   // -------------------------------------------------------------------------
   // History & temporal drift
@@ -246,6 +256,28 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
       'Rising churn means more concept turnover; a rising dead-concept ratio means more stale/removed ' +
       'code. Read the trend, not single buckets — sustained high churn or a growing dead ratio are ' +
       'health concerns; stable low values indicate maturity.',
+  },
+  semantic_bisect: {
+    name: 'semantic_bisect',
+    category: 'history',
+    summary: 'Binary search over commit history for where a concept shifted most from a "good" baseline.',
+    resultShape: '{ query, goodRef, badRef, culpritRef, maxShift, steps: [{ ref, date, blobCount, distanceFromGood }] }.',
+    interpretation:
+      '`culpritRef` is the bisection\'s best guess for when the concept diverged from the good baseline; ' +
+      '`maxShift` (cosine distance) is the size of the largest jump found. Steps show the search path — ' +
+      'higher `distanceFromGood` values mark candidates closer to the regression. Treat the culprit as a ' +
+      'narrowed time window to investigate further (e.g. with change_points or file_evolution), not a ' +
+      'definitive single commit.',
+  },
+  activity_heatmap: {
+    name: 'activity_heatmap',
+    category: 'history',
+    summary: 'Commit-count activity buckets over time (weekly or monthly).',
+    resultShape: '{ period, buckets: [{ period, count }] } — most-recent up to 52 buckets.',
+    interpretation:
+      'A simple commit-frequency timeline. Spikes indicate bursts of activity (releases, crunch periods, ' +
+      'large refactors); long flat/zero stretches indicate dormancy. Use alongside narrate_repo or ' +
+      'change_points to explain what drove a spike.',
   },
 
   // -------------------------------------------------------------------------
@@ -363,6 +395,17 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
       'A low max-doc-similarity means no documentation blob resembles this code — a documentation gap. ' +
       'Prioritise the lowest-scoring, most-important files for docs.',
   },
+  refactor_candidates: {
+    name: 'refactor_candidates',
+    category: 'quality',
+    summary: 'Pairs of symbols/chunks/files that are near-duplicates by embedding similarity.',
+    resultShape: '{ threshold, level, totalScanned, pairs: [{ similarity, a, b }] } (top 20 by similarity).',
+    interpretation:
+      'High `similarity` (near the threshold, default 0.88, max 1.0) means the two items (`a`/`b`, shown ' +
+      'as `path::symbolName` or `path`) are likely duplicated or near-duplicated logic — candidates for ' +
+      'extraction into a shared helper. `level` (symbol/chunk/file) sets the granularity. Not every pair ' +
+      'is worth merging — check whether the duplication is incidental (e.g. boilerplate) or meaningful.',
+  },
   security_scan: {
     name: 'security_scan',
     category: 'quality',
@@ -386,6 +429,17 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
       '`gained` are blobs relevant to the topic that appear by ref2, `lost` are ones present at ref1 but ' +
       'gone by ref2, `stable` persist. Read it as how the topic\'s footprint changed between the two ' +
       'points; cite the blob hashes and dates.',
+  },
+  file_diff: {
+    name: 'file_diff',
+    category: 'diff',
+    summary: 'Cosine distance between two versions of a single file at two refs, with optional neighbours.',
+    resultShape: '{ ref1, ref2, path, blobHash1, blobHash2, cosineDistance, neighbors1?, neighbors2? }, neighbors: { path, blobHash, distance }.',
+    interpretation:
+      '`cosineDistance` (0–2) measures how much the file changed in meaning between the two refs — near 0 ' +
+      'means semantically unchanged (even if the text differs), higher values mean substantive rewrites. ' +
+      '`neighbors1`/`neighbors2` (if requested) show the closest other blobs to each version — useful for ' +
+      'spotting that a file was effectively replaced by, or merged from, another file.',
   },
   semantic_blame: {
     name: 'semantic_blame',
@@ -429,10 +483,53 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
       'A sequence of cluster snapshots. Read it for trends — acceleration (lots of movement) vs ' +
       'stabilisation (little) — to characterise the project\'s structural trajectory over time.',
   },
+  cluster_change_points: {
+    name: 'cluster_change_points',
+    category: 'clusters',
+    summary: 'Detects commits where the cluster/concept landscape shifted most.',
+    resultShape: '{ k, threshold, range, points: [{ before: {ref, clusters}, after: {ref, clusters}, shiftScore, topMovingPairs }] }.',
+    interpretation:
+      'Each point is a before/after pair of cluster snapshots with a `shiftScore` — higher means a bigger ' +
+      'reorganisation of the concept map at that point. `topMovingPairs` names which clusters grew/shrank ' +
+      'most. Use the highest-scoring points as candidates for "this is when the architecture changed".',
+  },
+  semantic_map: {
+    name: 'semantic_map',
+    category: 'clusters',
+    summary: 'Snapshot of the current cluster layout (requires a prior `clusters` run).',
+    resultShape: '{ clusters: [{ id, label, size, representativePaths(top 3), assignedBlobCount }] } or { error } if no snapshot exists.',
+    interpretation:
+      'A static view of the most recent cluster snapshot — `label` and `representativePaths` name each ' +
+      'concept area, `size`/`assignedBlobCount` show its weight. If `error` is returned, no snapshot ' +
+      'exists yet; suggest running `gitsema clusters` first. Use this for a quick "what areas exist" ' +
+      'overview without recomputing clusters.',
+  },
 
   // -------------------------------------------------------------------------
   // Compound workflows
   // -------------------------------------------------------------------------
+  cherry_pick_suggest: {
+    name: 'cherry_pick_suggest',
+    category: 'workflow',
+    summary: 'Suggests commits most semantically relevant to a query, as cherry-pick candidates.',
+    resultShape: '{ query, results: [{ commitHash, score, message, paths[] }] }.',
+    interpretation:
+      'Ranked by relevance to the query (higher `score` = more relevant). Each result is a candidate ' +
+      'commit to cherry-pick onto another branch — check `paths` for what it touches and `message` for ' +
+      'intent before recommending it; relevance does not guarantee the commit applies cleanly elsewhere.',
+  },
+  pr_report: {
+    name: 'pr_report',
+    category: 'workflow',
+    summary: 'Compound PR-review bundle: semantic diff, impacted modules, change points, and reviewer suggestions.',
+    resultShape: '{ ref1, ref2, semanticDiff?, impactedModules?, changePoints?, reviewerSuggestions }; sections may be { error } if unavailable.',
+    interpretation:
+      'Combine the sections into a review summary: `semanticDiff` (gained/lost/stable concepts between ' +
+      'refs) frames what changed conceptually, `impactedModules` shows blast radius, `changePoints` flags ' +
+      'any large historical shifts in the affected area, and `reviewerSuggestions` names people to involve. ' +
+      'A section returning `{error}` just means that part could not be computed (e.g. no query given) — ' +
+      'report on the remaining sections.',
+  },
   triage: {
     name: 'triage',
     category: 'workflow',
