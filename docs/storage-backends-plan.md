@@ -327,8 +327,39 @@ fusion math stays backend-independent.
 - **pgvector:** push topK + filters into SQL (`ORDER BY embedding <=> $1 LIMIT
   k`), with HNSW index. Dequantization decision: store full Float32 in pgvector
   initially (simplest); quantization is a later optimization.
-- **qdrant:** native ANN with payload filters (model/branch/time). Re-rank /
+- **qdrant:** native ANN with payload filters (model/time). Re-rank /
   exact-cosine top candidates in JS if we need parity with SQLite scoring.
+
+### 6.5 What lives *in* Qdrant — payload vs. companion
+
+Qdrant does hold metadata, but only a deliberate slice. Each stored vector is a
+**point** = `id + vector + payload`, where the payload is per-vector JSON you can
+filter and return on. The rule: **put in the payload only what's needed to filter
+the ANN query server-side or to identify the hit; everything else stays in the
+companion `MetadataStore` and is fetched by `blob_hash` after search.**
+
+**In the Qdrant payload:**
+- `blob_hash` — identity / join key back to the `MetadataStore`.
+- `model` — filter by embedding model.
+- `first_seen` (immutable commit timestamp) — `--before`/`--after` time filtering.
+- chunk/symbol points also carry `start_line`/`end_line` (+ `symbol_name`,
+  `symbol_kind`, `language`) so a hit renders without a second round-trip.
+- the vector *kind* (file/chunk/symbol/module/commit) is the **collection**
+  itself — one collection per kind — not a payload field.
+
+**Stays in the companion `MetadataStore`** (fetched by `blob_hash` post-search):
+the commit graph, full path lists, branch membership, ownership, clusters —
+everything relational, mutable, or many-to-many. Qdrant can't do the joins and
+aggregations gitsema's analysis commands need, and duplicating mutable data into
+payloads invites drift.
+
+**Branch filtering is the judgment call.** Branch membership is mutable and
+many-to-many (a blob joins new branches as history grows), so denormalizing it
+into the payload would mean rewriting points. Instead, mirror the existing
+`usearch` candidate-pool pattern: filter `model`+`first_seen` in Qdrant, pull a
+**wider topK**, then post-filter by branch in JS against a companion lookup.
+`first_seen` is safe to denormalize precisely because it is immutable for a
+content-addressed blob.
 
 ---
 
@@ -475,7 +506,30 @@ Phases 102 and 103 can run concurrently once 101 lands.
 
 ---
 
-## 12. Changeset
+## 12. Non-goals (deferred)
+
+- **No `ConfigStore` abstraction for now.** Config splits into two kinds that
+  want different homes, and neither needs a new seam:
+  - *User preferences / behavior knobs* (`provider`, `model`, search weights…)
+    are **already JSON** files (`.gitsema/config.json` repo, `~/.config/gitsema/
+    config.json` user), scope-aware and env-overridable via
+    `src/core/config/configManager.ts`. Nothing to abstract.
+  - *Index-describing facts* (`embed_config` provenance, `settings`) **must stay
+    in the `MetadataStore`**, co-located and consistent with the index they
+    describe. Pulling them into a separate JSON file would re-introduce the
+    split-brain the store split exists to prevent (e.g. a shared remote Postgres
+    index whose "what model built this?" lived in one laptop's JSON).
+  - Key-value config also has no backend variety worth a pluggable seam (unlike
+    vectors or BM25), so the cost (a fourth async interface + conformance tests)
+    isn't justified.
+- **Possible later:** a pluggable **config *provider*** inside `configManager.ts`
+  — sourcing user config from somewhere other than local JSON (e.g. a remote
+  config service or a merged fleet endpoint). That is a *config-loading* feature,
+  not a storage backend, and is explicitly out of scope for Phases 101–103.
+
+---
+
+## 13. Changeset
 
 Each phase adds a `minor` changeset (new capability), e.g. Phase 101:
 
@@ -484,7 +538,7 @@ Each phase adds a `minor` changeset (new capability), e.g. Phase 101:
 "gitsema": minor
 ---
 
-Introduce a pluggable storage seam (MetadataStore / VectorStore) behind the
-existing SQLite backend, with no behavior change — groundwork for Postgres
-+ pgvector and Qdrant backends.
+Introduce a pluggable storage seam (MetadataStore / VectorStore / FtsStore)
+behind the existing SQLite backend, with no behavior change — groundwork for
+Postgres + pgvector and Qdrant backends.
 ```
