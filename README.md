@@ -80,9 +80,9 @@ Configuration is read from environment variables or persisted via `gitsema confi
 | `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
 | `GITSEMA_DATA_DIR` | `~/.gitsema/data` | Root directory where `gitsema tools serve` persists cloned repos + index DBs (`repos/<repoId>/{repo,index.db}`, `registry.db`) |
 
-Run `gitsema config list` to see every active key and where its value came from (env, repo config, global config, or default). Supported dot-notation keys include `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, `storage.backend`, `storage.scope`, `storage.name`, `storage.metadata.url`, `storage.vectors.url`, `storage.fts.backend`, and more.
+Run `gitsema config list` to see every active key and where its value came from (env, repo config, global config, or default). Supported dot-notation keys include `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, `storage.backend`, `storage.scope`, `storage.name`, `storage.metadata.url`, `storage.vectors.url`, `storage.vectors.apiKey`, `storage.fts.backend`, and more.
 
-> **Storage backends (experimental, Phases 101–102):** `storage.backend` selects where the index lives — `sqlite` (the default) and `postgres` (+ pgvector) are implemented; `qdrant` is planned (Phase 103). For postgres, set `storage.metadata.url=postgres://user:pass@host:5432/dbname` (see `docker-compose.postgres.yml` for a local pgvector instance) and optionally `storage.fts.backend=tsvector|pg_search|none`. Read-path commands (search, history, evolution, etc.) work against postgres; `gitsema index` does not yet write to it (Phase 103). `storage.scope` chooses which index a command resolves to: `project` (per-repo `.gitsema/`, default), `user` (`~/.gitsema/`), or `named` (an explicitly addressed index via `storage.name`). See [`docs/storage-backends-plan.md`](docs/storage-backends-plan.md).
+> **Storage backends (experimental, Phases 101–103):** `storage.backend` selects where the index lives — `sqlite` (the default), `postgres` (+ pgvector), and `qdrant` are all implemented. For postgres, set `storage.metadata.url=postgres://user:pass@host:5432/dbname` (see `docker-compose.postgres.yml` for a local pgvector instance) and optionally `storage.fts.backend=tsvector|pg_search|none`. For qdrant, set `storage.vectors.url=http://host:6333` (see `docker-compose.qdrant.yml`) plus `storage.metadata.url=postgres://...` (a Postgres companion for paths/commits/branches/FTS) and optionally `storage.vectors.apiKey`. `gitsema index` and all read-path commands (search, history, evolution, etc.) work against postgres and qdrant. `storage.scope` chooses which index a command resolves to: `project` (per-repo `.gitsema/`, default), `user` (`~/.gitsema/`), or `named` (an explicitly addressed index via `storage.name`). Use `gitsema storage migrate --to <backend> [...]` to copy an existing sqlite index into postgres/qdrant/sqlite, and `gitsema doctor`/`gitsema status` to inspect any backend. See [`docs/storage-backends-plan.md`](docs/storage-backends-plan.md).
 
 ---
 
@@ -129,6 +129,19 @@ Walk Git history and embed all blobs. Already-indexed blobs are skipped (dedup b
 The indexer applies a multi-level fallback chain: whole-file → function chunker → fixed windows (1500 chars → 800 chars) when a blob exceeds the embedding model's context limit.
 
 Other `index` subcommands: `index export` / `index import` (bundle transfer), `index update-modules` (directory-centroid embeddings), `index build-vss` (build the ANN index).
+
+#### `gitsema storage migrate --to <backend> [options]`
+
+Copies the active index into another storage backend (sqlite/postgres/qdrant) via the `StorageProfile` seam. Content-addressed and idempotent, so a migration is safe to re-run/resume after an interruption. Only `sqlite` sources are supported today.
+
+| Flag | Description |
+|---|---|
+| `--to <backend>` | destination backend: `sqlite` \| `postgres` \| `qdrant` (required) |
+| `--to-path <file>` | destination SQLite database file (for `--to sqlite`) |
+| `--to-metadata-url <url>` | destination `postgres://...` connection string (for `--to postgres \| qdrant`) |
+| `--to-vectors-url <url>` | destination Qdrant `http(s)://` URL (for `--to qdrant`) |
+| `--to-vectors-api-key <key>` | Qdrant API key (for `--to qdrant`) |
+| `--to-fts-backend <backend>` | destination FTS backend: `tsvector` \| `pg_search` \| `none` (default: `tsvector`) |
 
 ### Protocol Servers
 

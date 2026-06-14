@@ -432,34 +432,65 @@ gitsema config list                     # show all active values + sources
 
 Environment variables always override config-file values. See [`README.md`](README.md) for the full env-var reference.
 
-### Storage backends & scoping (experimental — Phases 101–102)
+### Storage backends & scoping (experimental — Phases 101–103)
 
 A pluggable storage seam splits persisted data into three async stores —
 `MetadataStore` (relational facts), `VectorStore` (embeddings + similarity), and
 an optional `FtsStore` (keyword/BM25) — so each can later be backed by a
 different technology. Phase 101 shipped the seam plus a SQLite adapter that
-preserves existing behavior. Phase 102 adds a Postgres + pgvector adapter for
-the read path (search, history, evolution, etc.).
+preserves existing behavior. Phase 102 added a Postgres + pgvector adapter, and
+Phase 103 adds a Qdrant adapter plus indexer write-path support, a
+`storage migrate` command, and cross-store `doctor`/`status` reporting — for
+all three backends.
 
 | Key | Values | Notes |
 |---|---|---|
-| `storage.backend` | `sqlite` (default) · `postgres` · `qdrant` | `sqlite` and `postgres` implemented; `qdrant` planned (Phase 103) |
+| `storage.backend` | `sqlite` (default) · `postgres` · `qdrant` | all three implemented |
 | `storage.scope` | `project` (default) · `user` · `named` | which index a command resolves to |
 | `storage.name` | string | required when `scope=named` |
-| `storage.metadata.url` | path / URL | metadata store location (a file path for SQLite, or a `postgres://...` connection string for `storage.backend=postgres`) |
-| `storage.vectors.url` / `storage.fts.backend` | — | per-store overrides; for postgres, `storage.fts.backend` selects `tsvector` (default, `ts_rank_cd`), `pg_search` (opt-in ParadeDB BM25), or `none` |
+| `storage.metadata.url` | path / URL | metadata store location: a file path for SQLite, or a `postgres://...` connection string for `storage.backend=postgres`/`qdrant` (qdrant's relational companion) |
+| `storage.vectors.url` | Qdrant `http(s)://` URL | required for `storage.backend=qdrant` |
+| `storage.vectors.apiKey` | string | optional Qdrant API key |
+| `storage.fts.backend` | `tsvector` (default) · `pg_search` · `none` | postgres/qdrant only — `tsvector` (`ts_rank_cd`), opt-in ParadeDB `pg_search` BM25, or `none` to disable hybrid search |
 
 **Postgres + pgvector backend (Phase 102):** set `storage.backend=postgres` and
 `storage.metadata.url=postgres://user:pass@host:5432/dbname` (a pgvector-enabled
 Postgres, e.g. `pgvector/pgvector:pg16` — see `docker-compose.postgres.yml`).
 Schema migrations run automatically and idempotently on first connection.
-Search, history, evolution, and all other read-path commands work against this
-backend. **Caveat:** `gitsema index` does not yet write to the Postgres backend
-— indexer/write-path rewiring is planned for Phase 103. Vector search uses a
-wide ANN candidate pool (exact `<=>` cosine distance, since embedding columns
-are unconstrained to support multiple models/dimensions) re-ranked with the
-same three-signal scoring as SQLite; `--vss`, `allowedHashes`, `earlyCut`, and
-result caching are not yet supported on this backend.
+`gitsema index` and all read-path commands (search, history, evolution, etc.)
+work against this backend. Vector search uses a wide ANN candidate pool (exact
+`<=>` cosine distance, since embedding columns are unconstrained to support
+multiple models/dimensions) re-ranked with the same three-signal scoring as
+SQLite; `--vss`, `allowedHashes`, `earlyCut`, and result caching are not yet
+supported on this backend.
+
+**Qdrant backend (Phase 103):** set `storage.backend=qdrant`,
+`storage.vectors.url=http://host:6333` (a Qdrant instance — see
+`docker-compose.qdrant.yml`), and `storage.metadata.url=postgres://...` (a
+Postgres companion for paths/commits/branches/FTS, reusing the Phase 102
+adapter). Embeddings are stored in one Qdrant collection per
+`(kind, model, dimensions)` tuple, created lazily on first `index` run.
+`gitsema index` writes to both stores; search fetches a wide ANN pool from
+Qdrant and re-ranks in JS, same as the Postgres adapter. **Caveat:**
+cross-store writes (Postgres metadata + Qdrant vectors) are not atomic — a
+partial write self-heals on the next incremental `index` run via the existing
+dedup check. Module (directory centroid) embeddings remain SQLite-only for
+postgres/qdrant backends.
+
+**`gitsema storage migrate --to <backend> [options]`:** copies the active
+index into another storage backend (sqlite/postgres/qdrant), using
+content-addressed/idempotent writes so a migration is safe to re-run/resume.
+Only `sqlite` sources are supported today (the common "move my local index to
+a shared backend" path). See `gitsema storage migrate --help` for the
+`--to-path` / `--to-metadata-url` / `--to-vectors-url` / `--to-vectors-api-key`
+/ `--to-fts-backend` flags.
+
+**`gitsema doctor` / `gitsema status`:** for postgres/qdrant profiles, both
+commands report the active backend/scope/location plus row counts (blobs,
+paths, commits, indexed commits, branches, file embeddings) and flag FTS/vector
+count mismatches. The deep sqlite-only checks (`PRAGMA integrity_check`, schema
+version, FTS5 backfill, `--extended` model/freshness/latency checks) remain
+sqlite-specific.
 
 See [`docs/storage-backends-plan.md`](storage-backends-plan.md) for the full design.
 

@@ -3642,8 +3642,85 @@ interface.
   to the write-path seam (Postgres *and* Qdrant — carried from 102);
   `gitsema storage migrate`, doctor orphan checks, status backend reporting.
 
+  **Implemented:**
+  - **Indexer write-path rewiring (carried from 102):** `indexer.ts` now writes
+    blobs/embeddings/paths/FTS via `profile.writeFileBlob`/`.writeBlobRecord`,
+    commit/branch links via `profile.metadata.linkBlobCommits`/
+    `.setBlobBranches`/`.markCommitIndexed`/`.getLastIndexedCommit`, and
+    chunk/symbol/commit-message embeddings via `profile.vectors.upsert`,
+    instead of calling the synchronous SQLite-only `blobStore.ts` functions
+    directly — `gitsema index` is now backend-agnostic for postgres and qdrant.
+    **Deviations:** (1) module (directory centroid) embeddings remain
+    SQLite-only (`moduleEmbeddingsSupported = profile.backend === 'sqlite'`) —
+    their running-mean update needs a read-modify-write that isn't part of the
+    `VectorStore` seam; (2) `gitsema index --file <path>` (`indexFileCommand` in
+    `src/cli/commands/index.ts`) still calls `storeBlob`/`storeBlobRecord`
+    directly and so only writes to the SQLite backend regardless of
+    `storage.backend` — fixing this is a documented follow-up.
+  - **Qdrant `VectorStore` + `StorageProfile`**
+    (`src/core/storage/qdrant/{connection,vectorStore,profile}.ts`, using
+    `@qdrant/js-client-rest`): one collection per `(kind, model, dimensions)`
+    tuple (`gitsema_<kind>_<model>_<dims>`), created lazily on first `upsert`.
+    Deterministic sha1-derived UUID point ids keyed on the natural id (plus
+    line range for chunk/symbol). `search()`/`searchCommits()` fetch a wide
+    ANN candidate pool then re-rank in JS with `pathRelevanceScore` +
+    `computeRecencyScores`, mirroring `PgVectorStore`. Reuses Phase 102's
+    `PostgresMetadataStore`/`PostgresFtsStore` as the relational companion for
+    paths/commits/branches/FTS (`storage.metadata.url`, a `postgres://...`
+    string, is required alongside `storage.vectors.url`).
+    **Deviation:** `first_seen`/`last_seen` are *not* denormalized into the
+    Qdrant payload (despite §6.5) — `search()`/`searchCommits()` instead join
+    through the Postgres companion's `blob_commits`/`commits` tables, exactly
+    like `PgVectorStore`, to avoid plumbing a new field through `VectorRecord`
+    and the indexer. Cross-store writes (Postgres metadata + Qdrant vectors)
+    are not atomic — a partial write self-heals on the next incremental
+    `index` run via the existing dedup check (per §8).
+  - **`resolveStorageProfile()`** now resolves `storage.backend=qdrant` from
+    `storage.vectors.url` (Qdrant `http(s)://` URL, required) +
+    `storage.metadata.url` (postgres companion, required) +
+    `storage.vectors.apiKey` (optional) + `storage.fts.backend`.
+    `withStorageProfile()` no-ops for qdrant (own client/pool).
+  - **`gitsema storage migrate --to <backend> [...]`**
+    (`src/core/storage/migrate.ts`, `src/cli/commands/storageMigrate.ts`):
+    copies an index between backends — reads every table from the *source*
+    sqlite database directly (`better-sqlite3`) and re-`upsert`s/inserts into
+    the destination via `profile.metadata`/`profile.vectors`/`profile.fts`.
+    All destination writes use content-addressed/idempotent paths
+    (`ON CONFLICT DO NOTHING`, deterministic point ids), so a migration is
+    safe to re-run/resume after an interruption.
+    **Deviation:** only `sqlite` sources are supported (`--to` selects
+    sqlite/postgres/qdrant destinations) — migrating *from* postgres/qdrant
+    would need new "list all rows" methods on `MetadataStore`/`VectorStore`
+    that don't exist yet; documented as a follow-up rather than blocking this
+    phase, since sqlite → {postgres, qdrant} is the primary "move my existing
+    index" use case.
+  - **Doctor / status backend reporting:** `MetadataStore.getStats()` (row
+    counts: blobs, paths, commits, indexed commits, branches, last indexed
+    commit) is implemented for SQLite and Postgres (and therefore Qdrant, via
+    the Postgres companion). `gitsema doctor` and `gitsema status` detect
+    non-sqlite profiles and report backend/scope/location plus these counts
+    via the new `runStorageDoctor()` (`src/core/storage/doctor.ts`), which also
+    cross-checks the vector store's file-embedding count against the metadata
+    store's blob count and flags disabled FTS.
+    **Deviation:** the deep sqlite-only checks in `gitsema doctor`
+    (`PRAGMA integrity_check`, schema-version check, FTS5-backfill count, the
+    `--extended` model-reachability/freshness/latency checks) remain
+    sqlite-specific — there is no equivalent single-file integrity check for
+    postgres/qdrant.
+  - **Infra:** `docker-compose.qdrant.yml` (qdrant/qdrant image, dev/test);
+    `.github/workflows/ci.yml` gained a `qdrant-storage-tests` job (postgres +
+    qdrant service containers) running `tests/qdrantStorageProfile.test.ts`,
+    gated on `GITSEMA_TEST_QDRANT_URL`/`GITSEMA_TEST_POSTGRES_URL`.
+  - **Tests:** `tests/qdrantStorageProfile.test.ts` mirrors
+    `tests/postgresStorageProfile.test.ts` (adapter conformance +
+    `resolveStorageProfile`/`withStorageProfile`); `tests/storageProfile.test.ts`
+    gained `getStats`/`runStorageDoctor` coverage and replaced the old
+    "qdrant throws" test with the new validation/resolution tests.
+
 **Status:** Phase 101 ✅ complete (seam + SQLite adapter + config + read-path
 async migration); Phase 102 ✅ complete (read-path dispatch, write-path
 interface + SQLite/Postgres implementations, pgvector `VectorStore`, Postgres
-`MetadataStore`/`FtsStore`, CI Postgres service) with the indexer write-path
-rewiring carried to Phase 103; Phase 103 📋 planned.
+`MetadataStore`/`FtsStore`, CI Postgres service); Phase 103 ✅ complete (indexer
+write-path rewiring, Qdrant `VectorStore`/`StorageProfile`, `gitsema storage
+migrate`, doctor/status cross-store reporting, CI Qdrant service) — see
+deviations above.
