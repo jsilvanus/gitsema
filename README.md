@@ -96,6 +96,9 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 |---|---|
 | `gitsema config <action> [key] [value]` | Manage persistent configuration (`set`, `get`, `list`, `unset`) |
 | `gitsema status [file]` | Show index status and database info, or status for a specific file |
+| `gitsema doctor [options]` | Run index health checks (integrity, schema version, FTS backfill, scale warnings; `--extended` for model reachability/freshness) |
+| `gitsema storage [info]` | Show the resolved storage backend/scope/location/FTS config (no connections opened) |
+| `gitsema storage migrate --to <backend> [options]` | Copy the active index into another storage backend (sqlite/postgres/qdrant) |
 | `gitsema models` | Manage embedding model configurations (list, add, remove, info); also manages LLM narrator/guide model configs via `--narrator`/`--guide` |
 | `gitsema index` | Show index coverage (blob counts per model) |
 | `gitsema index start [options]` | Perform indexing — walk Git history and embed all blobs |
