@@ -1,0 +1,33 @@
+version: "3.9"
+
+# docker-compose.postgres.yml — pgvector-enabled Postgres for local development
+# and testing of the `postgres` storage backend (Phase 102).
+#
+# Usage:
+#   docker compose -f docker-compose.postgres.yml up -d
+#   export GITSEMA_STORAGE_BACKEND=postgres
+#   export GITSEMA_STORAGE_METADATA_URL=postgres://gitsema:gitsema@localhost:5433/gitsema
+#
+# To run the Postgres-gated test suite:
+#   export GITSEMA_TEST_POSTGRES_URL=postgres://gitsema:gitsema@localhost:5433/gitsema
+#   pnpm test -- postgres
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: gitsema
+      POSTGRES_PASSWORD: gitsema
+      POSTGRES_DB: gitsema
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gitsema"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - gitsema_postgres:/var/lib/postgresql/data
+
+volumes:
+  gitsema_postgres:

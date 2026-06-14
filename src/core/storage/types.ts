@@ -21,6 +21,8 @@
 import type { Embedding, SearchResult } from '../models/types.js'
 import type { VectorSearchOptions } from '../search/analysis/vectorSearch.js'
 import type { CommitSearchOptions, CommitSearchResult } from '../search/commitSearch.js'
+import type { CommitEntry } from '../git/commitMap.js'
+import type { FileCategory } from '../embedding/fileType.js'
 
 /** Which technology backs a profile. Only `sqlite` is implemented in Phase 101. */
 export type StorageBackend = 'sqlite' | 'postgres' | 'qdrant'
@@ -39,10 +41,34 @@ export interface Bm25Hit {
   score: number
 }
 
+/** Which embedding table a `VectorStore.upsert`/`delete` call targets. */
+export type VectorKind = 'file' | 'chunk' | 'symbol' | 'module' | 'commit'
+
+/**
+ * A single vector to upsert. `id` is the natural key for `kind`:
+ *   - file/chunk/symbol → `blobHash` (chunk/symbol additionally carry line
+ *     ranges / symbol metadata so the row can be created if missing)
+ *   - module            → `modulePath`
+ *   - commit            → `commitHash`
+ */
+export interface VectorRecord {
+  id: string
+  model: string
+  dimensions: number
+  embedding: Embedding
+  quantize?: boolean
+  startLine?: number
+  endLine?: number
+  symbolName?: string
+  symbolKind?: string
+  language?: string
+  blobCount?: number
+}
+
 /**
  * Relational metadata operations. This is intentionally a minimal slice for
- * Phase 101 (the operations needed by the dedup and result-assembly paths);
- * it grows as call sites migrate to the seam.
+ * Phase 101/102 (the operations needed by the dedup, result-assembly, and
+ * indexing-write paths); it grows as call sites migrate to the seam.
  */
 export interface MetadataStore {
   /** True if the blob already has a whole-file embedding for `model`. */
@@ -51,6 +77,20 @@ export interface MetadataStore {
   filterNewBlobs(hashes: string[], model: string): Promise<Set<string>>
   /** Maps each requested blob hash to its known file paths. */
   pathsFor(blobHashes: string[]): Promise<Map<string, string[]>>
+  /** Registers a blob (content-addressed; safe to call repeatedly). */
+  putBlob(blobHash: string, size: number): Promise<void>
+  /** Adds a path for a blob (no-op if the (blobHash, path) pair already exists). */
+  addPath(blobHash: string, path: string): Promise<void>
+  /** Registers a commit (safe to call repeatedly). */
+  putCommit(commit: CommitEntry): Promise<void>
+  /** Links a commit to the blobs it introduced/touched; returns the number of new links. */
+  linkBlobCommits(commitHash: string, blobHashes: string[]): Promise<number>
+  /** Records that a commit's branch associations include the given blobs. */
+  setBlobBranches(blobHash: string, branches: string[]): Promise<void>
+  /** Marks a commit as fully processed (used to default `--since` on the next run). */
+  markCommitIndexed(commitHash: string): Promise<void>
+  /** Returns the most recently indexed commit hash, or undefined if never indexed. */
+  getLastIndexedCommit(): Promise<string | undefined>
 }
 
 /** Vector similarity search + counts over the embedding tables. */
@@ -61,6 +101,10 @@ export interface VectorStore {
   searchCommits(queryEmbedding: Embedding, options?: CommitSearchOptions): Promise<CommitSearchResult[]>
   /** Number of whole-file embeddings, optionally filtered to a model. */
   countFileEmbeddings(model?: string): Promise<number>
+  /** Upserts one or more vectors of the given kind. */
+  upsert(kind: VectorKind, items: VectorRecord[]): Promise<void>
+  /** Deletes vectors of the given kind by id (see `VectorRecord.id`). */
+  delete(kind: VectorKind, ids: string[]): Promise<void>
 }
 
 /** Keyword / BM25 store. Optional — a profile may have `fts: null`. */
@@ -75,6 +119,27 @@ export interface FtsStore {
   delete(blobHashes: string[]): Promise<void>
 }
 
+/** Arguments for `StorageProfile.writeFileBlob()` — a whole-file blob + embedding. */
+export interface WriteFileBlobArgs {
+  blobHash: string
+  size: number
+  path: string
+  model: string
+  embedding: Embedding
+  fileType?: FileCategory
+  /** Raw text content for FTS indexing. */
+  content?: string
+  quantize?: boolean
+}
+
+/** Arguments for `StorageProfile.writeBlobRecord()` — a blob + path with no embedding. */
+export interface WriteBlobRecordArgs {
+  blobHash: string
+  size: number
+  path: string
+  content?: string
+}
+
 /**
  * A resolved storage profile: the three stores plus the metadata describing how
  * they were resolved. Built by `resolveStorageProfile()`.
@@ -87,4 +152,15 @@ export interface StorageProfile {
   readonly metadata: MetadataStore
   readonly vectors: VectorStore
   readonly fts: FtsStore | null
+
+  /**
+   * Writes a blob + its whole-file embedding + its path (+ FTS content, if
+   * given) as a single atomic unit. Backends that support transactions
+   * (SQLite, Postgres) commit all parts together; this is the cross-store
+   * transaction boundary described in docs/storage-backends-plan.md §8.
+   */
+  writeFileBlob(args: WriteFileBlobArgs): Promise<void>
+
+  /** Writes a blob + its path (+ FTS content) without an embedding, atomically. */
+  writeBlobRecord(args: WriteBlobRecordArgs): Promise<void>
 }

@@ -3575,9 +3575,75 @@ interface.
   `profile.vectors.*`/`profile.fts.*`; migrate the indexing write path (both
   carried from 101); Postgres `MetadataStore` + `FtsStore` (`tsvector` BM25) +
   pgvector `VectorStore`.
+
+  **Implemented:**
+  - **Read-path routing (carried from 101):** rather than editing each of the
+    ~30 read-path call sites individually, `vectorSearch`/`hybridSearch`/
+    `searchCommits` now dispatch on `getCachedStorageProfile().backend` at
+    entry: for `sqlite` the existing function body *is* the implementation
+    (and `SqliteVectorStore.search`/`.searchCommits` delegate back into it, so
+    there's no recursion); for `postgres`/`qdrant` the call is forwarded to
+    `profile.vectors.*`/`profile.fts.*`. This makes every caller backend-agnostic
+    without a 30-file mechanical edit, at the cost of the dispatch living inside
+    these three functions instead of at each call site — the outcome the plan's
+    §1 bullet asks for ("backend actually swappable"), via a different
+    mechanism than literal call-site edits.
+  - **Write-path interface (carried from 101):** `src/core/storage/types.ts`
+    gained `VectorKind`/`VectorRecord`, write methods on `MetadataStore`
+    (`putBlob`, `addPath`, `putCommit`, `linkBlobCommits`, `setBlobBranches`,
+    `markCommitIndexed`, `getLastIndexedCommit`), `VectorStore.upsert`/`.delete`,
+    and `StorageProfile.writeFileBlob`/`.writeBlobRecord` as the cross-store
+    atomic write boundary. Implemented for both SQLite (delegating to existing
+    `blobStore.ts` functions) and Postgres (single-transaction `BEGIN`/`COMMIT`).
+    **Deviation / carried to Phase 103:** `indexer.ts`/`blobStore.ts`/
+    `deduper.ts` themselves still call the synchronous SQLite-only functions
+    directly — they have not been rewired to call these new seam methods. The
+    write-path *interface* is complete and conformance-tested (SQLite +
+    Postgres), but a Postgres profile is not yet *writable* via `gitsema index`.
+    Rewiring the indexer is bundled into Phase 103 alongside the Qdrant
+    write path, since both need the same async call-site changes.
+  - **Postgres `MetadataStore` + `FtsStore`**
+    (`src/core/storage/postgres/{metadataStore,ftsStore}.ts`): plain-SQL schema
+    (`src/core/storage/postgres/migrations.ts`, a separate idempotent migration
+    track from `sqlite.ts`). `FtsStore` defaults to `tsvector` + `ts_rank_cd`
+    (`storage.fts.backend=tsvector`, the default for postgres); ParadeDB
+    `pg_search` BM25 is opt-in (`storage.fts.backend=pg_search`, requires the
+    `pg_search` extension — implemented but not exercised in CI). `Bm25Hit.score`
+    is negated (`-rank` / `-bm25_score`) so `hybridSearch`'s normalization is
+    identical across backends. `ts_rank_cd` is an approximation of BM25, not a
+    drop-in match for SQLite FTS5 — see docs/storage-backends-plan.md §11.
+  - **pgvector `VectorStore`** (`src/core/storage/postgres/vectorStore.ts`):
+    fetches a wide ANN-ordered candidate pool via `<=>` (cosine distance) per
+    kind (file/chunk/symbol/module/commit), then re-ranks with the same JS
+    three-signal logic (`pathRelevanceScore` + `computeRecencyScores`) as the
+    SQLite adapter — the `--vss` trick, generalized.
+    **Deviation:** embedding columns are unconstrained `vector` (no fixed
+    dimension), so `<=>` does an *exact* kNN scan rather than HNSW-approximate;
+    per-model HNSW indexes (which require a fixed dimension) are a documented
+    follow-up. Not yet supported on this backend: `allowedHashes`, `useVss`,
+    `earlyCut`, result caching (`noCache`/`queryText`).
+  - **`resolveStorageProfile()`** now resolves `storage.backend=postgres` from
+    `storage.metadata.url` (a `postgres://...` connection string; throws if
+    missing/non-URL) and validates `storage.fts.backend` (`tsvector` |
+    `pg_search` | `none`). `withStorageProfile()` supports postgres profiles
+    (no-op activation — the profile holds its own connection pool).
+  - **Infra:** `docker-compose.postgres.yml` (pgvector/pgvector image, dev/test);
+    `.github/workflows/ci.yml` gained a `postgres-storage-tests` job (Linux-only
+    pgvector service container) running `tests/postgresStorageProfile.test.ts`,
+    gated on `GITSEMA_TEST_POSTGRES_URL` (also skips cleanly when unset, e.g.
+    the main matrix job).
+  - **Tests:** `tests/storageProfile.test.ts` gained write-path conformance
+    tests (SQLite); `tests/postgresStorageProfile.test.ts` is a parallel
+    conformance + parity suite run against real Postgres+pgvector (verified
+    locally against postgres 16 + pgvector 0.6 — 1029/1029 tests green).
+
 - **Phase 103 — Qdrant + portability/ops:** Qdrant `VectorStore` with a
-  relational companion store; `gitsema storage migrate`, doctor orphan checks,
-  status backend reporting.
+  relational companion store; rewire `indexer.ts`/`blobStore.ts`/`deduper.ts`
+  to the write-path seam (Postgres *and* Qdrant — carried from 102);
+  `gitsema storage migrate`, doctor orphan checks, status backend reporting.
 
 **Status:** Phase 101 ✅ complete (seam + SQLite adapter + config + read-path
-async migration); Phases 102–103 📋 planned.
+async migration); Phase 102 ✅ complete (read-path dispatch, write-path
+interface + SQLite/Postgres implementations, pgvector `VectorStore`, Postgres
+`MetadataStore`/`FtsStore`, CI Postgres service) with the indexer write-path
+rewiring carried to Phase 103; Phase 103 📋 planned.

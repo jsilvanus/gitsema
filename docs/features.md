@@ -432,21 +432,34 @@ gitsema config list                     # show all active values + sources
 
 Environment variables always override config-file values. See [`README.md`](README.md) for the full env-var reference.
 
-### Storage backends & scoping (experimental — Phase 101)
+### Storage backends & scoping (experimental — Phases 101–102)
 
 A pluggable storage seam splits persisted data into three async stores —
 `MetadataStore` (relational facts), `VectorStore` (embeddings + similarity), and
 an optional `FtsStore` (keyword/BM25) — so each can later be backed by a
-different technology. Phase 101 ships the seam plus a SQLite adapter that
-preserves existing behavior.
+different technology. Phase 101 shipped the seam plus a SQLite adapter that
+preserves existing behavior. Phase 102 adds a Postgres + pgvector adapter for
+the read path (search, history, evolution, etc.).
 
 | Key | Values | Notes |
 |---|---|---|
-| `storage.backend` | `sqlite` (default) · `postgres` · `qdrant` | only `sqlite` implemented; others planned (Phases 102–103) |
+| `storage.backend` | `sqlite` (default) · `postgres` · `qdrant` | `sqlite` and `postgres` implemented; `qdrant` planned (Phase 103) |
 | `storage.scope` | `project` (default) · `user` · `named` | which index a command resolves to |
 | `storage.name` | string | required when `scope=named` |
-| `storage.metadata.url` | path / URL | metadata store location (a file path for SQLite) |
-| `storage.vectors.url` / `storage.fts.backend` | — | per-store overrides (vectors / keyword) |
+| `storage.metadata.url` | path / URL | metadata store location (a file path for SQLite, or a `postgres://...` connection string for `storage.backend=postgres`) |
+| `storage.vectors.url` / `storage.fts.backend` | — | per-store overrides; for postgres, `storage.fts.backend` selects `tsvector` (default, `ts_rank_cd`), `pg_search` (opt-in ParadeDB BM25), or `none` |
+
+**Postgres + pgvector backend (Phase 102):** set `storage.backend=postgres` and
+`storage.metadata.url=postgres://user:pass@host:5432/dbname` (a pgvector-enabled
+Postgres, e.g. `pgvector/pgvector:pg16` — see `docker-compose.postgres.yml`).
+Schema migrations run automatically and idempotently on first connection.
+Search, history, evolution, and all other read-path commands work against this
+backend. **Caveat:** `gitsema index` does not yet write to the Postgres backend
+— indexer/write-path rewiring is planned for Phase 103. Vector search uses a
+wide ANN candidate pool (exact `<=>` cosine distance, since embedding columns
+are unconstrained to support multiple models/dimensions) re-ranked with the
+same three-signal scoring as SQLite; `--vss`, `allowedHashes`, `earlyCut`, and
+result caching are not yet supported on this backend.
 
 See [`docs/storage-backends-plan.md`](storage-backends-plan.md) for the full design.
 
