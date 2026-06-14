@@ -79,3 +79,52 @@ jobs:
         run: pnpm test -- postgres
         env:
           GITSEMA_TEST_POSTGRES_URL: postgres://gitsema:gitsema@localhost:5432/gitsema
+
+  qdrant-storage-tests:
+    # Qdrant + Postgres companion conformance suite for the `qdrant` storage
+    # backend (Phase 103). Linux-only service containers; the main
+    # build-and-test job skips these tests since GITSEMA_TEST_QDRANT_URL is
+    # unset there.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gitsema
+          POSTGRES_PASSWORD: gitsema
+          POSTGRES_DB: gitsema
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gitsema"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:v1.13.0
+        ports:
+          - 6333:6333
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm build
+
+      - name: Qdrant storage tests
+        run: pnpm test -- qdrant
+        env:
+          GITSEMA_TEST_POSTGRES_URL: postgres://gitsema:gitsema@localhost:5432/gitsema
+          GITSEMA_TEST_QDRANT_URL: http://localhost:6333

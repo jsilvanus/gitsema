@@ -27,6 +27,8 @@ const STORAGE_ENV = [
   'GITSEMA_STORAGE_SCOPE',
   'GITSEMA_STORAGE_NAME',
   'GITSEMA_STORAGE_METADATA_URL',
+  'GITSEMA_STORAGE_VECTORS_URL',
+  'GITSEMA_STORAGE_VECTORS_API_KEY',
   'GITSEMA_STORAGE_FTS_BACKEND',
 ] as const
 
@@ -300,11 +302,13 @@ describe('resolveStorageProfile — config driven', () => {
     expect(resolveStorageProfile(cwd).fts).toBeNull()
   })
 
-  it('postgres backend requires storage.metadata.url; qdrant is not yet implemented', () => {
+  it('postgres backend requires storage.metadata.url; qdrant requires metadata.url and vectors.url', () => {
     process.env.GITSEMA_STORAGE_BACKEND = 'postgres'
     expect(() => resolveStorageProfile(cwd)).toThrow(/storage\.metadata\.url/)
     process.env.GITSEMA_STORAGE_BACKEND = 'qdrant'
-    expect(() => resolveStorageProfile(cwd)).toThrow(/Phase 103/)
+    expect(() => resolveStorageProfile(cwd)).toThrow(/storage\.metadata\.url/)
+    process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
+    expect(() => resolveStorageProfile(cwd)).toThrow(/storage\.vectors\.url/)
   })
 
   it('postgres backend resolves a PostgresStorageProfile when metadata.url is set', () => {
@@ -321,6 +325,16 @@ describe('resolveStorageProfile — config driven', () => {
     process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
     process.env.GITSEMA_STORAGE_FTS_BACKEND = 'bm25'
     expect(() => resolveStorageProfile(cwd)).toThrow(/Invalid storage\.fts\.backend/)
+  })
+
+  it('qdrant backend resolves a QdrantStorageProfile when metadata.url and vectors.url are set', () => {
+    process.env.GITSEMA_STORAGE_BACKEND = 'qdrant'
+    process.env.GITSEMA_STORAGE_METADATA_URL = 'postgres://user:pass@localhost:5432/gitsema_test'
+    process.env.GITSEMA_STORAGE_VECTORS_URL = 'http://localhost:6333'
+    const p = resolveStorageProfile(cwd)
+    expect(p.backend).toBe('qdrant')
+    expect(p.location).toBe('http://localhost:6333')
+    expect(p.fts).not.toBeNull()
   })
 
   it('invalid backend / scope are rejected', () => {
