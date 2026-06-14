@@ -3724,3 +3724,136 @@ interface + SQLite/Postgres implementations, pgvector `VectorStore`, Postgres
 write-path rewiring, Qdrant `VectorStore`/`StorageProfile`, `gitsema storage
 migrate`, doctor/status cross-store reporting, CI Qdrant service) — see
 deviations above.
+
+---
+
+### Phase 104 — Full-toolset guide coverage, per-command `--narrate`, and a guided `gitsema setup` wizard
+
+**Goal:** Close the remaining gaps between the CLI's ~50 analysis/workflow
+commands and the `gitsema guide`/`narrate`/`explain` LLM layer (Phases 96-99),
+and give new users (and new backends from Phases 101-103) a single guided
+setup path. Three independently-shippable slices:
+
+**Slice 1 — Wire the remaining read-path analysis commands into `gitsema guide`.**
+`src/core/narrator/guideTools.ts` currently exposes 37 tools in `GUIDE_TOOLS`.
+The following read-only analysis commands have no `GUIDE_TOOLS` entry and
+should get one (reusing the same `core` functions the CLI commands call —
+do not duplicate logic):
+- `bisect` (`semanticBisect` / `runSemanticBisect`-style core fn used by
+  `semanticBisectCommand`)
+- `refactor-candidates` (`findRefactorCandidates`)
+- `cherry-pick-suggest` (`suggestCherryPicks`)
+- `heatmap` (`computeHeatmap`)
+- `map` (`computeSemanticMap` / whatever backs `mapCommand`)
+- `file-diff` (`computeFileDiff`/`computeSemanticDiff`-for-a-single-file, used
+  by `diffCommand`)
+- `diff <ref1> <ref2> <query>` (conceptual diff across two refs — name it
+  `ref_diff` or `concept_diff` in `GUIDE_TOOLS` to avoid clashing with the
+  existing `semantic_diff` tool, used by `remoteIndexCommand`'s sibling
+  — verify the actual handler, `src/cli/register/all.ts` around `'diff <ref1> <ref2> <query>'`)
+- `lifecycle <query>` (`computeConceptLifecycle`, used by
+  `conceptLifecycleCommand`)
+- `cluster-change-points` (`computeClusterChangePoints`)
+- `cross-repo-similarity <query>` (used by `crossRepoSimilarityCommand` in
+  `src/cli/register/analysis.ts`)
+- `pr-report` (used by `prReportCommand`)
+
+For each: add a `GuideToolEntry` (category, `needsIndex`, JSON-schema
+`definition`, `run` handler returning a size-capped JSON-safe object, mirroring
+the existing entries' style — wrap in try/catch, never throw), add a matching
+entry to `src/core/narrator/interpretations.ts` (`TOOL_INTERPRETATIONS`)
+describing the result shape/significant fields/thresholds, then run
+`pnpm gen:skill` to regenerate `skill/gitsema-ai-assistant.md` and its
+`.github/skills/gitsema.md` mirror. `tests/docsSync.test.ts` enforces that every
+`GUIDE_TOOLS` entry has an interpretation and that the generated skill matches
+committed files — keep it green. Extend `tests/guideAgentLoop.test.ts` with
+coverage for the new tool names (tool-name-set assertions + at least one
+executed-tool-result test per new tool, following the existing pattern).
+Admin/infra commands (`config`, `models`, `doctor`, `status`, `storage`,
+`repos`, `tools mcp/lsp/serve`, `gc`/`vacuum`/`check`, `export`/`import`,
+`backfill-fts`, `build-vss`, `update-modules`) remain intentionally excluded
+from `GUIDE_TOOLS`, per existing precedent — do not wire these.
+
+**Slice 2 — Generic per-command `--narrate` support.**
+Phase 97's backlog noted "Per-command `--narrate` flag using
+`interpretations.ts` entries (beyond `narrate`/`explain`/result-narrators)" as
+deferred. 10 commands already have a bespoke `--narrate` flag (`search`,
+`evolution`, `file-evolution`, `lifecycle`, `file-diff`, `clusters`,
+`cluster-diff`, `cluster-timeline`, `change-points`, `file-change-points`),
+each calling its own `narrate*` function in `src/core/llm/narrator.ts`. Add a
+**generic** narration path so the remaining commands can opt in without a
+bespoke `narrate*` function per command:
+- New helper in `src/core/llm/narrator.ts`, e.g.
+  `narrateToolResult(toolKey: string, result: unknown, opts?: { focus?: string })`
+  — looks up `TOOL_INTERPRETATIONS[toolKey]` (added/extended in Slice 1) for
+  the "how to read this" guidance, builds a system prompt from
+  `buildNarratorSystemPrompt(name)` + the interpretation text, sends the
+  (redacted, size-capped) JSON result as the user payload to the active
+  narrator model, and returns a short prose summary. Must remain
+  safe-by-default: no network call unless `--narrate` is passed **and** a
+  narrator model is configured (mirror the existing guard in
+  `runNarrate`/`runExplain` and the bespoke `narrate*` functions — same
+  "no narrator configured" placeholder message).
+- Add `--narrate` to a first batch of commands that lack it and have a
+  `TOOL_INTERPRETATIONS` entry already or added in Slice 1: `first-seen`,
+  `branch-summary`, `merge-audit`, `merge-preview`, `dead-concepts`,
+  `debt-score`, `doc-gap`, `security-scan`, `blame`/`semantic-blame`, `triage`,
+  `impact`, `ownership`, `experts`, `author`, `contributor-profile`, `bisect`,
+  `refactor-candidates`, `cherry-pick-suggest`, `heatmap`. Each wires
+  `--narrate` → `narrateToolResult('<tool_key>', result)` → print the summary
+  after the normal text/JSON output (same placement convention as the existing
+  bespoke `--narrate` flags).
+- `workflow run` and `policy-check`/`ci-diff`/`regression-gate` are
+  out of scope for `--narrate` (workflow already composes narrated sections
+  where relevant; policy gates are machine-consumed and must stay
+  deterministic).
+- Add unit tests for `narrateToolResult` (mocked chattydeer provider, no
+  network) and at least one integration-style test per newly-wired command
+  verifying `--narrate` without a configured model prints the existing
+  safe placeholder (no crash, no network).
+
+**Slice 3 — Guided `gitsema setup` wizard.**
+`gitsema quickstart` (`src/cli/commands/quickstart.ts`) already walks a new
+user through repo detection → provider/model selection → config write →
+initial index, but predates Phases 101-103 and only ever configures the
+default SQLite backend. Add a guided storage-backend step:
+- Insert a new step into the wizard (between provider/model selection and
+  config write) that asks: "Storage backend: sqlite (default) / postgres /
+  qdrant?" — for `postgres`, prompt for `storage.metadata.url` and optional
+  `storage.fts.backend`; for `qdrant`, prompt for `storage.vectors.url`,
+  `storage.metadata.url`, and optional `storage.vectors.apiKey`. Persist via
+  `setConfigValue('storage.backend', ...)` etc. (extend
+  `src/core/config/configManager.ts`'s supported-keys list if any
+  `storage.*` keys aren't already settable via `gitsema config set`).
+  Validate with `resolveStorageProfile()`/`getCachedStorageProfile()` before
+  writing, surfacing connection errors before the wizard proceeds to indexing.
+- Add `gitsema setup` as the primary discoverable name for this wizard
+  (`gitsema quickstart` remains as a backward-compat alias, same as the
+  `tools mcp`/`mcp` precedent) — register both in
+  `src/cli/register/analysis.ts`, both calling the same `quickstartCommand`
+  (renaming the exported function is optional; an alias registration is
+  sufficient).
+- Optional final step (skippable): offer to configure a narrator/guide model
+  via the existing `gitsema models add <name> --narrator|--guide --provider
+  ollama` flow (Phase 99) if Ollama is detected, so `gitsema narrate`/`guide`
+  work out of the box too.
+- Update README.md's quick-start section and `docs/features.md` to mention
+  `gitsema setup`/`gitsema quickstart` covers backend selection; add a
+  changeset.
+
+**Out of scope / explicit non-goals for Phase 104:**
+- No new storage backends or `StorageStats`/`doctor` changes (Phases 101-103
+  are complete).
+- No changes to `GUIDE_TOOLS`/`interpretations.ts` for admin/infra commands.
+- No change to the safe-by-default behavior of `narrate`/`explain`/`guide`
+  (no network without an explicit `--narrate`/configured model).
+
+**Suggested sequencing:** Slice 1 (guide tool coverage) is the most
+mechanical and lowest-risk — do it first to validate the
+`GUIDE_TOOLS`/`interpretations.ts`/`gen:skill`/`docsSync` loop still holds for
+new entries. Slice 2 depends on the `TOOL_INTERPRETATIONS` entries added in
+Slice 1 for the new tools (though it can proceed independently for commands
+whose interpretations already exist). Slice 3 is independent and can be done
+in parallel or last.
+
+**Status:** 📋 planned.
