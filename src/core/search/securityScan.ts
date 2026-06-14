@@ -121,7 +121,7 @@ export async function scanForVulnerabilities(
   for (const outcome of embedResults) {
     if (outcome.status === 'rejected') continue // skip unavailable patterns
     const { pattern: p, queryEmb } = outcome.value
-    const results = vectorSearch(queryEmb, { topK: top, model: opts.model, query: p.query })
+    const results = await vectorSearch(queryEmb, { topK: top, model: opts.model, query: p.query })
     for (const r of results) {
       // Apply structural heuristics when available
       let heuristicMatches: string[] | undefined

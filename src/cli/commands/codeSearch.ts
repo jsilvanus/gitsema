@@ -19,7 +19,7 @@ export function codeSearchCommand(): Command {
       const threshold = parseFloat(options.threshold)
       const codeProvider = getCodeProvider()
       const queryEmbedding = await embedQuery(codeProvider, snippet)
-      const results = vectorSearch(queryEmbedding, {
+      const results = await vectorSearch(queryEmbedding, {
         topK,
         model: options.model ?? codeProvider.model,
         searchChunks: options.level === 'chunk' || options.level === 'symbol',

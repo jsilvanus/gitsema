@@ -227,7 +227,7 @@ describe('indexer — commit message embeddings (integration)', () => {
     const queryEmbedding = await provider.embed('authentication token verification')
 
     const results = await withDbSession(session, async () =>
-      searchCommits(queryEmbedding, { topK: 5 }),
+      await searchCommits(queryEmbedding, { topK: 5 }),
     )
 
     expect(results.length).toBeGreaterThan(0)
@@ -261,7 +261,7 @@ describe('indexer — commit message embeddings (integration)', () => {
     const queryEmbedding = await provider.embed('authentication')
 
     const results = await withDbSession(session, async () =>
-      searchCommits(queryEmbedding, { topK: 5 }),
+      await searchCommits(queryEmbedding, { topK: 5 }),
     )
 
     expect(results).toEqual([])

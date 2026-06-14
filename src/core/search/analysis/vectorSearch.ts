@@ -176,7 +176,7 @@ export interface VectorSearchOptions {
   allowedHashes?: Set<string>
 }
 
-export function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOptions = {}): SearchResult[] {
+export async function vectorSearch(queryEmbedding: Embedding, options: VectorSearchOptions = {}): Promise<SearchResult[]> {
   const {
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, query = '',
@@ -586,7 +586,7 @@ export async function vectorSearchWithAnn(
     }
   }
 
-  const results = vectorSearch(queryEmbedding, { ...options, allowedHashes, noCache: true })
+  const results = await vectorSearch(queryEmbedding, { ...options, allowedHashes, noCache: true })
 
   if (!noCache) {
     setCachedResults(cacheKey, results)

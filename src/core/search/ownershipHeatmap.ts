@@ -12,10 +12,10 @@ export interface OwnershipEntry {
   topPaths: string[]
 }
 
-export function computeOwnershipHeatmap(opts: { embedding: Embedding; topK?: number; windowDays?: number }): OwnershipEntry[] {
+export async function computeOwnershipHeatmap(opts: { embedding: Embedding; topK?: number; windowDays?: number }): Promise<OwnershipEntry[]> {
   const { embedding, topK = 5, windowDays = 90 } = opts
   // Find top matching blobs
-  const results = vectorSearch(embedding, { topK: topK * 20 }) // fetch more candidates for ranking
+  const results = await vectorSearch(embedding, { topK: topK * 20 }) // fetch more candidates for ranking
   if (!results || results.length === 0) return []
 
   const { rawDb } = getActiveSession()

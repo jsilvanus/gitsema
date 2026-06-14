@@ -27,7 +27,7 @@ export function registerWorkflowTools(server: McpServer) {
       if (!eRes.ok) return eRes.resp
       const emb = eRes.embedding!
       const sections: Record<string, unknown> = {}
-      try { sections.firstSeen = vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
+      try { sections.firstSeen = await vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
       try { sections.changePoints = computeConceptChangePoints(query, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
       try { sections.experts = computeExpertsAlias({ topN: top }) } catch (e) { sections.experts = [] }
       if (file) {
@@ -75,7 +75,7 @@ export function registerWorkflowTools(server: McpServer) {
         const eRes = await embed(provider, q, 'Error embedding query')
         if (!eRes.ok) return eRes.resp
         const emb = eRes.embedding!
-        try { sections.firstSeen = vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
+        try { sections.firstSeen = await vectorSearch(emb, { topK: top }) } catch (e) { sections.firstSeen = [] }
         try { sections.changePoints = computeConceptChangePoints(q, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
         try { sections.experts = computeExpertsAlias({ topN: top }) } catch (e) { sections.experts = [] }
       } else {
@@ -83,7 +83,7 @@ export function registerWorkflowTools(server: McpServer) {
         const eRes = await embed(provider, q, 'Error embedding query')
         if (!eRes.ok) return eRes.resp
         const emb = eRes.embedding!
-        try { sections.topChangedConcepts = vectorSearch(emb, { topK: top }) } catch (e) { sections.topChangedConcepts = [] }
+        try { sections.topChangedConcepts = await vectorSearch(emb, { topK: top }) } catch (e) { sections.topChangedConcepts = [] }
         try { sections.changePoints = computeConceptChangePoints(q, emb, { topK: top }) } catch (e) { sections.changePoints = [] }
         try { sections.experts = computeExpertsAlias({ topN: top }) } catch (e) { sections.experts = [] }
       }

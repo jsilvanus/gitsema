@@ -142,7 +142,7 @@ export async function changePointsCommand(
   let candidateHashes: string[] | undefined
   if (options.hybrid) {
     const bw = options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : 0.3
-    const hybridResults = hybridSearch(query.trim(), queryEmbedding, { topK: topK, bm25Weight: bw, branch: options.branch })
+    const hybridResults = await hybridSearch(query.trim(), queryEmbedding, { topK: topK, bm25Weight: bw, branch: options.branch })
     candidateHashes = hybridResults.map((r) => r.blobHash)
   }
 

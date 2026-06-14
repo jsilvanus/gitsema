@@ -90,7 +90,7 @@ export function watchRouter(deps: WatchRouterDeps): Router {
             continue
           }
         }
-        const results = vectorSearch(emb, {
+        const results = await vectorSearch(emb, {
           topK,
           model,
           after: row.last_run_ts ?? undefined,

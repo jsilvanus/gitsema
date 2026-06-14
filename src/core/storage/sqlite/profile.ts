@@ -58,11 +58,11 @@ class SqliteMetadataStore implements MetadataStore {
 
 class SqliteVectorStore implements VectorStore {
   async search(queryEmbedding: Embedding, options: VectorSearchOptions = {}): Promise<SearchResult[]> {
-    return vectorSearch(queryEmbedding, options)
+    return await vectorSearch(queryEmbedding, options)
   }
 
   async searchCommits(queryEmbedding: Embedding, options: CommitSearchOptions = {}): Promise<CommitSearchResult[]> {
-    return searchCommits(queryEmbedding, options)
+    return await searchCommits(queryEmbedding, options)
   }
 
   async countFileEmbeddings(model?: string): Promise<number> {

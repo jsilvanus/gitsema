@@ -384,7 +384,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
 
   if (options.hybrid) {
     // Hybrid search: BM25 (FTS5) + vector similarity (no ANN pre-filter)
-    results = hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
+    results = await hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
   } else if (dualModel && codeProvider) {
     // Dual-model search: embed with both models and merge results
     let codeEmbedding: Embedding
@@ -435,8 +435,8 @@ export async function searchCommand(query: string, options: SearchCommandOptions
       const partB = parsedBool.parts[1]
       const embA = textEmbedding
       const embB = await sharedEmbedQuery(textProvider, partB, { noCache })
-      const resA = vectorSearch(embA, { ...searchOpts, topK })
-      const resB = vectorSearch(embB, { ...searchOpts, topK })
+      const resA = await vectorSearch(embA, { ...searchOpts, topK })
+      const resB = await vectorSearch(embB, { ...searchOpts, topK })
       results = parsedBool.op === 'OR' ? mergeOr(resA, resB, topK) : mergeAnd(resA, resB, topK)
     } catch (err) {
       // On failure fall back to the precomputed results
@@ -447,7 +447,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   if (options.or) {
     try {
       const orEmb = await sharedEmbedQuery(textProvider, options.or, { noCache })
-      const orResults = vectorSearch(orEmb, { ...searchOpts, topK })
+      const orResults = await vectorSearch(orEmb, { ...searchOpts, topK })
       results = mergeOr(results, orResults, topK)
     } catch (err) {
       // ignore
@@ -456,7 +456,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   if (options.and) {
     try {
       const andEmb = await sharedEmbedQuery(textProvider, options.and, { noCache })
-      const andResults = vectorSearch(andEmb, { ...searchOpts, topK })
+      const andResults = await vectorSearch(andEmb, { ...searchOpts, topK })
       results = mergeAnd(results, andResults, topK)
     } catch (err) {
       // ignore
@@ -470,7 +470,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
   // Optional commit message search
   let commitResults
   if (options.includeCommits) {
-    commitResults = searchCommits(textEmbedding, { topK, model: textModel })
+    commitResults = await searchCommits(textEmbedding, { topK, model: textModel })
   }
 
   // --annotate-clusters: join each result with its cluster label (if a clustering run exists)

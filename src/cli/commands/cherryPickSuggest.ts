@@ -37,7 +37,7 @@ export async function cherryPickSuggestCommand(query: string, options: CherryPic
     throw err
   }
 
-  const results = suggestCherryPicks(qEmb, { topK, model: textModel })
+  const results = await suggestCherryPicks(qEmb, { topK, model: textModel })
 
   const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: undefined })
   const jsonSink = getSink(sinks, 'json')

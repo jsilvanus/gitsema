@@ -280,7 +280,7 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       if (!query) return errorResult('semantic_search requires a non-empty "query" argument')
       const topK = numArg(args, 'top_k', 10, 1, 25)
       const { provider, embedding } = await embedFor(query)
-      const results = vectorSearch(embedding, { topK, model: provider.model, queryText: query, branch: strArg(args, 'branch') })
+      const results = await vectorSearch(embedding, { topK, model: provider.model, queryText: query, branch: strArg(args, 'branch') })
       return { query, results: results.map((r) => ({ paths: r.paths, score: r.score, blobHash: r.blobHash })) }
     },
   },
@@ -301,7 +301,7 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       if (!snippet) return errorResult('code_search requires a non-empty "snippet" argument')
       const topK = numArg(args, 'top_k', 10, 1, 25)
       const { provider, embedding } = await embedFor(snippet, true)
-      const results = vectorSearch(embedding, { topK, searchChunks: true, searchSymbols: true, model: provider.model, branch: strArg(args, 'branch') })
+      const results = await vectorSearch(embedding, { topK, searchChunks: true, searchSymbols: true, model: provider.model, branch: strArg(args, 'branch') })
       return { snippet, results: results.map((r) => ({ paths: r.paths, score: r.score, blobHash: r.blobHash })) }
     },
   },
@@ -325,7 +325,7 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       if (!query) return errorResult('search_history requires a non-empty "query" argument')
       const topK = numArg(args, 'top_k', 10, 1, 25)
       const { embedding } = await embedFor(query)
-      let results = vectorSearch(embedding, {
+      let results = await vectorSearch(embedding, {
         topK,
         before: dateArg(strArg(args, 'before')),
         after: dateArg(strArg(args, 'after')),
@@ -357,8 +357,8 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       const branch = strArg(args, 'branch')
       const { embedding } = await embedFor(query)
       const results = boolArg(args, 'hybrid')
-        ? hybridSearch(query, embedding, { topK, branch })
-        : vectorSearch(embedding, { topK, branch })
+        ? await hybridSearch(query, embedding, { topK, branch })
+        : await vectorSearch(embedding, { topK, branch })
       const sorted = [...results].sort((a, b) => (a.firstSeen ?? Infinity) - (b.firstSeen ?? Infinity))
       return {
         query,
@@ -741,7 +741,7 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       const top = numArg(args, 'top', 5, 1, 25)
       const windowDays = numArg(args, 'window_days', 90, 1, 3650)
       const { embedding } = await embedFor(query)
-      const heatmap = computeOwnershipHeatmap({ embedding, topK: top, windowDays })
+      const heatmap = await computeOwnershipHeatmap({ embedding, topK: top, windowDays })
       return { query, owners: heatmap }
     },
   },
@@ -1052,7 +1052,7 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       const top = numArg(args, 'top', 5, 1, 25)
       const { embedding } = await embedFor(query)
       const sections: Record<string, unknown> = {}
-      try { sections.firstSeen = vectorSearch(embedding, { topK: top }).map((r) => ({ path: r.paths[0] ?? null, score: r.score, blobHash: r.blobHash, firstSeen: r.firstSeen })) } catch { sections.firstSeen = [] }
+      try { sections.firstSeen = (await vectorSearch(embedding, { topK: top })).map((r) => ({ path: r.paths[0] ?? null, score: r.score, blobHash: r.blobHash, firstSeen: r.firstSeen })) } catch { sections.firstSeen = [] }
       try { sections.changePoints = computeConceptChangePoints(query, embedding, { topK: top }).points } catch { sections.changePoints = [] }
       try { sections.experts = computeExperts({ topN: top }) } catch { sections.experts = [] }
       const file = strArg(args, 'file')
@@ -1100,13 +1100,13 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       } else if (template === 'incident') {
         const q = query ?? ''
         const { embedding } = await embedFor(q)
-        try { sections.firstSeen = vectorSearch(embedding, { topK: top }).map((r) => ({ path: r.paths[0] ?? null, score: r.score, blobHash: r.blobHash, firstSeen: r.firstSeen })) } catch { sections.firstSeen = [] }
+        try { sections.firstSeen = (await vectorSearch(embedding, { topK: top })).map((r) => ({ path: r.paths[0] ?? null, score: r.score, blobHash: r.blobHash, firstSeen: r.firstSeen })) } catch { sections.firstSeen = [] }
         try { sections.changePoints = computeConceptChangePoints(q, embedding, { topK: top }).points } catch { sections.changePoints = [] }
         try { sections.experts = computeExperts({ topN: top }) } catch { sections.experts = [] }
       } else {
         const q = query ?? 'architecture changes quality'
         const { embedding } = await embedFor(q)
-        try { sections.topChangedConcepts = vectorSearch(embedding, { topK: top }).map((r) => ({ path: r.paths[0] ?? null, score: r.score, blobHash: r.blobHash })) } catch { sections.topChangedConcepts = [] }
+        try { sections.topChangedConcepts = (await vectorSearch(embedding, { topK: top })).map((r) => ({ path: r.paths[0] ?? null, score: r.score, blobHash: r.blobHash })) } catch { sections.topChangedConcepts = [] }
         try { sections.changePoints = computeConceptChangePoints(q, embedding, { topK: top }).points } catch { sections.changePoints = [] }
         try { sections.experts = computeExperts({ topN: top }) } catch { sections.experts = [] }
       }
@@ -1187,7 +1187,7 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       const caseResults: Array<{ query: string; precision: number; recall: number; mrr: number }> = []
       for (const c of cases) {
         const { embedding } = await embedFor(c.query)
-        const hits = vectorSearch(embedding, { topK: top })
+        const hits = await vectorSearch(embedding, { topK: top })
         const topPaths = hits.flatMap((h) => h.paths ?? []).slice(0, top)
         const expected = new Set(c.expected_paths)
         const matched = topPaths.filter((p) => expected.has(p))

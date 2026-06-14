@@ -49,10 +49,10 @@ export function registerSearchTools(server: McpServer) {
 
       let results = []
       if (hybrid) {
-        const hybridResults = hybridSearch(query, queryEmbedding, { topK: top_k, bm25Weight: bm25_weight, branch })
+        const hybridResults = await hybridSearch(query, queryEmbedding, { topK: top_k, bm25Weight: bm25_weight, branch })
         results = hybridResults
       } else {
-        results = vectorSearch(queryEmbedding, {
+        results = await vectorSearch(queryEmbedding, {
           topK: top_k,
           recent,
           alpha,
@@ -68,7 +68,7 @@ export function registerSearchTools(server: McpServer) {
       let commitText = ''
       if (include_commits) {
         try {
-          const commitResults = searchCommits(queryEmbedding, { topK: 10, model: provider.model })
+          const commitResults = await searchCommits(queryEmbedding, { topK: 10, model: provider.model })
           if (commitResults.length > 0) {
             commitText = '\n\nMatching commits:\n' + commitResults.map((c) => `${c.score.toFixed(3)}  ${c.paths[0] ?? '(unknown)'}  [${c.commitHash.slice(0, 7)}]  ${c.message}`).join('\n')
           }
@@ -102,7 +102,7 @@ export function registerSearchTools(server: McpServer) {
       if (!eRes.ok) return eRes.resp
       const embedding = eRes.embedding!
 
-      const results = vectorSearch(embedding, {
+      const results = await vectorSearch(embedding, {
         topK: top_k,
         searchChunks: level === 'chunk' || level === 'symbol',
         searchSymbols: level === 'symbol',
@@ -143,7 +143,7 @@ export function registerSearchTools(server: McpServer) {
         return { content: [{ type: 'text', text: `Error parsing date: ${msg}` }] }
       }
 
-      let results = vectorSearch(queryEmbedding, {
+      let results = await vectorSearch(queryEmbedding, {
         topK: top_k,
         before: beforeTs,
         after: afterTs,
@@ -186,10 +186,10 @@ export function registerSearchTools(server: McpServer) {
 
       let results
       if (hybrid) {
-        const hybridResults = hybridSearch(query, queryEmbedding, { topK: top_k, bm25Weight: bm25_weight, branch })
+        const hybridResults = await hybridSearch(query, queryEmbedding, { topK: top_k, bm25Weight: bm25_weight, branch })
         results = hybridResults
       } else {
-        results = vectorSearch(queryEmbedding, { topK: top_k, searchChunks: level === 'chunk' || chunks, searchSymbols: level === 'symbol', branch })
+        results = await vectorSearch(queryEmbedding, { topK: top_k, searchChunks: level === 'chunk' || chunks, searchSymbols: level === 'symbol', branch })
       }
 
       const sorted = [...results].sort((a, b) => {
@@ -212,7 +212,7 @@ export function registerSearchTools(server: McpServer) {
       let commitText = ''
       if (include_commits) {
         try {
-          const commitResults = searchCommits(queryEmbedding, { topK: 10, model: provider.model })
+          const commitResults = await searchCommits(queryEmbedding, { topK: 10, model: provider.model })
           if (commitResults.length > 0) {
             commitText = '\n\nMatching commits:\n' + commitResults.map((c) => `${c.score.toFixed(3)}  ${c.paths[0] ?? '(unknown)'}  [${c.commitHash.slice(0, 7)}]  ${c.message}`).join('\n')
           }

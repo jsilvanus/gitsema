@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('../src/core/search/analysis/vectorSearch.js', () => ({ vectorSearch: vi.fn().mockReturnValue([{ blobHash: 'b1' }, { blobHash: 'b2' }]) }))
+vi.mock('../src/core/search/analysis/vectorSearch.js', () => ({ vectorSearch: vi.fn().mockResolvedValue([{ blobHash: 'b1' }, { blobHash: 'b2' }]) }))
 vi.mock('../src/core/db/sqlite.js', () => ({ getActiveSession: vi.fn() }))
 
 import { computeOwnershipHeatmap } from '../src/core/search/ownershipHeatmap.js'
@@ -27,10 +27,10 @@ function makeRawDb() {
 
 describe('computeOwnershipHeatmap', () => {
   beforeEach(() => { vi.restoreAllMocks() })
-  it('computes simple ownership entries', () => {
+  it('computes simple ownership entries', async () => {
     const rawDb = makeRawDb()
     vi.mocked(getActiveSession).mockReturnValue({ rawDb } as any)
-    const res = computeOwnershipHeatmap({ embedding: [0.1,0.2], topK: 5, windowDays: 365 })
+    const res = await computeOwnershipHeatmap({ embedding: [0.1,0.2], topK: 5, windowDays: 365 })
     expect(res.length).toBeGreaterThan(0)
     expect(res[0]).toHaveProperty('authorName')
   })

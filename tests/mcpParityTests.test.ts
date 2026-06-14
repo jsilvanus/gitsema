@@ -230,8 +230,8 @@ describe('Core functions for missing MCP tools exist and return stable shapes', 
     expect(Array.isArray(results)).toBe(true)
   })
 
-  it('computeOwnershipHeatmap() returns an array on empty DB', () => {
-    const results = computeOwnershipHeatmap({ embedding: MOCK_VEC, topK: 5 })
+  it('computeOwnershipHeatmap() returns an array on empty DB', async () => {
+    const results = await computeOwnershipHeatmap({ embedding: MOCK_VEC, topK: 5 })
     expect(Array.isArray(results)).toBe(true)
   })
 })

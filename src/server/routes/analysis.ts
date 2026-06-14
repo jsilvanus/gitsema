@@ -513,7 +513,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     }
     const sections: Record<string, unknown> = {}
     try {
-      sections.firstSeen = vectorSearch(queryEmbedding, { topK: opts.top })
+      sections.firstSeen = await vectorSearch(queryEmbedding, { topK: opts.top })
     } catch (err) {
       sections.firstSeen = { error: err instanceof Error ? err.message : String(err) }
     }
@@ -635,7 +635,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     try {
-      const heatmap = computeOwnershipHeatmap({ embedding: queryEmbedding, topK: opts.top, windowDays: opts.windowDays })
+      const heatmap = await computeOwnershipHeatmap({ embedding: queryEmbedding, topK: opts.top, windowDays: opts.windowDays })
       res.json(heatmap)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
@@ -693,7 +693,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
         res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
         return
       }
-      try { sections.firstSeen = vectorSearch(emb, { topK: top }) }
+      try { sections.firstSeen = await vectorSearch(emb, { topK: top }) }
       catch (err) { sections.firstSeen = { error: err instanceof Error ? err.message : String(err) } }
       try { sections.changePoints = computeConceptChangePoints(opts.query!, emb, { topK: top }) }
       catch (err) { sections.changePoints = { error: err instanceof Error ? err.message : String(err) } }
@@ -710,7 +710,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
         res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
         return
       }
-      try { sections.topChangedConcepts = vectorSearch(emb, { topK: top }) }
+      try { sections.topChangedConcepts = await vectorSearch(emb, { topK: top }) }
       catch (err) { sections.topChangedConcepts = { error: err instanceof Error ? err.message : String(err) } }
       try { sections.changePoints = computeConceptChangePoints(query, emb, { topK: top }) }
       catch (err) { sections.changePoints = { error: err instanceof Error ? err.message : String(err) } }
@@ -772,7 +772,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       let topPaths: string[] = []
       try {
         const emb = await embedQuery(textProvider, c.query) as number[]
-        const hits = vectorSearch(emb, { topK })
+        const hits = await vectorSearch(emb, { topK })
         topPaths = hits.flatMap((h) => (h.paths ?? []).slice(0, 1))
       } catch {
         // leave topPaths empty

@@ -38,7 +38,7 @@ export async function ownershipCommand(query: string, options: OwnershipOptions)
   }
 
   try {
-    const heatmap = computeOwnershipHeatmap({ embedding: emb as any, topK: top, windowDays })
+    const heatmap = await computeOwnershipHeatmap({ embedding: emb as any, topK: top, windowDays })
     const sinks = resolveOutputs({ out: options.out, dump: options.dump })
     const jsonSink = getSink(sinks, 'json')
     if (jsonSink) {

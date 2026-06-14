@@ -114,7 +114,7 @@ export async function evalCommand(options: EvalCommandOptions): Promise<void> {
     let topPaths: string[] = []
     try {
       const embedding = await embedQuery(textProvider, c.query)
-      const hits = vectorSearch(embedding, { topK })
+      const hits = await vectorSearch(embedding, { topK })
       topPaths = hits.flatMap((h) => h.paths.slice(0, 1))
     } catch (err) {
       console.warn(`  Warning: search failed for "${c.query}": ${err instanceof Error ? err.message : String(err)}`)
