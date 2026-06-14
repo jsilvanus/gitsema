@@ -58,7 +58,7 @@ This repo uses [changesets](https://github.com/changesets/changesets) for versio
 
 ## Build & run
 
-**Requirements:** Node.js 18+, Git on `PATH`, and an embedding backend (Ollama or any OpenAI-compatible HTTP API).
+**Requirements:** Node.js 20+, Git on `PATH`, and an embedding backend (Ollama or any OpenAI-compatible HTTP API).
 
 ```bash
 pnpm install       # install dependencies
@@ -222,8 +222,47 @@ Manage persistent configuration (set/get/list/unset). Stored in `.gitsema/config
 
 Supported dot-notation keys for command defaults (see `src/core/config/configManager.ts`): `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `verbose`, `logMaxBytes`, `servePort`, `serveKey`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, and more. Use `gitsema config list` to see all active values and their sources.
 
-### `gitsema backfill-fts`
-Populate FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added). Required to use `--hybrid` search on older index entries.
+### `gitsema index backfill-fts`
+Populate FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added). Required to use `--hybrid` search on older index entries. The top-level `gitsema backfill-fts` is a hidden backward-compat alias.
+
+### `gitsema index <maintenance subcommand>`
+Maintenance operations on the active index, grouped under `gitsema index`:
+
+| Subcommand | Description |
+|---|---|
+| `gitsema index doctor [--lsp] [--extended]` | Integrity checks, schema/provenance checks, index health report |
+| `gitsema index vacuum` | `VACUUM`/`ANALYZE` the SQLite database |
+| `gitsema index gc [--dry-run]` | Garbage-collect unreachable blob records |
+| `gitsema index rebuild-fts [-y]` | Rebuild the FTS5 index from stored data |
+| `gitsema index backfill-fts` | Populate FTS5 content for pre-Phase-11 entries |
+| `gitsema index update-modules` | Recalculate directory centroid embeddings |
+| `gitsema index clear-model <model> [-y]` | Delete stored embeddings/cache for a model |
+| `gitsema index build-vss [--model] [--ef-construction] [--M]` | Build a usearch HNSW ANN index for fast approximate search |
+
+Older top-level forms (`gitsema doctor`, `vacuum`, `gc`, `rebuild-fts`, `update-modules`, `clear-model`, `build-vss`) remain as hidden, deprecated aliases.
+
+### `gitsema storage <subcommand>`
+Manage the pluggable storage backend (Phase 101–103). Backends: `sqlite` (default), `postgres` (+ pgvector), `qdrant` (vectors) + Postgres metadata. Selected via `storage.*` config keys / `GITSEMA_STORAGE_*` env vars (see Configuration).
+
+| Subcommand | Description |
+|---|---|
+| `gitsema storage info` (default) | Show the resolved backend/scope/location — no connections opened |
+| `gitsema storage migrate --to <sqlite\|postgres\|qdrant> [--to-path] [--to-metadata-url] [--to-vectors-url] [--to-vectors-api-key] [--to-fts-backend]` | Copy the active index into another backend; resumable, safe to re-run. Only sqlite sources are supported today. |
+
+### `gitsema setup` / `gitsema quickstart`
+Guided onboarding wizard (aliases of each other): detects an embedding provider, configures a model, lets you select a storage backend, and indexes HEAD in one step.
+
+### `gitsema repl`
+Interactive semantic search REPL — a query loop sharing one embedding provider/connection across queries.
+
+### `gitsema eval <file>`
+Evaluate retrieval quality (precision@k, recall@k, MRR) against a JSONL file of `{query, expectedPaths}` test cases.
+
+### `gitsema regression-gate [options]` / `gitsema code-review [options]`
+CI gates: `regression-gate` fails if key concepts drift beyond a threshold between two refs; `code-review` finds historical analogues for changed code and flags regressions. Same exit-code contract as `policy-check` (0/1/2/3).
+
+### `gitsema bisect <good> <bad> <query>`
+Semantic git bisect — binary search over commit history to find where a concept diverged from a "good" baseline.
 
 ### `gitsema narrate [options]`
 Return commit evidence (default, no LLM call) or an LLM-generated narrative of repository development history. Evidence-only mode is safe-by-default — no network calls unless `--narrate` is passed and a narrator model is configured (`gitsema models add <name> --narrator --http-url <url> --activate`). Supports `--since`/`--until`/`--range`, `--focus`, `--format md|text|json`, and `--out <spec>`.
@@ -232,7 +271,7 @@ Return commit evidence (default, no LLM call) or an LLM-generated narrative of r
 Return matching commits (default, no LLM call) or an LLM-generated explanation/timeline for a bug, error, or topic. Same safe-by-default and narrator-model conventions as `narrate`.
 
 ### `gitsema guide [question] [options]`
-Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured (no network access). When a model is configured, runs a real agentic tool-calling loop (`@jsilvanus/chattydeer` `runAgentLoop`, maxRoundtrips 5) against the full `GUIDE_TOOLS` registry in `src/core/narrator/guideTools.ts` — the same ~36 capabilities exposed as MCP tools (search, history, branch/merge, ownership, quality, diff/blame, clustering, workflow, admin). Index-gated tools return `{error}` gracefully when no `.gitsema` index exists. Supports `-i/--interactive` for a multi-turn REPL session (one agent session reused across turns).
+Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured (no network access). When a model is configured, runs a real agentic tool-calling loop (`@jsilvanus/chattydeer` `runAgentLoop`, maxRoundtrips 5) against the full `GUIDE_TOOLS` registry in `src/core/narrator/guideTools.ts` (46 tools, covering search, history, branch/merge, ownership, quality, diff/blame, clustering, workflow, admin — a superset of the 34 MCP tools below; Phase 104 is closing the remaining gaps). Index-gated tools return `{error}` gracefully when no `.gitsema` index exists. Supports `-i/--interactive` for a multi-turn REPL session (one agent session reused across turns).
 
 ---
 
@@ -262,6 +301,13 @@ git repo
    ↓
 [ src/core/db/ ]           schema.ts   — Drizzle ORM table definitions
    │                        sqlite.ts   — connection, WAL mode, versioned migrations, FTS5 init
+   ↓
+[ src/core/storage/ ]     types.ts          — MetadataStore / VectorStore / FtsStore interfaces (async)
+   │                        sqlite/           — default backend, wraps src/core/db
+   │                        postgres/         — Postgres metadata + pgvector vector store
+   │                        qdrant/           — Qdrant vector store (+ Postgres metadata/FTS)
+   │                        resolveProfile.ts — picks backend(s) from storage.* config / GITSEMA_STORAGE_*
+   │                        doctor.ts, migrate.ts — cross-store health checks and `storage migrate`
    ↓
 [ src/core/search/ ]       analysis/vectorSearch.ts  — cosine similarity, three-signal ranking
    │                        analysis/hybridSearch.ts  — vector + BM25 fusion
@@ -318,6 +364,14 @@ Configuration is via environment variables or the `gitsema config` command (pers
 | `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
 | `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
 | `GITSEMA_DATA_DIR` | `~/.gitsema/data` | Root directory for `gitsema tools serve`'s persisted repo clones + index DBs (`repos/<repoId>/{repo,index.db}`, `registry.db`) |
+| `GITSEMA_STORAGE_BACKEND` | `sqlite` | `sqlite` \| `postgres` \| `qdrant` — selects the storage profile (Phase 101–103) |
+| `GITSEMA_STORAGE_SCOPE` | *(optional)* | Scoping/namespace for shared backends (e.g. multi-repo Postgres/Qdrant) |
+| `GITSEMA_STORAGE_NAME` | *(optional)* | Logical name for the storage profile |
+| `GITSEMA_STORAGE_METADATA_URL` | *(required for postgres/qdrant)* | Postgres connection string for the `MetadataStore` (and `FtsStore` via tsvector) |
+| `GITSEMA_STORAGE_VECTORS_URL` | *(required for qdrant)* | Qdrant `http(s)://` URL for the `VectorStore` |
+| `GITSEMA_STORAGE_VECTORS_API_KEY` | *(optional)* | Qdrant API key |
+| `GITSEMA_STORAGE_FTS_BACKEND` | `tsvector` | `tsvector` \| `pg_search` \| `none` — FTS backend for non-sqlite profiles |
+| `GITSEMA_STORAGE_FTS_URL` | *(optional)* | Override connection string for the `FtsStore` |
 
 **Ollama quick start:**
 ```bash
@@ -340,10 +394,12 @@ gitsema index
 
 ## Database
 
-- **Location:** `.gitsema/index.db` (relative to the indexed repo root)
+- **Location (default sqlite backend):** `.gitsema/index.db` (relative to the indexed repo root)
 - **Engine:** SQLite via `better-sqlite3`, WAL mode enabled
 - **ORM:** Drizzle ORM (`src/core/db/schema.ts`)
 - **Add to `.gitignore`:** `.gitsema/`
+
+**Pluggable storage backends (Phase 101–103):** all reads/writes go through async `MetadataStore` / `VectorStore` / `FtsStore` interfaces (`src/core/storage/types.ts`). The default `sqlite` backend wraps the schema below; `postgres` routes metadata + FTS through Postgres (pgvector for vectors), and `qdrant` uses Qdrant for vectors with Postgres for metadata/FTS. Select via `storage.*` config or `GITSEMA_STORAGE_*` env vars (see Configuration), inspect with `gitsema storage info`, and copy between backends with `gitsema storage migrate`.
 
 **Schema overview (current schema v23):**
 
