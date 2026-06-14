@@ -1,7 +1,8 @@
 # Storage Backends & Index Scoping — Design Plan
 
 **Status:** accepted — direction is **Option 1** (split `MetadataStore` +
-`VectorStore`), three phases, async seam first. Implementation not started.
+`VectorStore` + `FtsStore`), three phases, async seam first. Implementation not
+started.
 **Targets:** Phases 101–103 (async seam first, then pgvector + Qdrant)
 **Scope:** Pluggable storage backends (SQLite · Postgres+pgvector · Qdrant),
 local or remote, with a clear index-scoping model (project / user / named).
@@ -105,39 +106,49 @@ From the architecture study:
 The user asked to *explain the choices* rather than pre-pick one. Here they
 are, with the trade-offs that matter.
 
-### Option 1 — **Split into two stores: `MetadataStore` + `VectorStore`** ⭐ recommended
+### Option 1 — **Split into three stores: `MetadataStore` + `VectorStore` + `FtsStore`** ⭐ recommended
 
 Keep a **relational metadata store always present** (SQLite *or* Postgres),
 holding everything that is fundamentally relational — blobs, paths, commits,
 `blob_commits`, branches, chunks/symbols metadata, clusters metadata, config,
-settings, repos, FTS/BM25. Make **only the vector store pluggable**: SQLite
-BLOB, pgvector, or Qdrant.
+settings, repos. Make the **vector store** pluggable (SQLite BLOB, pgvector,
+Qdrant) **and** the **keyword/BM25 store** (`FtsStore`) independently pluggable
+(SQLite FTS5, Postgres `tsvector`/`pg_search`, or a dedicated search engine).
+
+A `StorageProfile` wires up all three; a backend may implement one, two, or all
+three interfaces. `FtsStore` is **optional** — a profile with `fts: null` simply
+has no keyword search, and `--hybrid` reports "unavailable" instead of erroring.
 
 ```
-                 ┌──────────────────────┐      ┌─────────────────────┐
-   indexer ───►  │   MetadataStore       │      │    VectorStore      │
-   search  ───►  │ (SQLite | Postgres)   │ ───► │ (SQLite | pgvector  │
-                 │  blobs, paths, FTS…   │      │  | Qdrant)          │
-                 └──────────────────────┘      └─────────────────────┘
+                 ┌─────────────────────┐   ┌────────────────────┐   ┌──────────────────────┐
+   indexer ───►  │   MetadataStore     │   │    VectorStore     │   │   FtsStore (opt.)    │
+   search  ───►  │ (SQLite | Postgres) │   │ (SQLite | pgvector │   │ (FTS5 | tsvector /   │
+                 │  blobs, paths,      │   │  | Qdrant)         │   │  pg_search | engine) │
+                 │  commits, branches… │   │  embeddings        │   │  BM25 keyword search │
+                 └─────────────────────┘   └────────────────────┘   └──────────────────────┘
 ```
 
 - **Pros:**
   - Matches the user's own observation — "some data cannot be placed into
     qdrant, so it's likely stored in db anyway." This makes that a *first-class*
     design fact instead of a workaround.
-  - Smallest *conceptual* blast radius: the relational schema we already have
-    barely changes; FTS5/BM25 stays in SQL where it belongs.
-  - Natural Postgres story: `postgres` metadata + `pgvector` vectors are the
-    *same* Postgres connection — one backend, two interfaces.
-  - Qdrant becomes "just a vector store"; pair it with SQLite or Postgres for
-    metadata. No need to reinvent the commit graph in Qdrant.
+  - **Keyword search is independently swappable.** BM25 differs the most across
+    backends (FTS5 vs `tsvector` vs none-in-Qdrant), so giving it its own seam
+    lets us later drop in OpenSearch / Tantivy / Meilisearch without touching
+    metadata, and lets hybrid search be cleanly optional.
+  - Natural Postgres story: `postgres` metadata + `pgvector` vectors +
+    `tsvector` FTS are all the *same* Postgres connection — one backend, three
+    interfaces.
+  - Qdrant becomes "just a vector store"; pair it with SQLite/Postgres metadata
+    and any `FtsStore`. No need to reinvent the commit graph in Qdrant.
 - **Cons:**
-  - Two coordinated stores → write paths must keep them consistent (a blob's
-    metadata row and its vector). Needs a documented consistency story
-    (idempotent re-index already gives us most of this — see §8).
-  - With Qdrant, a write spans two systems (no single transaction). Acceptable
-    because indexing is idempotent and content-addressed (re-running heals
-    drift).
+  - Three coordinated stores → write paths must keep them consistent (a blob's
+    metadata row, its vector, and its FTS content). Needs a documented
+    consistency story (idempotent re-index already gives us most of this — §8).
+  - With Qdrant (or an external FTS engine), a write spans multiple systems (no
+    single transaction). Acceptable because indexing is idempotent and
+    content-addressed (re-running heals drift); `doctor` checks all three stores
+    for orphans.
 
 ### Option 2 — **One `StorageBackend` interface covering everything**
 
@@ -167,8 +178,8 @@ pgvector/Qdrant.
 
 ### Decision
 
-**Option 1 — split `MetadataStore` + `VectorStore` — is the chosen direction.**
-It is the only option that (a) honors the "some data can't go in
+**Option 1 — split `MetadataStore` + `VectorStore` + `FtsStore` — is the chosen
+direction.** It is the only option that (a) honors the "some data can't go in
 Qdrant" reality as a design principle, (b) still unlocks a fully-remote
 all-Postgres deployment for teams, and (c) keeps the FTS/commit-graph/temporal
 machinery in the relational world where it's cheap, instead of forcing it
@@ -188,7 +199,7 @@ there without a destabilizing big-bang.
 
 ### Strategy A — **Async interface, phased call-site migration** ⭐ recommended
 
-Make `MetadataStore`/`VectorStore` methods `async`. The SQLite adapter wraps its
+Make the `MetadataStore`/`VectorStore`/`FtsStore` methods `async`. The SQLite adapter wraps its
 synchronous calls in already-resolved promises (zero real cost). Migrate call
 sites to `await` incrementally, **slice by slice**, behind a green test suite:
 
@@ -260,40 +271,53 @@ export type VectorKind = 'file' | 'chunk' | 'symbol' | 'module' | 'commit'
 
 export interface MetadataStore {
   // relational surface: blobs, paths, commits, blob_commits, branches,
-  // chunks, symbols, clusters, config, settings, repos, fts/bm25…
+  // chunks, symbols, clusters, config, settings, repos…
   // (mirrors today's blobStore + query helpers, made async)
-  bm25(query: string, limit: number): Promise<Bm25Hit[]>
-  // …plus the existing query helpers, behind one async seam
+  // …the existing query helpers, behind one async seam
+}
+
+// keyword / BM25 store — independently pluggable, and OPTIONAL
+export interface FtsStore {
+  index(blobHash: string, content: string): Promise<void>
+  search(query: string, limit: number): Promise<Bm25Hit[]>  // returns blob_hash + score
+  delete(blobHashes: string[]): Promise<void>
 }
 
 export interface StorageProfile {
   metadata: MetadataStore
   vectors: VectorStore
+  fts: FtsStore | null   // null ⇒ no keyword search; --hybrid reports unavailable
 }
 ```
 
 ### 6.2 Table → store mapping
 
-| Data | sqlite profile | postgres profile | qdrant profile |
+| Store | sqlite profile | postgres profile | qdrant profile |
 |---|---|---|---|
-| blobs, paths, commits, blob_commits, branches, chunks, symbols (metadata), clusters meta, repos, tokens, config, settings, indexed_commits, checkpoints | SQLite tables | Postgres tables | **SQLite or Postgres** (companion) |
-| FTS / BM25 | SQLite FTS5 | Postgres `tsvector` (or ParadeDB `pg_search` BM25) | companion store's FTS |
-| file/chunk/symbol/module/commit embeddings | SQLite BLOB (+ usearch) | `vector` columns (pgvector, HNSW/IVFFlat) | Qdrant collections (one per kind) |
+| **MetadataStore** — blobs, paths, commits, blob_commits, branches, chunks, symbols (metadata), clusters meta, repos, tokens, config, settings, indexed_commits, checkpoints | SQLite tables | Postgres tables | **SQLite or Postgres** (companion) |
+| **VectorStore** — file/chunk/symbol/module/commit embeddings | SQLite BLOB (+ usearch) | `vector` columns (pgvector, HNSW/IVFFlat) | Qdrant collections (one per kind) |
+| **FtsStore** — keyword/BM25 (optional) | SQLite FTS5 | Postgres `tsvector` (or ParadeDB `pg_search`) | companion's FTS, an external engine, or `null` |
 | query embedding cache, projections, blob_clusters centroid | SQLite BLOB | pgvector | stay in companion relational store (small, not worth Qdrant) |
 
 > **Why the companion store for Qdrant:** Qdrant holds vectors + a small payload
 > for filtering (model, blob_hash, branch, first_seen). Everything relational
-> (commit graph, ownership, temporal joins, FTS) lives in the SQLite/Postgres
-> companion. This is the concrete form of the user's "some data is stored in db
-> anyway."
+> (commit graph, ownership, temporal joins) lives in the SQLite/Postgres
+> companion, and keyword search lives in whatever `FtsStore` the profile names.
+> This is the concrete form of the user's "some data is stored in db anyway."
 
-### 6.3 BM25 per backend
+### 6.3 `FtsStore` (BM25) per backend
+
+The `FtsStore` seam isolates the part that differs most across backends. Scores
+are normalized the same way `hybridSearch.ts` already does, so the vector⊕BM25
+fusion math stays backend-independent.
 
 - **sqlite:** unchanged FTS5 `bm25()`.
 - **postgres:** `tsvector` + `ts_rank_cd` as a baseline; optionally ParadeDB's
-  `pg_search` for true BM25 if available. We normalize scores the same way
-  `hybridSearch.ts` already does, so the fusion math is backend-independent.
-- **qdrant:** BM25 comes from the companion relational store (FTS5 or Postgres).
+  `pg_search` for true BM25 if available (the Phase 102 open question).
+- **qdrant:** no native BM25 — pair with a companion `FtsStore` (FTS5/Postgres)
+  or an external engine; or `null` for vector-only deployments.
+- **future:** a dedicated engine (OpenSearch / Tantivy / Meilisearch) can be
+  added as just another `FtsStore` implementation, touching nothing else.
 
 ### 6.4 Vector search per backend
 
@@ -313,13 +337,20 @@ export interface StorageProfile {
 ### 7.1 New config keys (under existing `gitsema config` system)
 
 ```
-storage.backend         sqlite | postgres | qdrant         (default: sqlite)
-storage.scope           project | user | named             (default: project)
-storage.metadata.url    file path | postgres://…           (metadata store)
-storage.vectors.url     (qdrant only) https://qdrant:6333  (vector store)
-storage.vectors.apiKey  (qdrant/pg auth)
-storage.name            <named-index>                       (when scope=named)
+storage.backend         sqlite | postgres | qdrant   preset wiring all three   (default: sqlite)
+storage.scope           project | user | named                                 (default: project)
+storage.metadata.url    file path | postgres://…      MetadataStore
+storage.vectors.url     (e.g. qdrant) https://host…    VectorStore   (else inferred from preset)
+storage.vectors.apiKey  vector store auth
+storage.fts.backend     fts5 | tsvector | none | …     FtsStore      (else inferred from preset)
+storage.fts.url         (external engine only)
+storage.name            <named-index>                  when scope=named
 ```
+
+`storage.backend` is a **preset** that picks sensible defaults for all three
+stores (e.g. `qdrant` ⇒ Qdrant vectors + SQLite metadata + SQLite FTS). The
+per-store keys override individual seams, so a power user can mix freely (e.g.
+Postgres metadata + Qdrant vectors + `fts.backend=none`).
 
 - **Resolution order** (unchanged precedence): env vars → repo `.gitsema/config.json`
   → user `~/.config/gitsema/config.json` → defaults.
@@ -345,10 +376,10 @@ No separate "local vs remote" flag needed — the URL scheme says it.
 ## 8. Consistency & portability
 
 - **Indexing is idempotent and content-addressed**, so a partial write (e.g.
-  metadata committed, Qdrant upsert failed) self-heals on the next `index` run:
-  the deduper sees the blob is missing its vector and re-embeds only that one.
-  We document this and add a `gitsema doctor` check that reports
-  metadata-without-vector (and vice versa) orphans per backend.
+  metadata committed, Qdrant upsert failed, or FTS not yet written) self-heals on
+  the next `index` run: the deduper sees the blob is missing its vector/FTS entry
+  and re-processes only that one. We document this and add a `gitsema doctor`
+  check that reports orphans across all three stores (metadata ↔ vector ↔ FTS).
 - **`gitsema storage migrate --from <profile> --to <profile>`** (Phase 103):
   stream blobs/embeddings from one profile to another. Because identity is the
   blob hash, this is a straight copy with re-`upsert` into the target — no
@@ -372,10 +403,11 @@ The big, mostly-mechanical phase. Ships **no new backend and no behavior
 change** — it only relocates today's logic behind an async interface and makes
 gitsema scope-aware.
 
-- Introduce `src/core/storage/` (`MetadataStore`, `VectorStore`,
+- Introduce `src/core/storage/` (`MetadataStore`, `VectorStore`, `FtsStore`,
   `StorageProfile`) with **async** signatures (Strategy A, §5).
-- Implement the **SQLite adapter** wrapping today's code (sync calls returned as
-  resolved promises — zero real cost).
+- Implement the **SQLite adapter** for all three interfaces wrapping today's
+  code (sync calls returned as resolved promises — zero real cost; `FtsStore` =
+  FTS5).
 - Migrate the **vector read path** (`vectorSearch`/`hybridSearch`/`commitSearch`)
   and the **indexing write path** (`blobStore`/`indexer`/`deduper`) to the seam,
   slice by slice, behind the green test suite. Long-tail relational queries stay
@@ -388,7 +420,7 @@ gitsema scope-aware.
 
 ### Phase 102 — Postgres metadata + pgvector
 
-- Postgres `MetadataStore` (relational schema + `tsvector`/`ts_rank_cd` BM25,
+- Postgres `MetadataStore` + Postgres `FtsStore` (`tsvector`/`ts_rank_cd` BM25,
   `pg_search` BM25 as opt-in).
 - pgvector `VectorStore` (HNSW index, wider ANN candidate pool re-ranked by the
   existing JS three-signal ranking for parity).
@@ -397,7 +429,7 @@ gitsema scope-aware.
 ### Phase 103 — Qdrant + portability/ops
 
 - Qdrant `VectorStore` paired with a SQLite **or** Postgres metadata companion
-  (collection-per-kind, payload filters, JS re-rank for scoring parity).
+  and `FtsStore` (collection-per-kind, payload filters, JS re-rank for parity).
 - `gitsema storage migrate --from <profile> --to <profile>` (hash-keyed copy, no
   re-embedding — §8).
 - `gitsema doctor` cross-store orphan checks; `gitsema status` reports the active

@@ -3534,17 +3534,19 @@ pgvector, Qdrant) instead of only local SQLite, with a clear index-scoping model
 **Design:** Full design and rationale (axes, abstraction-option trade-offs,
 async strategy, table→store mapping, BM25 per backend, consistency/portability)
 live in [`docs/storage-backends-plan.md`](storage-backends-plan.md). Chosen
-direction: split into a **`MetadataStore` + `VectorStore`** seam (relational
-metadata always present; vector store pluggable), migrated behind an **async**
+direction: split into a **`MetadataStore` + `VectorStore` + `FtsStore`** seam
+(relational metadata always present; vector store and keyword/BM25 store each
+independently pluggable, `FtsStore` optional), migrated behind an **async**
 interface.
 
 **Phases:**
 - **Phase 101 — Async storage seam (foundation):** introduce
-  `src/core/storage/` async interfaces + SQLite adapter; migrate the vector
-  read path and indexing write path to the seam; add `storage.*` config and the
-  scope model. No new backend, no behavior change.
-- **Phase 102 — Postgres metadata + pgvector:** Postgres `MetadataStore`
-  (`tsvector` BM25) + pgvector `VectorStore`.
+  `src/core/storage/` async interfaces (`MetadataStore`/`VectorStore`/`FtsStore`)
+  + SQLite adapter; migrate the vector read path and indexing write path to the
+  seam; add `storage.*` config and the scope model. No new backend, no behavior
+  change.
+- **Phase 102 — Postgres metadata + pgvector:** Postgres `MetadataStore` +
+  `FtsStore` (`tsvector` BM25) + pgvector `VectorStore`.
 - **Phase 103 — Qdrant + portability/ops:** Qdrant `VectorStore` with a
   relational companion store; `gitsema storage migrate`, doctor orphan checks,
   status backend reporting.
