@@ -1,6 +1,7 @@
 # Storage Backends & Index Scoping — Design Plan
 
-**Status:** proposed (planning only — no code yet)
+**Status:** accepted — direction is **Option 1** (split `MetadataStore` +
+`VectorStore`), three phases, async seam first. Implementation not started.
 **Targets:** Phases 101–103 (async seam first, then pgvector + Qdrant)
 **Scope:** Pluggable storage backends (SQLite · Postgres+pgvector · Qdrant),
 local or remote, with a clear index-scoping model (project / user / named).
@@ -164,9 +165,10 @@ pgvector/Qdrant.
   still needs a local SQLite metadata file, which undercuts the "shared team
   index in our Postgres" use case. A dead end for the team scenario.
 
-### Recommendation
+### Decision
 
-**Option 1.** It is the only one that (a) honors the "some data can't go in
+**Option 1 — split `MetadataStore` + `VectorStore` — is the chosen direction.**
+It is the only option that (a) honors the "some data can't go in
 Qdrant" reality as a design principle, (b) still unlocks a fully-remote
 all-Postgres deployment for teams, and (c) keeps the FTS/commit-graph/temporal
 machinery in the relational world where it's cheap, instead of forcing it
