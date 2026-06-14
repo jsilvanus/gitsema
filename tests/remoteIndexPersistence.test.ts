@@ -47,7 +47,7 @@ vi.mock('../src/core/indexing/indexer.js', () => ({
 
 import { createApp } from '../src/server/app.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
-import { getRegistrySession, normalizeRepoUrl, deriveRepoId, registerPersistedRepo, getRepoClonePath, getRepoDbPath } from '../src/core/indexing/repoRegistry.js'
+import { getRegistrySession, closeRegistrySession, normalizeRepoUrl, deriveRepoId, registerPersistedRepo, getRepoClonePath, getRepoDbPath } from '../src/core/indexing/repoRegistry.js'
 
 const mockProvider: EmbeddingProvider = {
   model: 'mock',
@@ -68,6 +68,9 @@ afterEach(() => {
 
 afterAll(() => {
   delete process.env.GITSEMA_DATA_DIR
+  // Close the registry's sqlite handle first — on Windows, an open
+  // WAL-mode database file cannot be unlinked while held open.
+  closeRegistrySession()
   rmSync(dataDir, { recursive: true, force: true })
 })
 

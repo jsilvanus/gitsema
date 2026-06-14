@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { getActiveSession, openDatabaseAt, getOrOpenSessionAtPath } from '../db/sqlite.js'
+import { getActiveSession, openDatabaseAt, getOrOpenSessionAtPath, closeSessionAtPath } from '../db/sqlite.js'
 import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import type { SearchResult, Embedding } from '../models/types.js'
 import { mergeSearchResults } from '../search/analysis/vectorSearch.js'
@@ -154,6 +154,17 @@ export function getRegistrySession(): ReturnType<typeof getOrOpenSessionAtPath> 
     _registrySession = getOrOpenSessionAtPath(join(getDataDir(), 'registry.db'))
   }
   return _registrySession
+}
+
+/**
+ * Closes the cached registry session (if open), releasing its sqlite file
+ * handle. Used in tests on Windows, where an open WAL-mode database file
+ * cannot be deleted while held open.
+ */
+export function closeRegistrySession(): void {
+  if (!_registrySession) return
+  closeSessionAtPath(_registrySession.dbPath)
+  _registrySession = undefined
 }
 
 /**

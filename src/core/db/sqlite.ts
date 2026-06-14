@@ -468,3 +468,15 @@ export function getOrOpenSessionAtPath(dbPath: string): DbSession {
   _pathSessions.set(dbPath, session)
   return session
 }
+
+/**
+ * Closes and evicts a cached path-keyed DB session (if open), releasing its
+ * underlying sqlite file handle. Used in tests on Windows, where an open
+ * WAL-mode database file cannot be deleted while held open.
+ */
+export function closeSessionAtPath(dbPath: string): void {
+  const existing = _pathSessions.get(dbPath)
+  if (!existing) return
+  existing.rawDb.close()
+  _pathSessions.delete(dbPath)
+}
