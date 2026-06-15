@@ -3881,3 +3881,41 @@ in parallel or last.
 - Slice 3's optional narrator/guide step (step 7) only offers local Ollama
   configuration, matching the spec's "if Ollama is detected" framing; HTTP/CLI
   narrator backends are configured separately via `gitsema models add`.
+
+---
+
+## Knowledge Graph Track (Phases 105–110) — *planned*
+
+> **Full design:** [`docs/knowledge-graph.md`](knowledge-graph.md) is the single
+> design reference for this track (two-level symbol identity, schema, per-language
+> name-resolution heuristics, edge taxonomy, traversal layer). Phase entries below
+> are summaries — do not restate the design here; update the design doc instead.
+
+**Motivation.** gitsema is semantic-embedding-first: vectors, FTS, and relational
+metadata already agree on one canonical ID (`blob_hash`). What's missing is a
+**structural truth layer** — typed, queryable, temporally-aware edges
+(`calls`/`imports`/`defines`/`extends`) between **stable symbol nodes**. Today
+`symbols` carry only a bare name/kind/line-range with an unstable auto-increment PK,
+extraction walks only top-level `rootNode.namedChildren`, and `impact.ts` coupling
+is purely semantic. This track adds the graph without violating blob-first /
+immutable / Git-is-truth.
+
+**Core decision (two-level identity).** Immutable per-blob *symbol occurrences*
+(dedup'd by blob hash, like embeddings) vs. recomputable *symbol nodes* keyed by
+`symbol_key = path#qualified_name#signature_hash`. Edges connect stable nodes but
+carry Git provenance (`first/last_seen_commit`), so temporal edges come for free.
+Graph is **relational-only** (SQLite + Postgres recursive CTEs); Qdrant `GraphStore`
+fails loud (cf. review9 §4). First languages: **TS/JS + Python**, then Go/Rust/Java.
+
+| Phase | Title | Schema | Deliverable |
+|---|---|---|---|
+| **105** | Stable symbol identity | v24 | Recursive scope-stack extraction → `qualified_name`, `signature`, `signature_hash`, `parent_symbol_key`, `symbol_key` on `symbols`. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
+| **106** | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
+| **107** | Linking pass + `edges` table | v26 | `gitsema graph build` resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Queryable `symbol_nodes` + `edges`. |
+| **108** | Traversal + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. Makes `impact` structural. |
+| **109** | Cascade query planner | — | `FTS filter → vector expand → graph traversal → merge/rerank`; structural signal in ranking. |
+| **110** | Unified graph UI | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. |
+
+Each phase ends with working software, tests, a `features.md` entry, a `PLAN.md`
+status update, and a changeset. **Start point: Phase 105** (isolated, test-heavy,
+ships qualified names before any edge depends on it).
