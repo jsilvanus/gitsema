@@ -9,6 +9,7 @@ import type { Embedding } from '../models/types.js'
 import { RoutingProvider } from '../embedding/router.js'
 import { getFileCategory } from '../embedding/fileType.js'
 import { createChunker, type ChunkStrategy, type ChunkOptions } from '../chunking/chunker.js'
+import { extractStructuralRefs } from '../chunking/structuralRefs.js'
 import { logger } from '../../utils/logger.js'
 import { createLimiter } from '../../utils/concurrency.js'
 import { extname, dirname } from 'node:path'
@@ -90,6 +91,12 @@ export interface IndexerOptions {
   computeModuleEmbedding?: boolean
   quantize?: boolean
   /**
+   * When true, extract structural references (imports/calls/extends/implements)
+   * for TS/TSX/JS/Python blobs and store them in `structural_refs` (Phase 106,
+   * knowledge-graph §3.2). Default: false (no-op for other backends/languages).
+   */
+  graph?: boolean
+  /**
    * Number of texts to send in a single `embedBatch()` call when the provider
    * supports it (only used when `--chunker file`, the default).
    *
@@ -140,6 +147,8 @@ export interface IndexStats {
   commitEmbeddings: number
   /** Number of commit message embedding failures (Phase 30). */
   commitEmbedFailed: number
+  /** Number of structural-reference rows stored (Phase 106, `index --graph`). */
+  structuralRefs: number
   /** Current pipeline stage (used by progress renderer) */
   currentStage: 'collecting' | 'embedding' | 'commit-mapping' | 'done'
   /** Per-stage wall-clock time in ms (set at completion) */
@@ -207,6 +216,28 @@ function detectLanguageForPath(filePath: string): string {
 }
 
 /**
+ * Extracts and stores structural references (imports/calls/extends/implements)
+ * for one blob when `--graph` is enabled (Phase 106, knowledge-graph §3.2).
+ * Unsupported languages and parse failures are no-ops (graceful degradation).
+ */
+async function maybeExtractStructuralRefs(
+  profile: ReturnType<typeof getCachedStorageProfile>,
+  blobHash: string,
+  path: string,
+  text: string,
+  stats: IndexStats,
+): Promise<void> {
+  try {
+    const refs = extractStructuralRefs(text, path)
+    if (refs.length === 0) return
+    await profile.metadata.storeStructuralRefs(blobHash, refs)
+    stats.structuralRefs += refs.length
+  } catch (err) {
+    logger.debug?.(`Structural ref extraction failed for ${path}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
  * Builds the enriched text for a symbol embedding.  Including the file path,
  * symbol kind, and symbol name in the preamble lets the embedding model
  * capture the symbol's identity context alongside its code content.
@@ -244,6 +275,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     chunkerOptions = {},
     branchFilter,
     computeModuleEmbedding = true,
+    graph = false,
     onProgress,
   } = options
   const { quantize = false } = options
@@ -302,7 +334,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
     embedFailed: 0, otherFailed: 0,
     fbFunction: 0, fbFixed: 0,
     queued: 0, elapsed: 0, commits: 0, blobCommits: 0, chunks: 0, symbols: 0,
-    moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0,
+    moduleEmbeddings: 0, commitEmbeddings: 0, commitEmbedFailed: 0, structuralRefs: 0,
     currentStage: 'collecting',
     stageTimings: { collection: 0, embedding: 0, commitMapping: 0 },
     embedLatencyAvgMs: 0,
@@ -708,6 +740,7 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         try {
           await profile.writeFileBlob({ blobHash: entry.blobHash, size: content.length, path: entry.path, model: provider.model, embedding, fileType, content: text, quantize })
           stats.indexed++
+          if (graph) await maybeExtractStructuralRefs(profile, entry.blobHash, entry.path, text, stats)
         } catch (err) {
           logger.error(`Failed to store blob ${entry.blobHash}: ${err instanceof Error ? err.message : String(err)}`)
           stats.failed++
@@ -769,6 +802,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
         const fileType = getFileCategory(path)
         const activeProvider = router ? router.providerForFile(path) : provider
         const text = content.toString('utf8')
+
+        if (graph) await maybeExtractStructuralRefs(profile, blobHash, path, text, stats)
 
         if (useChunking) {
           // Chunked indexing: always produce a Level-1 whole-file embedding first

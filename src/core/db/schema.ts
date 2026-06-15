@@ -225,6 +225,30 @@ export const symbolEmbeddings = sqliteTable('symbol_embeddings', {
 }))
 
 /**
+ * Raw, unresolved structural references extracted from one blob (Phase 106,
+ * knowledge-graph §3.2). Immutable and dedup'd by `blob_hash` — the same blob
+ * is parsed exactly once. Resolution to typed graph edges happens later
+ * (Phase 107); this table only records what the parser literally saw.
+ *
+ * Supported for TS/TSX/JS/Python only (`gitsema index --graph`); other
+ * languages produce no rows.
+ */
+export const structuralRefs = sqliteTable('structural_refs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  blobHash: text('blob_hash').notNull().references(() => blobs.blobHash),
+  /** Path-free qualified name of the referencing scope, or null = file/top-level scope. */
+  enclosingQualifiedName: text('enclosing_qualified_name'),
+  /** One of: import | call | extends | implements | reference. */
+  refKind: text('ref_kind').notNull(),
+  /** Literal text as written: imported name, callee name, base class name, etc. */
+  rawTarget: text('raw_target').notNull(),
+  /** For imports: the raw, unresolved module specifier. */
+  targetModule: text('target_module'),
+  /** 1-indexed line number. */
+  line: integer('line').notNull(),
+})
+
+/**
  * Semantic embedding of a Git commit message (Phase 30).
  *
  * Stores the vector representation of a commit's message text so the index

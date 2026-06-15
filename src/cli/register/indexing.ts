@@ -120,6 +120,10 @@ export function registerIndexing(program: Command) {
       '--level <level>',
       'indexing granularity: blob (one embedding per file, same as --chunker file), function (function/class boundaries, same as --chunker function), fixed (fixed-size windows). Alias for --chunker.',
     )
+    .option(
+      '--graph',
+      'extract structural references (imports/calls/extends/implements) for TS/TSX/JS/Python blobs and store them in structural_refs (Phase 106 knowledge-graph track)',
+    )
     .action(indexStartCommand)
 
   indexSub
