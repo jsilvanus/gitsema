@@ -173,6 +173,11 @@ Manage persisted repos with `gitsema repos list-persisted` and
 `gitsema repos remove <repoId> [--purge]`. See
 [`docs/features.md`](docs/features.md#persistent-server-side-repo-storage) for details.
 
+> **Deploying the server?** See the [deployment guide](docs/deploy.md) for Docker /
+> docker-compose, systemd, the Postgres + Qdrant backends, key security, backups,
+> and per-repo-size tuning. The repo also ships `docker-compose.yml` (Ollama
+> sidecar), `docker-compose.postgres.yml` (pgvector), and `docker-compose.qdrant.yml`.
+
 ### Search & Discovery
 
 | Command | Description |
@@ -510,6 +515,7 @@ See [`CLAUDE.md`](CLAUDE.md#mcp-integration) for the full tool list and VS Code 
 
 | Document | Purpose |
 |---|---|
+| [`docs/deploy.md`](docs/deploy.md) | Deployment guide: running the HTTP server (Docker / docker-compose / systemd), Postgres + Qdrant backends, securing keys, backups, and tuning |
 | [`docs/features.md`](docs/features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
 | [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
 | [`CLAUDE.md`](CLAUDE.md) | Architecture, schema, configuration, and development conventions |
