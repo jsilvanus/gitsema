@@ -70,5 +70,5 @@ export interface SearchResult {
   /** Cluster label from `cluster_assignments` — populated by `--annotate-clusters` on the search command. */
   clusterLabel?: string
   /** When explain=true, breakdown of score components. */
-  signals?: { cosine: number; recency?: number; pathScore?: number; bm25?: number }
+  signals?: { cosine: number; recency?: number; pathScore?: number; bm25?: number; structural?: number }
 }

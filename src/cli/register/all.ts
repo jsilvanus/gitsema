@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { collectOut } from '../../utils/outputSink.js'
+import { addLensOption } from '../lib/lens.js'
 
 // Per-domain register helpers (keep existing split modules available)
 import { registerSetup } from './setup.js'
@@ -330,22 +331,24 @@ export function registerAll(program: Command) {
     .option('--narrate', 'generate an LLM narrative of dead concepts (requires GITSEMA_LLM_URL)')
     .action(deadConceptsCommand)
 
-  program
-    .command('impact <path>')
-    .description('Compute semantically similar blobs across the codebase to highlight refactor impact (see also: blame, file-diff)')
-    .option('-k, --top <n>', 'number of similar blobs to return', '10')
-    .option('--chunks', 'include chunk-level embeddings for finer-grained coupling')
-    .option('--level <level>', 'search level: file (default), chunk, or symbol')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
-    .option('--model <model>', 'override embedding model')
-    .option('--text-model <model>', 'override text embedding model')
-    .option('--code-model <model>', 'override code embedding model')
-    .option('--branch <name>', 'restrict results to blobs seen on this branch')
-    .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise impact.html (legacy: prefer --out html)')
-    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
-    .option('--no-headings', "don't print section header")
-    .option('--narrate', 'generate an LLM narrative of the impact report (requires GITSEMA_LLM_URL)')
-    .action(impactCommand)
+  addLensOption(
+    program
+      .command('impact <path>')
+      .description('Compute semantically similar blobs across the codebase to highlight refactor impact (see also: blame, file-diff, blast-radius)')
+      .option('-k, --top <n>', 'number of similar blobs to return', '10')
+      .option('--chunks', 'include chunk-level embeddings for finer-grained coupling')
+      .option('--level <level>', 'search level: file (default), chunk, or symbol')
+      .option('--dump [file]', 'output structured JSON; writes to <file> if given, otherwise prints JSON to stdout (legacy: prefer --out json)')
+      .option('--model <model>', 'override embedding model')
+      .option('--text-model <model>', 'override text embedding model')
+      .option('--code-model <model>', 'override code embedding model')
+      .option('--branch <name>', 'restrict results to blobs seen on this branch')
+      .option('--html [file]', 'output interactive HTML; writes to <file> if given, otherwise impact.html (legacy: prefer --out html)')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump/--html)', collectOut, [] as string[])
+      .option('--no-headings', "don't print section header")
+      .option('--narrate', 'generate an LLM narrative of the impact report (requires GITSEMA_LLM_URL)'),
+    'semantic',
+  ).action(impactCommand)
 
   program
     .command('clusters')

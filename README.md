@@ -358,7 +358,7 @@ CI policy gate over drift, debt, and security thresholds.
 | `gitsema file-evolution <path> [options]` | Track semantic drift of a file over its Git history (see also: `file-diff`, `evolution`) |
 | `gitsema file-diff <ref1> <ref2> <path>` | Compute semantic diff between two versions of a file |
 | `gitsema blame <file>` (alias: `semantic-blame`) | Show semantic origin of each logical block in a file — nearest-neighbor blame |
-| `gitsema impact <path>` | Compute semantically similar blobs across the codebase to highlight refactor impact |
+| `gitsema impact <path> [--lens <lens>] [--weight-structural <n>]` | Compute semantically similar blobs across the codebase to highlight refactor impact. `--lens structural\|hybrid` makes this a thin alias over `blast-radius` (default lens: semantic, pre-Phase-109 behavior) |
 
 #### `gitsema file-evolution <path> [options]`
 
@@ -439,6 +439,10 @@ Track semantic drift of a single file across its Git history.
 | `gitsema graph callees <symbol> [--depth <n>]` | Forward `calls` traversal — what `<symbol>` (transitively) calls (default depth 3, max 3) |
 | `gitsema graph neighbors <node> [--edge-types <types>] [--direction <dir>] [--depth <n>]` | Typed neighborhood of `<node>` — any edge kinds by default (default depth 1, max 3) |
 | `gitsema graph path <a> <b>` | Shortest typed path from `<a>` to `<b>` (max depth 3) |
+| `gitsema blast-radius <symbol> [--lens <lens>] [--depth <n>] [-k/--top <n>] [--weight-structural <n>]` | What changes if I touch this — structural dependents (`calls`/`imports`/`extends`/`implements`/`references`, reverse traversal) and/or semantically similar blobs (default lens: hybrid) |
+| `gitsema relate <symbol> [-k/--top <n>]` | Callers/callees (structural, depth 1) and semantically similar blobs, labeled — both lenses, lose neither |
+| `gitsema similar <symbol> [--lens <lens>] [-k/--top <n>] [--weight-structural <n>]` | Symbols/files with a similar call/import shape (structural, Jaccard overlap) and/or semantically similar (vector) (default lens: hybrid) |
+| `gitsema unused [--edge-types <types>]` | Symbols/files with no inbound `calls`/`imports` edges — structural complement to `dead-concepts` |
 
 ### Workflow & CI
 

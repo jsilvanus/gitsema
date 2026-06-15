@@ -4033,3 +4033,63 @@ fusion pass / Phase 112 lens-coverage sweep, consistent with `docsSync`'s existi
 guard (which only requires every `GUIDE_TOOLS` entry to have an interpretation, not
 that every MCP tool is in `GUIDE_TOOLS`). No schema change. Tests:
 `tests/graphTraversal.test.ts`.
+
+**Status:** Phase 109 ✅ complete. Adds the cross-cutting `--lens
+semantic|structural|hybrid` toggle (knowledge-graph §7/§8) plus a fourth ranking
+signal in `vectorSearch` (`src/core/search/analysis/vectorSearch.ts`):
+`weightStructural`/`structuralScores` extend the three-signal formula to
+`score = (wv*cosine + wr*recency + wp*pathScore + ws*structScore) / wTotal`, where
+`structScore` comes from a precomputed `Map<blobHash, number>` of structural
+proximity (`1 / (1 + hops)`) from a query anchor. When neither option is set
+(the default for every existing caller), `useWeightedSignals` and the formula are
+unchanged from before Phase 109 — semantic-lens output is byte-for-byte identical.
+A shared `src/cli/lib/lens.ts` provides `parseLens()`, `lensWeights()`, and
+`addLensOption()` (adds `--lens <lens>` and `--weight-structural <n>` to a
+Commander command). Four new core modules under `src/core/graph/` back four new
+top-level commands:
+- `blastRadius` (`blastRadius.ts`) → `gitsema blast-radius <symbol> [--lens]
+  [--depth] [-k/--top]` (default lens: hybrid) — structural dependents via
+  `graph.neighbors(node, {edgeTypes: BLAST_RADIUS_EDGE_TYPES, direction: 'in',
+  depth})` (calls/imports/extends/implements/references) and/or semantically
+  similar blobs/symbols.
+- `relate` (`relate.ts`) → `gitsema relate <symbol> [-k/--top]` — depth-1
+  callers + depth-1 callees (labeled, structural) plus semantically similar
+  blobs/symbols — "both lenses, lose neither", no `--lens` flag (always shows all
+  three sections).
+- `similar` (`similar.ts`) → `gitsema similar <symbol> [--lens] [-k/--top]`
+  (default lens: hybrid) — structural similarity ranks nodes of the same `kind` by
+  Jaccard overlap of their outgoing edge targets (`imports` for files, `calls` for
+  symbols by default); semantic similarity ranks by embedding cosine similarity.
+- `unused` (`unused.ts`) → `gitsema unused [--edge-types]` — file/function/class/
+  method nodes with no inbound `calls`/`imports` edges (excludes `external:*`
+  nodes); the structural complement to the semantic `dead-concepts` command.
+
+The "semantic similarity without an embedding provider" lookup
+(`src/core/graph/semanticNeighbors.ts`, `semanticNeighborsForNode()`) ranks stored
+`embeddings`/`symbol_embeddings` rows by cosine similarity to the resolved graph
+node's own stored embedding (file nodes use `currentBlobHash`'s whole-file
+embedding; symbol nodes parse `symbol:<path>#<qualifiedName>#<signatureHash>` and
+use the matching `symbol_embeddings` row) — no network call. It returns
+`{supported: false, hits: []}` on non-sqlite backends, and all four new commands
+(plus `impact`'s blast-radius alias) render `(not supported on this storage
+backend)` for the semantic section in that case rather than throwing. Shared
+rendering helpers (`renderResolutionError`, `renderBlastRadius`) live in
+`src/cli/lib/graphRender.ts`.
+
+`gitsema impact <path> --lens structural|hybrid` becomes a thin alias over
+`blastRadius()` (knowledge-graph §8): the path is normalized to a `file:<path>`
+graph node and delegated entirely to `blastRadius()`/`renderBlastRadius()`,
+including `--dump`/`--out json` support. `--lens semantic` (the default) preserves
+the pre-Phase-109 `computeImpact()` code path exactly.
+
+**Deviations from the original sketch:** (1) `--weight-structural` is accepted by
+`blast-radius`/`similar`/`impact` for consistency with the shared `--lens` option
+helper, but the new fusion commands rank their structural/semantic sections
+independently (Jaccard / graph-distance / cosine) rather than through
+`vectorSearch`'s four-signal blend — `--weight-structural` only affects ranking
+when `--lens` flows into `vectorSearch` directly (not yet wired for any CLI
+command in this phase; the four-signal formula itself is tested and ready for a
+future search-integration phase). (2) No new MCP tools were added for
+`blast-radius`/`relate`/`similar`/`unused` — left for a future fusion/MCP-coverage
+phase, consistent with the Phase 108 deviation note. No schema change. Tests:
+`tests/graphLens.test.ts`.

@@ -7,6 +7,11 @@ import { graphCallersCommand } from '../commands/graphCallers.js'
 import { graphCalleesCommand } from '../commands/graphCallees.js'
 import { graphNeighborsCommand } from '../commands/graphNeighbors.js'
 import { graphPathCommand } from '../commands/graphPath.js'
+import { blastRadiusCommand } from '../commands/graphBlastRadius.js'
+import { relateCommand } from '../commands/graphRelate.js'
+import { similarCommand } from '../commands/graphSimilar.js'
+import { unusedCommand } from '../commands/graphUnused.js'
+import { addLensOption } from '../lib/lens.js'
 
 /**
  * Structural knowledge-graph commands (Phase 107, knowledge-graph §3.3/§8).
@@ -82,4 +87,34 @@ export function registerGraph(program: Command) {
     .command('path <a> <b>')
     .description('Shortest typed path from <a> to <b> (structural lens; max depth 3)')
     .action(graphPathCommand)
+
+  // Phase 109: --lens toggle + fusion commands (knowledge-graph §7/§8).
+  addLensOption(
+    program
+      .command('blast-radius <symbol>')
+      .description('What changes if I touch this — structural dependents and/or semantically related blobs (default lens: hybrid)')
+      .option('--depth <n>', 'structural traversal depth (max 3)')
+      .option('-k, --top <n>', 'number of semantic results to return (default 10)'),
+    'hybrid',
+  ).action(blastRadiusCommand)
+
+  program
+    .command('relate <symbol>')
+    .description('Callers/callees (structural) and semantically similar blobs (vector), labeled — both lenses, lose neither')
+    .option('-k, --top <n>', 'number of semantic results to return (default 10)')
+    .action(relateCommand)
+
+  addLensOption(
+    program
+      .command('similar <symbol>')
+      .description('Symbols/files with a similar call/import shape (structural) and/or semantically similar (vector) (default lens: hybrid)')
+      .option('-k, --top <n>', 'number of results to return per lens (default 10)'),
+    'hybrid',
+  ).action(similarCommand)
+
+  program
+    .command('unused')
+    .description('Symbols/files with no inbound calls/imports edges — structural complement to `dead-concepts`')
+    .option('--edge-types <types>', 'comma-separated inbound edge types that count as "used" (default: calls,imports)')
+    .action(unusedCommand)
 }

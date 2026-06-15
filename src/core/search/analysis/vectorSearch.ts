@@ -164,6 +164,21 @@ export interface VectorSearchOptions {
   weightVector?: number
   weightRecency?: number
   weightPath?: number
+  /**
+   * Fourth ranking signal weight (Phase 109, knowledge-graph §7.2): structural
+   * proximity from a query anchor along graph edges. Defaults to 0 (no
+   * structural signal) — when neither this nor `structuralScores` is set, the
+   * scoring formula is byte-for-byte identical to the pre-Phase-109 three-signal
+   * (or plain cosine) behavior.
+   */
+  weightStructural?: number
+  /**
+   * Precomputed per-blob structural proximity scores (e.g. `1 / (1 + hops)`
+   * from a query anchor, weighted by edge confidence — see
+   * `src/core/graph/structuralScore.ts`), keyed by `blobHash`. Missing entries
+   * score 0. Only consulted when `weightStructural` is set.
+   */
+  structuralScores?: Map<string, number>
   query?: string
   searchChunks?: boolean
   searchSymbols?: boolean
@@ -195,11 +210,14 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
 
   const {
     topK = 10, model, recent = false, alpha = 0.8, before, after,
-    weightVector, weightRecency, weightPath, query = '',
+    weightVector, weightRecency, weightPath, weightStructural, structuralScores, query = '',
     searchChunks = false, searchSymbols = false, searchModules = false, branch,
     negativeQueryEmbedding, negativeLambda, explain, earlyCut = 0,
     queryText, noCache = false, allowedHashes,
   } = options
+  // Per-anchor structural scores vary independently of the cache key's query
+  // text/embedding fingerprint, so bypass the result cache when present.
+  const effectiveNoCache = noCache || !!structuralScores
 
   // Per-mode row caps to prevent memory spikes on large indexes (review7 §4.4/§4.5).
   const FILE_CAP = (() => {
@@ -221,7 +239,7 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
 
   const cacheKeyOptions: Record<string, unknown> = {
     topK, model, recent, alpha, before, after,
-    weightVector, weightRecency, weightPath, query,
+    weightVector, weightRecency, weightPath, weightStructural, query,
     searchChunks, searchSymbols, searchModules, branch,
     negativeLambda, explain, earlyCut,
     // §11.1 — include a deterministic fingerprint of allowedHashes so that
@@ -237,16 +255,17 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
     queryText ?? embeddingFingerprint(queryEmbedding),
     cacheKeyOptions,
   )
-  if (!noCache) {
+  if (!effectiveNoCache) {
     const cached = getCachedResults(cacheKey)
     if (cached) return cached
   }
 
-  const useThreeSignal = weightVector !== undefined || weightRecency !== undefined || weightPath !== undefined
+  const useWeightedSignals = weightVector !== undefined || weightRecency !== undefined || weightPath !== undefined || weightStructural !== undefined
   const wv = weightVector ?? 0.7
   const wr = weightRecency ?? 0.2
   const wp = weightPath ?? 0.1
-  const wTotal = wv + wr + wp || 1
+  const ws = weightStructural ?? 0
+  const wTotal = wv + wr + wp + ws || 1
 
   const { db, rawDb } = getActiveSession()
   const AUTO_CANDIDATE_LIMIT = FILE_CAP
@@ -424,7 +443,7 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
   const negLambda = options.negativeLambda ?? 0.5
   const negNorm = negEmbedding ? vectorNorm(negEmbedding) : 0
 
-  const needRecency = recent || useThreeSignal
+  const needRecency = recent || useWeightedSignals
   let recencyScores: Map<string, number> | null = null
   if (needRecency) {
     const candidateHashes = [...new Set(
@@ -435,7 +454,7 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
   }
 
   let pathsByBlob: Map<string, string[]> | null = null
-  if (useThreeSignal) {
+  if (useWeightedSignals) {
     const hashes = [...new Set(
       scoringPool.filter((r) => !r.blobHash.startsWith('\0module:')).map((r) => r.blobHash),
     )]
@@ -475,11 +494,12 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
       score = cosine - (negLambda * negCos)
     }
 
-    if (useThreeSignal) {
+    if (useWeightedSignals) {
       const recency = recencyScores?.get(row.blobHash) ?? 0
       const blobPaths = pathsByBlob?.get(row.blobHash) ?? []
       const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : 0
-      score = (wv * cosine + wr * recency + wp * pathScore) / wTotal
+      const structScore = structuralScores?.get(row.blobHash) ?? 0
+      score = (wv * cosine + wr * recency + wp * pathScore + ws * structScore) / wTotal
     } else if (recent) {
       const recency = recencyScores?.get(row.blobHash) ?? 0
       score = alpha * cosine + (1 - alpha) * recency
@@ -563,13 +583,14 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
       const recency = recencyScores?.get(b.blobHash)
       const blobPaths = pathsByBlob?.get(b.blobHash) ?? []
       const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : undefined
-      base.signals = { cosine: b.cosine, recency: recency ?? undefined, pathScore }
+      const structScore = structuralScores?.get(b.blobHash)
+      base.signals = { cosine: b.cosine, recency: recency ?? undefined, pathScore, structural: structScore }
     }
 
     return base
   })
 
-  if (!noCache && !allowedHashes) {
+  if (!effectiveNoCache && !allowedHashes) {
     setCachedResults(cacheKey, results)
   }
 
