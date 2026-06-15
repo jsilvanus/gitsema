@@ -21,13 +21,15 @@ import { PostgresMetadataStore } from '../postgres/metadataStore.js'
 import { PostgresFtsStore, type PostgresFtsBackend } from '../postgres/ftsStore.js'
 import { getQdrantClient } from './connection.js'
 import { QdrantVectorStore } from './vectorStore.js'
-import type { FtsStore, MetadataStore, StorageProfile, StorageScope, VectorStore, WriteBlobRecordArgs, WriteFileBlobArgs } from '../types.js'
+import { UnsupportedGraphStore } from '../unsupportedGraphStore.js'
+import type { FtsStore, GraphStore, MetadataStore, StorageProfile, StorageScope, VectorStore, WriteBlobRecordArgs, WriteFileBlobArgs } from '../types.js'
 
 export class QdrantStorageProfile implements StorageProfile {
   readonly backend = 'qdrant' as const
   readonly metadata: MetadataStore
   readonly vectors: VectorStore
   readonly fts: FtsStore | null
+  readonly graph: GraphStore = new UnsupportedGraphStore()
   private readonly pool
 
   constructor(

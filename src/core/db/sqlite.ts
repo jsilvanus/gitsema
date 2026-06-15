@@ -56,8 +56,10 @@ export interface DbSession {
  *       symbols table for path-free stable symbol identity (Phase 105 / knowledge-graph §3.1)
  * 25 — Added structural_refs table for per-blob structural extraction (Phase 106 /
  *       knowledge-graph §3.2), populated during `index --graph` for TS/TSX/JS/Python
+ * 26 — Added graph_nodes and edges tables for the structural linking pass (Phase 107 /
+ *       knowledge-graph §3.3), rebuilt wholesale by `gitsema graph build`
  */
-export const CURRENT_SCHEMA_VERSION = 25
+export const CURRENT_SCHEMA_VERSION = 26
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -339,6 +341,33 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- Recomputable structural graph: nodes + typed edges (Phase 107 / v26).
+    -- Rebuilt wholesale by 'gitsema graph build' (truncate-and-rebuild, like blob_clusters).
+    CREATE TABLE IF NOT EXISTS graph_nodes (
+      node_key TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      path TEXT,
+      repo_id TEXT,
+      current_blob_hash TEXT,
+      is_external INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS edges (
+      src_key TEXT NOT NULL REFERENCES graph_nodes(node_key),
+      dst_key TEXT NOT NULL REFERENCES graph_nodes(node_key),
+      edge_type TEXT NOT NULL,
+      weight REAL DEFAULT 1,
+      confidence REAL DEFAULT 1,
+      first_seen_commit TEXT,
+      last_seen_commit TEXT,
+      observed_count INTEGER DEFAULT 1,
+      PRIMARY KEY (src_key, dst_key, edge_type)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_edges_src_type ON edges(src_key, edge_type);
+    CREATE INDEX IF NOT EXISTS idx_edges_dst_type ON edges(dst_key, edge_type);
   `)
 
   if (isFresh) {

@@ -427,6 +427,15 @@ Track semantic drift of a single file across its Git history.
 
 `code-review` follows the same exit-code contract as `policy-check` (0 ok / 1 runtime error / 2 usage error / 3 gate failed).
 
+### Knowledge Graph
+
+| Command | Description |
+|---|---|
+| `gitsema graph build` | Build/rebuild `graph_nodes` and `edges` from `structural_refs`, `symbols`, and `blob_commits` (truncate-and-rebuild; requires prior `gitsema index --graph`) |
+| `gitsema co-change <path> [-k/--top <n>]` | Files that historically change together with `<path>` |
+| `gitsema deps <identifier> [--reverse] [--depth <n>] [--edge-types <types>]` | Import/dependency closure of a file or symbol (default edge types: `imports,calls,extends,implements`) |
+| `gitsema graph cycles [--edge-types <types>]` / `gitsema cycles [--edge-types <types>]` | Detect cycles in the structural graph (default: `imports`) |
+
 ### Workflow & CI
 
 | Command | Description |

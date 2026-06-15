@@ -119,6 +119,76 @@ export interface MetadataStore {
   storeStructuralRefs(blobHash: string, refs: StructuralRefRecord[]): Promise<void>
 }
 
+/**
+ * Typed edge kinds in the structural graph (Phase 107, knowledge-graph §5).
+ * `similar_to` is reserved for a later phase (semantic-neighbor edges) and is
+ * never written by `gitsema graph build`.
+ */
+export type EdgeType =
+  | 'contains'
+  | 'defines'
+  | 'imports'
+  | 'calls'
+  | 'extends'
+  | 'implements'
+  | 'references'
+  | 'co_change'
+  | 'similar_to'
+
+/** A node in the structural graph (Phase 107, knowledge-graph §2.3/§3.3). */
+export interface GraphNodeRecord {
+  /** `file:<path>` | `symbol:<path>#<qualifiedName>#<signatureHash>` | `external:<name>`. */
+  nodeKey: string
+  /** `file` | `function` | `class` | `method` | ... | `external`. */
+  kind: string
+  displayName: string
+  /** File the node lives at; undefined for external nodes. */
+  path?: string
+  repoId?: string
+  /** Most-recent occurrence's blob hash; undefined for file aggregates / external nodes. */
+  currentBlobHash?: string
+  isExternal?: boolean
+}
+
+/** A typed edge between two `graph_nodes.node_key` values (Phase 107). */
+export interface GraphEdgeRecord {
+  srcKey: string
+  dstKey: string
+  edgeType: EdgeType
+  /** observed_count or co-change strength. Defaults to 1. */
+  weight?: number
+  /** Resolution confidence 0..1 (knowledge-graph §4). Defaults to 1. */
+  confidence?: number
+  firstSeenCommit?: string
+  lastSeenCommit?: string
+  observedCount?: number
+}
+
+/**
+ * Storage for the recomputable structural graph (Phase 107, knowledge-graph
+ * §3.3/§6). `gitsema graph build` truncates and rebuilds nodes/edges wholesale
+ * (like `blob_clusters`); read methods back the early `co-change`/`deps`/
+ * `cycles` commands.
+ *
+ * Relational-only (review9 §4): the Qdrant profile's `GraphStore` throws on
+ * every method — graph queries require a relational backend.
+ */
+export interface GraphStore {
+  /** Atomically replaces all nodes and edges (truncate-and-rebuild). */
+  replaceAll(nodes: GraphNodeRecord[], edges: GraphEdgeRecord[]): Promise<void>
+  /** Total node / edge counts, e.g. for `gitsema graph build` summaries. */
+  countNodes(): Promise<number>
+  countEdges(): Promise<number>
+  /** A single node by key, or undefined if it doesn't exist. */
+  getNode(nodeKey: string): Promise<GraphNodeRecord | undefined>
+  /** All nodes (small graphs only — used by `cycles`/`deps`). */
+  allNodes(): Promise<GraphNodeRecord[]>
+  /** All edges, optionally filtered to the given edge types. */
+  allEdges(edgeTypes?: EdgeType[]): Promise<GraphEdgeRecord[]>
+  /** Edges touching `nodeKey`, optionally filtered by direction and edge types. */
+  edgesFor(nodeKey: string, opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both' }): Promise<GraphEdgeRecord[]>
+}
+
 /** A raw structural reference to persist for one blob (Phase 106, knowledge-graph §3.2). */
 export interface StructuralRefRecord {
   /** Path-free qualified name of the referencing scope, or undefined = file/top-level scope. */
@@ -192,6 +262,8 @@ export interface StorageProfile {
   readonly metadata: MetadataStore
   readonly vectors: VectorStore
   readonly fts: FtsStore | null
+  /** Structural graph store (Phase 107). Throws on Qdrant profiles — see `GraphStore`. */
+  readonly graph: GraphStore
 
   /**
    * Writes a blob + its whole-file embedding + its path (+ FTS content, if

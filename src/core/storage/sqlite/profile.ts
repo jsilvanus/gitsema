@@ -9,7 +9,7 @@
  */
 
 import { getActiveSession } from '../../db/sqlite.js'
-import { embeddings, paths, blobs, commits, blobCommits, indexedCommits, blobBranches, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings, commitEmbeddings } from '../../db/schema.js'
+import { embeddings, paths, blobs, commits, blobCommits, indexedCommits, blobBranches, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings, commitEmbeddings, graphNodes, edges } from '../../db/schema.js'
 import { eq, inArray, sql } from 'drizzle-orm'
 import { isIndexed as dedupeIsIndexed, filterNewBlobs as dedupeFilterNewBlobs } from '../../indexing/deduper.js'
 import {
@@ -26,7 +26,11 @@ import type { Embedding, SearchResult } from '../../models/types.js'
 import type { CommitEntry } from '../../git/commitMap.js'
 import type {
   Bm25Hit,
+  EdgeType,
   FtsStore,
+  GraphEdgeRecord,
+  GraphNodeRecord,
+  GraphStore,
   MetadataStore,
   StorageProfile,
   StorageScope,
@@ -302,6 +306,125 @@ export function sanitizeFtsQuery(query: string): string {
 }
 
 /**
+ * SQLite-backed `GraphStore` (Phase 107). `replaceAll` truncates and
+ * rebuilds `graph_nodes`/`edges` in one transaction — the same
+ * truncate-and-rebuild discipline used for `blob_clusters`.
+ */
+export class SqliteGraphStore implements GraphStore {
+  async replaceAll(nodes: GraphNodeRecord[], edgeRecords: GraphEdgeRecord[]): Promise<void> {
+    const { db, rawDb } = getActiveSession()
+    const tx = rawDb.transaction(() => {
+      rawDb.prepare('DELETE FROM edges').run()
+      rawDb.prepare('DELETE FROM graph_nodes').run()
+
+      const BATCH = 500
+      for (let i = 0; i < nodes.length; i += BATCH) {
+        const batch = nodes.slice(i, i + BATCH)
+        db.insert(graphNodes).values(batch.map((n) => ({
+          nodeKey: n.nodeKey,
+          kind: n.kind,
+          displayName: n.displayName,
+          path: n.path ?? null,
+          repoId: n.repoId ?? null,
+          currentBlobHash: n.currentBlobHash ?? null,
+          isExternal: n.isExternal ? 1 : 0,
+        }))).run()
+      }
+
+      for (let i = 0; i < edgeRecords.length; i += BATCH) {
+        const batch = edgeRecords.slice(i, i + BATCH)
+        db.insert(edges).values(batch.map((e) => ({
+          srcKey: e.srcKey,
+          dstKey: e.dstKey,
+          edgeType: e.edgeType,
+          weight: e.weight ?? 1,
+          confidence: e.confidence ?? 1,
+          firstSeenCommit: e.firstSeenCommit ?? null,
+          lastSeenCommit: e.lastSeenCommit ?? null,
+          observedCount: e.observedCount ?? 1,
+        }))).run()
+      }
+    })
+    tx()
+  }
+
+  async countNodes(): Promise<number> {
+    const { rawDb } = getActiveSession()
+    const row = rawDb.prepare('SELECT COUNT(*) AS n FROM graph_nodes').get() as { n: number }
+    return row.n
+  }
+
+  async countEdges(): Promise<number> {
+    const { rawDb } = getActiveSession()
+    const row = rawDb.prepare('SELECT COUNT(*) AS n FROM edges').get() as { n: number }
+    return row.n
+  }
+
+  async getNode(nodeKey: string): Promise<GraphNodeRecord | undefined> {
+    const { db } = getActiveSession()
+    const row = db.select().from(graphNodes).where(eq(graphNodes.nodeKey, nodeKey)).get()
+    return row ? rowToNode(row) : undefined
+  }
+
+  async allNodes(): Promise<GraphNodeRecord[]> {
+    const { db } = getActiveSession()
+    return db.select().from(graphNodes).all().map(rowToNode)
+  }
+
+  async allEdges(edgeTypes?: EdgeType[]): Promise<GraphEdgeRecord[]> {
+    const { db } = getActiveSession()
+    const rows = edgeTypes && edgeTypes.length > 0
+      ? db.select().from(edges).where(inArray(edges.edgeType, edgeTypes)).all()
+      : db.select().from(edges).all()
+    return rows.map(rowToEdge)
+  }
+
+  async edgesFor(nodeKey: string, opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both' }): Promise<GraphEdgeRecord[]> {
+    const { db } = getActiveSession()
+    const direction = opts?.direction ?? 'both'
+    const edgeTypes = opts?.edgeTypes
+
+    const collected: GraphEdgeRecord[] = []
+    if (direction === 'out' || direction === 'both') {
+      const rows = db.select().from(edges).where(eq(edges.srcKey, nodeKey)).all()
+      for (const r of rows) collected.push(rowToEdge(r))
+    }
+    if (direction === 'in' || direction === 'both') {
+      const rows = db.select().from(edges).where(eq(edges.dstKey, nodeKey)).all()
+      for (const r of rows) collected.push(rowToEdge(r))
+    }
+    return edgeTypes && edgeTypes.length > 0
+      ? collected.filter((e) => edgeTypes.includes(e.edgeType))
+      : collected
+  }
+}
+
+function rowToNode(row: typeof graphNodes.$inferSelect): GraphNodeRecord {
+  return {
+    nodeKey: row.nodeKey,
+    kind: row.kind,
+    displayName: row.displayName,
+    path: row.path ?? undefined,
+    repoId: row.repoId ?? undefined,
+    currentBlobHash: row.currentBlobHash ?? undefined,
+    isExternal: !!row.isExternal,
+  }
+}
+
+function rowToEdge(row: typeof edges.$inferSelect): GraphEdgeRecord {
+  return {
+    srcKey: row.srcKey,
+    dstKey: row.dstKey,
+    edgeType: row.edgeType as EdgeType,
+    weight: row.weight ?? 1,
+    confidence: row.confidence ?? 1,
+    firstSeenCommit: row.firstSeenCommit ?? undefined,
+    lastSeenCommit: row.lastSeenCommit ?? undefined,
+    observedCount: row.observedCount ?? 1,
+  }
+}
+
+/**
  * A SQLite storage profile. The three stores share the active DbSession, so
  * wrapping calls in `withStorageProfile()` (which activates the profile's
  * database) routes all three to the same SQLite file.
@@ -311,6 +434,7 @@ export class SqliteStorageProfile implements StorageProfile {
   readonly metadata: MetadataStore = new SqliteMetadataStore()
   readonly vectors: VectorStore = new SqliteVectorStore()
   readonly fts: FtsStore | null
+  readonly graph: GraphStore = new SqliteGraphStore()
 
   constructor(
     readonly scope: StorageScope,
