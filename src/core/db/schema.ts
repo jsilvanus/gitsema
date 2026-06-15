@@ -249,6 +249,50 @@ export const structuralRefs = sqliteTable('structural_refs', {
 })
 
 /**
+ * Recomputable graph nodes (Phase 107, knowledge-graph §3.3). Rebuilt
+ * wholesale by `gitsema graph build` (truncate-and-rebuild, like
+ * `blob_clusters`). One row per `file`, `symbol`, or `external` node.
+ *
+ * `node_key` format:
+ *   - file:     `[repo_id "/"]? path`
+ *   - symbol:   `[repo_id "/"]? path "#" qualified_name "#" signature_hash`
+ *   - external: `ext:<raw_name>`
+ */
+export const graphNodes = sqliteTable('graph_nodes', {
+  nodeKey: text('node_key').primaryKey(),
+  /** `file` | `function` | `class` | `method` | ... | `external`. */
+  kind: text('kind').notNull(),
+  displayName: text('display_name').notNull(),
+  /** File the node lives at; null for external nodes. */
+  path: text('path'),
+  repoId: text('repo_id'),
+  /** Most-recent occurrence's blob hash; null for file aggregates / external nodes. */
+  currentBlobHash: text('current_blob_hash'),
+  isExternal: integer('is_external').default(0),
+})
+
+/**
+ * Recomputable typed edges between graph nodes (Phase 107, knowledge-graph
+ * §3.3/§5). Rebuilt wholesale by `gitsema graph build`. `edge_type` is one
+ * of: contains | defines | imports | calls | extends | implements |
+ * references | co_change | similar_to.
+ */
+export const edges = sqliteTable('edges', {
+  srcKey: text('src_key').notNull().references(() => graphNodes.nodeKey),
+  dstKey: text('dst_key').notNull().references(() => graphNodes.nodeKey),
+  edgeType: text('edge_type').notNull(),
+  /** observed_count or co-change strength. */
+  weight: real('weight').default(1),
+  /** Resolution confidence 0..1 (knowledge-graph §4). */
+  confidence: real('confidence').default(1),
+  firstSeenCommit: text('first_seen_commit'),
+  lastSeenCommit: text('last_seen_commit'),
+  observedCount: integer('observed_count').default(1),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.srcKey, table.dstKey, table.edgeType] }),
+}))
+
+/**
  * Semantic embedding of a Git commit message (Phase 30).
  *
  * Stores the vector representation of a commit's message text so the index

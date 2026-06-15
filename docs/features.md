@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.95.0** · Schema: **v25** · Test suite: **1114 tests**
+> Current version: **v0.95.0** · Schema: **v26** · Test suite: **1126 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -67,6 +67,7 @@ One database can hold embeddings from **multiple embedding models simultaneously
 | **Pipelined read/embed/store (Phase 69)** | `AsyncQueue`-based overlap of batch stages; activated on the batch path |
 | Per-repo project metadata | `gitsema project` (2D projections) |
 | **Structural reference extraction (Phase 106)** | `--graph` — extracts raw, unresolved structural references (imports, calls, `extends`/`implements` heritage) for TS/TSX/JS/Python blobs into `structural_refs`, dedup'd by `blob_hash` (knowledge-graph §3.2; sites only — resolution to definitions is Phase 107+) |
+| **Structural knowledge graph (Phase 107)** | `gitsema graph build` — truncate-and-rebuild linking pass: resolves `structural_refs` + `symbols` + `paths` into `graph_nodes` (`file:<path>`, `symbol:<path>#<qname>#<sighash>`, `external:<name>`) and typed `edges` (`contains`, `defines`, `imports`, `calls`, `extends`, `implements`, `references`, `co_change`) with confidence-tier resolution (same-file 1.0 → imported 0.9 → project-wide-unique 0.6 → ambiguous 0.3 → unresolved/external 0); `co_change` edges materialized from `blob_commits` (knowledge-graph §3.3/§4/§5) |
 
 **Chunking fallback chain:** whole-file → function boundaries → fixed windows (1500 chars) → fixed windows (800 chars) when a blob exceeds the embedding model's context limit.
 
@@ -198,6 +199,7 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | **Full-toolset guide coverage (Phase 104)** | `GUIDE_TOOLS`/`TOOL_INTERPRETATIONS` now cover `bisect`, `refactor-candidates`, `cherry-pick-suggest`, `heatmap`, `map`, `file-diff`, `lifecycle`, `cluster-change-points`, `cross-repo-similarity`, and `pr-report`, so `gitsema guide` and the generated skill can reason about the full CLI command surface |
 | **Generic `--narrate` via `narrateToolResult` (Phase 104)** | `narrateToolResult(toolKey, result)` in `src/core/llm/narrator.ts` looks up the tool's `TOOL_INTERPRETATIONS` entry, redacts and caps the JSON result, and asks the active narrator model for a prose summary (safe-by-default — no network unless `--narrate` is passed and a narrator model is configured). Wired onto `--narrate` flags on `first-seen`, `branch-summary`, `merge-audit`, `merge-preview`, `dead-concepts`, `debt`, `doc-gap`, `security-scan`, `blame`/`semantic-blame`, `triage`, `impact`, `ownership`, `experts`, `author`, `contributor-profile`, `bisect`, `refactor-candidates`, `cherry-pick-suggest`, and `heatmap` |
 | **Guided `gitsema setup` wizard with storage backend selection (Phase 104)** | `gitsema setup` (primary name; `gitsema quickstart` remains a backward-compat alias) extends the onboarding wizard with a storage-backend step (sqlite/postgres/qdrant), persisting `storage.*` config keys and validating the connection via `getCachedStorageProfile().metadata.getLastIndexedCommit()` (reverting to sqlite on failure), plus an optional final step to configure a local Ollama narrator/guide model via `gitsema models add <name> --narrator\|--guide --provider ollama --activate` |
+| **Co-change / dependency / cycle queries (Phase 107)** | `gitsema co-change <path> [-k/--top]` — files that historically change together with `<path>` (from `co_change` edges); `gitsema deps <identifier> [--reverse] [--depth] [--edge-types]` — import/dependency closure of a file or symbol (BFS over `imports`/`calls`/`extends`/`implements` edges); `gitsema graph cycles` / top-level `gitsema cycles [--edge-types]` — detect cycles in the structural graph (default: `imports`). All require `gitsema index --graph` + `gitsema graph build` first |
 
 ---
 

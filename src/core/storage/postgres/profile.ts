@@ -11,13 +11,15 @@ import { ensurePostgresSchema } from './migrations.js'
 import { PostgresMetadataStore } from './metadataStore.js'
 import { PostgresFtsStore, type PostgresFtsBackend } from './ftsStore.js'
 import { PgVectorStore } from './vectorStore.js'
-import type { FtsStore, MetadataStore, StorageProfile, StorageScope, VectorStore, WriteBlobRecordArgs, WriteFileBlobArgs } from '../types.js'
+import { PostgresGraphStore } from './graphStore.js'
+import type { FtsStore, GraphStore, MetadataStore, StorageProfile, StorageScope, VectorStore, WriteBlobRecordArgs, WriteFileBlobArgs } from '../types.js'
 
 export class PostgresStorageProfile implements StorageProfile {
   readonly backend = 'postgres' as const
   readonly metadata: MetadataStore
   readonly vectors: VectorStore
   readonly fts: FtsStore | null
+  readonly graph: GraphStore
   private readonly pool
 
   constructor(
@@ -30,6 +32,7 @@ export class PostgresStorageProfile implements StorageProfile {
     this.metadata = new PostgresMetadataStore(this.pool)
     this.vectors = new PgVectorStore(this.pool)
     this.fts = ftsEnabled ? new PostgresFtsStore(this.pool, ftsBackend) : null
+    this.graph = new PostgresGraphStore(this.pool)
   }
 
   async writeFileBlob(args: WriteFileBlobArgs): Promise<void> {

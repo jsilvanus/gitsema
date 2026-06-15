@@ -3927,7 +3927,7 @@ include `co-change`, `deps`, `cycles`, `callers`/`callees`/`path`/`neighbors`,
 |---|---|---|---|
 | **105** ✅ | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols`. Path-bearing `symbol_key` is derived at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
 | **106** ✅ | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
-| **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Early CLI: `co-change`, `deps`, `cycles`. |
+| **107** ✅ | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Early CLI: `co-change`, `deps`, `cycles`. |
 | **108** | Traversal primitives + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. |
 | **109** | `--lens` toggle + structural ranking | — | Cross-cutting `--lens` + `--weight-structural` in the re-rank loop; new commands `blast-radius`, `relate`, `similar --lens`, `unused`; `impact` gains `--lens`. Semantic stays the default for existing commands. |
 | **110** | Fusion: cascade planner + hotspots | — | Cascade query planner (`FTS → vector → graph traversal → merge/rerank`); `hotspots`; structural enrichment of `code-review`/`explain`/`guide`/`triage`. |
@@ -3970,3 +3970,36 @@ since it reuses `PostgresMetadataStore` for relational data — **no Qdrant devi
 Indexing is gated behind a new `gitsema index start --graph` flag, wired through
 `runIndex()`'s batch and non-batch paths (`IndexStats.structuralRefs` tracks rows
 stored). No `graph_nodes`/`edges` or resolution — that is Phase 107.
+
+**Status:** Phase 107 ✅ complete. `gitsema graph build`
+(`src/core/graph/build.ts`) is a truncate-and-rebuild linking pass: it groups
+`symbols` occurrences (joined against `paths`) by `(path, qualifiedName,
+signatureHash)` into `symbol:<path>#<qname>#<sighash>` nodes (picking the
+most-recently-committed blob as `currentBlobHash`), mints `file:<path>` nodes for
+every known path, and emits `contains`/`defines` edges from `parentQualifiedName`.
+`structural_refs` rows are resolved to typed edges (`imports`/`calls`/`extends`/
+`implements`/`references`) via the knowledge-graph §4 confidence tiers: same-file
+(1.0) → imported-and-resolved (0.9) → project-wide-unique by last name segment
+(0.6) → ambiguous, nearest-by-directory-distance (0.3, `weight` = candidate count)
+→ unresolved (0, minted as an `external:<name>` node). `co_change` edges are
+materialized bidirectionally from `blob_commits`/`commits`/`paths`, weighted by
+co-occurrence count with `firstSeenCommit`/`lastSeenCommit` provenance. Schema v26
+adds `graph_nodes` and `edges` (+ `(src_key, edge_type)` / `(dst_key, edge_type)`
+indexes) via sqlite migration `026_graph_nodes_edges.ts`, fresh-DB DDL, and Postgres
+DDL. The storage seam gains a `GraphStore` interface (`replaceAll`, `countNodes`,
+`countEdges`, `getNode`, `allNodes`, `allEdges`, `edgesFor`), implemented for sqlite
+and Postgres; the Qdrant profile uses `UnsupportedGraphStore`, which fails loud with
+a clear error (per review9 §4 — graph queries require a relational backend). Early
+CLI surface: `gitsema graph build`, `gitsema co-change <path>`, `gitsema deps
+<identifier>` (with `--reverse`/`--depth`/`--edge-types`), and `gitsema graph
+cycles` / top-level `gitsema cycles` alias (DFS cycle detection over `imports` by
+default). **Deviations from the original sketch:** (1) external nodes use
+`external:<name>` (this phase's spec) rather than `ext:<raw_name>` from
+knowledge-graph.md §2.3 — kept for consistency with the task's authoritative
+node-key contract; (2) `firstSeenCommit`/`lastSeenCommit` are only populated for
+`co_change` edges, not structural edges (would require extra blob→commit joins not
+essential to the core linking pass); (3) `CO_CHANGE_MAX_FILES_PER_COMMIT = 50` caps
+pairwise co-change computation per commit to avoid O(n²) blowup on
+vendoring/lockfile-regeneration commits. Traversal primitives
+(callers/callees/path/neighbors) and the `--lens` toggle remain out of scope —
+Phase 108/109.

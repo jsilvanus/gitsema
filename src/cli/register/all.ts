@@ -6,6 +6,7 @@ import { registerSetup } from './setup.js'
 import { registerIndexing } from './indexing.js'
 import { registerSearch } from './search.js'
 import { registerAnalysis } from './analysis.js'
+import { registerGraph } from './graph.js'
 
 // Command handlers (moved from src/cli/index.ts)
 import { conceptEvolutionCommand } from '../commands/conceptEvolution.js'
@@ -52,6 +53,7 @@ export function registerAll(program: Command) {
   registerIndexing(program)
   registerSearch(program)
   registerAnalysis(program)
+  registerGraph(program)
 
   // Concept evolution / concept-level timeline
   program

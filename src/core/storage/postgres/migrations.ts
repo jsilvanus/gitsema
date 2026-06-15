@@ -157,6 +157,34 @@ CREATE TABLE IF NOT EXISTS blob_fts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_blob_fts_tsv ON blob_fts USING GIN (tsv);
+
+-- Recomputable structural graph: nodes + typed edges (Phase 107 / v26).
+-- Rebuilt wholesale by \`gitsema graph build\`. Postgres supports recursive
+-- CTEs over edges for future traversal phases (108+).
+CREATE TABLE IF NOT EXISTS graph_nodes (
+  node_key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  path TEXT,
+  repo_id TEXT,
+  current_blob_hash TEXT,
+  is_external INT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS edges (
+  src_key TEXT NOT NULL REFERENCES graph_nodes(node_key),
+  dst_key TEXT NOT NULL REFERENCES graph_nodes(node_key),
+  edge_type TEXT NOT NULL,
+  weight DOUBLE PRECISION DEFAULT 1,
+  confidence DOUBLE PRECISION DEFAULT 1,
+  first_seen_commit TEXT,
+  last_seen_commit TEXT,
+  observed_count INT DEFAULT 1,
+  PRIMARY KEY (src_key, dst_key, edge_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_edges_src_type ON edges(src_key, edge_type);
+CREATE INDEX IF NOT EXISTS idx_edges_dst_type ON edges(dst_key, edge_type);
 `
 
 const migrated = new WeakSet<Pool>()
