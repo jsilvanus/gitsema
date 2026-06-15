@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
-import { extractSymbolMetadata, type SymbolMetadata } from '../src/core/chunking/functionChunker.js'
+import { extractSymbolMetadata, getGrammar, type SymbolMetadata } from '../src/core/chunking/functionChunker.js'
 import { runMigrations } from '../src/core/db/migrations/runner.js'
 
 function sha1_12(s: string): string {
@@ -12,11 +12,17 @@ function byQualifiedName(symbols: SymbolMetadata[], qualifiedName: string): Symb
   return symbols.find((s) => s.qualifiedName === qualifiedName)
 }
 
+// extractSymbolMetadata() degrades to `[]` when the native tree-sitter
+// module is unavailable (e.g. no prebuilt binary for this platform/Node
+// combination). Skip the AST-dependent suites in that case rather than
+// asserting on empty results.
+const treeSitterAvailable = getGrammar('typescript') !== null
+
 // ---------------------------------------------------------------------------
 // TypeScript
 // ---------------------------------------------------------------------------
 
-describe('extractSymbolMetadata — TypeScript', () => {
+describe.skipIf(!treeSitterAvailable)('extractSymbolMetadata — TypeScript', () => {
   const content = [
     'export class Auth {',
     '  validateToken(token: string): boolean {',
@@ -81,7 +87,7 @@ describe('extractSymbolMetadata — TypeScript', () => {
 // TSX
 // ---------------------------------------------------------------------------
 
-describe('extractSymbolMetadata — TSX', () => {
+describe.skipIf(!treeSitterAvailable)('extractSymbolMetadata — TSX', () => {
   it('extracts a top-level function component with a normalized signature', () => {
     const content = [
       'export function Greeting(name: string, count: number) {',
@@ -102,7 +108,7 @@ describe('extractSymbolMetadata — TSX', () => {
 // JavaScript
 // ---------------------------------------------------------------------------
 
-describe('extractSymbolMetadata — JavaScript', () => {
+describe.skipIf(!treeSitterAvailable)('extractSymbolMetadata — JavaScript', () => {
   const content = [
     'class Widget {',
     '  render(props, ctx) {',
@@ -137,7 +143,7 @@ describe('extractSymbolMetadata — JavaScript', () => {
 // Python
 // ---------------------------------------------------------------------------
 
-describe('extractSymbolMetadata — Python', () => {
+describe.skipIf(!treeSitterAvailable)('extractSymbolMetadata — Python', () => {
   const content = [
     'class Auth:',
     '    def validate_token(self, token):',

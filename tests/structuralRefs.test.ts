@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest'
 import Database from 'better-sqlite3'
 import { extractStructuralRefs, type StructuralRef } from '../src/core/chunking/structuralRefs.js'
-import { extractSymbolMetadata } from '../src/core/chunking/functionChunker.js'
+import { extractSymbolMetadata, getGrammar } from '../src/core/chunking/functionChunker.js'
 import { runMigrations } from '../src/core/db/migrations/runner.js'
 import { openDatabaseAt, withDbSession } from '../src/core/db/sqlite.js'
 import { storeStructuralRefs } from '../src/core/indexing/blobStore.js'
@@ -25,11 +25,17 @@ function byKind(refs: StructuralRef[], kind: StructuralRef['refKind']): Structur
   return refs.filter((r) => r.refKind === kind)
 }
 
+// extractStructuralRefs()/extractSymbolMetadata() degrade to `[]` when the
+// native tree-sitter module is unavailable (e.g. no prebuilt binary for this
+// platform/Node combination). Skip the AST-dependent suites in that case
+// rather than asserting on empty results.
+const treeSitterAvailable = getGrammar('typescript') !== null
+
 // ---------------------------------------------------------------------------
 // TypeScript
 // ---------------------------------------------------------------------------
 
-describe('extractStructuralRefs — TypeScript', () => {
+describe.skipIf(!treeSitterAvailable)('extractStructuralRefs — TypeScript', () => {
   const content = [
     "import Default, { Named, Other as Aliased } from './mod'",
     "import * as ns from './ns-mod'",
@@ -100,7 +106,7 @@ describe('extractStructuralRefs — TypeScript', () => {
 // TSX
 // ---------------------------------------------------------------------------
 
-describe('extractStructuralRefs — TSX', () => {
+describe.skipIf(!treeSitterAvailable)('extractStructuralRefs — TSX', () => {
   it('extracts imports and calls from a function component', () => {
     const content = [
       "import { useState } from 'react'",
@@ -120,7 +126,7 @@ describe('extractStructuralRefs — TSX', () => {
 // JavaScript
 // ---------------------------------------------------------------------------
 
-describe('extractStructuralRefs — JavaScript', () => {
+describe.skipIf(!treeSitterAvailable)('extractStructuralRefs — JavaScript', () => {
   const content = [
     "const { merge } = require('lodash')",
     '',
@@ -152,7 +158,7 @@ describe('extractStructuralRefs — JavaScript', () => {
 // Python
 // ---------------------------------------------------------------------------
 
-describe('extractStructuralRefs — Python', () => {
+describe.skipIf(!treeSitterAvailable)('extractStructuralRefs — Python', () => {
   const content = [
     'import os',
     'import numpy as np',
@@ -208,7 +214,7 @@ describe('extractStructuralRefs — Python', () => {
 // Nested scopes match Phase 105's qualifiedName
 // ---------------------------------------------------------------------------
 
-describe('extractStructuralRefs — enclosingQualifiedName matches Phase 105 qualifiedName', () => {
+describe.skipIf(!treeSitterAvailable)('extractStructuralRefs — enclosingQualifiedName matches Phase 105 qualifiedName', () => {
   it('TS: a call inside a nested method has enclosingQualifiedName equal to the method symbol qualifiedName', () => {
     const content = [
       'class Outer {',
