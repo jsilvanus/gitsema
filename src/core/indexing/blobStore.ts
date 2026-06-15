@@ -1,5 +1,5 @@
 import { getActiveSession } from '../db/sqlite.js'
-import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches, symbols, symbolEmbeddings, commitEmbeddings, moduleEmbeddings } from '../db/schema.js'
+import { blobs, embeddings, paths, commits, blobCommits, indexedCommits, chunks, chunkEmbeddings, blobBranches, symbols, symbolEmbeddings, commitEmbeddings, moduleEmbeddings, structuralRefs } from '../db/schema.js'
 import { inArray, desc } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
 import type { BlobHash, Embedding } from '../models/types.js'
@@ -379,6 +379,42 @@ export function storeSymbol(args: StoreSymbolArgs): number {
 
     return symbolRow.id
   })
+}
+
+/** A raw structural reference to persist for one blob (Phase 106). */
+export interface StructuralRefRecord {
+  enclosingQualifiedName?: string
+  refKind: 'import' | 'call' | 'extends' | 'implements' | 'reference'
+  rawTarget: string
+  targetModule?: string
+  line: number
+}
+
+/**
+ * Writes the structural-reference rows extracted from one blob (Phase 106,
+ * knowledge-graph §3.2). Immutable and dedup'd by `blob_hash`: if any rows
+ * already exist for `blobHash`, this is a no-op — the same blob is parsed
+ * exactly once, mirroring the dedup discipline of embeddings/symbols.
+ */
+export function storeStructuralRefs(blobHash: BlobHash, refs: StructuralRefRecord[]): void {
+  if (refs.length === 0) return
+  const { db, rawDb } = getActiveSession()
+
+  const existing = rawDb
+    .prepare('SELECT 1 FROM structural_refs WHERE blob_hash = ? LIMIT 1')
+    .get(blobHash)
+  if (existing) return
+
+  db.insert(structuralRefs)
+    .values(refs.map((r) => ({
+      blobHash,
+      enclosingQualifiedName: r.enclosingQualifiedName ?? null,
+      refKind: r.refKind,
+      rawTarget: r.rawTarget,
+      targetModule: r.targetModule ?? null,
+      line: r.line,
+    })))
+    .run()
 }
 
 export interface StoreCommitEmbeddingArgs {

@@ -129,6 +129,7 @@ Walk Git history and embed all blobs. Already-indexed blobs are skipped (dedup b
 | `--auto-build-vss [threshold]` | off | Build the VSS/HNSW ANN index after indexing |
 | `--quantize` | off | Int8 scalar quantization of embeddings |
 | `--profile <name>` | — | `speed` \| `balanced` \| `quality` preset |
+| `--graph` | off | Extract structural references (imports/calls/extends/implements) for TS/TSX/JS/Python blobs into `structural_refs` (Phase 106 knowledge-graph track) |
 
 The indexer applies a multi-level fallback chain: whole-file → function chunker → fixed windows (1500 chars → 800 chars) when a blob exceeds the embedding model's context limit.
 

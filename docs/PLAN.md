@@ -3926,7 +3926,7 @@ include `co-change`, `deps`, `cycles`, `callers`/`callees`/`path`/`neighbors`,
 | Phase | Title | Schema | Deliverable |
 |---|---|---|---|
 | **105** ✅ | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols`. Path-bearing `symbol_key` is derived at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
-| **106** | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
+| **106** ✅ | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
 | **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Early CLI: `co-change`, `deps`, `cycles`. |
 | **108** | Traversal primitives + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. |
 | **109** | `--lens` toggle + structural ranking | — | Cross-cutting `--lens` + `--weight-structural` in the re-rank loop; new commands `blast-radius`, `relate`, `similar --lens`, `unused`; `impact` gains `--lens`. Semantic stays the default for existing commands. |
@@ -3954,3 +3954,19 @@ tests/behavior) — nested symbols (e.g. class methods) are not separately chunk
 embedded, but their identity metadata is still captured by `extractSymbolMetadata()`
 and exposed via the top-level chunk's `parentQualifiedName`-filtered match. Per-method
 chunking/embedding, if wanted, is left to a later phase.
+
+**Status:** Phase 106 ✅ complete. `extractStructuralRefs()`
+(`src/core/chunking/structuralRefs.ts`) reuses the Phase 105 tree-sitter grammars and
+scope-stack walk to record raw, unresolved structural references — `import`, `call`,
+`extends`, `implements` — for TS/TSX/JS/Python; other languages and parse failures
+return `[]` (graceful degradation, same contract as Phase 105). Each ref carries an
+`enclosingQualifiedName` that lines up with Phase 105's `qualifiedName` for the same
+scope (`undefined` = file/top-level). Schema v25 adds the immutable, dedup-by-`blob_hash`
+`structural_refs` table (+ `(blob_hash)` and `(ref_kind, raw_target)` indexes) via
+sqlite migration `025_structural_refs.ts`, fresh-DB DDL, and Postgres DDL. The storage
+seam gains `MetadataStore.storeStructuralRefs()`, implemented for both
+`SqliteMetadataStore` and `PostgresMetadataStore` (and therefore the Qdrant profile too,
+since it reuses `PostgresMetadataStore` for relational data — **no Qdrant deviation**).
+Indexing is gated behind a new `gitsema index start --graph` flag, wired through
+`runIndex()`'s batch and non-batch paths (`IndexStats.structuralRefs` tracks rows
+stored). No `graph_nodes`/`edges` or resolution — that is Phase 107.

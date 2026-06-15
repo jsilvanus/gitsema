@@ -316,6 +316,8 @@ export interface IndexCommandOptions {
   profile?: string
   /** Indexing granularity alias: blob | function | fixed (maps to --chunker). */
   level?: string
+  /** Extract structural references (imports/calls/extends/implements) for TS/TSX/JS/Python (Phase 106). */
+  graph?: boolean
 }
 
 /**
@@ -657,6 +659,7 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
     quantize: options.quantize,
     embedBatchSize,
     profileBatchSize,
+    graph: options.graph,
   })
 
   // Clear progress line

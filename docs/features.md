@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.95.0** · Schema: **v24** · Test suite: **1092 tests**
+> Current version: **v0.95.0** · Schema: **v25** · Test suite: **1114 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -66,6 +66,7 @@ One database can hold embeddings from **multiple embedding models simultaneously
 | **Ollama true-batch endpoint (Phase 62)** | `OllamaProvider` uses `/api/embed` (Ollama ≥ 0.1.34) for native `string[]` batch; falls back to serial on 404 |
 | **Pipelined read/embed/store (Phase 69)** | `AsyncQueue`-based overlap of batch stages; activated on the batch path |
 | Per-repo project metadata | `gitsema project` (2D projections) |
+| **Structural reference extraction (Phase 106)** | `--graph` — extracts raw, unresolved structural references (imports, calls, `extends`/`implements` heritage) for TS/TSX/JS/Python blobs into `structural_refs`, dedup'd by `blob_hash` (knowledge-graph §3.2; sites only — resolution to definitions is Phase 107+) |
 
 **Chunking fallback chain:** whole-file → function boundaries → fixed windows (1500 chars) → fixed windows (800 chars) when a blob exceeds the embedding model's context limit.
 

@@ -133,6 +133,7 @@ Walk Git history and embed all blobs. Already-indexed blobs are skipped (dedup b
 | `--window-size <n>` | `1500` | Characters per chunk (fixed chunker) |
 | `--overlap <n>` | `200` | Character overlap between adjacent fixed chunks |
 | `--file <paths...>` | — | Index specific files from HEAD only |
+| `--graph` | off | Extract structural references (imports/calls/extends/implements) for TS/TSX/JS/Python blobs into `structural_refs` (Phase 106 knowledge-graph track) |
 
 The indexer applies a multi-level fallback chain: whole-file → function chunker → fixed windows (1500 chars → 800 chars) when a blob exceeds the embedding model's context limit.
 
@@ -426,6 +427,7 @@ gitsema index
 | `embed_config` | Recorded embedding provenance (model, dimensions, chunker); also stores narrator/guide LLM model configs via `kind` + `params_json` (v22) |
 | `indexing_checkpoints` | Resume markers for interrupted indexing runs |
 | `settings` | Key-value settings, e.g. active narrator/guide model config selection (v22) |
+| `structural_refs` | Raw, unresolved structural references (imports/calls/extends/implements) per blob, dedup'd by `blob_hash`; added in v25 (Phase 106, knowledge-graph §3.2), populated by `index --graph` for TS/TSX/JS/Python only |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
@@ -443,7 +445,8 @@ gitsema index
 - v21 → v22: Added `kind` + `params_json` columns to `embed_config`, and a `settings` key-value table, for LLM narrator/guide model configs (Phase 91)
 - v22 → v23: Added `normalized_url`, `clone_path`, `last_indexed_at`, `ephemeral` columns to `repos` table for persistent server-side repo storage (`GITSEMA_DATA_DIR`)
 - v23 → v24: Added `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` columns (+ indexes) to `symbols` table for path-free stable symbol identity (Phase 105 / knowledge-graph §3.1)
-- **Current version: 24**
+- v24 → v25: Added `structural_refs` table (+ indexes) for per-blob structural extraction — imports/calls/extends/implements sites (Phase 106 / knowledge-graph §3.2), populated by `index --graph`
+- **Current version: 25**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

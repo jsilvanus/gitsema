@@ -54,8 +54,10 @@ export interface DbSession {
  *       persistent server-side repo storage (GITSEMA_DATA_DIR registry)
  * 24 — Added qualified_name, signature, signature_hash, parent_qualified_name columns to
  *       symbols table for path-free stable symbol identity (Phase 105 / knowledge-graph §3.1)
+ * 25 — Added structural_refs table for per-blob structural extraction (Phase 106 /
+ *       knowledge-graph §3.2), populated during `index --graph` for TS/TSX/JS/Python
  */
-export const CURRENT_SCHEMA_VERSION = 24
+export const CURRENT_SCHEMA_VERSION = 25
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -199,6 +201,21 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       quant_scale REAL,
       PRIMARY KEY (symbol_id, model)
     );
+
+    -- Raw, unresolved structural references per blob (Phase 106 / v25); dedup'd by blob_hash.
+    -- Populated by index --graph for TS/TSX/JS/Python only.
+    CREATE TABLE IF NOT EXISTS structural_refs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+      enclosing_qualified_name TEXT,
+      ref_kind TEXT NOT NULL,
+      raw_target TEXT NOT NULL,
+      target_module TEXT,
+      line INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_structural_refs_blob_hash ON structural_refs(blob_hash);
+    CREATE INDEX IF NOT EXISTS idx_structural_refs_kind_target ON structural_refs(ref_kind, raw_target);
 
     CREATE TABLE IF NOT EXISTS blob_clusters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

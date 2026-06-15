@@ -17,6 +17,7 @@ import {
   storeCommitWithBlobs, markCommitIndexed as sqliteMarkCommitIndexed,
   getLastIndexedCommit as sqliteGetLastIndexedCommit, storeBlobBranches,
   storeChunk, storeSymbol, storeModuleEmbedding, storeCommitEmbedding,
+  storeStructuralRefs as sqliteStoreStructuralRefs,
   serializeEmbedding,
 } from '../../indexing/blobStore.js'
 import { vectorSearch, type VectorSearchOptions } from '../../search/analysis/vectorSearch.js'
@@ -30,6 +31,7 @@ import type {
   StorageProfile,
   StorageScope,
   StorageStats,
+  StructuralRefRecord,
   VectorKind,
   VectorRecord,
   VectorStore,
@@ -129,6 +131,10 @@ class SqliteMetadataStore implements MetadataStore {
     const branchCount = db.select({ n: sql<number>`count(distinct branch_name)` }).from(blobBranches).get()?.n ?? 0
     const lastIndexedCommit = await sqliteGetLastIndexedCommit()
     return { blobCount, pathCount, commitCount, indexedCommitCount, branchCount, lastIndexedCommit }
+  }
+
+  async storeStructuralRefs(blobHash: string, refs: StructuralRefRecord[]): Promise<void> {
+    sqliteStoreStructuralRefs(blobHash, refs)
   }
 }
 

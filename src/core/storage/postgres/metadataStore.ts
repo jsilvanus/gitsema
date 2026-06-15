@@ -8,7 +8,7 @@
 import type { Pool } from 'pg'
 import { ensurePostgresSchema } from './migrations.js'
 import type { CommitEntry } from '../../git/commitMap.js'
-import type { MetadataStore, StorageStats } from '../types.js'
+import type { MetadataStore, StorageStats, StructuralRefRecord } from '../types.js'
 
 export class PostgresMetadataStore implements MetadataStore {
   constructor(private readonly pool: Pool) {}
@@ -147,5 +147,19 @@ export class PostgresMetadataStore implements MetadataStore {
     const branchCount = await count('SELECT COUNT(DISTINCT branch_name) AS c FROM blob_branches')
     const lastIndexedCommit = await this.getLastIndexedCommit()
     return { blobCount, pathCount, commitCount, indexedCommitCount, branchCount, lastIndexedCommit }
+  }
+
+  async storeStructuralRefs(blobHash: string, refs: StructuralRefRecord[]): Promise<void> {
+    if (refs.length === 0) return
+    const pool = await this.ready()
+    const { rows } = await pool.query('SELECT 1 FROM structural_refs WHERE blob_hash = $1 LIMIT 1', [blobHash])
+    if (rows.length > 0) return
+    for (const ref of refs) {
+      await pool.query(
+        `INSERT INTO structural_refs (blob_hash, enclosing_qualified_name, ref_kind, raw_target, target_module, line)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [blobHash, ref.enclosingQualifiedName ?? null, ref.refKind, ref.rawTarget, ref.targetModule ?? null, ref.line],
+      )
+    }
   }
 }

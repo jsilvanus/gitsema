@@ -8,11 +8,11 @@ import type { Chunk, Chunker } from './chunker.js'
 /**
  * A thin abstraction over the tree-sitter parser state for a single language.
  */
-interface TreeSitterGrammar {
+export interface TreeSitterGrammar {
   parse(src: string): { rootNode: TSNode }
 }
 
-interface TSNode {
+export interface TSNode {
   type: string
   startPosition: { row: number; column: number }
   endPosition: { row: number; column: number }
@@ -67,9 +67,9 @@ function loadGrammar(pkgName: string, exportKey?: string): unknown | null {
 // Language detection
 // ---------------------------------------------------------------------------
 
-type Language = 'python' | 'go' | 'rust' | 'typescript' | 'tsx' | 'javascript' | 'java' | 'other'
+export type Language = 'python' | 'go' | 'rust' | 'typescript' | 'tsx' | 'javascript' | 'java' | 'other'
 
-function detectLanguage(path: string): Language {
+export function detectLanguage(path: string): Language {
   const ext = path.split('.').pop()?.toLowerCase() ?? ''
   switch (ext) {
     case 'py': case 'pyi': return 'python'
@@ -87,7 +87,7 @@ function detectLanguage(path: string): Language {
 // Tree-sitter grammar factories (loaded on demand)
 // ---------------------------------------------------------------------------
 
-function getGrammar(lang: Language): TreeSitterGrammar | null {
+export function getGrammar(lang: Language): TreeSitterGrammar | null {
   if (!loadTreeSitter() || !ParserClass) return null
 
   let language: unknown | null = null
@@ -380,7 +380,7 @@ export interface SymbolMetadata {
   parentQualifiedName?: string
 }
 
-const TS_JS_LANGS: ReadonlySet<Language> = new Set(['typescript', 'tsx', 'javascript'])
+export const TS_JS_LANGS: ReadonlySet<Language> = new Set(['typescript', 'tsx', 'javascript'])
 
 /** Strips a leading `: ` from a tree-sitter `type_annotation` node's text. */
 function stripTypeAnnotation(text: string): string {

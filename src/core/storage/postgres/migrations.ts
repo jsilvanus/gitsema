@@ -135,6 +135,21 @@ CREATE TABLE IF NOT EXISTS commit_embeddings (
   PRIMARY KEY (commit_hash, model)
 );
 
+-- Raw, unresolved structural references per blob (Phase 106 / v25); dedup'd by blob_hash.
+-- Populated by \`index --graph\` for TS/TSX/JS/Python only.
+CREATE TABLE IF NOT EXISTS structural_refs (
+  id BIGSERIAL PRIMARY KEY,
+  blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
+  enclosing_qualified_name TEXT,
+  ref_kind TEXT NOT NULL,
+  raw_target TEXT NOT NULL,
+  target_module TEXT,
+  line INT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_structural_refs_blob_hash ON structural_refs(blob_hash);
+CREATE INDEX IF NOT EXISTS idx_structural_refs_kind_target ON structural_refs(ref_kind, raw_target);
+
 CREATE TABLE IF NOT EXISTS blob_fts (
   blob_hash TEXT PRIMARY KEY REFERENCES blobs(blob_hash),
   content TEXT NOT NULL,

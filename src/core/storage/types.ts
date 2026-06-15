@@ -111,6 +111,26 @@ export interface MetadataStore {
   getLastIndexedCommit(): Promise<string | undefined>
   /** Basic row counts for `gitsema status` / `gitsema doctor` reporting. */
   getStats(): Promise<StorageStats>
+  /**
+   * Stores the structural-reference rows extracted from one blob (Phase 106,
+   * knowledge-graph §3.2). Immutable and dedup'd by `blobHash` — a no-op if
+   * rows already exist for this blob.
+   */
+  storeStructuralRefs(blobHash: string, refs: StructuralRefRecord[]): Promise<void>
+}
+
+/** A raw structural reference to persist for one blob (Phase 106, knowledge-graph §3.2). */
+export interface StructuralRefRecord {
+  /** Path-free qualified name of the referencing scope, or undefined = file/top-level scope. */
+  enclosingQualifiedName?: string
+  /** One of: import | call | extends | implements | reference. */
+  refKind: 'import' | 'call' | 'extends' | 'implements' | 'reference'
+  /** Literal text as written: imported name, callee name, base class name, etc. */
+  rawTarget: string
+  /** For imports: the raw, unresolved module specifier. */
+  targetModule?: string
+  /** 1-indexed line number. */
+  line: number
 }
 
 /** Vector similarity search + counts over the embedding tables. */
