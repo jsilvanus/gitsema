@@ -20,7 +20,7 @@ import type { ConceptChangePointReport, FileChangePointReport } from '../search/
 import type { HealthSnapshot } from '../search/temporal/healthTimeline.js'
 import type { ConceptLifecycleResult } from '../search/conceptLifecycle.js'
 import { buildNarratorSystemPrompt, getInterpretation } from '../narrator/interpretations.js'
-import { redactAll } from '../narrator/redact.js'
+import { redact, redactAll } from '../narrator/redact.js'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -48,8 +48,17 @@ function resolveLlmUrl(): { parsedUrl: URL; model: string; apiKey: string } | { 
   }
 }
 
-/** Call the chat completion endpoint with a prompt and an optional system prompt. */
+/**
+ * Call the chat completion endpoint with a prompt and an optional system prompt.
+ *
+ * The user `prompt` is redacted here, at the single chokepoint every narrator
+ * routes through, so secret/PII redaction is guaranteed regardless of the
+ * caller (the per-result `narrate*` helpers build prompts from repo content).
+ * The `systemPrompt` is persona/interpretation text with no repo data and is
+ * left untouched. Redaction is idempotent, so callers that pre-redact are fine.
+ */
 async function callLlm(parsedUrl: URL, model: string, apiKey: string, prompt: string, maxTokens = 300, systemPrompt?: string): Promise<string> {
+  prompt = redact(prompt).text
   const endpoint = new URL('/v1/chat/completions', parsedUrl).toString()
   const timeoutMs = (() => {
     const raw = process.env.GITSEMA_LLM_TIMEOUT
