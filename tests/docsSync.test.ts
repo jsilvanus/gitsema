@@ -109,6 +109,18 @@ describe('TOOL_INTERPRETATIONS coverage', () => {
     const missing = Object.keys(GUIDE_TOOLS).filter((name) => !TOOL_INTERPRETATIONS[name])
     expect(missing, `missing TOOL_INTERPRETATIONS entries: ${missing.join(', ')}`).toEqual([])
   })
+
+  it('every skill tool resolves a usage def (description + params) from GUIDE_TOOLS', () => {
+    // The generated skill block joins each interpretation (how to read) with a
+    // GUIDE_TOOLS definition (how to use) by tool name or MCP alias. If an entry
+    // has no resolvable usage def, the skill would show interpretation only —
+    // catch that here (mirrors gen-skill.mjs's USAGE_BY_NAME lookup).
+    const usageNames = new Set(Object.values(GUIDE_TOOLS).map((e) => e.definition.name))
+    const missing = Object.values(TOOL_INTERPRETATIONS)
+      .filter((e) => !usageNames.has(e.name) && !(e.aliases ?? []).some((a) => usageNames.has(a)))
+      .map((e) => e.name)
+    expect(missing, `interpretation entries without a GUIDE_TOOLS usage def: ${missing.join(', ')}`).toEqual([])
+  })
 })
 
 describe('skill generation drift', () => {

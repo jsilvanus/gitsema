@@ -81,6 +81,8 @@ server.tool('health_timeline', ...)
 server.tool('debt_score', ...)
 server.tool('multi_repo_search', ...)
 
+server.tool('get_skill', ...)
+
 // parity-gap tools (registered in modularized files)
 server.tool('doc_gap', ...)
 server.tool('contributor_profile', ...)
