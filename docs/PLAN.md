@@ -3884,12 +3884,13 @@ in parallel or last.
 
 ---
 
-## Knowledge Graph Track (Phases 105–110) — *planned*
+## Knowledge Graph Track (Phases 105–112) — *planned*
 
 > **Full design:** [`docs/knowledge-graph.md`](knowledge-graph.md) is the single
 > design reference for this track (two-level symbol identity, schema, per-language
-> name-resolution heuristics, edge taxonomy, traversal layer). Phase entries below
-> are summaries — do not restate the design here; update the design doc instead.
+> name-resolution heuristics, edge taxonomy, traversal layer, the `--lens` toggle,
+> and the new-command catalog). Phase entries below are summaries — do not restate
+> the design here; update the design doc instead.
 
 **Motivation.** gitsema is semantic-embedding-first: vectors, FTS, and relational
 metadata already agree on one canonical ID (`blob_hash`). What's missing is a
@@ -3911,14 +3912,27 @@ temporal edges come for free. Graph is **relational-only** (SQLite + Postgres
 recursive CTEs); Qdrant `GraphStore` fails loud (cf. review9 §4). First languages:
 **TS/JS + Python**, then Go/Rust/Java.
 
+**Three lenses, not two (the `--lens` toggle).** Structural is an *additive third
+lens*, never a replacement — **Semantic** (vectors/FTS) · **Temporal**
+(git/`blob_commits`) · **Structural** (graph edges). A cross-cutting
+`--lens semantic|structural|hybrid` + `--weight-structural` extends the existing
+three-signal ranker to four signals. `semantic` reproduces today's behavior exactly,
+so existing commands default to it and nothing is lost; new graph-native commands
+default to `structural`; fusion commands default to `hybrid`. New commands unlocked
+include `co-change`, `deps`, `cycles`, `callers`/`callees`/`path`/`neighbors`,
+`blast-radius`, `relate`, `unused`, and `hotspots`, plus `--lens` upgrades to
+`impact`/`code-review`/`explain`/`guide`/`triage` (see design doc §7–§8).
+
 | Phase | Title | Schema | Deliverable |
 |---|---|---|---|
 | **105** | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols`. Path-bearing `symbol_key` is derived at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
 | **106** | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
-| **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. |
-| **108** | Traversal + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. Makes `impact` structural. |
-| **109** | Cascade query planner | — | `FTS filter → vector expand → graph traversal → merge/rerank`; structural signal in ranking. |
-| **110** | Unified graph UI | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. |
+| **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Early CLI: `co-change`, `deps`, `cycles`. |
+| **108** | Traversal primitives + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. |
+| **109** | `--lens` toggle + structural ranking | — | Cross-cutting `--lens` + `--weight-structural` in the re-rank loop; new commands `blast-radius`, `relate`, `similar --lens`, `unused`; `impact` gains `--lens`. Semantic stays the default for existing commands. |
+| **110** | Fusion: cascade planner + hotspots | — | Cascade query planner (`FTS → vector → graph traversal → merge/rerank`); `hotspots`; structural enrichment of `code-review`/`explain`/`guide`/`triage`. |
+| **111** | Unified graph UI | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. |
+| **112** | Lens coverage & parity sweep | — | Cross-cutting adoption pass over the whole command surface (CLI + MCP + HTTP): shared `addLensOption()` helper, uniform §7.3 defaults + per-hit lens labeling, docs/skill/`interpretations.ts` parity, and a test asserting every lens-capable command exposes `lens`. Done last so it covers the 110 fusion commands too. |
 
 Each phase ends with working software, tests, a `features.md` entry, a `PLAN.md`
 status update, and a changeset. **Start point: Phase 105** (isolated, test-heavy,
