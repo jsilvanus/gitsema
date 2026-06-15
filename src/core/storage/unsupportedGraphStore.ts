@@ -8,7 +8,7 @@
  * graph-unavailable backend, not a silent empty graph.
  */
 
-import type { EdgeType, GraphEdgeRecord, GraphNodeRecord, GraphStore } from './types.js'
+import type { EdgeType, GraphEdgeRecord, GraphHit, GraphNodeRecord, GraphPath, GraphStore, GraphSubgraph } from './types.js'
 
 const ERROR_MESSAGE = 'graph queries require a relational backend (Qdrant storage profiles do not support gitsema graph build/co-change/deps/cycles)'
 
@@ -38,6 +38,26 @@ export class UnsupportedGraphStore implements GraphStore {
   }
 
   async edgesFor(_nodeKey: string, _opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both' }): Promise<GraphEdgeRecord[]> {
+    throw new Error(ERROR_MESSAGE)
+  }
+
+  async neighbors(_key: string, _opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both'; depth?: number }): Promise<GraphHit[]> {
+    throw new Error(ERROR_MESSAGE)
+  }
+
+  async callers(_key: string, _depth?: number): Promise<GraphHit[]> {
+    throw new Error(ERROR_MESSAGE)
+  }
+
+  async callees(_key: string, _depth?: number): Promise<GraphHit[]> {
+    throw new Error(ERROR_MESSAGE)
+  }
+
+  async path(_from: string, _to: string): Promise<GraphPath | null> {
+    throw new Error(ERROR_MESSAGE)
+  }
+
+  async subgraph(_seed: string, _depth?: number): Promise<GraphSubgraph> {
     throw new Error(ERROR_MESSAGE)
   }
 }

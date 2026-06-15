@@ -165,10 +165,50 @@ export interface GraphEdgeRecord {
 }
 
 /**
+ * Default/maximum traversal depth for `GraphStore` traversal primitives
+ * (Phase 108, knowledge-graph §6). Capped to bound recursive-CTE cost.
+ */
+export const MAX_GRAPH_TRAVERSAL_DEPTH = 3
+
+/** A node reached during a `GraphStore` traversal (Phase 108, knowledge-graph §6). */
+export interface GraphHit {
+  nodeKey: string
+  displayName: string
+  kind: string
+  /** Number of hops from the traversal's starting node (>= 1). */
+  depth: number
+  /** The edge type of the (shortest) hop that reached this node, if known. */
+  edgeType?: EdgeType
+}
+
+/** One hop in a `GraphPath` (Phase 108, knowledge-graph §6). */
+export interface GraphPathHop {
+  nodeKey: string
+  displayName: string
+  edgeType: EdgeType
+  /** True if this hop traverses an edge against its stored src->dst direction. */
+  reversed: boolean
+}
+
+/** A shortest typed path between two graph nodes (Phase 108, knowledge-graph §6). */
+export interface GraphPath {
+  from: string
+  to: string
+  /** Hops from `from` to `to`, in order. Empty if `from === to`. */
+  hops: GraphPathHop[]
+}
+
+/** A node-induced subgraph (Phase 108, knowledge-graph §6). */
+export interface GraphSubgraph {
+  nodes: GraphNodeRecord[]
+  edges: GraphEdgeRecord[]
+}
+
+/**
  * Storage for the recomputable structural graph (Phase 107, knowledge-graph
  * §3.3/§6). `gitsema graph build` truncates and rebuilds nodes/edges wholesale
  * (like `blob_clusters`); read methods back the early `co-change`/`deps`/
- * `cycles` commands.
+ * `cycles` commands plus the Phase 108 traversal primitives.
  *
  * Relational-only (review9 §4): the Qdrant profile's `GraphStore` throws on
  * every method — graph queries require a relational backend.
@@ -187,6 +227,21 @@ export interface GraphStore {
   allEdges(edgeTypes?: EdgeType[]): Promise<GraphEdgeRecord[]>
   /** Edges touching `nodeKey`, optionally filtered by direction and edge types. */
   edgesFor(nodeKey: string, opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both' }): Promise<GraphEdgeRecord[]>
+
+  /**
+   * Typed neighborhood of `key` via recursive traversal (Phase 108,
+   * knowledge-graph §6). `direction` defaults to `'both'`; `depth` defaults
+   * to 1 and is capped at `MAX_GRAPH_TRAVERSAL_DEPTH`.
+   */
+  neighbors(key: string, opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both'; depth?: number }): Promise<GraphHit[]>
+  /** Reverse `calls` traversal — who (transitively) calls `key`. Depth capped at `MAX_GRAPH_TRAVERSAL_DEPTH` (default). */
+  callers(key: string, depth?: number): Promise<GraphHit[]>
+  /** Forward `calls` traversal — what `key` (transitively) calls. Depth capped at `MAX_GRAPH_TRAVERSAL_DEPTH` (default). */
+  callees(key: string, depth?: number): Promise<GraphHit[]>
+  /** Shortest typed path from `from` to `to` (any edge type/direction), or null if unreachable within `MAX_GRAPH_TRAVERSAL_DEPTH`. */
+  path(from: string, to: string): Promise<GraphPath | null>
+  /** The node-induced subgraph within `depth` hops of `seed` (both directions, all edge types). `depth` capped at `MAX_GRAPH_TRAVERSAL_DEPTH`. */
+  subgraph(seed: string, depth?: number): Promise<GraphSubgraph>
 }
 
 /** A raw structural reference to persist for one blob (Phase 106, knowledge-graph §3.2). */

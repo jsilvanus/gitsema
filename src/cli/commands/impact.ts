@@ -11,6 +11,10 @@ import { shortHash } from '../../core/search/ranking.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { emitJsonSink } from '../lib/output.js'
 import { narrateToolResult } from '../../core/llm/narrator.js'
+import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
+import { blastRadius } from '../../core/graph/blastRadius.js'
+import { parseLens } from '../lib/lens.js'
+import { renderResolutionError, renderBlastRadius } from '../lib/graphRender.js'
 
 export interface ImpactCommandOptions {
   /** Number of similar blobs to return (default 10). */
@@ -33,6 +37,7 @@ export interface ImpactCommandOptions {
   noHeadings?: boolean
   out?: string[]
   narrate?: boolean
+  lens?: string
 }
 
 /**
@@ -102,6 +107,37 @@ export async function impactCommand(
   if (isNaN(topK) || topK < 1) {
     console.error('Error: --top must be a positive integer')
     process.exit(1)
+  }
+
+  const lens = parseLens(options.lens, 'semantic')
+
+  // Phase 109 (knowledge-graph §8): `--lens structural|hybrid` makes `impact`
+  // a thin alias over `blast-radius` — true structural dependents instead of
+  // (or alongside) semantic similarity. `--lens semantic` (default) preserves
+  // pre-Phase-109 behavior exactly.
+  if (lens !== 'semantic') {
+    const profile = getCachedStorageProfile(process.cwd())
+    const normalised = filePath.trim().replace(/\\/g, '/').replace(/^\.\//, '')
+    const result = await blastRadius(profile.graph, normalised, { lens, topK })
+
+    if (result.resolved.status !== 'found') {
+      console.log(renderResolutionError(filePath, result.resolved))
+      return
+    }
+
+    if (options.dump !== undefined || (options.out?.some((o) => o.startsWith('json')))) {
+      const jsonSink = getSink(resolveOutputs({ out: options.out, dump: options.dump, html: options.html }), 'json')
+      if (jsonSink?.file) {
+        writeFileSync(jsonSink.file, JSON.stringify(result, null, 2), 'utf8')
+        console.log(`Wrote impact (blast-radius) report JSON to ${jsonSink.file}`)
+      } else {
+        console.log(JSON.stringify(result, null, 2))
+      }
+      return
+    }
+
+    console.log(renderBlastRadius(result, result.resolved.node))
+    return
   }
 
   const resolvedPath = resolve(filePath.trim())
