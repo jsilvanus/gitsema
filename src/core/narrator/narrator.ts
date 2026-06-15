@@ -5,7 +5,7 @@
  * Output always includes commit hash citations for auditability.
  */
 
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
 import type { CommitEvent, NarrateCommandOptions, ExplainCommandOptions, NarrationResult } from './types.js'
 import { redactAll } from './redact.js'
@@ -20,6 +20,24 @@ import { logger } from '../../utils/logger.js'
 const MAX_COMMITS_DEFAULT = 500
 
 /**
+ * Validate a user-supplied git revision range (e.g. `HEAD~10..HEAD`, `v1..v2`,
+ * `main...feature`, a tag/branch/commit). Permits only characters that are
+ * legal in git refspecs and rejects values that begin with `-` (which `git log`
+ * would otherwise interpret as an option). Returns `true` when the range is
+ * safe to pass as a single argv element to `git log`.
+ *
+ * This is the guard for the narrator's only externally-controlled git input:
+ * `range` reaches here from `gitsema narrate --range` and from the
+ * `POST /api/v1/narrate` request body, so it must never be interpolated into a
+ * shell or used to inject flags.
+ */
+export function isSafeGitRange(range: string): boolean {
+  // First char must be a normal ref character (not `-`); remaining chars may
+  // include the range/exclusion punctuation git uses (`.` covers `..`/`...`).
+  return /^[A-Za-z0-9._/~^@{}][A-Za-z0-9._/~^@{}-]*$/.test(range)
+}
+
+/**
  * Stream commits from git log as an array of CommitEvent records.
  * Content is NOT redacted here — callers must redact before sending to LLM.
  */
@@ -32,23 +50,30 @@ export function fetchCommitEvents(opts: {
 }): CommitEvent[] {
   const { since, until, range, maxCommits = MAX_COMMITS_DEFAULT, cwd = process.cwd() } = opts
 
-  // Build git log command
-  const parts: string[] = [
-    'git', 'log',
+  // Build git log argv. Spawned via execFileSync (no shell), so `since`/`until`
+  // are safe as single `--flag=value` argv elements even with spaces (e.g.
+  // "2 weeks ago"). `range`, the only externally-controllable revision, is
+  // validated against a refspec allowlist to prevent option/path injection.
+  const args: string[] = [
+    'log',
     `--max-count=${maxCommits}`,
     '--format=%H%x1F%ai%x1F%an%x1F%s%x1F%b%x1E',
   ]
 
   if (range) {
-    parts.push(range)
+    if (!isSafeGitRange(range)) {
+      logger.warn(`[narrator] ignoring unsafe --range value: ${JSON.stringify(range)}`)
+      return []
+    }
+    args.push(range)
   } else {
-    if (since) parts.push(`--since="${since}"`)
-    if (until) parts.push(`--until="${until}"`)
+    if (since) args.push(`--since=${since}`)
+    if (until) args.push(`--until=${until}`)
   }
 
   let raw: string
   try {
-    raw = execSync(parts.join(' '), { cwd, maxBuffer: 50 * 1024 * 1024, encoding: 'utf8' })
+    raw = execFileSync('git', args, { cwd, maxBuffer: 50 * 1024 * 1024, encoding: 'utf8' })
   } catch (err) {
     logger.warn(`[narrator] git log failed: ${err instanceof Error ? err.message : String(err)}`)
     return []
