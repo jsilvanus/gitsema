@@ -3900,18 +3900,22 @@ extraction walks only top-level `rootNode.namedChildren`, and `impact.ts` coupli
 is purely semantic. This track adds the graph without violating blob-first /
 immutable / Git-is-truth.
 
-**Core decision (two-level identity).** Immutable per-blob *symbol occurrences*
-(dedup'd by blob hash, like embeddings) vs. recomputable *symbol nodes* keyed by
-`symbol_key = path#qualified_name#signature_hash`. Edges connect stable nodes but
-carry Git provenance (`first/last_seen_commit`), so temporal edges come for free.
-Graph is **relational-only** (SQLite + Postgres recursive CTEs); Qdrant `GraphStore`
-fails loud (cf. review9 §4). First languages: **TS/JS + Python**, then Go/Rust/Java.
+**Core decision (two-level identity).** Immutable per-blob *symbol occurrences* are
+**path-free** (dedup'd by blob hash, like embeddings — a blob maps to many paths and
+is parsed once), keyed by `(blob_hash, qualified_name, signature_hash)`. Recomputable
+*graph nodes* (`file` | `symbol` | `external`) carry path: the path-bearing
+`symbol_key = path#qualified_name#signature_hash` is **derived** at node-build by
+joining occurrences × `paths`, so duplicate content at two paths fans out to two
+nodes. Edges connect nodes and carry Git provenance (`first/last_seen_commit`), so
+temporal edges come for free. Graph is **relational-only** (SQLite + Postgres
+recursive CTEs); Qdrant `GraphStore` fails loud (cf. review9 §4). First languages:
+**TS/JS + Python**, then Go/Rust/Java.
 
 | Phase | Title | Schema | Deliverable |
 |---|---|---|---|
-| **105** | Stable symbol identity | v24 | Recursive scope-stack extraction → `qualified_name`, `signature`, `signature_hash`, `parent_symbol_key`, `symbol_key` on `symbols`. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
+| **105** | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols`. Path-bearing `symbol_key` is derived at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
 | **106** | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
-| **107** | Linking pass + `edges` table | v26 | `gitsema graph build` resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Queryable `symbol_nodes` + `edges`. |
+| **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. |
 | **108** | Traversal + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. Makes `impact` structural. |
 | **109** | Cascade query planner | — | `FTS filter → vector expand → graph traversal → merge/rerank`; structural signal in ranking. |
 | **110** | Unified graph UI | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. |
