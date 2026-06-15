@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.94.0** · Schema: **v23** · Test suite: **1040 tests**
+> Current version: **v0.95.0** · Schema: **v24** · Test suite: **1092 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -98,6 +98,7 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | Multi-repo search | `gitsema repos` + MCP `multi_repo_search` |
 | **Early-cut (Phase 64)** | `--early-cut <n>` — random-sample candidate pool for speed on large indexes |
 | **LLM provenance citations (Phase 64)** | `--explain-llm` — structured citation block for LLM prompt grounding |
+| **Stable symbol identity (Phase 105)** | Symbol-level results (`code_search`, `--chunks` with symbols) carry path-free `qualifiedName` (scope chain, e.g. `Auth.validateToken`), `signature` (normalized param list), `signatureHash`, and `parentQualifiedName`, for TS/TSX/JS/Python; `renderResults()` displays `qualifiedName(signature)`, falling back to `symbolName` for other languages/older rows |
 
 ---
 

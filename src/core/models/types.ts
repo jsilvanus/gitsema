@@ -51,6 +51,14 @@ export interface SearchResult {
   symbolName?: string
   /** Kind of the symbol: 'function' | 'class' | 'method' | 'impl' | 'struct' | 'enum' | 'trait' | 'other'. */
   symbolKind?: string
+  /** Path-free qualified name (scope chain joined by '.'), e.g. "Auth.validateToken". Phase 105. */
+  qualifiedName?: string
+  /** Normalized parameter-list signature, e.g. "(token:string)". Phase 105. */
+  signature?: string
+  /** First 12 hex chars of sha1(signature). Phase 105. */
+  signatureHash?: string
+  /** Enclosing scope's qualified name, or undefined at top level. Phase 105. */
+  parentQualifiedName?: string
   /** Detected programming language of the symbol — present for symbol-level results. */
   language?: string
   /**

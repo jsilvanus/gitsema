@@ -52,8 +52,10 @@ export interface DbSession {
  * 22 — Added kind + params_json columns to embed_config; added settings table (narrator model config)
  * 23 — Added normalized_url, clone_path, last_indexed_at, ephemeral columns to repos table for
  *       persistent server-side repo storage (GITSEMA_DATA_DIR registry)
+ * 24 — Added qualified_name, signature, signature_hash, parent_qualified_name columns to
+ *       symbols table for path-free stable symbol identity (Phase 105 / knowledge-graph §3.1)
  */
-export const CURRENT_SCHEMA_VERSION = 23
+export const CURRENT_SCHEMA_VERSION = 24
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -167,6 +169,7 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     );
 
     -- Symbol-level registry: named declarations extracted by the function chunker (Phase 19)
+    -- qualified_name/signature/signature_hash/parent_qualified_name added in v24 (Phase 105)
     CREATE TABLE IF NOT EXISTS symbols (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       blob_hash TEXT NOT NULL REFERENCES blobs(blob_hash),
@@ -175,8 +178,15 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       symbol_name TEXT NOT NULL,
       symbol_kind TEXT NOT NULL,
       language TEXT NOT NULL,
-      chunk_id INTEGER
+      chunk_id INTEGER,
+      qualified_name TEXT,
+      signature TEXT,
+      signature_hash TEXT,
+      parent_qualified_name TEXT
     );
+
+    CREATE INDEX IF NOT EXISTS idx_symbols_qualified_name_sig ON symbols(qualified_name, signature_hash);
+    CREATE INDEX IF NOT EXISTS idx_symbols_blob_hash_qualified_name ON symbols(blob_hash, qualified_name);
 
     -- Enriched embeddings for symbol-level semantic search (Phase 19)
     CREATE TABLE IF NOT EXISTS symbol_embeddings (

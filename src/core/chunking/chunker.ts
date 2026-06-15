@@ -25,6 +25,18 @@ export interface Chunk {
    * Present only when using the `function` chunker strategy.
    */
   symbolKind?: string
+  /**
+   * Path-free qualified name (scope chain joined by `.`, e.g. `"Auth.validateToken"`).
+   * Top-level symbols use their bare name. Populated for TS/TSX/JS/Python via the
+   * tree-sitter recursive scope-stack walk (Phase 105); undefined otherwise.
+   */
+  qualifiedName?: string
+  /** Normalized parameter list, e.g. `"(token:string)"`. Phase 105. */
+  signature?: string
+  /** First 12 hex chars of sha1(signature). Phase 105. */
+  signatureHash?: string
+  /** Enclosing scope's qualified name, or undefined at top level. Phase 105. */
+  parentQualifiedName?: string
 }
 
 export interface ChunkOptions {

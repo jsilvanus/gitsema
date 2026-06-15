@@ -73,6 +73,14 @@ export interface VectorRecord {
   symbolKind?: string
   language?: string
   blobCount?: number
+  /** Path-free qualified name (scope chain joined by '.'). symbol kind only (Phase 105). */
+  qualifiedName?: string
+  /** Normalized parameter-list signature, e.g. "(token:string)". symbol kind only (Phase 105). */
+  signature?: string
+  /** First 12 hex chars of sha1(signature). symbol kind only (Phase 105). */
+  signatureHash?: string
+  /** Enclosing scope's qualified name, or undefined at top level. symbol kind only (Phase 105). */
+  parentQualifiedName?: string
 }
 
 /**

@@ -134,6 +134,8 @@ type CandidateRow = {
   chunkId?: number; startLine?: number; endLine?: number
   symbolId?: number; symbolName?: string; symbolKind?: string; language?: string
   modulePath?: string
+  qualifiedName?: string | null; signature?: string | null
+  signatureHash?: string | null; parentQualifiedName?: string | null
 }
 
 function rowToEmbedding(row: CandidateRow): Float32Array {
@@ -328,6 +330,10 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
       symbolName: symbols.symbolName,
       symbolKind: symbols.symbolKind,
       language: symbols.language,
+      qualifiedName: symbols.qualifiedName,
+      signature: symbols.signature,
+      signatureHash: symbols.signatureHash,
+      parentQualifiedName: symbols.parentQualifiedName,
       vector: symbolEmbeddings.vector,
       quantized: symbolEmbeddings.quantized,
       quantMin: symbolEmbeddings.quantMin,
@@ -360,6 +366,10 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
         symbolName: row.symbolName,
         symbolKind: row.symbolKind,
         language: row.language,
+        qualifiedName: row.qualifiedName,
+        signature: row.signature,
+        signatureHash: row.signatureHash,
+        parentQualifiedName: row.parentQualifiedName,
       })
     }
   }
@@ -449,6 +459,8 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
       chunkId: row.chunkId, startLine: row.startLine, endLine: row.endLine,
       symbolId: row.symbolId, symbolName: row.symbolName, symbolKind: row.symbolKind,
       language: row.language, modulePath: row.modulePath,
+      qualifiedName: row.qualifiedName, signature: row.signature,
+      signatureHash: row.signatureHash, parentQualifiedName: row.parentQualifiedName,
       cosine, score,
     }
   }
@@ -541,6 +553,10 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
       symbolName: b.symbolName,
       symbolKind: b.symbolKind,
       language: b.language,
+      qualifiedName: b.qualifiedName ?? undefined,
+      signature: b.signature ?? undefined,
+      signatureHash: b.signatureHash ?? undefined,
+      parentQualifiedName: b.parentQualifiedName ?? undefined,
     }
 
     if (options.explain) {

@@ -91,8 +91,22 @@ CREATE TABLE IF NOT EXISTS symbols (
   symbol_kind TEXT NOT NULL,
   language TEXT NOT NULL,
   chunk_id BIGINT,
+  -- qualified_name/signature/signature_hash/parent_qualified_name added in v24 (Phase 105)
+  qualified_name TEXT,
+  signature TEXT,
+  signature_hash TEXT,
+  parent_qualified_name TEXT,
   UNIQUE (blob_hash, start_line, end_line, symbol_name)
 );
+
+-- Idempotent column additions for symbols tables created before Phase 105.
+ALTER TABLE symbols ADD COLUMN IF NOT EXISTS qualified_name TEXT;
+ALTER TABLE symbols ADD COLUMN IF NOT EXISTS signature TEXT;
+ALTER TABLE symbols ADD COLUMN IF NOT EXISTS signature_hash TEXT;
+ALTER TABLE symbols ADD COLUMN IF NOT EXISTS parent_qualified_name TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_symbols_qualified_name_sig ON symbols(qualified_name, signature_hash);
+CREATE INDEX IF NOT EXISTS idx_symbols_blob_hash_qualified_name ON symbols(blob_hash, qualified_name);
 
 CREATE TABLE IF NOT EXISTS symbol_embeddings (
   symbol_id BIGINT NOT NULL REFERENCES symbols(id),

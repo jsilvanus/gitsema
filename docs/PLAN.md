@@ -3925,7 +3925,7 @@ include `co-change`, `deps`, `cycles`, `callers`/`callees`/`path`/`neighbors`,
 
 | Phase | Title | Schema | Deliverable |
 |---|---|---|---|
-| **105** | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols`. Path-bearing `symbol_key` is derived at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
+| **105** ✅ | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols`. Path-bearing `symbol_key` is derived at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
 | **106** | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
 | **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Early CLI: `co-change`, `deps`, `cycles`. |
 | **108** | Traversal primitives + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. |
@@ -3937,3 +3937,20 @@ include `co-change`, `deps`, `cycles`, `callers`/`callees`/`path`/`neighbors`,
 Each phase ends with working software, tests, a `features.md` entry, a `PLAN.md`
 status update, and a changeset. **Start point: Phase 105** (isolated, test-heavy,
 ships qualified names before any edge depends on it).
+
+**Status:** Phase 105 ✅ complete. `extractSymbolMetadata()`
+(`src/core/chunking/functionChunker.ts`) recursively walks TS/TSX/JS/Python ASTs
+with a scope stack, producing path-free `qualifiedName`/`signature`/`signatureHash`/
+`parentQualifiedName` for every symbol (including nested class methods); other
+languages return `[]` (graceful degradation, fields stay `null`). Schema v24 adds
+the four nullable `symbols` columns + `(qualified_name, signature_hash)` and
+`(blob_hash, qualified_name)` indexes (sqlite migration, fresh-DB DDL, and Postgres
+DDL/ALTER). The four fields are threaded through `VectorRecord`, `RerankCandidate`,
+`SearchResult`, sqlite/Postgres/Qdrant write and read paths, `code_search` /
+`renderResults()` (shows `qualifiedName(signature)`, falling back to `symbolName`),
+and the LSP `documentSymbol` handler. **Deviation from the original sketch:** chunk
+and embedding *granularity* remains top-level-only (preserving existing chunking
+tests/behavior) — nested symbols (e.g. class methods) are not separately chunked or
+embedded, but their identity metadata is still captured by `extractSymbolMetadata()`
+and exposed via the top-level chunk's `parentQualifiedName`-filtered match. Per-method
+chunking/embedding, if wanted, is left to a later phase.

@@ -314,6 +314,14 @@ export interface StoreSymbolArgs {
   /** Optional FK linking this symbol to its source chunk row (Phase 33). */
   chunkId?: number
   quantize?: boolean
+  /** Path-free qualified name (scope chain joined by '.'). Phase 105. */
+  qualifiedName?: string
+  /** Normalized parameter-list signature, e.g. "(token:string)". Phase 105. */
+  signature?: string
+  /** First 12 hex chars of sha1(signature). Phase 105. */
+  signatureHash?: string
+  /** Enclosing scope's qualified name, or undefined at top level. Phase 105. */
+  parentQualifiedName?: string
 }
 
 /**
@@ -332,7 +340,10 @@ export interface StoreSymbolArgs {
  * Returns the newly created (or existing) symbol id.
  */
 export function storeSymbol(args: StoreSymbolArgs): number {
-  const { blobHash, startLine, endLine, symbolName, symbolKind, language, model, embedding, chunkId } = args
+  const {
+    blobHash, startLine, endLine, symbolName, symbolKind, language, model, embedding, chunkId,
+    qualifiedName, signature, signatureHash, parentQualifiedName,
+  } = args
   const { db, rawDb } = getActiveSession()
   const { vector, quantized: qFlag, quantMin: qMin, quantScale: qScale } = serializeEmbedding(embedding, args.quantize)
 
@@ -354,7 +365,11 @@ export function storeSymbol(args: StoreSymbolArgs): number {
   return db.transaction((tx) => {
     const symbolRow = tx
       .insert(symbols)
-      .values({ blobHash, startLine, endLine, symbolName, symbolKind, language, chunkId: chunkId ?? null })
+      .values({
+        blobHash, startLine, endLine, symbolName, symbolKind, language, chunkId: chunkId ?? null,
+        qualifiedName: qualifiedName ?? null, signature: signature ?? null,
+        signatureHash: signatureHash ?? null, parentQualifiedName: parentQualifiedName ?? null,
+      })
       .returning({ id: symbols.id })
       .get()
 
