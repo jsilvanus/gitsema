@@ -3,8 +3,8 @@
 > Status: **Design / not yet implemented.** Target track: Phases 105–112.
 > Scope decision (owner): build the **structural** graph first (typed edges from
 > static analysis), starting with **TypeScript/JavaScript + Python**, then expand
-> to Go/Rust/Java. A separate presentation/UI graph (Phase 111) folds in later, and
-> a cross-command lens-coverage sweep (Phase 112) closes the track.
+> to Go/Rust/Java. A cross-command lens-coverage sweep (Phase 111) precedes a
+> separate presentation/UI graph (Phase 112, HTML + CLI) which closes the track.
 
 This document is the single design reference for the knowledge-graph track. It
 nails down the **identity model**, the **schema**, the **per-language name-resolution
@@ -376,7 +376,7 @@ fusion lives in one place.
 
 This mirrors the precedent set by `--hybrid` + `--bm25-weight` (vector+BM25 blend),
 so the convention is already idiomatic. The MCP/HTTP tool surfaces expose `lens` as a
-parameter wherever the CLI flag exists. A dedicated **Phase 112** sweeps the whole
+parameter wherever the CLI flag exists. A dedicated **Phase 111** sweeps the whole
 command set to make this coverage uniform and mechanically enforced (a shared
 `addLensOption()` helper + a parity test), rather than wired ad-hoc per command.
 
@@ -427,8 +427,8 @@ when each becomes buildable — several temporal ones need only `co_change`
 | **108** | Traversal primitives + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. |
 | **109** | `--lens` toggle + structural ranking | — | Cross-cutting `--lens semantic\|structural\|hybrid` + `--weight-structural` (§7) wired into the re-rank loop; new commands `blast-radius`, `relate`, `similar --lens`, `unused`; `impact` gains `--lens`. **Semantic stays the default for existing commands.** |
 | **110** | Fusion: cascade planner + hotspots | — | Cascade query planner `FTS filter → vector expand → graph traversal → merge/rerank`; `hotspots`; structural enrichment of `code-review`/`explain`/`guide`/`triage`. |
-| **111** | Unified graph UI | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. |
-| **112** | Lens coverage & parity sweep | — | Cross-cutting adoption pass over the **entire command surface** (CLI + MCP + HTTP): wire `--lens`/`lens` into every command where more than one lens is meaningful, via a single shared `addLensOption()` helper; enforce the §7.3 defaults and per-hit lens labeling uniformly; restore docs / skill / `interpretations.ts` parity; add a test asserting every lens-capable command/tool exposes `lens` (the same mechanical-guarantee approach as `docsSync`). Done last so it also covers the fusion commands from 110. |
+| **111** | Lens coverage & parity sweep | — | Cross-cutting adoption pass over the **entire command surface** (CLI + MCP + HTTP): wire `--lens`/`lens` into every command where more than one lens is meaningful, via a single shared `addLensOption()` helper; enforce the §7.3 defaults and per-hit lens labeling uniformly; restore docs / skill / `interpretations.ts` parity; add a test asserting every lens-capable command/tool exposes `lens` (the same mechanical-guarantee approach as `docsSync`). Done before the UI phase so it also covers the fusion commands from 110. |
+| **112** | Unified graph UI (HTML + CLI) | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. Also adds a CLI/text-mode subgraph view (ASCII tree or list rendering of nodes/edges) for terminal-only workflows. |
 
 Each phase ends with working software, tests, a `features.md` entry, a `PLAN.md`
 status update, and a changeset (per `CLAUDE.md`).
