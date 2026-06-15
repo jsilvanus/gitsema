@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { Chunk, Chunker } from './chunker.js'
 
 // ---------------------------------------------------------------------------
@@ -14,6 +15,7 @@ interface TreeSitterGrammar {
 interface TSNode {
   type: string
   startPosition: { row: number; column: number }
+  endPosition: { row: number; column: number }
   namedChildren: TSNode[]
   text: string
   childForFieldName(name: string): TSNode | null | undefined
@@ -304,6 +306,14 @@ export interface DeclarationInfo {
   symbolName?: string
   /** Symbol kind: 'function' | 'class' | 'method' | 'impl' | 'struct' | 'enum' | 'trait' | 'other'. */
   symbolKind?: string
+  /** Path-free qualified name (scope chain joined by `.`). Phase 105. */
+  qualifiedName?: string
+  /** Normalized parameter-list signature, e.g. `"(token:string)"`. Phase 105. */
+  signature?: string
+  /** First 12 hex chars of sha1(signature). Phase 105. */
+  signatureHash?: string
+  /** Enclosing scope's qualified name, or undefined at top level. Phase 105. */
+  parentQualifiedName?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +350,276 @@ function extractDeclarationsWithTreeSitter(content: string, lang: Language): Dec
   }
 
   return declarations
+}
+
+// ---------------------------------------------------------------------------
+// Recursive symbol-metadata extraction (Phase 105 — stable symbol identity)
+//
+// Walks the full AST with a scope stack to compute, for TS/TSX/JS/Python only,
+// a path-free intrinsic identity per symbol: a qualified name (scope chain
+// joined by '.'), a normalized parameter signature + short hash, and the
+// enclosing scope's qualified name. Other languages return [] (graceful
+// degradation — callers leave the new fields undefined).
+// ---------------------------------------------------------------------------
+
+/** Path-free intrinsic identity for one symbol occurrence (Phase 105). */
+export interface SymbolMetadata {
+  /** 1-indexed start line (decorator/export lines included). */
+  startLine: number
+  /** 1-indexed end line. */
+  endLine: number
+  symbolName: string
+  symbolKind: string
+  /** Scope chain joined by '.', e.g. "Auth.validateToken". Top-level = bare name. */
+  qualifiedName: string
+  /** Normalized parameter-list signature, e.g. "(token:string)". */
+  signature?: string
+  /** First 12 hex chars of sha1(signature). */
+  signatureHash?: string
+  /** Enclosing scope's qualified name, or undefined at top level. */
+  parentQualifiedName?: string
+}
+
+const TS_JS_LANGS: ReadonlySet<Language> = new Set(['typescript', 'tsx', 'javascript'])
+
+/** Strips a leading `: ` from a tree-sitter `type_annotation` node's text. */
+function stripTypeAnnotation(text: string): string {
+  return text.replace(/^:\s*/, '').trim()
+}
+
+/**
+ * Describes a single formal parameter as a normalized, comparable token.
+ * Strips whitespace and default values; keeps TS type annotations when the
+ * grammar exposes them; Python/JS degrade to bare names (arity + names).
+ * Returns null for tokens that carry no signature information (e.g. commas,
+ * which tree-sitter never returns as named children, but defend anyway).
+ */
+function describeParam(node: TSNode): string | null {
+  let prefix = ''
+  let target = node
+
+  switch (node.type) {
+    case 'rest_parameter':
+    case 'list_splat_pattern':
+      prefix = '...'
+      target = node.namedChildren[0] ?? node
+      break
+    case 'dictionary_splat_pattern':
+      prefix = '**'
+      target = node.namedChildren[0] ?? node
+      break
+    default:
+      break
+  }
+
+  // TS: required_parameter / optional_parameter wrap a `pattern` + optional `type`.
+  const pattern = target.childForFieldName('pattern')
+  const typeNode = target.childForFieldName('type')
+  if (pattern) {
+    const name = pattern.text.trim()
+    const type = typeNode ? stripTypeAnnotation(typeNode.text) : undefined
+    const optional = node.type === 'optional_parameter' ? '?' : ''
+    return type ? `${prefix}${name}${optional}:${type}` : `${prefix}${name}${optional}`
+  }
+
+  // Python: typed_parameter / typed_default_parameter / default_parameter
+  // expose `name`/`type` via field names too in the official grammar.
+  const namedField = target.childForFieldName('name')
+  if (namedField) {
+    const name = namedField.text.trim()
+    const type = typeNode ? stripTypeAnnotation(typeNode.text) : undefined
+    return type ? `${prefix}${name}:${type}` : `${prefix}${name}`
+  }
+
+  // assignment_pattern (JS default value): left side is the name, right side
+  // (default value) is intentionally discarded.
+  if (target.type === 'assignment_pattern') {
+    const left = target.namedChildren[0]
+    return left ? `${prefix}${left.text.trim()}` : null
+  }
+
+  // Plain identifier or any other simple pattern (object/array destructuring,
+  // `self`, etc.) — fall back to its normalized text.
+  const text = target.text.replace(/\s+/g, '').trim()
+  if (!text || text === ',') return null
+  return `${prefix}${text}`
+}
+
+/**
+ * Builds a normalized signature string from a `formal_parameters`/`parameters`
+ * node and its sha1-derived short hash. Returns undefined when no parameters
+ * node is available (e.g. a bare class declaration).
+ */
+function computeSignature(paramsNode: TSNode | null | undefined): { signature: string; signatureHash: string } | undefined {
+  if (!paramsNode) return undefined
+  const parts: string[] = []
+  for (const child of paramsNode.namedChildren) {
+    const part = describeParam(child)
+    if (part !== null) parts.push(part)
+  }
+  const signature = `(${parts.join(',')})`
+  const signatureHash = createHash('sha1').update(signature).digest('hex').slice(0, 12)
+  return { signature, signatureHash }
+}
+
+/** Joins a scope stack and a name into a path-free qualified name. */
+function qualify(scopeStack: readonly string[], name: string): string {
+  return scopeStack.length > 0 ? `${scopeStack.join('.')}.${name}` : name
+}
+
+/**
+ * Recursively walks one declaration node (and, for classes, its body) pushing
+ * `SymbolMetadata` entries for every recognized symbol — top-level or nested.
+ * `startLineOverride` lets decorator/export wrappers report the outer node's
+ * start line while the inner declaration supplies the name/kind/body.
+ */
+function visitDeclaration(
+  node: TSNode,
+  lang: Language,
+  scopeStack: readonly string[],
+  out: SymbolMetadata[],
+  startLineOverride?: number,
+): void {
+  const startLine = startLineOverride ?? node.startPosition.row + 1
+  const endLine = node.endPosition.row + 1
+  const parentQualifiedName = scopeStack.length > 0 ? scopeStack.join('.') : undefined
+
+  if (TS_JS_LANGS.has(lang)) {
+    switch (node.type) {
+      case 'export_statement': {
+        const inner = node.namedChildren[0]
+        if (inner) visitDeclaration(inner, lang, scopeStack, out, startLine)
+        return
+      }
+      case 'class_declaration': {
+        const name = node.childForFieldName('name')?.text ?? ''
+        const qualifiedName = qualify(scopeStack, name)
+        out.push({ startLine, endLine, symbolName: name, symbolKind: 'class', qualifiedName, parentQualifiedName })
+        const body = node.childForFieldName('body')
+        if (body) {
+          const innerScope = [...scopeStack, name]
+          for (const member of body.namedChildren) {
+            visitDeclaration(member, lang, innerScope, out)
+          }
+        }
+        return
+      }
+      case 'method_definition': {
+        const name = node.childForFieldName('name')?.text ?? ''
+        const qualifiedName = qualify(scopeStack, name)
+        const sig = computeSignature(node.childForFieldName('parameters'))
+        out.push({
+          startLine, endLine, symbolName: name, symbolKind: 'method', qualifiedName, parentQualifiedName,
+          signature: sig?.signature, signatureHash: sig?.signatureHash,
+        })
+        return
+      }
+      case 'public_field_definition':
+      case 'field_definition': {
+        // Class field assigned an arrow/function expression, e.g. `bar = () => {}`.
+        const value = node.childForFieldName('value')
+        if (!value || (value.type !== 'arrow_function' && value.type !== 'function_expression' && value.type !== 'function')) return
+        const name = node.childForFieldName('name')?.text ?? node.childForFieldName('property')?.text ?? ''
+        if (!name) return
+        const qualifiedName = qualify(scopeStack, name)
+        const sig = computeSignature(value.childForFieldName('parameters'))
+        out.push({
+          startLine, endLine, symbolName: name, symbolKind: 'method', qualifiedName, parentQualifiedName,
+          signature: sig?.signature, signatureHash: sig?.signatureHash,
+        })
+        return
+      }
+      case 'function_declaration': {
+        const name = node.childForFieldName('name')?.text ?? ''
+        const qualifiedName = qualify(scopeStack, name)
+        const sig = computeSignature(node.childForFieldName('parameters'))
+        out.push({
+          startLine, endLine, symbolName: name, symbolKind: scopeStack.length > 0 ? 'method' : 'function',
+          qualifiedName, parentQualifiedName, signature: sig?.signature, signatureHash: sig?.signatureHash,
+        })
+        return
+      }
+      case 'lexical_declaration': {
+        const declarator = node.namedChildren.find((c) => c.type === 'variable_declarator')
+        const name = declarator?.childForFieldName('name')?.text ?? ''
+        if (!name) return
+        const value = declarator?.childForFieldName('value')
+        const sig = value ? computeSignature(value.childForFieldName('parameters')) : undefined
+        const qualifiedName = qualify(scopeStack, name)
+        out.push({
+          startLine, endLine, symbolName: name, symbolKind: scopeStack.length > 0 ? 'method' : 'function',
+          qualifiedName, parentQualifiedName, signature: sig?.signature, signatureHash: sig?.signatureHash,
+        })
+        return
+      }
+      default:
+        return
+    }
+  }
+
+  if (lang === 'python') {
+    switch (node.type) {
+      case 'decorated_definition': {
+        const inner = node.namedChildren.find((c) => c.type === 'function_definition' || c.type === 'class_definition')
+        if (inner) visitDeclaration(inner, lang, scopeStack, out, startLine)
+        return
+      }
+      case 'class_definition': {
+        const name = node.childForFieldName('name')?.text ?? ''
+        const qualifiedName = qualify(scopeStack, name)
+        out.push({ startLine, endLine, symbolName: name, symbolKind: 'class', qualifiedName, parentQualifiedName })
+        const body = node.childForFieldName('body')
+        if (body) {
+          const innerScope = [...scopeStack, name]
+          for (const member of body.namedChildren) {
+            visitDeclaration(member, lang, innerScope, out)
+          }
+        }
+        return
+      }
+      case 'function_definition': {
+        const name = node.childForFieldName('name')?.text ?? ''
+        const qualifiedName = qualify(scopeStack, name)
+        const sig = computeSignature(node.childForFieldName('parameters'))
+        out.push({
+          startLine, endLine, symbolName: name, symbolKind: scopeStack.length > 0 ? 'method' : 'function',
+          qualifiedName, parentQualifiedName, signature: sig?.signature, signatureHash: sig?.signatureHash,
+        })
+        return
+      }
+      default:
+        return
+    }
+  }
+}
+
+/**
+ * Recursively extracts path-free symbol identity (qualified name, normalized
+ * signature + hash, parent scope) for every symbol in `content` — top-level
+ * and nested (e.g. class methods). Supported for TypeScript, TSX, JavaScript,
+ * and Python only; all other languages return `[]` so callers leave the new
+ * `symbols` columns null (graceful degradation per the knowledge-graph design,
+ * §4.1/§4.2). Returns `[]` (never throws) when tree-sitter is unavailable.
+ */
+export function extractSymbolMetadata(content: string, path: string): SymbolMetadata[] {
+  const lang = detectLanguage(path)
+  if (!TS_JS_LANGS.has(lang) && lang !== 'python') return []
+
+  const grammar = getGrammar(lang)
+  if (!grammar) return []
+
+  let tree: { rootNode: TSNode }
+  try {
+    tree = grammar.parse(content)
+  } catch {
+    return []
+  }
+
+  const out: SymbolMetadata[] = []
+  for (const child of tree.rootNode.namedChildren) {
+    visitDeclaration(child, lang, [], out)
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -536,8 +816,23 @@ export class FunctionChunker implements Chunker {
       return [{ startLine: 1, endLine: lines.length, content }]
     }
 
+    // Phase 105: recursive scope-stack walk yields path-free qualified
+    // names/signatures for top-level declarations (and nested symbols, used
+    // by future phases). Match top-level entries back onto `declarations` by
+    // start line so each chunk's own symbol carries its stable identity.
+    const topLevelMetadata = new Map<number, SymbolMetadata>()
+    for (const m of extractSymbolMetadata(content, path)) {
+      if (m.parentQualifiedName === undefined) topLevelMetadata.set(m.startLine, m)
+    }
+
+    type Boundary = {
+      start: number; end: number
+      symbolName?: string; symbolKind?: string
+      qualifiedName?: string; signature?: string; signatureHash?: string; parentQualifiedName?: string
+    }
+
     // Build chunk boundaries: from each declaration start to the line before the next
-    const boundaries: Array<{ start: number; end: number; symbolName?: string; symbolKind?: string }> = []
+    const boundaries: Boundary[] = []
 
     // Content before first declaration (if any) — no symbol metadata
     if (declarations[0].startLine > 1) {
@@ -547,11 +842,16 @@ export class FunctionChunker implements Chunker {
     for (let i = 0; i < declarations.length; i++) {
       const { startLine, symbolName, symbolKind } = declarations[i]
       const end = i + 1 < declarations.length ? declarations[i + 1].startLine - 1 : lines.length
-      boundaries.push({ start: startLine, end, symbolName, symbolKind })
+      const meta = topLevelMetadata.get(startLine)
+      boundaries.push({
+        start: startLine, end, symbolName, symbolKind,
+        qualifiedName: meta?.qualifiedName, signature: meta?.signature,
+        signatureHash: meta?.signatureHash, parentQualifiedName: meta?.parentQualifiedName,
+      })
     }
 
     // Merge chunks that are too small into their predecessor
-    const merged: Array<{ start: number; end: number; symbolName?: string; symbolKind?: string }> = []
+    const merged: Boundary[] = []
     for (const b of boundaries) {
       if (merged.length > 0 && (b.end - b.start + 1) < MIN_CHUNK_LINES) {
         const prev = merged[merged.length - 1]
@@ -562,18 +862,26 @@ export class FunctionChunker implements Chunker {
         if (!prev.symbolName && b.symbolName) {
           prev.symbolName = b.symbolName
           prev.symbolKind = b.symbolKind
+          prev.qualifiedName = b.qualifiedName
+          prev.signature = b.signature
+          prev.signatureHash = b.signatureHash
+          prev.parentQualifiedName = b.parentQualifiedName
         }
       } else {
         merged.push({ ...b })
       }
     }
 
-    return merged.map(({ start, end, symbolName, symbolKind }) => ({
+    return merged.map(({ start, end, symbolName, symbolKind, qualifiedName, signature, signatureHash, parentQualifiedName }) => ({
       startLine: start,
       endLine: end,
       content: lines.slice(start - 1, end).join('\n'),
       symbolName,
       symbolKind,
+      qualifiedName,
+      signature,
+      signatureHash,
+      parentQualifiedName,
     }))
   }
 }

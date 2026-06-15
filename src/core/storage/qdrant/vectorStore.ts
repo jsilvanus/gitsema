@@ -199,6 +199,10 @@ export class QdrantVectorStore implements VectorStore {
         symbolName: c.symbolName,
         symbolKind: c.symbolKind,
         language: c.language,
+        qualifiedName: c.qualifiedName,
+        signature: c.signature,
+        signatureHash: c.signatureHash,
+        parentQualifiedName: c.parentQualifiedName,
       }
       if (explain) {
         const recency = recencyScores?.get(c.blobHash)
@@ -287,6 +291,8 @@ export class QdrantVectorStore implements VectorStore {
                 blob_hash: item.id, model: item.model,
                 start_line: item.startLine ?? 0, end_line: item.endLine ?? 0,
                 symbol_name: item.symbolName ?? '', symbol_kind: item.symbolKind ?? 'other', language: item.language ?? 'unknown',
+                qualified_name: item.qualifiedName ?? null, signature: item.signature ?? null,
+                signature_hash: item.signatureHash ?? null, parent_qualified_name: item.parentQualifiedName ?? null,
               },
             }],
           })
@@ -349,6 +355,10 @@ export class QdrantVectorStore implements VectorStore {
             blobHash: String(payload.blob_hash), cosine: hit.score,
             symbolId: -1, startLine: Number(payload.start_line ?? 0), endLine: Number(payload.end_line ?? 0),
             symbolName: String(payload.symbol_name ?? ''), symbolKind: String(payload.symbol_kind ?? 'other'), language: String(payload.language ?? 'unknown'),
+            qualifiedName: payload.qualified_name != null ? String(payload.qualified_name) : undefined,
+            signature: payload.signature != null ? String(payload.signature) : undefined,
+            signatureHash: payload.signature_hash != null ? String(payload.signature_hash) : undefined,
+            parentQualifiedName: payload.parent_qualified_name != null ? String(payload.parent_qualified_name) : undefined,
           })
         } else {
           results.push({ blobHash: String(payload.blob_hash), cosine: hit.score })

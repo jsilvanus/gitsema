@@ -245,21 +245,24 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       if (!pathRow) return { jsonrpc: '2.0', id, result: [] }
 
       const symbolRows = dbSession.rawDb.prepare(
-        `SELECT symbol_name, symbol_kind, start_line, end_line
+        `SELECT symbol_name, symbol_kind, start_line, end_line, qualified_name, signature
          FROM symbols WHERE blob_hash = ? ORDER BY start_line ASC`,
-      ).all(pathRow.blob_hash) as Array<{ symbol_name: string; symbol_kind: string; start_line: number; end_line: number }>
+      ).all(pathRow.blob_hash) as Array<{ symbol_name: string; symbol_kind: string; start_line: number; end_line: number; qualified_name: string | null; signature: string | null }>
 
       // Map symbol kinds to LSP SymbolKind numbers
       const kindMap: Record<string, number> = {
         function: 12, method: 6, class: 5, struct: 23, enum: 10,
         trait: 11, impl: 14, other: 13,
       }
-      const docSymbols = symbolRows.map((r) => ({
-        name: r.symbol_name,
-        kind: kindMap[r.symbol_kind] ?? 13,
-        range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
-        selectionRange: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.start_line - 1), character: 100 } },
-      }))
+      const docSymbols = symbolRows.map((r) => {
+        const name = r.qualified_name ?? r.symbol_name
+        return {
+          name: r.signature ? `${name}${r.signature}` : name,
+          kind: kindMap[r.symbol_kind] ?? 13,
+          range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
+          selectionRange: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.start_line - 1), character: 100 } },
+        }
+      })
       return { jsonrpc: '2.0', id, result: docSymbols }
     } catch (e: any) {
       return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }

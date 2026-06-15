@@ -867,6 +867,8 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
                   symbolName: chunk.symbolName, symbolKind: chunk.symbolKind ?? 'function',
                   language: lang, model: activeProvider.model, dimensions: symbolEmbedding.length, embedding: symbolEmbedding,
                   quantize,
+                  qualifiedName: chunk.qualifiedName, signature: chunk.signature,
+                  signatureHash: chunk.signatureHash, parentQualifiedName: chunk.parentQualifiedName,
                 }])
                 stats.symbols++
               } catch (err) {

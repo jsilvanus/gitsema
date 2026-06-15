@@ -175,6 +175,25 @@ export const symbols = sqliteTable('symbols', {
   language: text('language').notNull(),
   // Optional chunk_id linking this symbol to its source chunk (nullable)
   chunkId: integer('chunk_id'),
+  /**
+   * Path-free qualified name (scope chain joined by '.'), e.g.
+   * "Auth.validateToken". Top-level symbols use their bare name. Populated
+   * for TS/TSX/JS/Python (Phase 105); null for other languages or older rows.
+   */
+  qualifiedName: text('qualified_name'),
+  /**
+   * Normalized parameter-list signature, e.g. "(token:string)". Disambiguates
+   * overloads. Null when unavailable (Phase 105).
+   */
+  signature: text('signature'),
+  /** First 12 hex chars of sha1(signature) (Phase 105). */
+  signatureHash: text('signature_hash'),
+  /**
+   * Enclosing scope's qualified name, or null at top level (Phase 105).
+   * Path-free — the path-bearing symbol key is derived at display/node-build
+   * time, never stored here.
+   */
+  parentQualifiedName: text('parent_qualified_name'),
 })
 
 /**

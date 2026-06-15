@@ -186,6 +186,10 @@ class SqliteVectorStore implements VectorStore {
             model: item.model,
             embedding: item.embedding,
             quantize: item.quantize,
+            qualifiedName: item.qualifiedName,
+            signature: item.signature,
+            signatureHash: item.signatureHash,
+            parentQualifiedName: item.parentQualifiedName,
           })
           break
         case 'module':

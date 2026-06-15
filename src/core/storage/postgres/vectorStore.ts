@@ -145,6 +145,10 @@ export class PgVectorStore implements VectorStore {
         symbolName: c.symbolName,
         symbolKind: c.symbolKind,
         language: c.language,
+        qualifiedName: c.qualifiedName,
+        signature: c.signature,
+        signatureHash: c.signatureHash,
+        parentQualifiedName: c.parentQualifiedName,
       }
       if (explain) {
         const recency = recencyScores?.get(c.blobHash)
@@ -236,11 +240,20 @@ export class PgVectorStore implements VectorStore {
         }
         case 'symbol': {
           const { rows } = await pool.query<{ id: number }>(
-            `INSERT INTO symbols (blob_hash, start_line, end_line, symbol_name, symbol_kind, language)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (blob_hash, start_line, end_line, symbol_name) DO UPDATE SET symbol_kind = EXCLUDED.symbol_kind
+            `INSERT INTO symbols (blob_hash, start_line, end_line, symbol_name, symbol_kind, language,
+                                  qualified_name, signature, signature_hash, parent_qualified_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (blob_hash, start_line, end_line, symbol_name) DO UPDATE SET
+               symbol_kind = EXCLUDED.symbol_kind,
+               qualified_name = EXCLUDED.qualified_name,
+               signature = EXCLUDED.signature,
+               signature_hash = EXCLUDED.signature_hash,
+               parent_qualified_name = EXCLUDED.parent_qualified_name
              RETURNING id`,
-            [item.id, item.startLine ?? 0, item.endLine ?? 0, item.symbolName ?? '', item.symbolKind ?? 'other', item.language ?? 'unknown'],
+            [
+              item.id, item.startLine ?? 0, item.endLine ?? 0, item.symbolName ?? '', item.symbolKind ?? 'other', item.language ?? 'unknown',
+              item.qualifiedName ?? null, item.signature ?? null, item.signatureHash ?? null, item.parentQualifiedName ?? null,
+            ],
           )
           await pool.query(
             `INSERT INTO symbol_embeddings (symbol_id, model, dimensions, vector)
@@ -352,8 +365,11 @@ export class PgVectorStore implements VectorStore {
     const { rows } = await pool.query<{
       blob_hash: string; start_line: number; end_line: number; symbol_id: number
       symbol_name: string; symbol_kind: string; language: string; cosine: number
+      qualified_name: string | null; signature: string | null
+      signature_hash: string | null; parent_qualified_name: string | null
     }>(
       `SELECT s.blob_hash, s.start_line, s.end_line, s.id AS symbol_id, s.symbol_name, s.symbol_kind, s.language,
+              s.qualified_name, s.signature, s.signature_hash, s.parent_qualified_name,
               1 - (se.vector <=> $1::vector) AS cosine
        FROM symbol_embeddings se
        JOIN symbols s ON s.id = se.symbol_id
@@ -365,6 +381,8 @@ export class PgVectorStore implements VectorStore {
     return rows.map((r) => ({
       blobHash: r.blob_hash, cosine: r.cosine, startLine: r.start_line, endLine: r.end_line,
       symbolId: r.symbol_id, symbolName: r.symbol_name, symbolKind: r.symbol_kind, language: r.language,
+      qualifiedName: r.qualified_name ?? undefined, signature: r.signature ?? undefined,
+      signatureHash: r.signature_hash ?? undefined, parentQualifiedName: r.parent_qualified_name ?? undefined,
     }))
   }
 

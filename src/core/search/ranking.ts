@@ -39,6 +39,17 @@ export function groupResults(results: SearchResult[], mode: GroupMode, topK: num
 	return out.slice(0, topK)
 }
 
+/**
+ * Display label for a symbol-kind result: `qualifiedName(signature)` when
+ * available (Phase 105), falling back to the bare `symbolName`. Returns
+ * `undefined` when neither is present (back-compat for older rows).
+ */
+export function symbolLabel(r: SearchResult): string | undefined {
+	const name = r.qualifiedName ?? r.symbolName
+	if (!name) return undefined
+	return r.signature !== undefined ? `${name}${r.signature}` : name
+}
+
 export function renderResults(results: SearchResult[], showHeadings = true): string {
 	if (!results || results.length === 0) return '  (no results)'
 	const lines: string[] = []
@@ -52,6 +63,10 @@ export function renderResults(results: SearchResult[], showHeadings = true): str
 		}
 		if (r.startLine !== undefined && r.endLine !== undefined) {
 			line += ` :${r.startLine}-${r.endLine}`
+		}
+		if (r.kind === 'symbol') {
+			const label = symbolLabel(r)
+			if (label) line += `  ${label}`
 		}
 		lines.push(line)
 	}
