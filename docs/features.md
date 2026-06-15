@@ -200,6 +200,7 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | **Generic `--narrate` via `narrateToolResult` (Phase 104)** | `narrateToolResult(toolKey, result)` in `src/core/llm/narrator.ts` looks up the tool's `TOOL_INTERPRETATIONS` entry, redacts and caps the JSON result, and asks the active narrator model for a prose summary (safe-by-default — no network unless `--narrate` is passed and a narrator model is configured). Wired onto `--narrate` flags on `first-seen`, `branch-summary`, `merge-audit`, `merge-preview`, `dead-concepts`, `debt`, `doc-gap`, `security-scan`, `blame`/`semantic-blame`, `triage`, `impact`, `ownership`, `experts`, `author`, `contributor-profile`, `bisect`, `refactor-candidates`, `cherry-pick-suggest`, and `heatmap` |
 | **Guided `gitsema setup` wizard with storage backend selection (Phase 104)** | `gitsema setup` (primary name; `gitsema quickstart` remains a backward-compat alias) extends the onboarding wizard with a storage-backend step (sqlite/postgres/qdrant), persisting `storage.*` config keys and validating the connection via `getCachedStorageProfile().metadata.getLastIndexedCommit()` (reverting to sqlite on failure), plus an optional final step to configure a local Ollama narrator/guide model via `gitsema models add <name> --narrator\|--guide --provider ollama --activate` |
 | **Co-change / dependency / cycle queries (Phase 107)** | `gitsema co-change <path> [-k/--top]` — files that historically change together with `<path>` (from `co_change` edges); `gitsema deps <identifier> [--reverse] [--depth] [--edge-types]` — import/dependency closure of a file or symbol (BFS over `imports`/`calls`/`extends`/`implements` edges); `gitsema graph cycles` / top-level `gitsema cycles [--edge-types]` — detect cycles in the structural graph (default: `imports`). All require `gitsema index --graph` + `gitsema graph build` first |
+| **Graph traversal primitives (Phase 108)** | `GraphStore.neighbors/callers/callees/path/subgraph` — recursive-CTE traversals over `graph_nodes`/`edges` (sqlite + Postgres; Qdrant profile throws "graph queries require a relational backend"), depth capped at 3. CLI: `gitsema graph callers <symbol> [--depth]` (reverse `calls` traversal), `gitsema graph callees <symbol> [--depth]` (forward `calls` traversal), `gitsema graph neighbors <node> [--edge-types] [--direction] [--depth]` (typed neighborhood, any edge kinds), `gitsema graph path <a> <b>` (shortest typed path, rendered as `-[edgeType]->`/`<-[edgeType]-` hops). MCP: `call_graph` (callers/callees) and `graph_neighbors`. All resolve symbol qualified names, file paths, or literal node keys via `resolveNode()`; require `gitsema index --graph` + `gitsema graph build` first |
 
 ---
 
@@ -361,6 +362,8 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | `triage` | Incident triage bundle: first-seen, change points, evolution, bisect, experts |
 | `policy_check` | CI policy gate — debt score, security similarity, and concept drift thresholds |
 | `workflow_run` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
+| `call_graph` | Structural call-graph traversal — callers/callees of a symbol (Phase 108) |
+| `graph_neighbors` | Typed neighborhood of a graph node — any edge kinds, direction, depth (Phase 108) |
 
 ---
 

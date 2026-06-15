@@ -8,7 +8,9 @@
 
 import type { Pool } from 'pg'
 import { ensurePostgresSchema } from './migrations.js'
-import type { EdgeType, GraphEdgeRecord, GraphNodeRecord, GraphStore } from '../types.js'
+import type { EdgeType, GraphEdgeRecord, GraphHit, GraphNodeRecord, GraphPath, GraphPathHop, GraphStore, GraphSubgraph } from '../types.js'
+import { MAX_GRAPH_TRAVERSAL_DEPTH } from '../types.js'
+import { traverseNeighbors, findShortestPath, clampDepth, type WalkHit } from './graphTraversal.js'
 
 export class PostgresGraphStore implements GraphStore {
   constructor(private readonly pool: Pool) {}
@@ -96,6 +98,77 @@ export class PostgresGraphStore implements GraphStore {
     return edgeTypes && edgeTypes.length > 0
       ? collected.filter((e) => edgeTypes.includes(e.edgeType))
       : collected
+  }
+
+  async neighbors(key: string, opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both'; depth?: number }): Promise<GraphHit[]> {
+    await ensurePostgresSchema(this.pool)
+    const hits = await traverseNeighbors(this.pool, key, { ...opts, depthFallback: 1 })
+    return this.hydrateHits(hits)
+  }
+
+  async callers(key: string, depth?: number): Promise<GraphHit[]> {
+    await ensurePostgresSchema(this.pool)
+    const hits = await traverseNeighbors(this.pool, key, { edgeTypes: ['calls'], direction: 'in', depth, depthFallback: MAX_GRAPH_TRAVERSAL_DEPTH })
+    return this.hydrateHits(hits)
+  }
+
+  async callees(key: string, depth?: number): Promise<GraphHit[]> {
+    await ensurePostgresSchema(this.pool)
+    const hits = await traverseNeighbors(this.pool, key, { edgeTypes: ['calls'], direction: 'out', depth, depthFallback: MAX_GRAPH_TRAVERSAL_DEPTH })
+    return this.hydrateHits(hits)
+  }
+
+  async path(from: string, to: string): Promise<GraphPath | null> {
+    await ensurePostgresSchema(this.pool)
+    const found = await findShortestPath(this.pool, from, to)
+    if (!found) return null
+
+    const hops: GraphPathHop[] = []
+    for (const hop of found.hops) {
+      const node = await this.getNode(hop.nodeKey)
+      hops.push({
+        nodeKey: hop.nodeKey,
+        displayName: node?.displayName ?? hop.nodeKey,
+        edgeType: hop.edgeType,
+        reversed: hop.reversed,
+      })
+    }
+    return { from, to, hops }
+  }
+
+  async subgraph(seed: string, depth?: number): Promise<GraphSubgraph> {
+    await ensurePostgresSchema(this.pool)
+    const maxDepth = clampDepth(depth, MAX_GRAPH_TRAVERSAL_DEPTH)
+    const hits = await traverseNeighbors(this.pool, seed, { direction: 'both', depth: maxDepth })
+    const nodeKeys = [...new Set([seed, ...hits.map((h) => h.nodeKey)])]
+
+    if (nodeKeys.length === 0) return { nodes: [], edges: [] }
+
+    const nodesRes = await this.pool.query('SELECT * FROM graph_nodes WHERE node_key = ANY($1::text[])', [nodeKeys])
+    const edgesRes = await this.pool.query(
+      'SELECT * FROM edges WHERE src_key = ANY($1::text[]) AND dst_key = ANY($1::text[])',
+      [nodeKeys],
+    )
+    return { nodes: nodesRes.rows.map(rowToNode), edges: edgesRes.rows.map(rowToEdge) }
+  }
+
+  private async hydrateHits(hits: WalkHit[]): Promise<GraphHit[]> {
+    if (hits.length === 0) return []
+    const nodeKeys = hits.map((h) => h.nodeKey)
+    const res = await this.pool.query('SELECT * FROM graph_nodes WHERE node_key = ANY($1::text[])', [nodeKeys])
+    const byKey = new Map(res.rows.map((r: GraphNodeRow) => [r.node_key, rowToNode(r)]))
+    return hits
+      .map((h) => {
+        const node = byKey.get(h.nodeKey)
+        return {
+          nodeKey: h.nodeKey,
+          displayName: node?.displayName ?? h.nodeKey,
+          kind: node?.kind ?? 'unknown',
+          depth: h.depth,
+          edgeType: h.edgeType,
+        }
+      })
+      .sort((a, b) => a.depth - b.depth || a.nodeKey.localeCompare(b.nodeKey))
   }
 }
 

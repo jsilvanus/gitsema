@@ -10,7 +10,7 @@
 
 import { getActiveSession } from '../../db/sqlite.js'
 import { embeddings, paths, blobs, commits, blobCommits, indexedCommits, blobBranches, chunks, chunkEmbeddings, symbols, symbolEmbeddings, moduleEmbeddings, commitEmbeddings, graphNodes, edges } from '../../db/schema.js'
-import { eq, inArray, sql } from 'drizzle-orm'
+import { eq, inArray, sql, and } from 'drizzle-orm'
 import { isIndexed as dedupeIsIndexed, filterNewBlobs as dedupeFilterNewBlobs } from '../../indexing/deduper.js'
 import {
   storeFtsContent, getBlobContent, storeBlob, storeBlobRecord,
@@ -29,8 +29,12 @@ import type {
   EdgeType,
   FtsStore,
   GraphEdgeRecord,
+  GraphHit,
   GraphNodeRecord,
+  GraphPath,
+  GraphPathHop,
   GraphStore,
+  GraphSubgraph,
   MetadataStore,
   StorageProfile,
   StorageScope,
@@ -42,6 +46,8 @@ import type {
   WriteBlobRecordArgs,
   WriteFileBlobArgs,
 } from '../types.js'
+import { MAX_GRAPH_TRAVERSAL_DEPTH } from '../types.js'
+import { traverseNeighbors, findShortestPath, clampDepth, type WalkHit } from './graphTraversal.js'
 
 class SqliteMetadataStore implements MetadataStore {
   async isIndexed(blobHash: string, model: string): Promise<boolean> {
@@ -396,6 +402,82 @@ export class SqliteGraphStore implements GraphStore {
     return edgeTypes && edgeTypes.length > 0
       ? collected.filter((e) => edgeTypes.includes(e.edgeType))
       : collected
+  }
+
+  async neighbors(key: string, opts?: { edgeTypes?: EdgeType[]; direction?: 'out' | 'in' | 'both'; depth?: number }): Promise<GraphHit[]> {
+    const { rawDb } = getActiveSession()
+    const hits = traverseNeighbors(rawDb, key, { ...opts, depthFallback: 1 })
+    return this.hydrateHits(hits)
+  }
+
+  async callers(key: string, depth?: number): Promise<GraphHit[]> {
+    const { rawDb } = getActiveSession()
+    const hits = traverseNeighbors(rawDb, key, { edgeTypes: ['calls'], direction: 'in', depth, depthFallback: MAX_GRAPH_TRAVERSAL_DEPTH })
+    return this.hydrateHits(hits)
+  }
+
+  async callees(key: string, depth?: number): Promise<GraphHit[]> {
+    const { rawDb } = getActiveSession()
+    const hits = traverseNeighbors(rawDb, key, { edgeTypes: ['calls'], direction: 'out', depth, depthFallback: MAX_GRAPH_TRAVERSAL_DEPTH })
+    return this.hydrateHits(hits)
+  }
+
+  async path(from: string, to: string): Promise<GraphPath | null> {
+    const { rawDb } = getActiveSession()
+    const found = findShortestPath(rawDb, from, to)
+    if (!found) return null
+
+    const hops: GraphPathHop[] = []
+    for (const hop of found.hops) {
+      const node = await this.getNode(hop.nodeKey)
+      hops.push({
+        nodeKey: hop.nodeKey,
+        displayName: node?.displayName ?? hop.nodeKey,
+        edgeType: hop.edgeType,
+        reversed: hop.reversed,
+      })
+    }
+    return { from, to, hops }
+  }
+
+  async subgraph(seed: string, depth?: number): Promise<GraphSubgraph> {
+    const { db, rawDb } = getActiveSession()
+    const maxDepth = clampDepth(depth, MAX_GRAPH_TRAVERSAL_DEPTH)
+    const hits = traverseNeighbors(rawDb, seed, { direction: 'both', depth: maxDepth })
+    const nodeKeys = [...new Set([seed, ...hits.map((h) => h.nodeKey)])]
+
+    const nodes = nodeKeys.length > 0
+      ? db.select().from(graphNodes).where(inArray(graphNodes.nodeKey, nodeKeys)).all().map(rowToNode)
+      : []
+
+    const edgeRows = nodeKeys.length > 0
+      ? db.select().from(edges)
+        .where(and(inArray(edges.srcKey, nodeKeys), inArray(edges.dstKey, nodeKeys)))
+        .all()
+      : []
+
+    return { nodes, edges: edgeRows.map(rowToEdge) }
+  }
+
+  /** Resolves `WalkHit`s into `GraphHit`s by looking up display name/kind for each node. */
+  private async hydrateHits(hits: WalkHit[]): Promise<GraphHit[]> {
+    if (hits.length === 0) return []
+    const { db } = getActiveSession()
+    const nodeKeys = hits.map((h) => h.nodeKey)
+    const rows = db.select().from(graphNodes).where(inArray(graphNodes.nodeKey, nodeKeys)).all()
+    const byKey = new Map(rows.map((r) => [r.nodeKey, rowToNode(r)]))
+    return hits
+      .map((h) => {
+        const node = byKey.get(h.nodeKey)
+        return {
+          nodeKey: h.nodeKey,
+          displayName: node?.displayName ?? h.nodeKey,
+          kind: node?.kind ?? 'unknown',
+          depth: h.depth,
+          edgeType: h.edgeType,
+        }
+      })
+      .sort((a, b) => a.depth - b.depth || a.nodeKey.localeCompare(b.nodeKey))
   }
 }
 

@@ -12,6 +12,7 @@ import { registerClusteringTools } from './tools/clustering.js'
 import { registerWorkflowTools } from './tools/workflow.js'
 import { registerInfrastructureTools } from './tools/infrastructure.js'
 import { registerNarratorTools } from './tools/narrator.js'
+import { registerGraphTools } from './tools/graph.js'
 import { readFileSync } from 'node:fs'
 
 // Read package version dynamically so the MCP server always matches package.json
@@ -37,6 +38,7 @@ export async function startMcpServer(): Promise<void> {
   registerWorkflowTools(server)
   registerInfrastructureTools(server)
   registerNarratorTools(server)
+  registerGraphTools(server)
 
   const transport = new StdioServerTransport()
   await server.connect(transport)

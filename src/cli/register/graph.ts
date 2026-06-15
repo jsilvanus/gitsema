@@ -3,6 +3,10 @@ import { graphBuildCommand } from '../commands/graphBuild.js'
 import { coChangeCommand } from '../commands/coChange.js'
 import { depsCommand } from '../commands/deps.js'
 import { cyclesCommand } from '../commands/cycles.js'
+import { graphCallersCommand } from '../commands/graphCallers.js'
+import { graphCalleesCommand } from '../commands/graphCallees.js'
+import { graphNeighborsCommand } from '../commands/graphNeighbors.js'
+import { graphPathCommand } from '../commands/graphPath.js'
 
 /**
  * Structural knowledge-graph commands (Phase 107, knowledge-graph §3.3/§8).
@@ -52,4 +56,30 @@ export function registerGraph(program: Command) {
     .description('Detect cycles in the structural graph (default: import cycles) (alias of `gitsema graph cycles`)')
     .option('--edge-types <types>', 'comma-separated edge types to check for cycles (default: imports)')
     .action(cyclesCommand)
+
+  // Phase 108: traversal primitives (recursive CTEs over edges/graph_nodes).
+  graph
+    .command('callers <symbol>')
+    .description('Reverse `calls` traversal — who (transitively) calls <symbol> (default depth 3)')
+    .option('--depth <n>', 'limit traversal depth (max 3)')
+    .action(graphCallersCommand)
+
+  graph
+    .command('callees <symbol>')
+    .description('Forward `calls` traversal — what <symbol> (transitively) calls (default depth 3)')
+    .option('--depth <n>', 'limit traversal depth (max 3)')
+    .action(graphCalleesCommand)
+
+  graph
+    .command('neighbors <node>')
+    .description('Typed neighborhood of <node> — any edge kinds by default (default depth 1, max 3)')
+    .option('--edge-types <types>', 'comma-separated edge types to traverse (default: all)')
+    .option('--direction <dir>', "'out' | 'in' | 'both' (default: both)")
+    .option('--depth <n>', 'limit traversal depth (max 3)')
+    .action(graphNeighborsCommand)
+
+  graph
+    .command('path <a> <b>')
+    .description('Shortest typed path from <a> to <b> (structural lens; max depth 3)')
+    .action(graphPathCommand)
 }

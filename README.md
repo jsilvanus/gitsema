@@ -435,6 +435,10 @@ Track semantic drift of a single file across its Git history.
 | `gitsema co-change <path> [-k/--top <n>]` | Files that historically change together with `<path>` |
 | `gitsema deps <identifier> [--reverse] [--depth <n>] [--edge-types <types>]` | Import/dependency closure of a file or symbol (default edge types: `imports,calls,extends,implements`) |
 | `gitsema graph cycles [--edge-types <types>]` / `gitsema cycles [--edge-types <types>]` | Detect cycles in the structural graph (default: `imports`) |
+| `gitsema graph callers <symbol> [--depth <n>]` | Reverse `calls` traversal — who (transitively) calls `<symbol>` (default depth 3, max 3) |
+| `gitsema graph callees <symbol> [--depth <n>]` | Forward `calls` traversal — what `<symbol>` (transitively) calls (default depth 3, max 3) |
+| `gitsema graph neighbors <node> [--edge-types <types>] [--direction <dir>] [--depth <n>]` | Typed neighborhood of `<node>` — any edge kinds by default (default depth 1, max 3) |
+| `gitsema graph path <a> <b>` | Shortest typed path from `<a>` to `<b>` (max depth 3) |
 
 ### Workflow & CI
 

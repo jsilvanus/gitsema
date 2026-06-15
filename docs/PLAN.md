@@ -4003,3 +4003,33 @@ pairwise co-change computation per commit to avoid O(n²) blowup on
 vendoring/lockfile-regeneration commits. Traversal primitives
 (callers/callees/path/neighbors) and the `--lens` toggle remain out of scope —
 Phase 108/109.
+
+**Status:** Phase 108 ✅ complete. The `GraphStore` interface
+(`src/core/storage/types.ts`) gains five traversal primitives —
+`neighbors`/`callers`/`callees`/`path`/`subgraph` — plus `GraphHit`, `GraphPath`,
+`GraphPathHop`, `GraphSubgraph`, and a shared `MAX_GRAPH_TRAVERSAL_DEPTH = 3`
+constant (knowledge-graph §6). Both `SqliteGraphStore` and `PostgresGraphStore`
+implement them via recursive CTEs over `edges`/`graph_nodes`
+(`src/core/storage/sqlite/graphTraversal.ts` and
+`src/core/storage/postgres/graphTraversal.ts`): a `WITH RECURSIVE` walk with a
+`ROW_NUMBER() OVER (PARTITION BY node_key ORDER BY depth)` window picks the
+shortest-depth hit (and its edge type) per reached node for
+`neighbors`/`callers`/`callees`/`subgraph`; `path` uses a second recursive CTE that
+accumulates a delimited path string (`node|edgeType|reversed|node|...`) and returns
+the shortest match. All traversal depths are clamped to
+`MAX_GRAPH_TRAVERSAL_DEPTH` (`callers`/`callees`/`path`/`subgraph` default to 3;
+`neighbors` defaults to 1). `UnsupportedGraphStore` throws the same
+"graph queries require a relational backend" error for all five new methods, per
+review9 §4. A new `src/core/graph/traversal.ts` wraps the primitives with
+`resolveNode()` (Phase 107) for identifier resolution, backing four new CLI
+commands — `gitsema graph callers <symbol> [--depth]`, `gitsema graph callees
+<symbol> [--depth]`, `gitsema graph neighbors <node> [--edge-types] [--direction]
+[--depth]`, and `gitsema graph path <a> <b>` — and two new MCP tools, `call_graph`
+(callers/callees over `calls` edges) and `graph_neighbors` (typed neighborhood, any
+edge kinds), registered in `src/mcp/tools/graph.ts`. **Deviation from the original
+sketch:** `call_graph`/`graph_neighbors` are not yet added to the `gitsema guide`
+`GUIDE_TOOLS` registry (46 tools) or `interpretations.ts` — left for the Phase 110
+fusion pass / Phase 112 lens-coverage sweep, consistent with `docsSync`'s existing
+guard (which only requires every `GUIDE_TOOLS` entry to have an interpretation, not
+that every MCP tool is in `GUIDE_TOOLS`). No schema change. Tests:
+`tests/graphTraversal.test.ts`.

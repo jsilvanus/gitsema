@@ -468,7 +468,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (34 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator}.ts`):**
+**Exposed tools (36 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator,graph}.ts`):**
 
 | Tool | Description |
 |---|---|
@@ -506,6 +506,8 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `workflow_run` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
 | `narrate_repo` | Generate evidence (default) or an LLM narrative of repository development history |
 | `explain_issue_or_error` | Generate evidence (default) or an LLM explanation/timeline for a bug, error, or topic |
+| `call_graph` | Structural call-graph traversal — callers/callees of a symbol (Phase 108) |
+| `graph_neighbors` | Typed neighborhood of a graph node — any edge kinds, direction, depth (Phase 108) |
 
 ---
 
