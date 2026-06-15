@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { getActiveSession, openDatabaseAt, getOrOpenSessionAtPath, closeSessionAtPath } from '../db/sqlite.js'
+import { getActiveSession, openDatabaseAt, getOrOpenSessionAtPath, closeSessionAtPath, withDbSession } from '../db/sqlite.js'
 import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import type { SearchResult, Embedding } from '../models/types.js'
 import { mergeSearchResults } from '../search/analysis/vectorSearch.js'
@@ -97,16 +97,21 @@ export async function multiRepoSearch(
 
   for (const repo of repos) {
     if (!repo.dbPath) continue
+    let session: ReturnType<typeof openDatabaseAt> | undefined
     try {
-      const session = openDatabaseAt(repo.dbPath)
-      // Temporarily set the session context so vectorSearch works
-      // We pass the session directly via the rawDb approach in vectorSearch
-      const results = await vectorSearch(queryEmbedding, { topK, model })
+      // Open the repo's DB and make it the active session for the duration of
+      // the search, so vectorSearch (which resolves getActiveSession()) queries
+      // *this* repo's index — not the caller's cwd DB. Close it afterwards so
+      // the connection/WAL handles don't accumulate across calls (review9 §7.1).
+      session = openDatabaseAt(repo.dbPath)
+      const results = await withDbSession(session, () => vectorSearch(queryEmbedding, { topK, model }))
       for (const r of results) {
         allResults.push({ ...r, repoId: repo.id, repoName: repo.name })
       }
     } catch {
       // skip unreachable repos
+    } finally {
+      session?.rawDb.close()
     }
   }
 
