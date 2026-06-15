@@ -138,6 +138,18 @@ const migrated = new WeakSet<Pool>()
  */
 export async function ensurePostgresSchema(pool: Pool): Promise<void> {
   if (migrated.has(pool)) return
-  await pool.query(SCHEMA_SQL)
+  // This is the first query against the pool, so a bad connection string /
+  // unreachable server surfaces here. Wrap the raw pg error in an actionable
+  // message pointing at the config key, rather than leaking an opaque
+  // ECONNREFUSED / auth failure to the user (review9 §7.2).
+  try {
+    await pool.query(SCHEMA_SQL)
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    throw new Error(
+      `Cannot connect to the Postgres storage backend ` +
+      `(storage.metadata.url / GITSEMA_STORAGE_METADATA_URL): ${detail}`,
+    )
+  }
   migrated.add(pool)
 }

@@ -15,6 +15,7 @@
 
 import type { Pool } from 'pg'
 import { ensurePostgresSchema } from './migrations.js'
+import { scoreAndDedupe, type RerankCandidate } from '../rerank.js'
 import type { Embedding, SearchResult, SearchResultKind } from '../../models/types.js'
 import { pathRelevanceScore, type VectorSearchOptions } from '../../search/analysis/vectorSearch.js'
 import { computeRecencyScores, type FirstSeenInfo } from '../../search/temporal/timeSearch.js'
@@ -26,19 +27,7 @@ function toVectorLiteral(embedding: Embedding): string {
   return `[${Array.from(embedding).join(',')}]`
 }
 
-interface FileCandidate {
-  blobHash: string
-  cosine: number
-  negCosine?: number
-  chunkId?: number
-  startLine?: number
-  endLine?: number
-  symbolId?: number
-  symbolName?: string
-  symbolKind?: string
-  language?: string
-  modulePath?: string
-}
+type FileCandidate = RerankCandidate
 
 export class PgVectorStore implements VectorStore {
   constructor(private readonly pool: Pool) {}
@@ -127,33 +116,12 @@ export class PgVectorStore implements VectorStore {
     )]
     const pathsByBlob = await this.getPaths(pool, fileHashes)
 
-    type Scored = FileCandidate & { score: number }
-    const scored: Scored[] = candidates.map((c) => {
-      let score = c.cosine
-      if (negVec && c.negCosine !== undefined) {
-        score = c.cosine - negLambda * c.negCosine
-      }
-      if (useThreeSignal) {
-        const recency = recencyScores?.get(c.blobHash) ?? 0
-        const blobPaths = pathsByBlob.get(c.blobHash) ?? []
-        const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : 0
-        score = (wv * c.cosine + wr * recency + wp * pathScore) / wTotal
-      } else if (recent) {
-        const recency = recencyScores?.get(c.blobHash) ?? 0
-        score = alpha * c.cosine + (1 - alpha) * recency
-      }
-      return { ...c, score }
+    const top = scoreAndDedupe(candidates, {
+      query, topK, useThreeSignal, wv, wr, wp, wTotal, recent, alpha,
+      recencyScores, pathsByBlob,
+      // negCosine is only populated when a negative query embedding was used.
+      negLambda: negVec ? negLambda : undefined,
     })
-
-    scored.sort((a, b) => b.score - a.score)
-    const dedupeKey = (c: Scored) => c.modulePath !== undefined ? `\0module:${c.modulePath}` : c.blobHash
-    const best = new Map<string, Scored>()
-    for (const c of scored) {
-      const key = dedupeKey(c)
-      const existing = best.get(key)
-      if (!existing || c.score > existing.score) best.set(key, c)
-    }
-    const top = [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK)
 
     return top.map((c) => {
       if (c.modulePath !== undefined) {

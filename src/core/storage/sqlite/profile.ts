@@ -132,6 +132,11 @@ class SqliteMetadataStore implements MetadataStore {
   }
 }
 
+// NOTE: this adapter intentionally delegates back to the free `vectorSearch` /
+// `searchCommits` functions, which hold the actual sqlite implementation. Those
+// functions short-circuit when `profile.backend === 'sqlite'` *before*
+// re-entering the store, so this delegation does not recurse. Do not add real
+// query logic here that calls back into those functions without that guard.
 class SqliteVectorStore implements VectorStore {
   async search(queryEmbedding: Embedding, options: VectorSearchOptions = {}): Promise<SearchResult[]> {
     return await vectorSearch(queryEmbedding, options)

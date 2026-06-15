@@ -21,7 +21,29 @@ export function getQdrantClient(url: string, apiKey?: string): QdrantClient {
   return client
 }
 
+const verifiedClients = new WeakSet<QdrantClient>()
+
+/**
+ * Probe a Qdrant client once (memoized per client) so a bad URL / unreachable
+ * server fails with an actionable message pointing at the config key, rather
+ * than an opaque client error at the first search/upsert (review9 §7.2).
+ */
+export async function verifyQdrantClient(client: QdrantClient): Promise<void> {
+  if (verifiedClients.has(client)) return
+  try {
+    await client.getCollections()
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    throw new Error(
+      `Cannot connect to the Qdrant storage backend ` +
+      `(storage.vectors.url / GITSEMA_STORAGE_VECTORS_URL): ${detail}`,
+    )
+  }
+  verifiedClients.add(client)
+}
+
 /** Forgets all cached clients (tests). */
 export function clearQdrantClients(): void {
   clients.clear()
+  // WeakSet entries are dropped with their clients; nothing to clear explicitly.
 }
