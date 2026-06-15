@@ -101,6 +101,12 @@ pnpm test -- --watch        # watch mode during development
 - Mock modules with `vi.mock()`, spy with `vi.fn()`, clean up with `vi.restoreAllMocks()` in `afterEach`
 - Integration tests use `mkdtempSync()` + `rmSync()` for isolated temp Git repos
 - `withDbSession()` helper creates isolated temp SQLite DBs per test
+- **Always close `session.rawDb` (`better-sqlite3`) before `rmSync()`-ing its temp
+  directory.** On Windows, `rmSync` on a directory containing an open SQLite handle
+  fails with `EBUSY: resource busy or locked, unlink '...\test.db'` — this passes on
+  Linux/macOS (CI runs `ubuntu-latest` by default) but fails the Windows CI job. Call
+  `session.rawDb.close()` (e.g. in a `try`/`finally` around `withDbSession()`) before
+  the test's temp dir is removed in `afterEach`.
 
 ---
 

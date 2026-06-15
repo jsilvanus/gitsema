@@ -56,11 +56,15 @@ afterEach(() => {
 async function withGraph<T>(fn: (graph: SqliteGraphStore, session: DbSession) => Promise<T>): Promise<T> {
   const { session, tmpDir } = setupFixtureDb()
   tmpDirs.push(tmpDir)
-  return withDbSession(session, async () => {
-    const graph = new SqliteGraphStore()
-    await graph.replaceAll(NODES, EDGES)
-    return fn(graph, session)
-  })
+  try {
+    return await withDbSession(session, async () => {
+      const graph = new SqliteGraphStore()
+      await graph.replaceAll(NODES, EDGES)
+      return fn(graph, session)
+    })
+  } finally {
+    session.rawDb.close()
+  }
 }
 
 describe('SqliteGraphStore.neighbors', () => {

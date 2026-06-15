@@ -59,6 +59,7 @@ describe('vectorSearch — four-signal ranking (Phase 109)', () => {
       expect(results[0].score).toBeCloseTo(1, 6)
       expect(results[1].score).toBeCloseTo(0, 6)
     })
+    session.rawDb.close()
   })
 
   it('weightStructural + structuralScores reorders results via the four-signal formula', async () => {
@@ -98,6 +99,7 @@ describe('vectorSearch — four-signal ranking (Phase 109)', () => {
       // blobB now outranks blobA despite the lower cosine similarity.
       expect(results[0].blobHash).toBe('blobB')
     })
+    session.rawDb.close()
   })
 
   it('blends all four signals according to the supplied weights', async () => {
@@ -123,6 +125,7 @@ describe('vectorSearch — four-signal ranking (Phase 109)', () => {
       // wTotal = 1+0+0+1 = 2; cosine=1, structural=0.5 -> score = (1*1 + 1*0.5) / 2 = 0.75
       expect(results[0].score).toBeCloseTo(0.75, 6)
     })
+    session.rawDb.close()
   })
 })
 
@@ -159,7 +162,8 @@ const EDGES: GraphEdgeRecord[] = [
 
 async function withFusionGraph<T>(fn: (graph: SqliteGraphStore, session: DbSession) => Promise<T>): Promise<T> {
   const { session } = setupDb()
-  return withDbSession(session, async () => {
+  try {
+    return await withDbSession(session, async () => {
     const graph = new SqliteGraphStore()
     await graph.replaceAll(NODES, EDGES)
 
@@ -189,7 +193,10 @@ async function withFusionGraph<T>(fn: (graph: SqliteGraphStore, session: DbSessi
     insertSymEmb.run(symC, 'm', 4, bufFromArray([0, 1, 0, 0]))
 
     return fn(graph, session)
-  })
+    })
+  } finally {
+    session.rawDb.close()
+  }
 }
 
 describe('blastRadius (Phase 109)', () => {
