@@ -115,11 +115,12 @@
 |   [Phase 97 — Full-toolset guide, tool interpretation registry, skill generation, Ollama docs](#phase-97-—-full-toolset-guide-tool-interpretation-registry-skill-generation-ollama-docs) | 3280 |
 |   [Phase 98 — CLI-based AI tool backends for narrator/guide](#phase-98-—-cli-based-ai-tool-backends-for-narratorguide) | 3341 |
 |   [Phase 99 — `--provider ollama` for narrator/guide + Ollama model discovery](#phase-99-—-provider-ollama-for-narratorguide-ollama-model-discovery) | 3405 |
-|   [Phase 100 — Persistent, registry-backed server-side repo storage](#phase-100-—-persistent-registry-backed-server-side-repo-storage) | 3471 |
-|   [Phases 101–103 — Pluggable storage backends & index scoping](#phases-101103-—-pluggable-storage-backends-index-scoping) | 3539 |
-|   [Phase 104 — Full-toolset guide coverage, per-command `--narrate`, and a guided `gitsema setup` wizard](#phase-104-—-full-toolset-guide-coverage-per-command-narrate-and-a-guided-gitsema-setup-wizard) | 3741 |
 | [Long-Term Investments](#long-term-investments) | 3446 |
 | [Non-goals for now (revisited later)](#non-goals-for-now-revisited-later) | 3463 |
+|   [Phase 100 — Persistent, registry-backed server-side repo storage](#phase-100-—-persistent-registry-backed-server-side-repo-storage) | 3471 |
+|   [Phases 101–103 — Pluggable storage backends & index scoping](#phases-101–103-—-pluggable-storage-backends-index-scoping) | 3539 |
+|   [Phase 104 — Full-toolset guide coverage, per-command `--narrate`, and a guided `gitsema setup` wizard](#phase-104-—-full-toolset-guide-coverage-per-command-narrate-and-a-guided-gitsema-setup-wizard) | 3741 |
+| [Knowledge Graph Track (Phases 105–112) — *planned*](#knowledge-graph-track-phases-105–112-—-planned) | 3887 |
 
 ---
 
