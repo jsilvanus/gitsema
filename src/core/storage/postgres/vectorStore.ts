@@ -57,6 +57,15 @@ export class PgVectorStore implements VectorStore {
   }
 
   async search(queryEmbedding: Embedding, options: VectorSearchOptions = {}): Promise<SearchResult[]> {
+    // Fail loudly on options this backend cannot honor, rather than silently
+    // returning unfiltered (wrong) results. `allowedHashes` is the candidate
+    // filter behind boolean / negative-example search (review9 §4).
+    if (options.allowedHashes && options.allowedHashes.size > 0) {
+      throw new Error(
+        'postgres vector backend does not support allowedHashes candidate filtering ' +
+        '(used by boolean and negative-example search); run these queries on the sqlite backend',
+      )
+    }
     const pool = await this.ready()
     const {
       topK = 10, model, recent = false, alpha = 0.8, before, after,

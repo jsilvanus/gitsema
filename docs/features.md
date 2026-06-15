@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.93.0** · Schema: **v22** · Test suite: **921 tests**
+> Current version: **v0.94.0** · Schema: **v23** · Test suite: **1040 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).

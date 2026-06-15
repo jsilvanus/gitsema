@@ -102,6 +102,20 @@ export class QdrantVectorStore implements VectorStore {
   }
 
   async search(queryEmbedding: Embedding, options: VectorSearchOptions = {}): Promise<SearchResult[]> {
+    // Fail loudly on options this backend cannot honor, rather than silently
+    // returning wrong results (review9 §4).
+    if (options.allowedHashes && options.allowedHashes.size > 0) {
+      throw new Error(
+        'qdrant vector backend does not support allowedHashes candidate filtering ' +
+        '(used by boolean and negative-example search); run these queries on the sqlite backend',
+      )
+    }
+    if (options.negativeQueryEmbedding) {
+      throw new Error(
+        'qdrant vector backend does not support negative-example search; ' +
+        'use the sqlite or postgres backend',
+      )
+    }
     const {
       topK = 10, model, recent = false, alpha = 0.8, before, after,
       weightVector, weightRecency, weightPath, query = '',

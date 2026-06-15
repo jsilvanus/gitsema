@@ -16,6 +16,7 @@ import { getRawDb, DB_PATH } from '../../core/db/sqlite.js'
 import { getProfileDefaults, postRunRecommendations } from '../../core/indexing/adaptiveTuning.js'
 import { computeIndexStatus, formatIndexStatus } from '../../core/indexing/indexStatus.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 
 /** Maps `--level` values to the corresponding `--chunker` strategy string. */
 const LEVEL_TO_CHUNKER: Record<string, string> = {
@@ -55,6 +56,21 @@ function formatMs(ms: number): string {
 export async function indexFileCommand(filePath: string, options: { chunker?: string } = {}): Promise<void> {
   if (!filePath || filePath.trim() === '') {
     console.error('Error: file path is required')
+    process.exit(1)
+  }
+
+  // `index --file` writes via the synchronous SQLite-only blobStore helpers and
+  // does not yet route through the StorageProfile write-path seam, so on a
+  // non-sqlite backend it would silently write to a local .gitsema/index.db the
+  // configured backend never reads. Fail loudly until the seam is wired up
+  // (review9 §4; PLAN.md Phase 103 follow-up).
+  const profile = getCachedStorageProfile()
+  if (profile.backend !== 'sqlite') {
+    console.error(
+      `Error: 'gitsema index --file' is only supported on the sqlite storage backend ` +
+      `(active backend: '${profile.backend}'). Use a full 'gitsema index' run for ` +
+      `postgres/qdrant backends.`,
+    )
     process.exit(1)
   }
 
