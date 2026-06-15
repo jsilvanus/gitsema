@@ -20,6 +20,22 @@
  * INVARIANT: when a tool's output shape changes, update its entry here. The skill is
  * generated from this file and the narrators read it at runtime; nothing else needs
  * to change. See CLAUDE.md ("Tool interpretations") for the workflow.
+ *
+ * ── TWO HALVES OF A TOOL'S PROMPT GUIDANCE ──────────────────────────────────
+ * Each gitsema tool carries guidance in two complementary layers, kept in two
+ * files on purpose:
+ *
+ *   • HOW TO USE (call it / what it does / what args) — lives with the tool's
+ *     executable definition: `definition.description` + `parameters` in
+ *     `src/core/narrator/guideTools.ts` (the guide agent loop) and the
+ *     `registerTool(...)` description in `src/mcp/tools/*.ts` (the MCP server).
+ *   • HOW TO READ IT (what the result means) — THIS FILE (`summary`,
+ *     `resultShape`, `interpretation`).
+ *
+ * They are intentionally NOT merged: this registry is dependency-free prose so
+ * the skill generator (`scripts/gen-skill.mjs`) and the narrators can import it
+ * without pulling in `guideTools.ts`'s heavy executor dependency graph. The
+ * `docsSync` test enforces the cross-file link (`GUIDE_TOOLS ⊆ this registry`).
  */
 
 export type ToolCategory =

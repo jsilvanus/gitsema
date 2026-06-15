@@ -164,8 +164,21 @@ function readHeadFile(path: string): string {
 // Tool definitions (JSON-schema parameters for the LLM)
 // ---------------------------------------------------------------------------
 
+/**
+ * The "HOW TO USE" half of a tool's prompt guidance: `description` (what the
+ * tool does / when to call it) and `parameters` (JSON-schema args) are passed
+ * to the LLM as the tool's callable schema.
+ *
+ * The companion "HOW TO READ THE RESULT" half lives in
+ * `src/core/narrator/interpretations.ts` (`TOOL_INTERPRETATIONS`, keyed by the
+ * same `name`) and is embedded into the guide prompt via
+ * `buildGuideToolCatalog()`. The two are kept in separate files on purpose —
+ * see that file's header. The `docsSync` test enforces that every tool here has
+ * an interpretation entry there.
+ */
 export interface ToolDefinition {
   name: string
+  /** How to USE this tool — sent to the LLM as the tool schema. (Result interpretation lives in interpretations.ts.) */
   description: string
   parameters: Record<string, unknown>
 }
