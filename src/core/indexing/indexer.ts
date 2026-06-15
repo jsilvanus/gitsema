@@ -264,6 +264,13 @@ export async function runIndex(options: IndexerOptions): Promise<IndexStats> {
   // direct SQLite session for now (see docs/PLAN.md Phase 103 deviations) and
   // skip it for non-sqlite backends.
   const moduleEmbeddingsSupported = profile.backend === 'sqlite'
+  if (!moduleEmbeddingsSupported) {
+    logger.warn(
+      `[indexer] module (directory-centroid) embeddings are not supported on the ` +
+      `'${profile.backend}' storage backend and will be skipped; module-level search ` +
+      `(--group module) will return no results for this index`,
+    )
+  }
 
   // Resolve --since: use provided value, or fall back to the last indexed commit
   // for automatic incremental indexing. The special value 'all' forces a full re-index.

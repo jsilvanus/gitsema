@@ -12,7 +12,7 @@
  */
 
 import type { NarratorProvider, NarrateRequest, NarrateResponse, HttpNarratorParams } from './types.js'
-import { redact } from './redact.js'
+import { redactPrompts, disabledNarratorResponse } from './providerCommon.js'
 import { withAudit } from './audit.js'
 import { logger } from '../../utils/logger.js'
 
@@ -44,18 +44,8 @@ async function getExplainerClass(): Promise<typeof _explainerModule> {
   return _explainerModule
 }
 
-// ---------------------------------------------------------------------------
-// Placeholder returned in safe-by-default (disabled) mode
-// ---------------------------------------------------------------------------
-
-function disabledResponse(redactedFields: string[]): NarrateResponse {
-  return {
-    prose: '[LLM narrator disabled — configure a narrator model via: gitsema models add <name> --narrator --http-url <url> --activate (or --provider cli --cli-command <tool>)]',
-    tokensUsed: 0,
-    redactedFields,
-    llmEnabled: false,
-  }
-}
+const DISABLED_HINT =
+  'configure a narrator model via: gitsema models add <name> --narrator --http-url <url> --activate (or --provider cli --cli-command <tool>)'
 
 // ---------------------------------------------------------------------------
 // ChattydeerNarratorProvider
@@ -87,12 +77,10 @@ export class ChattydeerNarratorProvider implements NarratorProvider {
 
   async narrate(req: NarrateRequest): Promise<NarrateResponse> {
     // Redact before anything else — including logging
-    const { text: redactedUser, firedPatterns: userFired } = redact(req.userPrompt)
-    const { text: redactedSystem } = redact(req.systemPrompt)
-    const allFired = userFired
+    const { redactedUser, redactedSystem, firedPatterns: allFired } = redactPrompts(req)
 
     if (!this._enabled || !this._params) {
-      return disabledResponse(allFired)
+      return disabledNarratorResponse(allFired, DISABLED_HINT)
     }
 
     const params = this._params

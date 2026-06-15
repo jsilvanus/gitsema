@@ -42,6 +42,11 @@ export async function searchCommits(
   queryEmbedding: Embedding,
   options: CommitSearchOptions = {},
 ): Promise<CommitSearchResult[]> {
+  // Backend dispatch (mirrors vectorSearch): for the default sqlite backend
+  // this function *is* the implementation, and SqliteVectorStore.searchCommits
+  // delegates back here — so the short-circuit below MUST remain (re-entering
+  // for sqlite would recurse infinitely). For postgres/qdrant the call is
+  // forwarded to that backend's VectorStore.searchCommits.
   const profile = getCachedStorageProfile()
   if (profile.backend !== 'sqlite') {
     return profile.vectors.searchCommits(queryEmbedding, options)

@@ -24,6 +24,8 @@
 
 import { createHash } from 'node:crypto'
 import type { QdrantClient } from '@qdrant/js-client-rest'
+import { verifyQdrantClient } from './connection.js'
+import { scoreAndDedupe, type RerankCandidate } from '../rerank.js'
 import type { Pool } from 'pg'
 import type { Embedding, SearchResult, SearchResultKind } from '../../models/types.js'
 import { pathRelevanceScore, type VectorSearchOptions } from '../../search/analysis/vectorSearch.js'
@@ -46,18 +48,7 @@ function collectionName(kind: VectorKind, model: string, dimensions: number): st
   return `gitsema_${kind}_${sanitizeModel(model)}_${dimensions}`
 }
 
-interface FileCandidate {
-  blobHash: string
-  cosine: number
-  chunkId?: number
-  startLine?: number
-  endLine?: number
-  symbolId?: number
-  symbolName?: string
-  symbolKind?: string
-  language?: string
-  modulePath?: string
-}
+type FileCandidate = RerankCandidate
 
 export class QdrantVectorStore implements VectorStore {
   constructor(
@@ -102,6 +93,21 @@ export class QdrantVectorStore implements VectorStore {
   }
 
   async search(queryEmbedding: Embedding, options: VectorSearchOptions = {}): Promise<SearchResult[]> {
+    // Fail loudly on options this backend cannot honor, rather than silently
+    // returning wrong results (review9 §4).
+    if (options.allowedHashes && options.allowedHashes.size > 0) {
+      throw new Error(
+        'qdrant vector backend does not support allowedHashes candidate filtering ' +
+        '(used by boolean and negative-example search); run these queries on the sqlite backend',
+      )
+    }
+    if (options.negativeQueryEmbedding) {
+      throw new Error(
+        'qdrant vector backend does not support negative-example search; ' +
+        'use the sqlite or postgres backend',
+      )
+    }
+    await verifyQdrantClient(this.client)
     const {
       topK = 10, model, recent = false, alpha = 0.8, before, after,
       weightVector, weightRecency, weightPath, query = '',
@@ -166,30 +172,10 @@ export class QdrantVectorStore implements VectorStore {
     )]
     const pathsByBlob = await this.getPaths(fileHashes)
 
-    type Scored = FileCandidate & { score: number }
-    const scored: Scored[] = candidates.map((c) => {
-      let score = c.cosine
-      if (useThreeSignal) {
-        const recency = recencyScores?.get(c.blobHash) ?? 0
-        const blobPaths = pathsByBlob.get(c.blobHash) ?? []
-        const pathScore = blobPaths.length > 0 ? Math.max(...blobPaths.map((p) => pathRelevanceScore(query, p))) : 0
-        score = (wv * c.cosine + wr * recency + wp * pathScore) / wTotal
-      } else if (recent) {
-        const recency = recencyScores?.get(c.blobHash) ?? 0
-        score = alpha * c.cosine + (1 - alpha) * recency
-      }
-      return { ...c, score }
+    const top = scoreAndDedupe(candidates, {
+      query, topK, useThreeSignal, wv, wr, wp, wTotal, recent, alpha,
+      recencyScores, pathsByBlob,
     })
-
-    scored.sort((a, b) => b.score - a.score)
-    const dedupeKey = (c: Scored) => c.modulePath !== undefined ? `\0module:${c.modulePath}` : c.blobHash
-    const best = new Map<string, Scored>()
-    for (const c of scored) {
-      const key = dedupeKey(c)
-      const existing = best.get(key)
-      if (!existing || c.score > existing.score) best.set(key, c)
-    }
-    const top = [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK)
 
     return top.map((c) => {
       if (c.modulePath !== undefined) {
@@ -225,6 +211,7 @@ export class QdrantVectorStore implements VectorStore {
   }
 
   async searchCommits(queryEmbedding: Embedding, options: CommitSearchOptions = {}): Promise<CommitSearchResult[]> {
+    await verifyQdrantClient(this.client)
     const { topK = 10, model } = options
     const dims = queryEmbedding.length
     const candidates = await this.queryCandidates('commit', queryEmbedding, dims, model, topK)
@@ -267,6 +254,7 @@ export class QdrantVectorStore implements VectorStore {
   }
 
   async upsert(kind: VectorKind, items: VectorRecord[]): Promise<void> {
+    if (items.length > 0) await verifyQdrantClient(this.client)
     for (const item of items) {
       const name = collectionName(kind, item.model, item.embedding.length)
       await this.ensureCollection(name, item.embedding.length)
@@ -325,6 +313,7 @@ export class QdrantVectorStore implements VectorStore {
 
   async delete(kind: VectorKind, ids: string[]): Promise<void> {
     if (ids.length === 0) return
+    await verifyQdrantClient(this.client)
     const names = await this.listCollections(kind)
     const payloadKey = kind === 'module' ? 'module_path' : kind === 'commit' ? 'commit_hash' : 'blob_hash'
     for (const name of names) {

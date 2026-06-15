@@ -14,7 +14,7 @@
 import { execFile } from 'node:child_process'
 import type { NarratorProvider, NarrateRequest, NarrateResponse, CliNarratorParams } from './types.js'
 import { getCliAdapter } from './cliAdapters.js'
-import { redact } from './redact.js'
+import { redactPrompts, disabledNarratorResponse } from './providerCommon.js'
 import { withAudit } from './audit.js'
 import { logger } from '../../utils/logger.js'
 
@@ -26,14 +26,8 @@ export interface CliProviderOptions {
   params?: CliNarratorParams
 }
 
-function disabledResponse(redactedFields: string[]): NarrateResponse {
-  return {
-    prose: '[LLM narrator disabled — configure a narrator model via: gitsema models add <name> --narrator --provider cli --cli-command <tool> --activate]',
-    tokensUsed: 0,
-    redactedFields,
-    llmEnabled: false,
-  }
-}
+const DISABLED_HINT =
+  'configure a narrator model via: gitsema models add <name> --narrator --provider cli --cli-command <tool> --activate'
 
 export class CliNarratorProvider implements NarratorProvider {
   readonly modelName: string
@@ -47,12 +41,10 @@ export class CliNarratorProvider implements NarratorProvider {
   }
 
   async narrate(req: NarrateRequest): Promise<NarrateResponse> {
-    const { text: redactedUser, firedPatterns: userFired } = redact(req.userPrompt)
-    const { text: redactedSystem } = redact(req.systemPrompt)
-    const allFired = userFired
+    const { redactedUser, redactedSystem, firedPatterns: allFired } = redactPrompts(req)
 
     if (!this._enabled || !this._params) {
-      return disabledResponse(allFired)
+      return disabledNarratorResponse(allFired, DISABLED_HINT)
     }
 
     const params = this._params

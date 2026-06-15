@@ -226,6 +226,10 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
     // two calls with the same query but different filter sets (e.g. different
     // branch scopes) don't collide on the same cache entry.
     allowedHashes: allowedHashesFingerprint(allowedHashes),
+    // The result cache is a process-global map; include the active database
+    // path so searches against different indexes in one process (e.g.
+    // multiRepoSearch switching sessions per repo) never collide (review9 §7.3).
+    db: getActiveSession().dbPath,
   }
   const cacheKey = buildCacheKey(
     queryText ?? embeddingFingerprint(queryEmbedding),
