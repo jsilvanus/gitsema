@@ -1,20 +1,24 @@
 # Design Doc — Structural Knowledge Graph Layer
 
-> Status: **Design / not yet implemented.** Target track: Phases 105–110.
+> Status: **Design / not yet implemented.** Target track: Phases 105–112.
 > Scope decision (owner): build the **structural** graph first (typed edges from
 > static analysis), starting with **TypeScript/JavaScript + Python**, then expand
-> to Go/Rust/Java. A separate presentation/UI graph (Phase 110) folds in later.
+> to Go/Rust/Java. A separate presentation/UI graph (Phase 111) folds in later, and
+> a cross-command lens-coverage sweep (Phase 112) closes the track.
 
 This document is the single design reference for the knowledge-graph track. It
 nails down the **identity model**, the **schema**, the **per-language name-resolution
-heuristics**, and the **phase boundaries** before any code lands. Phase entries in
-[`PLAN.md`](PLAN.md) should link here rather than restating the design.
+heuristics**, the **`--lens` toggle**, the **new commands**, and the **phase
+boundaries** before any code lands. Phase entries in [`PLAN.md`](PLAN.md) should link
+here rather than restating the design.
 
-> **Revision note (Codex review, PR #90):** the identity model was corrected so
-> per-blob occurrences are **path-free** (a blob may map to many paths and is parsed
-> once), and the node space now includes an explicit **`file` node** so that
-> file-level edges (`defines`, `imports`, `co_change`) and top-level call sites have
-> valid endpoints. See §2.1, §2.3, §3.
+> **Revision notes:**
+> - *Codex review, PR #90/#91:* occurrences are **path-free** (a blob maps to many
+>   paths and is parsed once); the node space includes an explicit **`file` node** so
+>   file-level edges and top-level call sites have valid endpoints. See §2.1, §2.3, §3.
+> - *Lens & commands pass:* added the three-lens framing and the cross-cutting
+>   **`--lens` toggle** (§7) so structural never *replaces* semantic — it's a dial —
+>   plus a catalog of new commands (§8) and two extra phases (109 lens, 110 fusion).
 
 ---
 
@@ -43,7 +47,8 @@ What it lacks is **structural relationships**. Concretely, as of schema v23:
 
 The knowledge-graph layer adds a **structural truth layer** on top of the existing
 blob-first index: typed, queryable, temporally-aware edges between stable nodes —
-without violating any of the project's non-negotiable constraints.
+without violating any of the project's non-negotiable constraints, and **without
+displacing the semantic lens** (§7).
 
 ### Constraints this design must respect (from `CLAUDE.md`)
 
@@ -121,7 +126,7 @@ Nodes are one of three kinds, all sharing one `node_key` string space:
 `repo_id` is present only in multi-repo deployments (omitted in the common
 single-repo case so keys stay readable). The `symbol` key is **not** content-addressed
 — that is what makes it stable across edits. A file rename mints a new key in v1;
-rename/move tracking is a later refinement (see §8).
+rename/move tracking is a later refinement (see §10).
 
 ---
 
@@ -297,7 +302,7 @@ All endpoints are `graph_nodes.node_key` values (`file`, `symbol`, or `external`
 not symbol granularity — symbol-level co-change would require line-range diffing and
 is out of scope. `similar_to` is intentionally **not** part of the structural-first
 scope — it is already available via `vectorSearch`; it is listed so the planner
-(Phase 109) can treat semantic neighbors as edges without duplicating storage.
+(Phase 110) can treat semantic neighbors as edges without duplicating storage.
 
 ---
 
@@ -322,23 +327,115 @@ them). Depth is capped (default 3) to bound cost. Qdrant: `GraphStore` throws
 
 ---
 
-## 7. Phase boundaries
+## 7. The `--lens` toggle (semantic · structural · hybrid)
+
+**Design principle: structural is a *third lens*, not a replacement.** The graph must
+never displace the semantic experience — it adds a dial. gitsema already reasons
+through two lenses and gains a third:
+
+| Lens | Backed by | Answers |
+|---|---|---|
+| **Semantic** | vectors + FTS | "what is *about* the same thing" |
+| **Temporal** | git / `blob_commits` | "what changed *together / when*" |
+| **Structural** *(new)* | graph `edges` | "what *actually references* what" |
+
+### 7.1 The cross-cutting option
+
+A shared option, defined once and reused by every command for which more than one
+lens is meaningful:
+
+```
+--lens semantic | structural | hybrid     # which lens(es) drive the result
+--weight-structural <n>                    # 4th ranking signal weight (default 0 until graph exists)
+```
+
+`--lens` is sugar over weights, layered onto the existing three-signal ranker
+(`--weight-vector` · `--weight-recency` · `--weight-path`), making it **four signals**:
+
+| `--lens` | Effect |
+|---|---|
+| `semantic` | structural weight 0 — **identical to today's behavior** (nothing lost) |
+| `structural` | vector weight 0 — pure graph traversal / ranking |
+| `hybrid` | both blended (vector + structural + recency + path) |
+
+### 7.2 The structural signal
+
+Structural proximity for ranking is a normalized graph distance from the query
+anchor along the chosen `edgeTypes` — e.g. `1 / (1 + hops)`, weighted by edge
+`confidence`/`weight`. It plugs into the same re-rank loop as `pathRelevanceScore`
+and `computeRecencyScores` today (`src/core/search/analysis/vectorSearch.ts`), so the
+fusion lives in one place.
+
+### 7.3 Per-command defaults (preserve, don't surprise)
+
+- **Existing commands** (`search`, `impact`, `experts`, `evolution`, …) default to
+  `--lens semantic` → byte-for-byte unchanged unless the user opts in.
+- **New graph-native commands** (`callers`, `deps`, `cycles`, …) default to
+  `--lens structural`.
+- **Fusion commands** (`relate`, `blast-radius`, `hotspots`) default to `--lens hybrid`.
+
+This mirrors the precedent set by `--hybrid` + `--bm25-weight` (vector+BM25 blend),
+so the convention is already idiomatic. The MCP/HTTP tool surfaces expose `lens` as a
+parameter wherever the CLI flag exists. A dedicated **Phase 112** sweeps the whole
+command set to make this coverage uniform and mechanically enforced (a shared
+`addLensOption()` helper + a parity test), rather than wired ad-hoc per command.
+
+---
+
+## 8. New commands & functionalities
+
+The graph + the lens toggle unlock a family of new commands. "Earliest phase" notes
+when each becomes buildable — several temporal ones need only `co_change`
+(`blob_commits`), not full call resolution.
+
+| Command | Default lens | Earliest | What it does |
+|---|---|---|---|
+| `gitsema co-change <file>` | temporal | 107 | Files that historically change together (from `blob_commits`). Cheapest early win; no call resolution needed. |
+| `gitsema deps <file\|symbol> [--reverse]` | structural | 107 | Import/dependency closure; `--reverse` for dependents. |
+| `gitsema cycles` | structural | 107 | Detect import/call cycles. |
+| `gitsema callers <symbol> [--depth]` | structural | 108 | Reverse `calls` traversal. |
+| `gitsema callees <symbol> [--depth]` | structural | 108 | Forward `calls` traversal. |
+| `gitsema neighbors <node> [--edge-types]` | structural | 108 | Typed neighborhood (any edge kinds). |
+| `gitsema path <a> <b>` | structural | 108 | Shortest typed path — "how does A reach B". |
+| `gitsema blast-radius <symbol> --lens` | hybrid | 109 | What changes if I touch this: `structural` = real callers/dependents; `semantic` = conceptually related; `hybrid` = both. The upgrade to today's semantic-only `impact`. |
+| `gitsema relate <symbol>` | hybrid | 109 | One view: **calls/called-by (structural)** *and* **semantically similar (vector)**, clearly labeled. Embodies "both lenses, lose neither." |
+| `gitsema similar <symbol> --lens structural` | (per flag) | 109 | Functions with the same call/import *shape* (structural) vs. semantically similar (vector). |
+| `gitsema unused` | structural | 109 | Symbols/files with no inbound `calls`/`imports` — structural complement to the semantic `dead-concepts`; pair them. |
+| `gitsema hotspots` | hybrid | 110 | Architectural risk = co-change (temporal) × call-coupling (structural) × churn. All three lenses in one score. |
+
+**Upgrades to existing commands (all gain `--lens`):**
+
+- `impact` — today semantic-only; `--lens structural` gives true blast radius,
+  `hybrid` blends. (Becomes a thin alias over `blast-radius`.)
+- `code-review` / `regression-gate` — changed symbols → structural callers **+**
+  semantic analogues for far better PR review and regression surfacing.
+- `explain` / `guide` / `narrate` — feed the LLM real callers/callees alongside
+  semantic neighbors (richer, grounded context).
+- `triage` / `bisect` — narrow candidates by structural reachability from the symptom.
+- MCP/guide tools — add `call_graph`, `deps`, `blast_radius`, `relate` so AI agents
+  navigate structurally + semantically instead of grepping blindly.
+
+---
+
+## 9. Phase boundaries
 
 | Phase | Title | Schema | Deliverable |
 |---|---|---|---|
-| **105** | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols` (occurrence identity = `(blob_hash, qualified_name, signature_hash)`). The path-bearing `symbol_key` (`path#qname#sighash`) is **derived** at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
+| **105** | Stable symbol identity | v24 | Recursive scope-stack extraction → path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` on `symbols` (occurrence identity = `(blob_hash, qualified_name, signature_hash)`). The path-bearing `symbol_key` is **derived** at display/node-build, not stored. `code_search`/LSP `documentSymbol` show `Class.method(sig)`. No edges; independently useful; de-risks the rest. |
 | **106** | Per-blob structural extraction | v25 | `structural_refs` (immutable, dedup by blob hash) populated during `index --graph` for TS/JS + Python. Sites only, no resolution. |
-| **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (joining occurrences × `paths`), resolves refs → typed edges with confidence tiers, materializes `co_change` from `blob_commits`. |
-| **108** | Traversal + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. Makes `impact` structural. |
-| **109** | Cascade query planner | — | `FTS filter → vector expand → graph traversal → merge/rerank`; structural signal in ranking. |
-| **110** | Unified graph UI | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. |
+| **107** | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers, materializes `co_change` from `blob_commits`. Early CLI: `co-change`, `deps`, `cycles`. |
+| **108** | Traversal primitives + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. |
+| **109** | `--lens` toggle + structural ranking | — | Cross-cutting `--lens semantic\|structural\|hybrid` + `--weight-structural` (§7) wired into the re-rank loop; new commands `blast-radius`, `relate`, `similar --lens`, `unused`; `impact` gains `--lens`. **Semantic stays the default for existing commands.** |
+| **110** | Fusion: cascade planner + hotspots | — | Cascade query planner `FTS filter → vector expand → graph traversal → merge/rerank`; `hotspots`; structural enrichment of `code-review`/`explain`/`guide`/`triage`. |
+| **111** | Unified graph UI | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. |
+| **112** | Lens coverage & parity sweep | — | Cross-cutting adoption pass over the **entire command surface** (CLI + MCP + HTTP): wire `--lens`/`lens` into every command where more than one lens is meaningful, via a single shared `addLensOption()` helper; enforce the §7.3 defaults and per-hit lens labeling uniformly; restore docs / skill / `interpretations.ts` parity; add a test asserting every lens-capable command/tool exposes `lens` (the same mechanical-guarantee approach as `docsSync`). Done last so it also covers the fusion commands from 110. |
 
 Each phase ends with working software, tests, a `features.md` entry, a `PLAN.md`
 status update, and a changeset (per `CLAUDE.md`).
 
 ---
 
-## 8. Risks & mitigations
+## 10. Risks & mitigations
 
 1. **Call resolution accuracy (highest).** Cross-file resolution is inherently
    imperfect. *Mitigation:* confidence tiers (§4), `external` nodes for unresolved
@@ -356,10 +453,14 @@ status update, and a changeset (per `CLAUDE.md`).
 5. **Scope-stack correctness.** The recursive walk is a real rewrite of the
    top-level-only extractor. *Mitigation:* Phase 105 is isolated and test-heavy
    (golden qualified-name fixtures per language) before any edges depend on it.
+6. **Lens confusion.** Three lenses risk surprising users. *Mitigation:* `--lens`
+   defaults preserve today's behavior for existing commands (§7.3); result output
+   labels which lens(es) produced each hit; one shared `--lens`/`--weight-structural`
+   helper so wiring is uniform, not ad-hoc.
 
 ---
 
-## 9. Non-goals (for this track)
+## 11. Non-goals (for this track)
 
 - A general-purpose graph database — the relational `edges` table is sufficient at
   gitsema's scale; revisit only if traversal becomes the bottleneck.
@@ -368,5 +469,5 @@ status update, and a changeset (per `CLAUDE.md`).
 - Symbol-level `co_change` — `blob_commits` is file-grained; symbol-grained
   co-change is out of scope.
 - Materializing `similar_to` edges up front — semantic neighbors stay computed on
-  the fly until the planner (109) proves a need.
+  the fly until the planner (Phase 110) proves a need.
 - Multi-repo unified vector key space — orthogonal; tracked separately.
