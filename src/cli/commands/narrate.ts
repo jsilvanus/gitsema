@@ -14,6 +14,7 @@ import { resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
 import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
 import type { NarrateFocus, NarrateFormat, NarrationResult } from '../../core/narrator/types.js'
 import { resolveOutputs, getSink, collectOut, type OutputSpec } from '../../utils/outputSink.js'
+import { addLensOption, parseLens } from '../lib/lens.js'
 
 // ---------------------------------------------------------------------------
 // Output formatting
@@ -180,6 +181,8 @@ export async function explainCommand(
     narrate?: boolean
     evidenceOnly?: boolean
     out?: string[]
+    /** Phase 111 lens toggle. Default `semantic` keeps output byte-identical. */
+    lens?: string
   },
 ): Promise<void> {
   // --narrate is shorthand for --no-evidence-only; default is evidence-only
@@ -207,6 +210,27 @@ export async function explainCommand(
   }
 
   emitNarrateResult(result, sink)
+
+  // Structural enrichment (Phase 110/111): when a structural/hybrid lens is
+  // requested and a concrete `--files` path is given, append grounded
+  // call-graph / co-change context. Default `semantic` lens prints nothing
+  // extra, so existing output stays byte-identical. Skipped for JSON output to
+  // avoid corrupting the payload.
+  const lens = parseLens(opts.lens, 'semantic')
+  if (lens !== 'semantic' && opts.files && format !== 'json' && !sink?.file) {
+    try {
+      const { getCachedStorageProfile } = await import('../../core/storage/resolveProfile.js')
+      const { structuralContextForPath, formatStructuralContext } = await import('../../core/graph/structuralContext.js')
+      const graph = getCachedStorageProfile(process.cwd()).graph
+      const ctx = await structuralContextForPath(graph, opts.files)
+      const summary = formatStructuralContext(ctx)
+      if (summary) {
+        console.log(`\nStructural context [lens: ${lens}] for ${opts.files}: ${summary}`)
+      }
+    } catch {
+      // graph unavailable — skip enrichment silently
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -234,18 +258,20 @@ export function registerNarratorCommands(program: Command): void {
     .option('--evidence-only', 'return raw commit evidence without calling the LLM (this is the default)')
     .action(narrateCommand)
 
-  program
-    .command('explain <topic>')
-    .description('Return matching commits (default) or an LLM-generated timeline for a bug, error, or topic.')
-    .option('--since <ref|date>', 'only include commits after this ref or date')
-    .option('--until <ref|date>', 'only include commits before this ref or date')
-    .option('--log <path>', 'path to an error log or stack trace file to include as context')
-    .option('--files <glob>', 'restrict search to files matching this glob')
-    .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
-    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
-    .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
-    .option('--model <name>', 'narrator model name to use (overrides active selection)')
-    .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
-    .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)')
-    .action(explainCommand)
+  addLensOption(
+    program
+      .command('explain <topic>')
+      .description('Return matching commits (default) or an LLM-generated timeline for a bug, error, or topic.')
+      .option('--since <ref|date>', 'only include commits after this ref or date')
+      .option('--until <ref|date>', 'only include commits before this ref or date')
+      .option('--log <path>', 'path to an error log or stack trace file to include as context')
+      .option('--files <glob>', 'restrict search to files matching this glob')
+      .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
+      .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
+      .option('--model <name>', 'narrator model name to use (overrides active selection)')
+      .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
+      .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)'),
+    'semantic',
+  ).action(explainCommand)
 }

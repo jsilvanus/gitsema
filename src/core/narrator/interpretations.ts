@@ -406,6 +406,41 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
       'extraction into a shared helper. `level` (symbol/chunk/file) sets the granularity. Not every pair ' +
       'is worth merging — check whether the duplication is incidental (e.g. boilerplate) or meaningful.',
   },
+  call_graph: {
+    name: 'call_graph',
+    category: 'quality',
+    summary: 'Structural callers/callees of a symbol over the knowledge graph.',
+    resultShape: '{ symbol, direction, hits: [{ node, displayName, depth, edgeType }] } — reverse (callers) or forward (callees) `calls` traversal.',
+    interpretation:
+      'This is the STRUCTURAL lens — real `calls` edges, not semantic similarity. `depth` is the hop count ' +
+      'from the queried symbol (capped at 3). Requires `gitsema index --graph` + `gitsema graph build`; an ' +
+      'empty/error result usually means the graph has not been built. Resolution is best-effort (confidence ' +
+      'tiers), so cross-file/dynamic calls may be missing or land on `external:` nodes.',
+  },
+  blast_radius: {
+    name: 'blast_radius',
+    category: 'quality',
+    summary: 'What changes if you touch a symbol/file — structural dependents and/or semantic neighbours.',
+    resultShape: '{ symbol, lens, structural: [{ node, displayName, depth, edgeType }], semantic: [{ path, symbolName, score }], semanticSupported }.',
+    interpretation:
+      'The `lens` selects the view: `structural` lists real dependents (who references this, via calls/' +
+      'imports/extends/implements/references); `semantic` lists conceptually related blobs; `hybrid` (default) ' +
+      'shows both. Use structural for "what must I retest", semantic for "what else encodes this idea". The ' +
+      'structural upgrade to `impact`. Requires the built graph; `semanticSupported:false` means the backend ' +
+      'cannot serve the semantic lens.',
+  },
+  hotspots: {
+    name: 'hotspots',
+    category: 'quality',
+    summary: 'Architectural risk = co-change (temporal) × call-coupling (structural) × churn.',
+    resultShape: '{ lens, hotspots: [{ path, risk, lenses, coChange, coupling, churn }] } sorted by risk (desc).',
+    interpretation:
+      '`risk` is a geometric mean in [0,1] of the normalized signals the lens selects (`hybrid` = all three; ' +
+      '`structural` = coupling only; `semantic` = co-change × churn), so a file must score on every ' +
+      'participating axis to rank highly. High-risk files are heavily coupled AND change often AND co-change ' +
+      'with many others — prime refactor/test-hardening targets. The `lenses` tag shows which signals ' +
+      'contributed. Requires `gitsema index --graph` + `gitsema graph build`.',
+  },
   security_scan: {
     name: 'security_scan',
     category: 'quality',

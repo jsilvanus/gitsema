@@ -55,6 +55,7 @@ import { searchRouter } from './routes/search.js'
 import { evolutionRouter } from './routes/evolution.js'
 import { remoteRouter } from './routes/remote.js'
 import { analysisRouter } from './routes/analysis.js'
+import { graphRouter } from './routes/graph.js'
 import { watchRouter } from './routes/watch.js'
 import { projectionsRouter } from './routes/projections.js'
 import { openapiRouter } from './routes/openapi.js'
@@ -167,6 +168,9 @@ export function createApp(options: AppOptions): Express {
   )
 
   app.use(`${base}/analysis`, repoSessionMiddleware, analysisRouter({ textProvider }))
+
+  // Phase 110/111: structural knowledge-graph routes (hotspots, …)
+  app.use(`${base}/graph`, repoSessionMiddleware, graphRouter())
 
   app.use(`${base}/watch`, repoSessionMiddleware, watchRouter({ textProvider }))
 

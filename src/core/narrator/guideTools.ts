@@ -63,6 +63,11 @@ import { computeConceptLifecycle } from '../search/conceptLifecycle.js'
 import { parseDateArg } from '../search/temporal/timeSearch.js'
 import { runIndex } from '../indexing/indexer.js'
 import { DEFAULT_MAX_SIZE } from '../git/showBlob.js'
+import { getCachedStorageProfile } from '../storage/resolveProfile.js'
+import { callers as graphCallers, callees as graphCallees } from '../graph/traversal.js'
+import { blastRadius } from '../graph/blastRadius.js'
+import { computeHotspots, churnByPath } from '../graph/hotspots.js'
+import { parseLens } from '../../cli/lib/lens.js'
 import { vectorSearchWithSession } from '../search/analysis/vectorSearch.js'
 import type { ToolCategory } from './interpretations.js'
 import { logger } from '../../utils/logger.js'
@@ -1559,6 +1564,86 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
       }
 
       return report
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // Structural knowledge graph (Phase 108–110)
+  // -------------------------------------------------------------------------
+  call_graph: {
+    category: 'quality',
+    needsIndex: true,
+    definition: {
+      name: 'call_graph',
+      description: 'Structural call-graph traversal over the knowledge graph (requires `gitsema index --graph` + `gitsema graph build`): who calls (callers) or is called by (callees) a symbol.',
+      parameters: obj({
+        symbol: str('Symbol qualified name, file path, or literal node key (file:..., symbol:..., external:...).'),
+        direction: { type: 'string', description: 'Traverse reverse (callers) or forward (callees) calls edges.', enum: ['callers', 'callees'] },
+        depth: int('Traversal depth (default and max 3).', { min: 1, max: 3 }),
+      }, ['symbol']),
+    },
+    run: async (args) => {
+      const symbol = strArg(args, 'symbol')
+      if (!symbol) return errorResult('call_graph requires a non-empty "symbol" argument')
+      const direction = strArg(args, 'direction') === 'callees' ? 'callees' : 'callers'
+      const depth = numArg(args, 'depth', 3, 1, 3)
+      const graph = getCachedStorageProfile(process.cwd()).graph
+      const result = direction === 'callees'
+        ? await graphCallees(graph, symbol, depth)
+        : await graphCallers(graph, symbol, depth)
+      if (result.resolved.status !== 'found') return errorResult(`no graph node found for "${symbol}" — run \`gitsema graph build\` first`)
+      return { symbol, direction, hits: result.hits.map((h) => ({ node: h.nodeKey, displayName: h.displayName, depth: h.depth, edgeType: h.edgeType })) }
+    },
+  },
+  blast_radius: {
+    category: 'quality',
+    needsIndex: true,
+    definition: {
+      name: 'blast_radius',
+      description: 'What changes if I touch this symbol/file: structural dependents (who references it) and/or semantically related blobs, selected by lens (requires `gitsema index --graph` + `gitsema graph build`).',
+      parameters: obj({
+        symbol: str('Symbol qualified name, file path, or literal node key.'),
+        lens: { type: 'string', description: 'Which lens(es) drive the result (default hybrid).', enum: ['semantic', 'structural', 'hybrid'] },
+        top_k: int('Number of semantic results (default 10, max 25).', { min: 1, max: 25 }),
+      }, ['symbol']),
+    },
+    run: async (args) => {
+      const symbol = strArg(args, 'symbol')
+      if (!symbol) return errorResult('blast_radius requires a non-empty "symbol" argument')
+      const lens = parseLens(strArg(args, 'lens'), 'hybrid')
+      const topK = numArg(args, 'top_k', 10, 1, 25)
+      const graph = getCachedStorageProfile(process.cwd()).graph
+      const result = await blastRadius(graph, symbol, { lens, topK })
+      if (result.resolved.status !== 'found') return errorResult(`no graph node found for "${symbol}" — run \`gitsema graph build\` first`)
+      return {
+        symbol, lens: result.lens,
+        structural: result.structural.map((h) => ({ node: h.nodeKey, displayName: h.displayName, depth: h.depth, edgeType: h.edgeType })),
+        semantic: result.semantic.map((h) => ({ path: h.paths[0] ?? null, symbolName: h.symbolName ?? null, score: h.score })),
+        semanticSupported: result.semanticSupported,
+      }
+    },
+  },
+  hotspots: {
+    category: 'quality',
+    needsIndex: true,
+    definition: {
+      name: 'hotspots',
+      description: 'Rank files by architectural risk = co-change (temporal) × call-coupling (structural) × churn, over the knowledge graph (requires `gitsema index --graph` + `gitsema graph build`). Default lens hybrid.',
+      parameters: obj({
+        lens: { type: 'string', description: 'Which lens(es) drive the risk score (default hybrid).', enum: ['semantic', 'structural', 'hybrid'] },
+        top_k: int('Number of hotspots to return (default 20, max 50).', { min: 1, max: 50 }),
+      }),
+    },
+    run: async (args) => {
+      const lens = parseLens(strArg(args, 'lens'), 'hybrid')
+      const topK = numArg(args, 'top_k', 20, 1, 50)
+      const profile = getCachedStorageProfile(process.cwd())
+      const churn = profile.backend === 'sqlite' ? churnByPath() : new Map<string, number>()
+      const result = await computeHotspots(profile.graph, { lens, topK, churnByPath: churn })
+      return {
+        lens: result.lens,
+        hotspots: result.hotspots.map((h) => ({ path: h.path, risk: h.risk, lenses: h.lenses, coChange: h.coChange, coupling: h.coupling, churn: h.churn })),
+      }
     },
   },
 

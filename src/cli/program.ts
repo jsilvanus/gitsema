@@ -55,6 +55,7 @@ export const COMMAND_GROUPS: Record<string, string> = {
   'doc-gap':             'Code Quality',
   'refactor-candidates': 'Code Quality',
   lifecycle:             'Code Quality',
+  hotspots:              'Code Quality',
   bisect:                  'Workflow & CI',
   'ci-diff':               'Workflow & CI',
   'contributor-profile':   'Workflow & CI',

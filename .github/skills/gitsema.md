@@ -767,6 +767,16 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 
 ### Quality, debt & risk
 
+**`blast_radius`** — What changes if you touch a symbol/file — structural dependents and/or semantic neighbours.
+
+- Result shape: { symbol, lens, structural: [{ node, displayName, depth, edgeType }], semantic: [{ path, symbolName, score }], semanticSupported }.
+- How to read it: The `lens` selects the view: `structural` lists real dependents (who references this, via calls/imports/extends/implements/references); `semantic` lists conceptually related blobs; `hybrid` (default) shows both. Use structural for "what must I retest", semantic for "what else encodes this idea". The structural upgrade to `impact`. Requires the built graph; `semanticSupported:false` means the backend cannot serve the semantic lens.
+
+**`call_graph`** — Structural callers/callees of a symbol over the knowledge graph.
+
+- Result shape: { symbol, direction, hits: [{ node, displayName, depth, edgeType }] } — reverse (callers) or forward (callees) `calls` traversal.
+- How to read it: This is the STRUCTURAL lens — real `calls` edges, not semantic similarity. `depth` is the hop count from the queried symbol (capped at 3). Requires `gitsema index --graph` + `gitsema graph build`; an empty/error result usually means the graph has not been built. Resolution is best-effort (confidence tiers), so cross-file/dynamic calls may be missing or land on `external:` nodes.
+
 **`dead_concepts`** — Blobs that existed historically but are no longer reachable from HEAD.
 
 - Result shape: Removed blobs with last-seen date and last-seen commit message.
@@ -781,6 +791,11 @@ This section is generated from `src/core/narrator/interpretations.ts` (run `pnpm
 
 - Result shape: Code blobs with their maximum similarity to any doc blob (lower = worse).
 - How to read it: A low max-doc-similarity means no documentation blob resembles this code — a documentation gap. Prioritise the lowest-scoring, most-important files for docs.
+
+**`hotspots`** — Architectural risk = co-change (temporal) × call-coupling (structural) × churn.
+
+- Result shape: { lens, hotspots: [{ path, risk, lenses, coChange, coupling, churn }] } sorted by risk (desc).
+- How to read it: `risk` is a geometric mean in [0,1] of the normalized signals the lens selects (`hybrid` = all three; `structural` = coupling only; `semantic` = co-change × churn), so a file must score on every participating axis to rank highly. High-risk files are heavily coupled AND change often AND co-change with many others — prime refactor/test-hardening targets. The `lenses` tag shows which signals contributed. Requires `gitsema index --graph` + `gitsema graph build`.
 
 **`impact`** — Blobs most semantically coupled to a file.
 

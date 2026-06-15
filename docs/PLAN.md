@@ -3931,8 +3931,8 @@ include `co-change`, `deps`, `cycles`, `callers`/`callees`/`path`/`neighbors`,
 | **107** ✅ | Linking pass + `graph_nodes`/`edges` | v26 | `gitsema graph build` builds `file`/`symbol`/`external` nodes (occurrences × `paths`), resolves refs → typed edges with confidence tiers; materializes `co_change` from `blob_commits`. Early CLI: `co-change`, `deps`, `cycles`. |
 | **108** | Traversal primitives + CLI/MCP | — | `GraphStore` seam (recursive CTEs); `gitsema graph callers\|callees\|neighbors\|path`; MCP `call_graph`/`graph_neighbors`. |
 | **109** | `--lens` toggle + structural ranking | — | Cross-cutting `--lens` + `--weight-structural` in the re-rank loop; new commands `blast-radius`, `relate`, `similar --lens`, `unused`; `impact` gains `--lens`. Semantic stays the default for existing commands. |
-| **110** | Fusion: cascade planner + hotspots | — | Cascade query planner (`FTS → vector → graph traversal → merge/rerank`); `hotspots`; structural enrichment of `code-review`/`explain`/`guide`/`triage`. |
-| **111** | Lens coverage & parity sweep | — | Cross-cutting adoption pass over the whole command surface (CLI + MCP + HTTP): shared `addLensOption()` helper, uniform §7.3 defaults + per-hit lens labeling, docs/skill/`interpretations.ts` parity, and a test asserting every lens-capable command exposes `lens`. Done before the UI phase so it covers the 110 fusion commands too. |
+| **110** ✅ | Fusion: cascade planner + hotspots | — | Cascade query planner (`FTS → vector → graph traversal → merge/rerank`); `hotspots`; structural enrichment of `code-review`/`explain`/`guide`/`triage`. |
+| **111** ✅ | Lens coverage & parity sweep | — | Cross-cutting adoption pass over the whole command surface (CLI + MCP + HTTP): shared `addLensOption()` helper, uniform §7.3 defaults + per-hit lens labeling, docs/skill/`interpretations.ts` parity, and a test asserting every lens-capable command exposes `lens`. Done before the UI phase so it covers the 110 fusion commands too. |
 | **112** | Unified graph UI (HTML + CLI) | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. Also adds a CLI/text-mode subgraph view (ASCII tree or list rendering of nodes/edges) for terminal-only workflows, alongside the HTML view. |
 
 Each phase ends with working software, tests, a `features.md` entry, a `PLAN.md`
@@ -4094,3 +4094,58 @@ future search-integration phase). (2) No new MCP tools were added for
 `blast-radius`/`relate`/`similar`/`unused` — left for a future fusion/MCP-coverage
 phase, consistent with the Phase 108 deviation note. No schema change. Tests:
 `tests/graphLens.test.ts`.
+
+**Status:** Phase 110 ✅ complete (knowledge-graph §7/§8/§10). Three deliverables:
+
+1. **Cascade query planner** (`src/core/graph/cascade.ts`, `planCascade()`): the
+   four-stage `FTS filter → vector expand → graph traversal → merge/rerank`
+   pipeline. Stage 1 BM25-pre-filters via `profile.fts` (skipped when absent);
+   stage 2 runs `vectorSearch`; stage 3 maps the top semantic hits to `file`
+   nodes and expands along `calls`/`imports`/`extends`/`implements`/`references`
+   edges (`1/(1+hops)` proximity); stage 4 unions + reranks under a lens-weighted
+   blend, labeling each hit with the contributing lens(es). `lens: 'semantic'`
+   short-circuits after stage 2 and returns the vector ranking unchanged
+   (byte-identical); structural stages catch `UnsupportedGraphStore` and degrade
+   to semantic-only (`structuralSupported: false`).
+2. **`gitsema hotspots`** (`src/core/graph/hotspots.ts`, CLI
+   `src/cli/commands/hotspots.ts`, MCP `hotspots`, `POST /api/v1/graph/hotspots`):
+   architectural risk = co-change (temporal) × call-coupling (structural) ×
+   churn, computed as a geometric mean of the normalized signals the lens
+   selects (`hybrid` = all three, `structural` = coupling only, `semantic` =
+   co-change × churn). Coupling/co-change come from the graph; churn from
+   `churnByPath()` (sqlite `blob_commits`). Default lens hybrid; per-hit lens
+   labels in text/JSON.
+3. **Structural enrichment** of `code-review`, `triage`, `explain`, `guide` via a
+   new `--lens` flag (default `semantic`, byte-identical). `triage` runs the
+   cascade planner for a "Structural context" section; `code-review`/`explain`
+   use `structuralContextForPath()` (`src/core/graph/structuralContext.ts`) for
+   "N callers / co-changes with X NN%" facts; `guide` gains the `call_graph`,
+   `blast_radius`, and `hotspots` tools in `GUIDE_TOOLS` (closing the Phase 108
+   deviation) and a lens hint. **Deviations:** (1) the cascade planner is wired
+   behind `hybrid` for the query-driven fusion paths (`triage`/`explain`
+   enrichment) rather than retrofitted into the already-tested anchor-based
+   `blast-radius`/`relate`/`similar` section output, whose hybrid behavior was
+   left intact; `hotspots` fuses the three lenses through its own risk product
+   (as the design specifies) rather than the cascade. (2) `explain` enrichment is
+   path-scoped (uses `--files`) to avoid an embedding/network call in the
+   evidence path. Tests: `tests/graphFusion.test.ts`.
+
+**Status:** Phase 111 ✅ complete (knowledge-graph §7.3/§11). The shared
+`addLensOption()` helper (`src/cli/lib/lens.ts`) is now applied uniformly to every
+command where more than one lens is meaningful — `blast-radius`/`similar`/`relate`/
+`hotspots` (fusion → default `hybrid`) and `impact`/`triage`/`code-review`/
+`explain`/`guide` (existing → default `semantic`) — enforcing the §7.3 defaults.
+New graph-native commands keep their `structural` default. Per-hit lens labels
+(`[semantic]`/`[structural]`/`[semantic+structural]`) are rendered consistently
+across the cascade, hotspots, and relate text/JSON output. The MCP `hotspots` tool
+and `POST /api/v1/graph/hotspots` route both expose `lens`. Docs/skill parity is
+restored: `interpretations.ts` gains `call_graph`/`blast_radius`/`hotspots`
+entries, `pnpm gen:skill` regenerated `skill/gitsema-ai-assistant.md` +
+`.github/skills/gitsema.md`, and `features.md`/`README.md` tables are updated. A
+new mechanical parity test (`tests/lensParity.test.ts`, mirroring `docsSync`'s
+style) introspects the Commander program, `GUIDE_TOOLS`, and the MCP/HTTP source to
+assert every lens-capable surface exposes `lens`/`--lens` with the correct default.
+**Deviation:** single-lens graph-native commands (`co-change` temporal-only;
+`deps`/`cycles`/`callers`/`callees`/`neighbors`/`path`/`unused` structural-only) do
+not take `--lens` — only one lens is meaningful for them — so they are excluded
+from the parity set by design. No schema change.

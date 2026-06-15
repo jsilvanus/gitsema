@@ -3,6 +3,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { callers, callees, neighbors } from '../../core/graph/traversal.js'
+import { computeHotspots, churnByPath } from '../../core/graph/hotspots.js'
+import { parseLens } from '../../cli/lib/lens.js'
 import type { EdgeType, GraphHit } from '../../core/storage/types.js'
 
 function renderResolutionError(label: string, resolved: { status: string; candidates?: Array<{ nodeKey: string }> }): string {
@@ -81,6 +83,34 @@ export function registerGraphTools(server: McpServer) {
 
         const resolvedNode = result.resolved.node
         return { content: [{ type: 'text', text: `Neighbors of ${resolvedNode.displayName} (${resolvedNode.nodeKey}):\n\n${renderHits(result.hits)}` }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] }
+      }
+    },
+  )
+
+  registerTool(
+    server,
+    'hotspots',
+    'Architectural risk ranking (Phase 110): risk = co-change (temporal) × call-coupling (structural) × churn, over the structural graph (`gitsema index --graph` + `gitsema graph build`). Default lens `hybrid` fuses all three signals; `structural` ranks by coupling only; `semantic` by co-change × churn.',
+    {
+      lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid').describe('Which lens(es) drive the risk score (default: hybrid)'),
+      top_k: z.number().int().positive().optional().default(20).describe('Number of hotspots to return'),
+    },
+    async ({ lens, top_k }) => {
+      try {
+        const profile = getCachedStorageProfile(process.cwd())
+        const churn = profile.backend === 'sqlite' ? churnByPath() : new Map<string, number>()
+        const result = await computeHotspots(profile.graph, { lens: parseLens(lens, 'hybrid'), topK: top_k, churnByPath: churn })
+        if (result.hotspots.length === 0) {
+          return { content: [{ type: 'text', text: 'No hotspots found. Run `gitsema index --graph` then `gitsema graph build` first.' }] }
+        }
+        const lines = result.hotspots.map((h, i) => {
+          const label = h.lenses.length > 0 ? ` [${h.lenses.join('+')}]` : ''
+          return `${String(i + 1).padStart(2)}. ${h.risk.toFixed(3)}  ${h.path}${label}  (co-change=${h.coChange} coupling=${h.coupling} churn=${h.churn})`
+        })
+        return { content: [{ type: 'text', text: `Architectural hotspots — lens: ${result.lens}\n\n${lines.join('\n')}` }] }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: [{ type: 'text', text: `Error: ${msg}` }] }

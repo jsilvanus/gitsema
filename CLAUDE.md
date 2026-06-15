@@ -278,7 +278,7 @@ Return commit evidence (default, no LLM call) or an LLM-generated narrative of r
 Return matching commits (default, no LLM call) or an LLM-generated explanation/timeline for a bug, error, or topic. Same safe-by-default and narrator-model conventions as `narrate`.
 
 ### `gitsema guide [question] [options]`
-Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured (no network access). When a model is configured, runs a real agentic tool-calling loop (`@jsilvanus/chattydeer` `runAgentLoop`, maxRoundtrips 5) against the full `GUIDE_TOOLS` registry in `src/core/narrator/guideTools.ts` (46 tools, covering search, history, branch/merge, ownership, quality, diff/blame, clustering, workflow, admin — a superset of the 34 MCP tools below; Phase 104 is closing the remaining gaps). Index-gated tools return `{error}` gracefully when no `.gitsema` index exists. Supports `-i/--interactive` for a multi-turn REPL session (one agent session reused across turns).
+Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured (no network access). When a model is configured, runs a real agentic tool-calling loop (`@jsilvanus/chattydeer` `runAgentLoop`, maxRoundtrips 5) against the full `GUIDE_TOOLS` registry in `src/core/narrator/guideTools.ts` (49 tools, covering search, history, branch/merge, ownership, quality, diff/blame, clustering, workflow, structural graph, admin — including the Phase 110 `call_graph`/`blast_radius`/`hotspots` structural tools; Phase 104 is closing the remaining gaps). Index-gated tools return `{error}` gracefully when no `.gitsema` index exists. Supports `-i/--interactive` for a multi-turn REPL session (one agent session reused across turns).
 
 ---
 
@@ -474,7 +474,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (36 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator,graph}.ts`):**
+**Exposed tools (37 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator,graph}.ts`):**
 
 | Tool | Description |
 |---|---|
@@ -514,6 +514,7 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `explain_issue_or_error` | Generate evidence (default) or an LLM explanation/timeline for a bug, error, or topic |
 | `call_graph` | Structural call-graph traversal — callers/callees of a symbol (Phase 108) |
 | `graph_neighbors` | Typed neighborhood of a graph node — any edge kinds, direction, depth (Phase 108) |
+| `hotspots` | Architectural risk = co-change × call-coupling × churn; `lens` selects which signals (Phase 110) |
 
 ---
 

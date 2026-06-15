@@ -9,6 +9,9 @@ import { computeSemanticBisect } from '../../core/search/semanticBisect.js'
 import { computeEvolution } from '../../core/search/temporal/evolution.js'
 import { parsePositiveInt } from '../../utils/parse.js'
 import { narrateToolResult } from '../../core/llm/narrator.js'
+import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
+import { planCascade, type CascadeHit } from '../../core/graph/cascade.js'
+import { parseLens } from '../lib/lens.js'
 
 export interface TriageOptions {
   ref1?: string
@@ -22,6 +25,8 @@ export interface TriageOptions {
   textModel?: string
   codeModel?: string
   narrate?: boolean
+  /** Phase 111 lens toggle. Default `semantic` keeps output byte-identical. */
+  lens?: string
 }
 
 export async function triageCommand(query: string, options: TriageOptions): Promise<void> {
@@ -102,6 +107,20 @@ export async function triageCommand(query: string, options: TriageOptions): Prom
     sections.experts = { error: err instanceof Error ? err.message : String(err) }
   }
 
+  // Structural context (Phase 110/111): under a structural/hybrid lens, run the
+  // cascade planner so triage narrows + enriches candidates with call-graph
+  // reachability. Default `semantic` lens leaves the report byte-identical.
+  const lens = parseLens(options.lens, 'semantic')
+  if (lens !== 'semantic') {
+    try {
+      const profile = getCachedStorageProfile(process.cwd())
+      const cascade = await planCascade({ query, queryEmbedding: queryEmbedding!, graph: profile.graph, lens, topK: top })
+      sections.structural = cascade
+    } catch (err) {
+      sections.structural = { error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
   const sinks = resolveOutputs({ out: options.out, dump: options.dump })
   const jsonSink = getSink(sinks, 'json')
   if (jsonSink) {
@@ -173,6 +192,27 @@ export async function triageCommand(query: string, options: TriageOptions): Prom
     const exp = experts as Array<{ authorName: string; blobCount: number }>
     for (const e of exp.slice(0, top)) {
       console.log(`  ${e.authorName}  blobs=${e.blobCount}`)
+    }
+  }
+
+  if (sections.structural !== undefined) {
+    console.log(`\n── Structural context [lens: ${lens}] ──`)
+    const struct = sections.structural as { hits?: CascadeHit[]; structuralSupported?: boolean } | { error: string }
+    if ('error' in (struct as object)) {
+      console.log(`  (error: ${(struct as { error: string }).error})`)
+    } else {
+      const s = struct as { hits?: CascadeHit[]; structuralSupported?: boolean }
+      if (s.structuralSupported === false) {
+        console.log('  (graph queries not supported on this storage backend)')
+      }
+      const hits = s.hits ?? []
+      if (hits.length === 0) {
+        console.log('  No structural matches found.')
+      }
+      for (const h of hits.slice(0, top)) {
+        const label = h.lenses.length > 0 ? ` [${h.lenses.join('+')}]` : ''
+        console.log(`  ${h.score.toFixed(4)}  ${h.paths[0] ?? h.displayName}${label}`)
+      }
     }
   }
 

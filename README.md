@@ -223,13 +223,13 @@ Same underlying search as `gitsema search`, but results are sorted by first-seen
 
 | Command | Description |
 |---|---|
-| `gitsema triage <query> [options]` | Incident triage: composite workflow (first-seen, change-points, file-evolution, bisect, experts) |
+| `gitsema triage <query> [options]` | Incident triage: composite workflow (first-seen, change-points, file-evolution, bisect, experts). `--lens structural\|hybrid` adds a cascade-planner structural context section (default: semantic, unchanged) |
 | `gitsema policy-check [options]` | Run policy gates for drift, debt, and security scores (CI-friendly exit codes) |
 | `gitsema ownership <query> [options]` | Show ownership heatmap for a concept (ownership confidence and trends) |
 | `gitsema eval <file> [options]` | Evaluate retrieval quality against a JSONL file of (query, expectedPaths) pairs |
 | `gitsema narrate [options]` | Return commit evidence (default) or an LLM-generated narrative of repository development history |
-| `gitsema explain <topic> [options]` | Return matching commits (default) or an LLM-generated explanation/timeline for a bug, error, or topic |
-| `gitsema guide [question] [options]` | Interactive LLM chat that answers questions about this repository, using gathered git context |
+| `gitsema explain <topic> [options]` | Return matching commits (default) or an LLM-generated explanation/timeline for a bug, error, or topic. `--lens structural\|hybrid` appends call-graph/co-change context for a `--files` path |
+| `gitsema guide [question] [options]` | Interactive LLM chat that answers questions about this repository, using gathered git context. `--lens structural\|hybrid` biases the agent toward the `call_graph`/`blast_radius`/`hotspots` tools |
 
 #### `gitsema narrate [options]` / `gitsema explain <topic> [options]`
 
@@ -420,7 +420,7 @@ Track semantic drift of a single file across its Git history.
 | `gitsema security-scan [options]` | Scan the codebase for common security patterns (semantic + structural heuristics) |
 | `gitsema health [options]` | Show codebase health timeline |
 | `gitsema debt [options]` | Score technical debt across the codebase |
-| `gitsema code-review [options]` | Semantic code review: find historical analogues for changed code and flag regressions |
+| `gitsema code-review [options]` | Semantic code review: find historical analogues for changed code and flag regressions. `--lens structural\|hybrid` adds per-file call-graph/co-change context (default: semantic, unchanged) |
 | `gitsema refactor-candidates [options]` | Find pairs of symbols/chunks/files semantically similar enough to be refactoring candidates |
 | `gitsema lifecycle <query> [options]` | Analyze the lifecycle stages (born → growing → mature → declining → dead) of a semantic concept |
 | `gitsema doc-gap [options]` | Find undocumented code by comparing code blobs against prose/documentation embeddings |
@@ -440,9 +440,10 @@ Track semantic drift of a single file across its Git history.
 | `gitsema graph neighbors <node> [--edge-types <types>] [--direction <dir>] [--depth <n>]` | Typed neighborhood of `<node>` — any edge kinds by default (default depth 1, max 3) |
 | `gitsema graph path <a> <b>` | Shortest typed path from `<a>` to `<b>` (max depth 3) |
 | `gitsema blast-radius <symbol> [--lens <lens>] [--depth <n>] [-k/--top <n>] [--weight-structural <n>]` | What changes if I touch this — structural dependents (`calls`/`imports`/`extends`/`implements`/`references`, reverse traversal) and/or semantically similar blobs (default lens: hybrid) |
-| `gitsema relate <symbol> [-k/--top <n>]` | Callers/callees (structural, depth 1) and semantically similar blobs, labeled — both lenses, lose neither |
+| `gitsema relate <symbol> [--lens <lens>] [-k/--top <n>]` | Callers/callees (structural, depth 1) and semantically similar blobs, labeled — both lenses, lose neither (default lens: hybrid) |
 | `gitsema similar <symbol> [--lens <lens>] [-k/--top <n>] [--weight-structural <n>]` | Symbols/files with a similar call/import shape (structural, Jaccard overlap) and/or semantically similar (vector) (default lens: hybrid) |
 | `gitsema unused [--edge-types <types>]` | Symbols/files with no inbound `calls`/`imports` edges — structural complement to `dead-concepts` |
+| `gitsema hotspots [--lens <lens>] [-k/--top <n>]` | Architectural risk = co-change (temporal) × call-coupling (structural) × churn — geometric mean of the signals the lens selects (default lens: hybrid). Also `POST /api/v1/graph/hotspots` and MCP `hotspots` |
 
 ### Workflow & CI
 
