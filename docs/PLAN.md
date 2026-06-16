@@ -4149,3 +4149,274 @@ assert every lens-capable surface exposes `lens`/`--lens` with the correct defau
 `deps`/`cycles`/`callers`/`callees`/`neighbors`/`path`/`unused` structural-only) do
 not take `--lens` — only one lens is meaningful for them — so they are excluded
 from the parity set by design. No schema change.
+
+---
+
+## Deployment scenarios & usage envisioning
+
+The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.
+
+### Scenario 1: Single-developer, local (no infra, zero setup)
+
+**Target:** Individual developers, small teams, local-only usage  
+**Install:** `npx gitsema` (ephemeral) or `npm install -g gitsema` (persistent)  
+**Index location:** `.gitsema/index.db` (repo-local SQLite)  
+**Network:** None required  
+**Repos indexed:** One per local directory
+
+**Workflow:**
+```bash
+cd /path/to/my/repo
+npx gitsema index            # embeds all blobs once, dedup by content hash
+npx gitsema search "auth"    # query the local index
+npx gitsema tools mcp        # expose to Claude Code or local MCP client (stdio)
+```
+
+**Key properties:**
+- Zero infrastructure: no server, no external services (unless using an HTTP embedding provider)
+- Embedding provider runs locally (Ollama) or via HTTP (OpenAI-compatible); gitsema CLI calls it directly
+- Index is SQLite, stored alongside the repo (git-ignored)
+- Content-addressed blob deduplication (same blob on different branches/commits is embedded once)
+- All analysis (search, evolution, clustering, graphs) runs locally in-process
+
+**Limitations:**
+- Index is per-repo, not shared across machines
+- If a developer switches machines, they must re-index (but `gitsema index --since` + content addressing means only *new* blobs are embedded)
+- MCP communication is stdio-only (no network transport in this scenario)
+
+**Use case examples:**
+- Developer exploring their local monorepo
+- Incident triage: "when did this pattern first appear?"
+- Learning codebase history before contributing
+
+---
+
+### Scenario 2: Single-developer (or small team), self-hosted (multi-location, incremental, multiple repos)
+
+**Target:** Individual developers who work across multiple machines (home, lab, office); small teams with a shared CI/CD host  
+**Install:** `npx gitsema` (CLI on client machines) + Docker (server on remote host)  
+**Index location:** Remote: `.gitsema/` directory on the server; Client: Git repo only (cloned locally)  
+**Network:** HTTP between client CLI and remote server  
+**Repos indexed:** Multiple repos on the server; client accesses one at a time
+
+**Architecture (Model A: client repos, server index):**
+- Client owns and manages the Git repository (cloned, committed, pushed locally)
+- Server owns the embedding index and index database
+- Client runs `gitsema index --remote <http://server:4242> [--since <ref>]` to trigger incremental indexing
+- Blobs are sent to the remote server only for embedding (if client doesn't have an embedding provider)
+- Index database is persisted on the server (`.gitsema/index.db`)
+
+**Workflow:**
+```bash
+# On machine A (home)
+cd ~/myrepo && git pull
+gitsema index --remote http://server:4242 --since <last-indexed-commit>
+gitsema search "auth" --remote http://server:4242
+
+# On machine B (lab)
+cd ~/myrepo && git pull
+gitsema index --remote http://server:4242 --since <last-indexed-commit>
+gitsema search "auth" --remote http://server:4242
+```
+
+**Key properties:**
+- Incremental indexing via `--since` (skips commits already processed)
+- Content-addressed blobs: identical code at the same path on both machines produces the same blob hash → no re-embedding
+- Server stores multiple repo indexes (e.g. `~/.gitsema/repos/{repo1,repo2}/index.db`)
+- Embedding provider can run on the server (Ollama in Docker) or externally (HTTP API)
+- MCP server runs on the remote host (HTTP transport via `gitsema tools serve`); client connects via HTTP
+
+**Limitations:**
+- Requires a persistent remote host (VPS, NAS, office server)
+- Network latency for every search / analysis query
+- Scaling limited by single-server embedding throughput (solve with batching + multi-GPU in Phase 62+)
+
+**Use case examples:**
+- Developer working from home and office, needing the same semantic context
+- Small team sharing a CI-indexed repository without sharing code checkout
+- Persistent indexing: "which commits introduced this security issue?"
+
+---
+
+### Scenario 3: Multi-developer, hosted (shared infrastructure, incremental, scoped access)
+
+**Target:** Teams with multiple developers; organizations with cross-team code analysis needs  
+**Install:** Docker Compose (Postgres + Qdrant + gitsema + embedding backend); `npx gitsema` CLI on client machines  
+**Index location:** Postgres (metadata + FTS) + Qdrant (vectors); persisted on server  
+**Network:** HTTP between client CLI and remote server  
+**Repos indexed:** Multiple repos shared across the organization  
+**Access control:** Per-repo tokens via `gitsema config set --global remoteKey <token>`
+
+**Architecture (same Model A, extended):**
+- Server hosts multiple repository indexes in a shared Postgres + Qdrant backend
+- Blobs are stored with per-repo isolation (via `storage.scope` configuration)
+- Each developer has a `.gitsema/config.json` with `remoteUrl` and `remoteKey`
+- Personal branches can be excluded from shared indexes (via branch filtering at index time)
+
+**Workflow:**
+```bash
+# Developer 1 (team A)
+gitsema config set --global remoteUrl http://server:4242
+gitsema config set --global remoteKey <token-for-repo-A>
+cd ~/repo-a && gitsema index  # incremental, scoped to repo A on shared server
+gitsema search "database layer" # queries repo-A index only
+
+# Developer 2 (team B, same server)
+gitsema config set --global remoteUrl http://server:4242
+gitsema config set --global remoteKey <token-for-repo-B>
+cd ~/repo-b && gitsema index  # incremental, scoped to repo B
+gitsema search "API endpoints" # queries repo-B index only
+```
+
+**Key properties:**
+- Shared infrastructure reduces per-repo deployment cost
+- Postgres supports concurrent writes (with careful locking) and multi-repo scoping
+- Qdrant provides vector search at scale (millions of embeddings)
+- FTS via Postgres tsvector or pg_search (Phase 102+)
+- Per-repo tokens allow fine-grained access control
+- All developers contribute to a unified index (optional: exclude personal branches)
+
+**Advanced options (future phases):**
+- **Index merging:** "Shared main + personal branches" — administrators can configure whether developers see each other's work-in-progress branches or only released main
+- **Multi-repo search:** `gitsema search "auth pattern" --repos repo-a,repo-b` (Phase 50 + multi-tenant scoping)
+- **Query-level time travel:** "Show this pattern as of Q2 2024 vs. Q3 2024"
+
+**Limitations:**
+- Requires operational overhead (Postgres, Qdrant, network tuning)
+- Index consistency during concurrent indexing (mitigated by incremental indexing + commit-based locking)
+- Cost scales with storage (vectors + FTS) and query volume
+
+**Use case examples:**
+- Organization onboarding new developers: "show me how authentication is done across our codebases"
+- Security team: "where is this vulnerability pattern present?" (search across all repos)
+- Architecture review: "which teams own this module, and what do they change most frequently?"
+- Automated incident response: "when did this pattern first appear, and on which branches?"
+
+---
+
+### Web UI (Phase 112+)
+
+The three scenarios above use CLI and HTTP API. A web UI (to be built) will provide:
+
+- **Interactive query interface** — form-based search, filtered by date/branch/path
+- **Graph visualization** — render `graph_nodes` + `edges` as an interactive force-directed graph (reuse Phase 55's HTML renderer patterns)
+- **Temporal heatmaps** — show codebase "hotness" by time and module
+- **Drill-down views** — click a search result to see its evolution timeline, related code, structural context
+- **Multi-repo dashboard** — admin view of indexed repos, indexing status, token management
+- **API documentation** — OpenAPI spec with interactive Swagger UI (Phase 71)
+
+The web UI will work in all three scenarios:
+- **Scenario 1 (local):** Served via `gitsema tools serve --ui --port 8080`; browser connects to `localhost:8080`
+- **Scenario 2 (self-hosted):** Docker image exposes port 4242; browser connects to `http://server:4242`
+- **Scenario 3 (multi-dev):** Same Docker setup; per-repo token scoping applies to web UI requests too
+
+---
+
+### Protocol integration: MCP over HTTP (not SSE)
+
+MCP (Model Context Protocol) is used by Claude Code and other AI clients to call tools. gitsema currently supports:
+- **Scenario 1:** `gitsema tools mcp` (stdio-only; for local development tools like VS Code)
+- **Scenario 2–3:** `gitsema tools serve` (HTTP API; but `gitsema tools mcp` remains stdio-only)
+
+**Design decision:** No Server-Sent Events (SSE) transport for MCP in Scenario 2–3. Instead:
+- The HTTP API (`gitsema tools serve`) exposes RESTful routes for all MCP tools (Phase 72)
+- OpenAPI/Swagger documents the routes
+- Client tools (Claude Code, custom scripts) call HTTP endpoints directly rather than speaking MCP protocol over SSE
+- This avoids transport complexity and leverages the existing HTTP server infrastructure
+
+**Future possibility:** If a true MCP-over-HTTP transport emerges as a standard, it can be added as an HTTP endpoint that bridges HTTP ↔ MCP stdio (not requiring SSE).
+
+---
+
+### Testing & validation across scenarios
+
+To ensure functionality works in all scenarios, the following test strategy is needed:
+
+**Unit tests (all scenarios):**
+- Indexing, deduplication, search, graph traversal (existing `tests/` suite)
+- Remote client behavior (HTTP error handling, retry logic)
+- Per-repo token scoping (access control)
+
+**Integration tests (per scenario):**
+
+| Scenario | Test setup | Validations |
+|---|---|---|
+| 1 (local) | Real Git repo + local Ollama | `gitsema index` completes; `search` returns results; `gitsema tools mcp` starts |
+| 2 (self-hosted) | Docker server + client CLI on separate machine | Incremental `--since` works; blob dedup verified (same hash on different commits); `--remote` flag works; same index accessible from multiple clients |
+| 3 (multi-dev) | Docker Compose (Postgres + Qdrant) + 2+ client CLIs | Per-repo token isolation; concurrent indexing doesn't corrupt index; multi-repo search works; branch filtering works |
+
+**Functional validation:**
+- Search quality is unchanged across local/remote (same `vectorSearch` algorithm)
+- Evolution timelines work correctly (temporal queries over shared indexes)
+- Clustering and graph traversal are consistent whether running locally or remotely
+- Web UI (Phase 112+) renders results correctly in all scenarios
+
+**Performance benchmarks (Phase 114+):**
+- Scenario 1: embedding throughput on commodity hardware (target: 1000 blobs/min)
+- Scenario 2: network overhead — measure latency of search/analysis queries over HTTP
+- Scenario 3: Postgres/Qdrant throughput at scale (100k+ blobs, 10+ concurrent clients)
+
+---
+
+### Usage envisioning: how developers actually use gitsema
+
+**Day 1: Onboarding**
+- New hire clones the company repo locally
+- Runs `gitsema index` (or Scenario 3: `gitsema index --remote <team-server>`)
+- Searches for "authentication", "database", "API" to understand codebase structure
+- Uses `gitsema guide` (agentic tool loop) to ask "how is error handling done here?" — the guide pulls together search results, commit history, and structural context
+
+**Week 1: Feature development**
+- Developer picks up a ticket: "Add OAuth 2.0 support"
+- Runs `gitsema first-seen "oauth"` to see when the OAuth module was first added, by whom
+- Runs `gitsema related-work "oauth"` (Phase 109) to see structural and semantic neighbors — modules that import oauth, modules that are frequently co-changed with it
+- Uses `gitsema code-review --lens structural` on their pull request to see what code paths they've broken (blast radius)
+- In Claude Code, invokes `call_graph` (Phase 108) to verify their changes don't introduce cycles
+
+**Week 2: Incident response**
+- Production issue: "OAuth token expiration causes intermittent auth failures"
+- Runs `gitsema bisect "oauth token expiration"` (Phase 38) to find the commit where the bug was introduced
+- Runs `gitsema evolution "src/auth/oauth.ts"` to see semantic drift — was there a refactor that introduced the bug?
+- Runs `gitsema explain "oauth token expiration" --narrate` to get an LLM summary of the issue with commit evidence
+- Uses `triage` (Phase 65) for a bundle of evidence: first-seen, change points, evolution, experts
+
+**Ongoing: codebase health**
+- Monthly: `gitsema hotspots` (Phase 110) shows which code is most risky (high churn + high coupling)
+- Quarterly: `gitsema policy-check` (Phase 66) enforces debt thresholds — fails CI if technical debt score is too high
+- Annually: `gitsema narrate --since 2025-01-01 --until 2026-01-01` generates a development timeline for the year
+
+**Team workflows:**
+- Code review: reviewer uses `gitsema code-review <branch>` to see what's changing semantically, not just syntactically
+- Architecture review: "does this module fit our layering?" — use `impact` + `graph neighbors` to see coupling
+- Refactoring: "is it safe to delete this function?" — use `unused` (Phase 109) to check for callers
+
+**Cross-team collaboration (Scenario 3):**
+- Team A owns "auth", Team B owns "API", Team C owns "frontend"
+- Team A runs `gitsema search "API client" --repos repo-frontend,repo-api` to see how frontend talks to API
+- Architecture committee reviews `gitsema multi-repo-search "error handling"` to see patterns across teams
+- When a vulnerability is found in a dependency, the security team runs `gitsema security-scan` (Phase 58) across all repos
+
+---
+
+### Implementation roadmap for scenarios
+
+**Already implemented (Phases 1–111):**
+- Scenario 1: Local indexing, search, MCP stdio server
+- Scenario 2 (partial): Remote HTTP API (`gitsema tools serve`), incremental indexing via `--since`
+- Scenario 3 (partial): Postgres/Qdrant backends, per-repo isolation in schema
+
+**Needed for Scenario 2 (self-hosted single-developer):**
+- [Phase 73+] Deployment guide: Docker Compose template, environment variables, quickstart
+- [Phase 15-17] Multi-location workflow: `--remote` CLI flag, client-side `--since` logic
+
+**Needed for Scenario 3 (multi-dev, shared infrastructure):**
+- [Phase 75] Per-repo access control: token validation, per-token repo scoping
+- [Phase 102–103] Pluggable backends: Postgres metadata + vectors, Qdrant vectors
+- [Phase 101] Index scoping: `storage.scope` configuration, multi-tenant isolation
+
+**Needed for all scenarios + Web UI:**
+- [Phase 112] Unified graph UI (HTML + CLI subgraph rendering)
+- [Phase 114+] Web UI: interactive search, graph viz, temporal heatmaps, token management
+- [Phase 116+] Performance: VSS/HNSW for faster search, query caching, incremental indexing optimizations
+
+This roadmap ensures that gitsema evolves from a developer tool (Scenario 1) to a team infrastructure (Scenario 3) without breaking backward compatibility or forcing large architectural rewrites.
