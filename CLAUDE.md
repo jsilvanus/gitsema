@@ -6,6 +6,7 @@ These are the four canonical reference documents for this repository. Keep them 
 | [`docs/features.md`](docs/features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
 | [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
 | [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md) | AI workflow skill/playbook for operating gitsema in coding tasks |
+| [`docs/parity.md`](docs/parity.md) | **Tool parity & flag coherence:** canonical matrix of tool availability across CLI/REPL/Guide/MCP/HTTP and flag implementation consistency; update when tools or interfaces change |
 
 The latest review is here. Do not edit the review file, but update that file with new review file after a review.
 
@@ -17,8 +18,9 @@ When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.
 2. Update the command/option tables in **`README.md`** if the feature adds a new command or flag.
 3. Mark the phase as completed in **`docs/PLAN.md`** and note any deviations from the original spec.
-4. Use latest review when starting the next iteration of development.
-5. **Add a changeset** describing the change (see "Releases & changesets" below). Do **not** run `npm version` or push `v*` tags manually — versioning and publishing are handled by changesets.
+4. **Update `docs/parity.md`** if the change affects tool availability across interfaces (CLI/REPL/Guide/MCP/HTTP) or adds/modifies command flags. See the "Maintenance & Governance" section in parity.md.
+5. Use latest review when starting the next iteration of development.
+6. **Add a changeset** describing the change (see "Releases & changesets" below). Do **not** run `npm version` or push `v*` tags manually — versioning and publishing are handled by changesets.
 
 ---
 
