@@ -22,6 +22,9 @@ import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_USAGE, EXIT_RUNTIME } from '../lib/errors.js'
 import { resolveOutputs, getSink } from '../../utils/outputSink.js'
+import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
+import { structuralContextForPath, formatStructuralContext, type StructuralContext } from '../../core/graph/structuralContext.js'
+import { parseLens } from '../lib/lens.js'
 
 export interface CodeReviewOptions {
   base?: string
@@ -32,6 +35,8 @@ export interface CodeReviewOptions {
   format?: string
   /** Unified output spec (repeatable); --out wins over --format */
   out?: string[]
+  /** Phase 111 lens toggle. Default `semantic` keeps output byte-identical. */
+  lens?: string
 }
 
 interface HunkSummary {
@@ -119,10 +124,14 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
   const { providerType, textModel: modelName } = resolveModels({})
   const provider = buildProviderOrExit(providerType, modelName, EXIT_RUNTIME)
 
+  const lens = parseLens(opts.lens, 'semantic')
+  const graph = lens !== 'semantic' ? getCachedStorageProfile(process.cwd()).graph : undefined
+
   const reviews: Array<{
     file: string
     analogues: Array<{ path: string; score: number }>
     regressionRisk: 'low' | 'medium' | 'high'
+    structural?: StructuralContext
   }> = []
 
   for (const hunk of hunks) {
@@ -157,7 +166,14 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
       } catch { /* ignore */ }
     }
 
-    reviews.push({ file: hunk.file, analogues, regressionRisk })
+    // Structural enrichment (Phase 110): surface call-graph/co-change context
+    // for the changed file under a structural/hybrid lens.
+    let structural: StructuralContext | undefined
+    if (graph) {
+      structural = await structuralContextForPath(graph, hunk.file)
+    }
+
+    reviews.push({ file: hunk.file, analogues, regressionRisk, structural })
   }
 
   if (format === 'json') {
@@ -190,6 +206,10 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
       }
     } else {
       console.log('  No historical analogues found above threshold.')
+    }
+    if (r.structural?.found) {
+      const summary = formatStructuralContext(r.structural)
+      if (summary) console.log(`  Structural [structural]: ${summary}`)
     }
     console.log()
   }

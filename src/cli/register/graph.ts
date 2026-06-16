@@ -11,7 +11,9 @@ import { blastRadiusCommand } from '../commands/graphBlastRadius.js'
 import { relateCommand } from '../commands/graphRelate.js'
 import { similarCommand } from '../commands/graphSimilar.js'
 import { unusedCommand } from '../commands/graphUnused.js'
+import { hotspotsCommand } from '../commands/hotspots.js'
 import { addLensOption } from '../lib/lens.js'
+import { collectOut } from '../../utils/outputSink.js'
 
 /**
  * Structural knowledge-graph commands (Phase 107, knowledge-graph §3.3/§8).
@@ -98,11 +100,13 @@ export function registerGraph(program: Command) {
     'hybrid',
   ).action(blastRadiusCommand)
 
-  program
-    .command('relate <symbol>')
-    .description('Callers/callees (structural) and semantically similar blobs (vector), labeled — both lenses, lose neither')
-    .option('-k, --top <n>', 'number of semantic results to return (default 10)')
-    .action(relateCommand)
+  addLensOption(
+    program
+      .command('relate <symbol>')
+      .description('Callers/callees (structural) and semantically similar blobs (vector), labeled — both lenses, lose neither (default lens: hybrid)')
+      .option('-k, --top <n>', 'number of semantic results to return (default 10)'),
+    'hybrid',
+  ).action(relateCommand)
 
   addLensOption(
     program
@@ -117,4 +121,15 @@ export function registerGraph(program: Command) {
     .description('Symbols/files with no inbound calls/imports edges — structural complement to `dead-concepts`')
     .option('--edge-types <types>', 'comma-separated inbound edge types that count as "used" (default: calls,imports)')
     .action(unusedCommand)
+
+  // Phase 110: fusion risk scoring (knowledge-graph §8).
+  addLensOption(
+    program
+      .command('hotspots')
+      .description('Architectural risk = co-change (temporal) × call-coupling (structural) × churn (default lens: hybrid)')
+      .option('-k, --top <n>', 'number of hotspots to return (default 20)')
+      .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[]),
+    'hybrid',
+  ).action(hotspotsCommand)
 }

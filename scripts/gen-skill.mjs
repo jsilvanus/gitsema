@@ -14,9 +14,40 @@ import {
   CATEGORY_ORDER,
   CATEGORY_LABELS,
 } from '../src/core/narrator/interpretations.js'
+import { GUIDE_TOOLS } from '../src/core/narrator/guideTools.js'
 
 const START = '<!-- GENERATED:INTERPRETATIONS START -->'
 const END = '<!-- GENERATED:INTERPRETATIONS END -->'
+
+/**
+ * Usage guidance per tool (description + parameters) lives with the executable
+ * `GUIDE_TOOLS` definitions; result-interpretation guidance lives in
+ * `interpretations.ts`. The skill block joins the two by tool name so every
+ * entry shows BOTH "how to use" and "how to read it". Indexed by the canonical
+ * tool name and its MCP aliases so interpretation entries resolve their usage.
+ */
+const USAGE_BY_NAME = (() => {
+  const map = new Map()
+  for (const entry of Object.values(GUIDE_TOOLS)) {
+    map.set(entry.definition.name, entry.definition)
+  }
+  return map
+})()
+
+/** Render an object-schema's parameters as a compact, readable list. */
+function renderParameters(parameters) {
+  const props = parameters?.properties ?? {}
+  const names = Object.keys(props)
+  if (names.length === 0) return undefined
+  const required = new Set(parameters?.required ?? [])
+  return names
+    .map((name) => {
+      const desc = (props[name]?.description ?? '').replace(/\s+/g, ' ').trim()
+      const req = required.has(name) ? ' (required)' : ''
+      return `\`${name}\`${req}${desc ? ` — ${desc}` : ''}`
+    })
+    .join('; ')
+}
 
 export function buildInterpretationsBlock() {
   const byCategory = new Map()
@@ -31,8 +62,11 @@ export function buildInterpretationsBlock() {
   lines.push('')
   lines.push(
     'This section is generated from `src/core/narrator/interpretations.ts` ' +
-    '(run `pnpm gen:skill` to regenerate). For each capability: what the result ' +
-    'shape is, and how to read it — what is significant, thresholds, and caveats.',
+    '(result interpretation) joined with the `GUIDE_TOOLS` definitions in ' +
+    '`src/core/narrator/guideTools.ts` (usage) — run `pnpm gen:skill` to ' +
+    'regenerate. For each capability: how to use it (what it does + parameters), ' +
+    'what the result shape is, and how to read it — what is significant, ' +
+    'thresholds, and caveats.',
   )
   lines.push('')
 
@@ -44,6 +78,12 @@ export function buildInterpretationsBlock() {
     for (const e of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
       lines.push(`**\`${e.name}\`** — ${e.summary}`)
       lines.push('')
+      const usage = USAGE_BY_NAME.get(e.name) ?? (e.aliases ?? []).map((a) => USAGE_BY_NAME.get(a)).find(Boolean)
+      if (usage) {
+        lines.push(`- Usage: ${usage.description.replace(/\s+/g, ' ').trim()}`)
+        const params = renderParameters(usage.parameters)
+        if (params) lines.push(`- Parameters: ${params}`)
+      }
       lines.push(`- Result shape: ${e.resultShape}`)
       lines.push(`- How to read it: ${e.interpretation}`)
       if (e.aliases?.length) {

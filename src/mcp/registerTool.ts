@@ -21,6 +21,14 @@ type EmbedResult = EmbedOk | EmbedErr
 
 type McpHandler = (args: any, helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<EmbedResult>; serializeSearchResults: (r: any[]) => string }) => Promise<any> | any
 
+/**
+ * Registers one MCP tool. `description` is the "HOW TO USE" guidance the MCP
+ * client's model sees (what the tool does / when to call it); `schema` is its
+ * args. The companion "HOW TO READ THE RESULT" guidance is NOT injected by the
+ * server — it lives in `src/core/narrator/interpretations.ts` and reaches MCP
+ * clients only via the generated skill (`skill/gitsema-ai-assistant.md`). Keep
+ * this `description` consistent with that tool's interpretation `summary`.
+ */
 export function registerTool(server: any, name: string, description: string, schema: any, handler: McpHandler): void {
   server.tool(name, description, schema, async (args: any) => {
     const makeErr = (msg: string) => ({ content: [{ type: 'text', text: msg }] })

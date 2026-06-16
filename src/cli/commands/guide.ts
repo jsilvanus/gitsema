@@ -17,6 +17,7 @@
 
 import type { Command } from 'commander'
 import { createInterface } from 'node:readline'
+import { addLensOption, parseLens } from '../lib/lens.js'
 import { resolveGuideConfig } from '../../core/narrator/resolveNarrator.js'
 import { redactAll } from '../../core/narrator/redact.js'
 import { withAudit } from '../../core/narrator/audit.js'
@@ -379,10 +380,19 @@ export async function guideCommand(
     model?: string
     noContext?: boolean
     interactive?: boolean
+    /** Phase 111 lens toggle — biases the agent toward structural tools. */
+    lens?: string
   },
 ): Promise<void> {
   const guideModelId = opts.guideModelId !== undefined ? parseInt(opts.guideModelId, 10) : undefined
   const includeContext = !opts.noContext
+  // A structural/hybrid lens hints the agent to reach for the call_graph /
+  // blast_radius / hotspots tools; semantic (default) leaves the prompt as-is.
+  const lens = parseLens(opts.lens, 'semantic')
+  const lensHint = lens !== 'semantic'
+    ? `\n\n(Lens preference: ${lens} — prefer the structural tools call_graph, blast_radius, and hotspots where relevant.)`
+    : ''
+  const withLens = (q: string): string => q + lensHint
 
   // Interactive mode: read questions from stdin line-by-line, reusing one
   // agent session across turns so the conversation is multi-turn.
@@ -402,7 +412,7 @@ export async function guideCommand(
     rl.on('line', async (line) => {
       const q = line.trim()
       if (!q) { rl.close(); return }
-      const { answer, llmEnabled } = await runGuide(q, { guideModelId, model: opts.model, includeContext, session })
+      const { answer, llmEnabled } = await runGuide(withLens(q), { guideModelId, model: opts.model, includeContext, session })
       console.log(`\n${answer}\n`)
       if (!llmEnabled) {
         console.log('(No LLM model configured — showing context only.)\n')
@@ -426,7 +436,7 @@ export async function guideCommand(
     process.exit(1)
   }
 
-  const { answer, llmEnabled } = await runGuide(q, { guideModelId, model: opts.model, includeContext })
+  const { answer, llmEnabled } = await runGuide(withLens(q), { guideModelId, model: opts.model, includeContext })
   console.log(answer)
   if (!llmEnabled) {
     console.error('\n(No LLM model configured — run `gitsema models add <name> --guide --http-url <url> --activate`')
@@ -439,7 +449,7 @@ export async function guideCommand(
 // ---------------------------------------------------------------------------
 
 export function registerGuideCommand(program: Command): void {
-  program
+  const cmd = program
     .command('guide [question]')
     .description(
       'Interactive LLM chat that answers questions about this repository. ' +
@@ -453,5 +463,5 @@ export function registerGuideCommand(program: Command): void {
     .option('--model <name>', 'guide/narrator model name to use')
     .option('--no-context', 'skip gathering git context (faster but less accurate)')
     .option('-i, --interactive', 'start an interactive REPL session (one question per line)')
-    .action(guideCommand)
+  addLensOption(cmd, 'semantic').action(guideCommand)
 }

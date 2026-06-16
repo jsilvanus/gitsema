@@ -1,11 +1,45 @@
 import { z } from 'zod'
+import { readFileSync, existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerTool } from '../registerTool.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { runIndex } from '../../core/indexing/indexer.js'
 import { DEFAULT_MAX_SIZE } from '../../core/git/showBlob.js'
 
+/**
+ * Locate the packaged agent skill. The skill lives at `<package-root>/skill/`,
+ * which is three levels up from this module in both the compiled (`dist/mcp/
+ * tools/`) and source (`src/mcp/tools/`) layouts.
+ */
+function findSkillPath(): string | undefined {
+  const candidate = fileURLToPath(new URL('../../../skill/gitsema-ai-assistant.md', import.meta.url))
+  return existsSync(candidate) ? candidate : undefined
+}
+
 export function registerInfrastructureTools(server: McpServer) {
+  // MCP-only tool: lets an MCP client pull the gitsema operating skill —
+  // including the per-tool usage + result-interpretation guidance — that the
+  // server does not otherwise inject into tool responses.
+  registerTool(
+    server,
+    'get_skill',
+    'Return the gitsema agent skill (skill/gitsema-ai-assistant.md): the playbook for operating gitsema in coding tasks, including how to use and how to interpret the result of every tool. Fetch this once at the start of a session to ground tool usage.',
+    {},
+    async () => {
+      const path = findSkillPath()
+      if (!path) {
+        return { content: [{ type: 'text', text: 'Error: skill file not found in this installation.' }] }
+      }
+      try {
+        return { content: [{ type: 'text', text: readFileSync(path, 'utf8') }] }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: 'text', text: `Error reading skill: ${msg}` }] }
+      }
+    },
+  )
+
   registerTool(
     server,
     'index',

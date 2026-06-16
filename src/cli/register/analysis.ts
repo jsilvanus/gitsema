@@ -12,6 +12,7 @@ import { codeReviewCommand } from '../commands/codeReview.js'
 import { registerNarratorCommands } from '../commands/narrate.js'
 import { registerGuideCommand } from '../commands/guide.js'
 import { collectOut } from '../../utils/outputSink.js'
+import { addLensOption } from '../lib/lens.js'
 
 export function registerAnalysis(program: Command) {
   program
@@ -30,17 +31,19 @@ export function registerAnalysis(program: Command) {
       await prReportCommand(options)
     })
 
-  program
-    .command('triage <query>')
-    .description('Incident triage: composite workflow (first-seen, change-points, file-evolution, bisect, experts)')
-    .option('--ref1 <ref>', 'bisect left ref')
-    .option('--ref2 <ref>', 'bisect right ref')
-    .option('--file <path>', 'focus on a specific file')
-    .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
-    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump)', collectOut, [] as string[])
-    .option('-k, --top <n>', 'number of top results per section', '5')
-    .option('--narrate', 'generate an LLM narrative of the triage bundle (requires GITSEMA_LLM_URL)')
-    .action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, out: opts.out, top: opts.top, narrate: opts.narrate }) })
+  addLensOption(
+    program
+      .command('triage <query>')
+      .description('Incident triage: composite workflow (first-seen, change-points, file-evolution, bisect, experts)')
+      .option('--ref1 <ref>', 'bisect left ref')
+      .option('--ref2 <ref>', 'bisect right ref')
+      .option('--file <path>', 'focus on a specific file')
+      .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --dump)', collectOut, [] as string[])
+      .option('-k, --top <n>', 'number of top results per section', '5')
+      .option('--narrate', 'generate an LLM narrative of the triage bundle (requires GITSEMA_LLM_URL)'),
+    'semantic',
+  ).action(async (query: string, opts: any) => { await triageCommand(query, { ref1: opts.ref1, ref2: opts.ref2, file: opts.file, dump: opts.dump, out: opts.out, top: opts.top, narrate: opts.narrate, lens: opts.lens }) })
 
   const policyCheckAction = async (opts: any) => {
     await policyCheckCommand({ maxDrift: opts.maxDrift, maxDebtScore: opts.maxDebtScore, minSecurityScore: opts.minSecurityScore, query: opts.query, dump: opts.dump, out: opts.out })
@@ -146,17 +149,19 @@ export function registerAnalysis(program: Command) {
       await crossRepoSimilarityCommand(query, opts)
     })
 
-  program
-    .command('code-review')
-    .description('Semantic code review: find historical analogues for changed code and flag regressions. Exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed.')
-    .option('--base <ref>', 'base git ref (e.g. main)')
-    .option('--head <ref>', 'head git ref (e.g. HEAD)')
-    .option('--diff-file <file>', 'read diff from a patch file instead of git')
-    .option('-k, --top <n>', 'top analogues per file (default: 5)')
-    .option('--threshold <n>', 'minimum similarity score (cosine similarity, 0–1, default: 0.75)')
-    .option('--format <fmt>', 'output format: text (default) or json (legacy: prefer --out <fmt>)')
-    .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --format)', collectOut, [] as string[])
-    .action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string; out?: string[] }) => {
+  addLensOption(
+    program
+      .command('code-review')
+      .description('Semantic code review: find historical analogues for changed code and flag regressions. Exit codes: 0 = ok, 1 = runtime error, 2 = usage error, 3 = gate failed.')
+      .option('--base <ref>', 'base git ref (e.g. main)')
+      .option('--head <ref>', 'head git ref (e.g. HEAD)')
+      .option('--diff-file <file>', 'read diff from a patch file instead of git')
+      .option('-k, --top <n>', 'top analogues per file (default: 5)')
+      .option('--threshold <n>', 'minimum similarity score (cosine similarity, 0–1, default: 0.75)')
+      .option('--format <fmt>', 'output format: text (default) or json (legacy: prefer --out <fmt>)')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --format)', collectOut, [] as string[]),
+    'semantic',
+  ).action(async (opts: { base?: string; head?: string; diffFile?: string; top?: string; threshold?: string; format?: string; out?: string[]; lens?: string }) => {
       await codeReviewCommand(opts)
     })
 
