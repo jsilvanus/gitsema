@@ -1,5 +1,31 @@
 # gitsema
 
+## 0.96.0
+
+### Minor Changes
+
+- b91836b: Knowledge-graph Phases 110–111: fusion + lens coverage.
+
+  - **`gitsema hotspots`** — rank files by architectural risk = co-change (temporal) × call-coupling (structural) × churn. Available as a CLI command, MCP tool, and `POST /api/v1/graph/hotspots` HTTP route, with a `--lens semantic|structural|hybrid` toggle (default hybrid) that selects which signals drive the score.
+  - **Cascade query planner** — a four-stage `FTS filter → vector expand → graph traversal → merge/rerank` pipeline powers the hybrid lens for query-driven fusion, surfacing structurally-adjacent code that pure semantic search misses while leaving semantic-lens output byte-for-byte unchanged.
+  - **Structural enrichment** — `code-review`, `triage`, `explain`, and `guide` gain `--lens`: under a structural/hybrid lens they surface grounded call-graph and co-change context (e.g. "called by N callers", "co-changes with file X 80% of the time"). The `guide` agent also gains `call_graph`, `blast_radius`, and `hotspots` tools.
+  - **Lens coverage sweep** — every command where more than one lens is meaningful now exposes the shared `--lens` option with consistent defaults (existing commands → semantic, graph-native → structural, fusion → hybrid) and per-hit lens labels across text/JSON output.
+
+- b91836b: Make the agent skill self-serve for tools, and expose it over MCP.
+
+  - The generated skill (`skill/gitsema-ai-assistant.md`) now documents **both** how to use each tool (description + parameters) and how to read its result, joined per tool — previously it carried only result interpretation.
+  - New **`get_skill`** MCP tool returns the skill document, so MCP clients can fetch gitsema's operating playbook (usage + interpretation for every tool) at the start of a session instead of having it only embedded in the guide's own prompt.
+
+- ce84122: Add `gitsema index start --graph` to extract raw structural references (imports, calls, `extends`/`implements`) from TS/TSX/JS/Python blobs into a new `structural_refs` table (schema v25), laying the groundwork for the upcoming knowledge-graph traversal commands.
+- 5efa2e4: Add `gitsema graph build`, which resolves `structural_refs`/`symbols`/`blob_commits` into a structural knowledge graph (`graph_nodes` + typed `edges`: contains, defines, imports, calls, extends, implements, references, co_change) using confidence-tier resolution for ambiguous references. New CLI commands `gitsema co-change <path>`, `gitsema deps <identifier>`, and `gitsema graph cycles` / `gitsema cycles` read from the resulting graph (schema v26).
+- 7c540bd: Add graph traversal primitives over the Phase 107 structural graph: `gitsema graph callers <symbol>` / `gitsema graph callees <symbol>` (transitive `calls` traversal, default and max depth 3), `gitsema graph neighbors <node>` (typed neighborhood, any edge kinds, configurable direction/depth), and `gitsema graph path <a> <b>` (shortest typed path between two nodes). New MCP tools `call_graph` and `graph_neighbors` expose the same traversals.
+- 7c540bd: Add a cross-cutting `--lens semantic|structural|hybrid` toggle (plus `--weight-structural <n>`) and four new structural/semantic fusion commands: `gitsema blast-radius <symbol>` ("what changes if I touch this" — structural dependents and/or semantically similar blobs), `gitsema relate <symbol>` (callers/callees plus semantically similar blobs, both lenses), `gitsema similar <symbol>` (same call/import shape and/or semantic similarity), and `gitsema unused` (symbols/files with no inbound calls/imports edges). `gitsema impact <path> --lens structural|hybrid` now reuses `blast-radius` for true structural impact analysis.
+- 5037791: Symbols now carry stable, path-free identities: `code-search` and the LSP `documentSymbol` results show fully-qualified names with normalized signatures (e.g. `Auth.validateToken(token:string)`) for TypeScript, TSX, JavaScript, and Python. The `symbols` table gains nullable `qualified_name`, `signature`, `signature_hash`, and `parent_qualified_name` columns (schema v24); older rows remain unaffected until re-indexed.
+
+### Patch Changes
+
+- 6c3b0cc: Add comprehensive tool parity and flag coherence documentation in `docs/parity.md`. This canonical reference tracks tool availability across all interfaces (CLI, REPL, Guide, MCP, HTTP, and planned CLI Interactive/Web UI/MCP HTTP) and documents flag implementation consistency. Includes maintenance guidelines to keep tables in sync with code changes. Updated CLAUDE.md to include parity.md in canonical documentation and added requirement to update parity tables when tools/interfaces/flags change.
+
 ## 0.95.0
 
 ### Minor Changes
