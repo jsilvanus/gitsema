@@ -1,12 +1,13 @@
 ## Canonical documentation
 
-These are the four canonical reference documents for this repository. Keep them accurate and up-to-date. 
+These are the five canonical reference documents for this repository. Keep them accurate and up-to-date. 
 
 | [`README.md`](README.md) | User-facing overview: installation, quick start, configuration, command reference |
 | [`docs/features.md`](docs/features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
 | [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
-| [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md) | AI workflow skill/playbook for operating gitsema in coding tasks |
 | [`docs/parity.md`](docs/parity.md) | **Tool parity & flag coherence:** canonical matrix of tool availability across CLI/REPL/Guide/MCP/HTTP and flag implementation consistency; update when tools or interfaces change |
+| [`docs/feature-ideas.md`](docs/feature-ideas.md) | **Undesigned feature ideas:** upcoming concepts not yet in active dev (PLAN.md) or fully designed; staging area for "what now?" and medium-term product direction |
+| [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md) | AI workflow skill/playbook for operating gitsema in coding tasks |
 
 The latest review is here. Do not edit the review file, but update that file with new review file after a review.
 

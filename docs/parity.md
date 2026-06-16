@@ -14,6 +14,7 @@ This table shows which tools/commands are available in which interface. A checkm
 ### Legend
 - **CLI**: Command-line interface (85 commands)
 - **REPL**: Lightweight interactive search REPL (search only)
+- **LSP**: Language Server Protocol for IDE integration (5 protocol methods: hover, definition, references, symbol search)
 - **Guide**: Agentic tool-calling loop in `gitsema guide` (47 tools, max 5 roundtrips)
 - **MCP**: Model Context Protocol tools (45 tools for AI clients)
 - **HTTP**: REST API server via `gitsema tools serve` (~30 endpoints)
@@ -23,69 +24,69 @@ This table shows which tools/commands are available in which interface. A checkm
 
 ### Tool Matrix
 
-| Tool/Command | CLI | REPL | Guide | MCP | HTTP | Interactive | Web UI | MCP HTTP |
+| Tool/Command | CLI | REPL | LSP | Guide | MCP | HTTP | Interactive | Web UI | MCP HTTP |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **Search & Discovery** |
 | `search` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `first-seen` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `first-seen` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `code-search` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
-| `dead-concepts` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `dead-concepts` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Analysis & Trends** |
-| `evolution` / `concept-evolution` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `file-evolution` / `file-diff` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `diff` / `semantic-diff` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `change-points` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `file-change-points` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `evolution` / `concept-evolution` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `file-evolution` / `file-diff` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `diff` / `semantic-diff` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `change-points` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `file-change-points` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | `cluster-change-points` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Blame & Attribution** |
-| `semantic-blame` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `author` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `experts` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `contributor-profile` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `semantic-blame` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `author` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `experts` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `contributor-profile` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | **Clustering & Organization** |
-| `clusters` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `cluster-diff` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
-| `cluster-timeline` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `clusters` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `cluster-diff` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
+| `cluster-timeline` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | **Branch & Merge** |
-| `branch-summary` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
-| `merge-audit` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `merge-preview` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `branch-summary` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
+| `merge-audit` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `merge-preview` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Quality & Metrics** |
 | `health` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
 | `debt` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
-| `security-scan` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `doc-gap` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `eval` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `security-scan` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `doc-gap` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `eval` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | **Impact & Dependencies** |
-| `impact` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `impact` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `co-change` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `deps` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `cycles` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Graph & Structure** |
 | `graph build` | ✓ | — | — | — | — | ✓ | — | — |
-| `graph callers` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
-| `graph callees` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
-| `graph neighbors` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `graph callers` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
+| `graph callees` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
+| `graph neighbors` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | `graph path` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `graph relate` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `graph similar` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `graph unused` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `blast-radius` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `hotspots` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `hotspots` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Workflow & CI** |
-| `triage` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `policy-check` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `triage` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `policy-check` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `regression-gate` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `code-review` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `pr-report` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `cherry-pick-suggest` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `workflow` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `workflow` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | **Narrative & Analysis** |
-| `narrate` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
-| `explain` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `narrate` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
+| `explain` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | `guide` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
 | **Indexing & Maintenance** |
-| `index` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `index` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `index start` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
 | `index doctor` | ✓ | — | — | — | — | ✓ | — | — |
 | `index vacuum` | ✓ | — | — | — | — | ✓ | — | — |
@@ -113,10 +114,31 @@ This table shows which tools/commands are available in which interface. A checkm
 | `multi-repo-search` | — | — | ✓ | ✓ | ✓ | — | — | ✓ |
 | `cross-repo-similarity` | ✓ | — | — | — | — | ✓ | ✓ | — |
 
+### LSP Interface Details
+
+**LSP is a specialized protocol for IDE integration, not a general command interface.** It exposes 5 JSON-RPC methods:
+
+| Method | Maps To | Use Case |
+|---|---|---|
+| `textDocument/hover` | `search` (semantic matching) | Show top-5 semantic matches when hovering over a symbol |
+| `textDocument/definition` | `code-search` (symbol + semantic lookup) | Go-to-definition: exact name match → substring match → semantic fallback |
+| `textDocument/references` | `search` + FTS (symbol + text references) | Find all references: symbol definitions + text mentions |
+| `textDocument/documentSymbol` | Symbol index | List all symbols (functions, classes, etc.) in the current document |
+| `workspace/symbol` | `code-search` (symbol search) | Workspace-wide symbol search by name pattern |
+
+**Marked as available in LSP:**
+- `search` ✓ — hover operation uses semantic search
+- `code-search` ✓ — workspace/symbol and definition use symbol search
+
+**Not available in LSP:**
+- All analysis commands (`evolution`, `clusters`, `change-points`, etc.) — LSP is read-only navigation, not analysis
+- All workflow/CI commands — LSP has no mutation or complex orchestration
+- All maintenance commands — Not applicable to IDE integration
+
 ### Parity Observations
 
-**Complete parity (available in 5+ interfaces):**
-- `search`, `first-seen`, `evolution`, `semantic-blame`, `author`, `clusters`, `merge-audit`, `merge-preview`, `security-scan`, `triage`, `policy-check`, `index`
+**Complete parity (available in 5+ interfaces, counting LSP):**
+- `search`, `code-search`, `index`, `first-seen`, `evolution`, `clusters`, `merge-audit`, `merge-preview`
 
 **CLI-only gaps (not in Guide/MCP):**
 - `index doctor`, `graph path`, `graph relate`, `graph similar`, `graph unused`, `blast-radius`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`, `co-change`, `deps`, `cycles`, and all maintenance subcommands
@@ -124,6 +146,10 @@ This table shows which tools/commands are available in which interface. A checkm
 **HTTP gaps:**
 - Most graph commands (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`)
 - `code-search`, `file-change-points`, `cluster-diff`, `cluster-timeline`, `branch-summary`, `contributor-profile`, `eval`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`
+
+**LSP gaps (expected — LSP is for IDE navigation only):**
+- All analysis commands, workflow/CI, maintenance, visualization, configuration
+- LSP provides read-only symbol navigation and semantic hover, not high-level analysis
 
 ---
 
