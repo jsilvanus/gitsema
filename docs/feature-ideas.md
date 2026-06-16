@@ -183,46 +183,76 @@ function sendEmail(to, subject) {  // ← "Called 42 times | Last: 2h ago"
 
 ---
 
-## MCP Remote Delegation
+## MCP Remote Delegation & HTTP Transport (Foundation for Semahub)
 
 ### Problem
 - MCP server (`gitsema tools mcp`) only works with local `.gitsema/index.db`
 - Multi-machine setups have same issue as LSP
-- No standard way to run MCP client on A, index on B
+- No standard way to run MCP on client machine while index lives on server
+- **Foundation blocker:** Self-hosted teams can't easily delegate indexing to server
 
 ### Intended Behavior
 
-**Three deployment modes:**
+**Three deployment modes (layered):**
+
 1. **Local MCP (current):** MCP stdio on local machine, index is local
    ```bash
    gitsema tools mcp  # Reads .gitsema/index.db locally
    ```
 
-2. **Remote MCP (intended):** MCP stdio on local machine, index is remote HTTP
+2. **Remote MCP (Phase 112):** MCP stdio on local machine, index is remote HTTP
    ```bash
    gitsema tools mcp --remote localhost:4242
    # Proxies all MCP tool calls to remote HTTP API
    ```
 
-3. **MCP over HTTP (future):** HTTP-based MCP protocol
+3. **MCP over HTTP/WebSocket (Phase 113):** HTTP-based MCP transport
    ```bash
-   gitsema tools mcp --http 0.0.0.0:5000
-   # External clients connect via JSON-RPC over HTTP/WebSocket
+   # Server
+   gitsema tools mcp --http 0.0.0.0:4242
+   
+   # Client (e.g., VS Code extension, web IDE)
+   Connect to: ws://server:4242/mcp
    ```
 
+### Strategic Context
+This is the **foundation for Semahub.** Self-hosted remote MCP enables:
+- Distributed teams (developers on A, index on B)
+- Centralized index server (multiple developers → one powerful index)
+- Load balancing (multiple gitsema servers behind proxy)
+- **Then:** Semahub wraps this with auth, billing, multi-tenancy
+
 ### Design Gaps
+
+**For MCP `--remote` (Phase 112):**
 - [ ] Define `--remote <url>` flag for MCP (same as LSP)
-- [ ] Specify MCP tools that require remote delegation (all of them?)
-- [ ] Define authentication model (same Bearer token as HTTP server?)
-- [ ] Define MCP HTTP transport (JSON-RPC over HTTP/WebSocket, per LSP spec)
-- [ ] Specify error handling for network failures (how MCP reports errors)
+- [ ] Specify MCP tools that require remote delegation (all?)
+- [ ] Error handling: how MCP reports network failures
+- [ ] Performance: acceptable latency for tool calls (hover, search, etc.)
+
+**For MCP HTTP/WebSocket (Phase 113):**
+- [ ] Define WebSocket URI path routing (`/mcp`? configurable?)
+- [ ] TLS handling (gitsema terminates? expect nginx proxy?)
+- [ ] Authentication (Bearer token, OAuth2?)
+- [ ] Streaming: how to handle large result sets over HTTP
+- [ ] Backpressure: rate limiting on HTTP layer
+- [ ] Reconnection strategy (heartbeat, exponential backoff)
 
 ### Effort Estimate
 - MCP `--remote`: ~200-300 LOC (similar to LSP remote)
-- MCP HTTP: ~300-400 LOC (extend HTTP server with MCP protocol handler)
+- MCP HTTP/WebSocket: ~400-500 LOC (new protocol handler, streaming support)
 
 ### Prerequisites
-- LSP `--remote` design should inform MCP `--remote` design (consistency)
+- LSP `--remote` design (Phase 112) should inform MCP `--remote`
+- HTTP server already has multi-tenancy hooks from Phase 101+
+- Can leverage same auth/routing/quota infrastructure
+
+### Semahub Dependency
+**Semahub builds on top of this:** Once self-hosted remote MCP is solid, Semahub adds:
+- User management layer (on top of `--remote` auth)
+- Multi-repo isolation (using existing multi-tenancy)
+- Job queue (for async indexing)
+- Managed storage (S3 backend instead of self-hosted filesystem)
 
 ---
 
@@ -277,133 +307,156 @@ Hovering over function foo():
 
 ---
 
-## Semahub: Hosted Semantic Indexing Service
+## Semahub: Hosted Semantic Indexing Service (Built on Self-Hosted Remote MCP)
 
 ### Problem
 - Developers want semantic indexing as a service (SaaS)
-- Running gitsema locally requires embedding models, infrastructure
-- Teams want centralized index server without managing their own
-- Multi-repo indexing is expensive; shared service amortizes cost
+- Running gitsema locally requires embedding models, GPU, storage infrastructure
+- Self-hosted teams want centralized index server without managing their own
+- Multi-repo indexing is expensive; shared service amortizes embedding model cost
 
 ### Vision: "Semahub"
-A hosted platform where:
-- Users register repos and gitsema indexes them
-- Local gitsema CLI delegates indexing to Semahub
+A **managed platform** built on top of the self-hosted remote MCP foundation:
+- Users register repos and Semahub handles indexing
+- No infrastructure: no embedding models to run, no storage to manage
 - Access indexes via CLI, LSP, MCP, or web dashboard
-- Billing based on repo size / queries
+- Billing based on repo size, indexing compute, query volume
 
-### Architecture
+**Key point:** Semahub is NOT a separate architecture—it's **self-hosted remote MCP + user management + hosted storage.**
 
+### Architecture (Layered on Self-Hosted Remote MCP)
+
+**Layer 1: Self-Hosted Remote MCP (Phase 112-113)**
 ```
 ┌──────────────────────────────────┐
-│   Semahub Web UI & API           │  ← Separate project (Node/Python)
+│     gitsema tools mcp --http     │ ← MCP over WebSocket
+│     (load-balanced, multi-tenant) │
+└──────────────┬───────────────────┘
+               │
+        ┌──────▼──────┐
+        │ gitsema HTTP │ ← Multi-tenant HTTP API
+        │   (Phase 101+)│   User isolation, auth, quotas
+        └──────┬───────┘
+               │
+        ┌──────▼──────┐
+        │ Local storage│ ← .gitsema/index.db on filesystem
+        └─────────────┘
+```
+
+**Layer 2: Semahub (Built on Layer 1)**
+```
+┌──────────────────────────────────┐
+│   Semahub Web UI & Services      │  ← Separate project (Node/Python)
 │   - User auth (signup/login)     │
 │   - Repo registry & management   │
 │   - Billing/subscriptions        │
 │   - Job queue & orchestration    │
+│   - Index storage (S3/MinIO)     │
 │   Database: PostgreSQL           │
 └──────────────┬───────────────────┘
-               │ (gitsema clients authenticate here)
+               │ (delegates to Layer 1)
     ┌──────────┴──────────┐
     │                     │
 ┌───▼────────────┐  ┌────▼────────────┐
 │ gitsema serve  │  │ gitsema serve   │
-│ (node 1)       │  │ (node 2)        │  ← Load-balanced gitsema servers
-│ + auth layer   │  │ + auth layer    │    (multi-tenant aware)
+│ + auth layer   │  │ + auth layer    │  ← Layer 1: Self-hosted MCP foundation
+│ + MCP HTTP     │  │ + MCP HTTP      │
 └───┬────────────┘  └────┬────────────┘
     │                     │
     └──────────┬──────────┘
                │
-        ┌──────▼──────┐
-        │ Object Store │ ← S3/MinIO (stores .gitsema/index.db per user/repo)
-        │  Metadata DB │
-        └─────────────┘
+        ┌──────▼──────────┐
+        │ S3/MinIO         │ ← Managed object storage (Semahub-specific)
+        │ (index storage)  │
+        └──────────────────┘
 ```
 
-### What gitsema Needs
+**Deployment Options:**
+1. **Self-hosted:** Run Layer 1 yourself (no Semahub needed)
+2. **Semahub managed:** Use Layer 2 (includes Layer 1, adds auth/billing/storage)
 
-**1. Authentication Layer**
-- [ ] `gitsema auth login` — authenticate user, save token locally
-- [ ] `gitsema auth logout` — revoke session token
-- [ ] `gitsema auth token` — manage API tokens
-- [ ] Store credentials in secure local storage (like git credential helper)
-- Effort: ~150-200 LOC
+### What gitsema Needs (Most is Phase 101+ Foundation)
 
-**2. Service Configuration**
-- [ ] `gitsema config set service.url https://semahub.com` — configure Semahub endpoint
-- [ ] `gitsema config set service.token <token>` — store auth token
-- [ ] Environment variables: `GITSEMA_SERVICE_URL`, `GITSEMA_SERVICE_TOKEN`
-- Effort: ~100 LOC (mostly config plumbing)
+**Already exists (Phase 101-103):**
+- ✓ HTTP API multi-tenancy support (`gitsema tools serve`)
+- ✓ Multi-machine indexing (`gitsema tools serve --port 4242`)
+- ✓ Bearer token authentication infrastructure
+- ✓ Remote client support (`remoteClient.ts` for proxying)
 
-**3. HTTP API Multi-Tenancy**
-- [ ] `gitsema tools serve` accepts `--multi-tenant` mode
-- [ ] All requests require Bearer token (user isolation)
-- [ ] Database paths isolated per user (`/users/{userId}/index.db`)
-- [ ] Validate token, enforce quota (rate limits, storage)
-- Effort: ~300-400 LOC (modify serve routes, add auth middleware)
+**New in Phase 112-113:**
 
-**4. Remote Indexing Delegation**
-- [ ] `gitsema index start --service semahub` — send indexing job to Semahub instead of local
-- [ ] `gitsema index status <repo-id>` — check indexing progress on Semahub
-- [ ] `gitsema index download <repo-id>` — download index from Semahub to local
-- Effort: ~200-300 LOC
+**Phase 112: LSP/MCP `--remote` Delegation**
+- [ ] `gitsema auth login` — authenticate with service, save token locally (~150-200 LOC)
+- [ ] `gitsema auth logout`, `gitsema auth token` (~100 LOC)
+- [ ] `gitsema config set service.url`, `service.token` (~100 LOC)
+- [ ] LSP `--remote` flag (~400-500 LOC, reuse HTTP infrastructure)
+- [ ] MCP `--remote` flag (~200-300 LOC, reuse HTTP infrastructure)
 
-**5. Remote Index Synchronization**
-- [ ] `gitsema index push` — upload local index to Semahub
-- [ ] `gitsema index pull <repo-id>` — fetch Semahub index locally
-- [ ] `gitsema index sync` — bidirectional sync
-- Effort: ~200-300 LOC
+**Phase 113: WebSocket Transport**
+- [ ] `gitsema tools lsp --websocket 0.0.0.0:4242` (~200-300 LOC)
+- [ ] `gitsema tools mcp --http 0.0.0.0:4242` (MCP over WebSocket) (~400-500 LOC)
+- [ ] Streaming support for large result sets (~100-200 LOC)
 
-**Total gitsema changes:** ~1000-1300 LOC
+**For Semahub Integration (Semahub Project, not gitsema):**
+- Optional: `gitsema index start --service semahub` (convenience wrapper, ~100 LOC)
+- Optional: `gitsema index status <repo-id>` (status polling, ~100 LOC)
+
+**Total gitsema NEW code:** ~1500-2000 LOC (Phases 112-113)  
+*Note: Most infrastructure (HTTP, multi-tenancy, auth hooks) exists in Phase 101+*
 
 ### What Semahub (Separate Project) Needs
 
-**1. User Management**
-- Signup, login, password reset
-- Email verification
-- OAuth2 (GitHub, Google) optional
-- Database: PostgreSQL `users` table
+**Key insight:** Semahub doesn't need to reimplement gitsema infrastructure. It adds a thin layer on top of gitsema's existing remote MCP capabilities.
 
-**2. Repository Registry**
-- User can register git repos (any git URL)
-- Metadata: repo URL, description, size, last indexed
-- Database: `users`, `repos`, `user_repos` tables
-- Access control (private repos, team sharing)
+**1. User Management** (Semahub-specific)
+- Signup, login, password reset, email verification
+- OAuth2 (GitHub, Google, etc.)
+- Database: PostgreSQL `users`, `organizations` tables
+- Integrates with gitsema auth: generates Bearer tokens
 
-**3. Indexing Orchestration**
-- Job queue (Redis/RabbitMQ) for async indexing
-- Distribute jobs across load-balanced gitsema servers
-- Store job progress and logs
+**2. Repository Registry** (Semahub-specific)
+- User registers git repos (HTTP POST to Semahub API)
+- Metadata: repo URL, description, owner, last indexed
+- Database: `repos`, `user_repos`, `permissions` tables
+- Access control: private/public, team sharing, RBAC
+
+**3. Indexing Job Queue** (Semahub-specific)
+- Queue system (Redis/RabbitMQ) for async indexing jobs
+- Enqueue `gitsema index start` calls to load-balanced servers
+- Track job status (pending/running/done/failed)
+- Store logs and metrics
 - Notify user on completion/failure
 
-**4. Index Storage & Retrieval**
-- Store `.gitsema/index.db` in S3/MinIO per user/repo
+**4. Index Storage Backend** (Semahub-specific)
+- S3/MinIO to store `.gitsema/index.db` per user/repo
 - Metadata: index size, timestamp, model version
-- Cleanup old indexes (retention policy)
-- Download/stream index to clients
+- Lifecycle management (cleanup old indexes, archival)
+- Streaming index download to users
 
-**5. API Gateway**
-- Authenticate all gitsema requests (Bearer token validation)
-- Route requests to available gitsema server
-- Rate limiting (by user tier)
-- Quota enforcement (storage, queries, indexing jobs)
+**5. API Gateway + Load Balancing** (Semahub-specific, routes to Layer 1)
+- Authenticate requests (issue Bearer token for MCP/LSP `--remote`)
+- Route to available gitsema server instance
+- Rate limiting per user tier
+- Quota enforcement (storage, concurrent jobs)
 
-**6. Billing & Subscriptions**
-- Subscription tiers (free, pro, enterprise)
-- Usage tracking (storage, query count, indexing minutes)
-- Billing integration (Stripe)
-- Cost model: $/GB stored + $/indexing hour
+**6. Billing & Subscriptions** (Semahub-specific)
+- Subscription tiers (free: 100MB, pro: 10GB, enterprise: unlimited)
+- Usage tracking: storage, indexing compute hours, query count
+- Stripe integration for payments
+- Cost model: $/GB stored + $/indexing compute hour
 
-**7. Web Dashboard**
-- View repos, indexing status
-- Search/analyze indexed repos
-- Billing, account settings
+**7. Web Dashboard** (Semahub-specific)
+- Repo management (register, remove, settings)
+- Indexing status and history
+- Billing and usage metrics
+- Account settings, API keys
 - Team management (for paid plans)
 
-**8. CLI Support**
-- `gitsema auth login https://semahub.com` — OAuth/device flow
+**8. CLI Integration** (Semahub uses existing gitsema commands)
+- `gitsema auth login https://semahub.com` (device flow or browser)
 - `gitsema config set service.url https://semahub.com`
-- Gitsema client auto-detects and uses Semahub endpoints
+- `gitsema tools lsp --remote api.semahub.com` (uses Semahub token)
+- `gitsema tools mcp --remote api.semahub.com` (uses Semahub token)
 
 ### Design Gaps
 
@@ -441,31 +494,62 @@ Start small:
 - Target: Teams >3 devs (easier to sell SaaS), DevTools teams
 - Compare favorably to: GitHub Copilot (search-only), Codebase AI (no structural analysis)
 
+### Product Strategy: Two Tiers
+
+**Tier 1: Self-Hosted Remote MCP (Phase 112-113)**
+- Self-hosted developers deploy `gitsema tools mcp --http` and `gitsema tools serve`
+- Use gitsema natively for IDE integration (LSP/MCP) with remote index
+- No user management, no billing needed
+- Core competency: semantic indexing engine + remote protocols
+
+**Tier 2: Semahub SaaS (After Phase 113)**
+- Managed Semahub handles: auth, billing, storage, job queue
+- Users login to Semahub, register repos, get index access
+- Transparent to developers: same `gitsema auth`, `gitsema tools lsp --remote`
+- Revenue: subscription fees for managed hosting + compute
+
 ### Effort Estimate
-- **gitsema changes:** ~1200 LOC, 2-3 weeks (can be done in parallel with other phases)
-- **Semahub project:** ~5000-7000 LOC, 6-8 weeks
-- **Infrastructure:** S3, PostgreSQL, Redis, load balancer (AWS/GCP, ~$200-500/month at scale)
+
+**Phase 112-113: Self-Hosted Remote MCP**
+- gitsema changes: ~1500-2000 LOC, 4-6 weeks
+- Infrastructure: User provides (on-prem, AWS, GCP, etc.)
+
+**Semahub SaaS (Post Phase 113)**
+- Semahub project: ~5000-7000 LOC, 8-10 weeks
+- Infrastructure: Managed by Semahub (~$500-2000/month at scale)
 
 ### Prerequisites
-- None (can start after Phase 111)
-- Pairs well with LSP/MCP remote (both enable distributed access)
+- None for Layer 1 (can start after Phase 111)
+- Layer 2 depends on Layer 1 complete (Phase 113+)
 
 ---
 
-## Summary: Deployment Modes & Phases
+## Summary: Architecture Layers & Deployment Modes
 
-| Capability | Phase | Local Index | Remote Index (HTTP) | Semahub SaaS |
-|---|---|:---:|:---:|:---:|
-| **Search CLI** | Current | ✓ | ✓ (`--remote`) | ✓ |
-| **LSP stdio** | Current | ✓ | ✗ (gap) | — |
-| **LSP TCP** | Current | ✓ | Workaround (SSH) | — |
-| **LSP `--remote`** | 112 | ✓ | ✓ (intended) | ✓ |
-| **LSP WebSocket** | 113 | ✓ | ✓ (intended) | ✓ |
-| **MCP stdio** | Current | ✓ | ✗ (gap) | — |
-| **MCP `--remote`** | 112 | ✓ | ✓ (intended) | ✓ |
-| **Indexing CLI** | Current | ✓ (local) | ✗ (gap) | ✓ (Phase C+) |
-| **gitsema auth** | Phase A | — | — | ✓ |
-| **Web dashboard** | Phase E | — | — | ✓ |
+**Layer 1: Self-Hosted Remote MCP (Phase 112-113) — THE FOUNDATION**
+
+| Capability | Self-Hosted Local | Self-Hosted Remote | Notes |
+|---|:---:|:---:|---|
+| **Search CLI** | ✓ | ✓ (`--remote`) | Works with `gitsema tools serve` |
+| **LSP stdio** | ✓ | ✗ (gap → Phase 112) | Use SSH tunnel workaround |
+| **LSP `--remote`** | ✓ | ✓ | Phase 112: new `--remote` flag |
+| **LSP WebSocket** | ✓ | ✓ | Phase 113: `--websocket` flag |
+| **MCP stdio** | ✓ | ✗ (gap → Phase 112) | Use SSH tunnel workaround |
+| **MCP `--remote`** | ✓ | ✓ | Phase 112: new `--remote` flag |
+| **MCP HTTP** | — | ✓ | Phase 113: `--http` flag (new) |
+| **Indexing** | ✓ | ✓ | Use `gitsema tools serve` (existing) |
+
+**Layer 2: Semahub SaaS (Built on Layer 1) — BUILT ON FOUNDATION**
+
+| Capability | Available | Notes |
+|---|:---:|---|
+| **All Layer 1 features** | ✓ | Web UI + managed infrastructure |
+| **User authentication** | ✓ | Signup, login, OAuth2 |
+| **Multi-user isolation** | ✓ | Repo isolation, permissions |
+| **Managed storage** | ✓ | S3 backend, auto-cleanup |
+| **Billing/subscriptions** | ✓ | Stripe integration |
+| **Web dashboard** | ✓ | Repo mgmt, usage metrics |
+| **Job queue** | ✓ | Async indexing, notifications |
 
 ---
 
