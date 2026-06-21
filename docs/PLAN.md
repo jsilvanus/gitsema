@@ -4172,7 +4172,7 @@ from the parity set by design. No schema change.
 | Phase | Spec section | Title | Deliverable |
 |---|---|---|---|
 | **113** ✅ | §3 (Phase A) | Generic remote delegation for MCP + LSP | One shared mechanism (`src/core/remote/protocolClient.ts`) lets `gitsema tools mcp --remote <url>` and `gitsema tools lsp --remote <url>` delegate every data-access call to a running `gitsema tools serve` instance via `POST /api/v1/protocol/:operation`. |
-| **114** | §5 (Phase C) | LSP structural navigation | New LSP methods backed by the Phase 107 knowledge-graph tables (`structural_refs`/`graph_nodes`/`edges`) — `callHierarchy/incomingCalls`/`outgoingCalls`, structural-first/semantic-fallback precedence for existing methods. |
+| **114** ✅ | §5 (Phase C) | LSP structural navigation | New LSP methods backed by the Phase 107 knowledge-graph tables (`structural_refs`/`graph_nodes`/`edges`) — `callHierarchy/incomingCalls`/`outgoingCalls`, structural-first/semantic-fallback precedence for existing methods. |
 | **115** | §6 (Phase D) | LSP diagnostics, code lens, rich hover | `textDocument/publishDiagnostics` on a background timer (not request-time), code lens, hover enrichment with temporal/risk/structure sections — behind a `--diagnostics` opt-in flag, all gracefully degrading. |
 | **116** | §4 (Phase B) | WebSocket transport | `--websocket <bind-address>` transport for MCP/LSP, depends on Phase 113's remote-delegation plumbing; auth via header, not subprotocol. |
 
@@ -4202,6 +4202,38 @@ call (per spec §3). `--remote`/`--remote-key`/`--remote-timeout` fall back to
 schema change. Tests: `tests/protocolClient.test.ts`,
 `tests/registerTool.test.ts`, plus remote-delegation additions to
 `tests/lsp.test.ts` and `tests/serverRoutes.test.ts`.
+
+**Phase 114 ✅ complete.** `src/core/lsp/structuralNav.ts` is the new module the
+spec asked for: it wraps `src/core/graph/resolveNode.ts` and
+`src/core/graph/traversal.ts`'s `callers()`/`callees()` to build LSP-shaped
+`StructuralLocation`/`CallHierarchyItem` results, instantiating a fresh
+`SqliteGraphStore()` per call (consistent with the LSP server's existing
+global-active-session threading — no `storage.*`/cwd config resolution, unlike the
+MCP graph tools). `textDocument/definition` and `textDocument/references` in
+`src/core/lsp/server.ts` now check `isGraphBuilt()` first and, when the graph has
+nodes and the identifier resolves with at least one hit, return the exact
+structural result with no fallback mixed in; every location returned by the
+pre-existing symbol/FTS/semantic-search code paths is now tagged
+`tags: ['fallback']` so it's never confused with an exact structural result (spec
+§5.3). Three new JSON-RPC methods — `textDocument/prepareCallHierarchy`,
+`callHierarchy/incomingCalls`, `callHierarchy/outgoingCalls` — call
+`prepareCallHierarchy()`/`incomingCalls()`/`outgoingCalls()` from
+`structuralNav.ts`; `initialize` now advertises `callHierarchyProvider: true`. One
+deviation from a literal LSP `CallHierarchyItem` round-trip: since this codebase's
+LSP methods already take a bare `params.text`/`params.word` identifier rather than
+a real document position, `incomingCalls`/`outgoingCalls` accept either a bare
+identifier or `params.item.data` (the resolved graph node key returned by
+`prepareCallHierarchy`), so protocol-correct clients and the existing
+text-based-invocation convention both work. Line ranges for graph nodes (which
+store no line data themselves) are recovered with one `symbols` table lookup by
+`(qualified_name, blob_hash)` — the same identity Phase 105/107 already use to
+build the node — keeping the "no new graph-query SQL" constraint from §5.1. No
+schema change. All three new methods got `lsp.<op>` remote-delegation entries
+(`METHOD_TO_REMOTE_OP` in `server.ts`, `LSP_OP_TO_METHOD` in
+`src/server/routes/protocol.ts`) for free, since Phase 113's delegation mechanism
+is method-name-driven. Tests: `tests/lspStructural.test.ts` (graph fixture mirrors
+`tests/graphTraversal.test.ts`; covers exact structural definition/references,
+call-hierarchy prepare/incoming/outgoing, and fallback-with-no-graph).
 
 ---
 

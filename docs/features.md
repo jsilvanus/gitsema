@@ -267,7 +267,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
-| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 5 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113) |
+| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 8 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
@@ -400,6 +400,28 @@ functions and LSP dispatcher via a small "capture" indirection, so business logi
 stays in one place.
 
 > Legacy top-level aliases `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work but emit a deprecation warning.
+
+### Structural navigation (Phase 114)
+
+`textDocument/definition` and `textDocument/references` are structural-first: when
+the Phase 106/107 knowledge graph is built (`gitsema graph build`) and the queried
+identifier resolves to an exact graph node, the LSP server returns that exact
+location (or its structural referrers) with no semantic ranking involved. When the
+graph isn't built, the identifier doesn't resolve, or it resolves with no incoming
+edges, the server falls back to the prior symbol/FTS/semantic-search behavior —
+every fallback location is tagged `tags: ['fallback']` so clients can distinguish
+exact structural results from approximate ones. The two never mix into one ranked
+list (per the LSP & MCP fleshout spec §5.3).
+
+Three new JSON-RPC methods add call-hierarchy support, backed by the same graph:
+`textDocument/prepareCallHierarchy` resolves a symbol to a `CallHierarchyItem`
+(carrying the resolved graph node key in `data`), and `callHierarchy/incomingCalls`
+/ `callHierarchy/outgoingCalls` return its direct (depth-1) callers/callees via the
+`calls` edge type. The server advertises `callHierarchyProvider: true` in
+`initialize`. All of this reuses `src/core/graph/traversal.ts` and `resolveNode.ts`
+directly (`src/core/lsp/structuralNav.ts`) — no new graph-query SQL was added; the
+only new SQL is a `symbols` table lookup (by `qualified_name` + `blob_hash`) to
+recover line ranges for graph nodes, since the graph itself stores no line data.
 
 ---
 

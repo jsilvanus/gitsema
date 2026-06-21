@@ -4,6 +4,15 @@ import { embedQuery } from '../embedding/embedQuery.js'
 import { buildProvider } from '../embedding/providerFactory.js'
 import { createServer as createNetServer } from 'node:net'
 import { callRemote, type RemoteConfig } from '../remote/protocolClient.js'
+import {
+  activeGraphStore,
+  isGraphBuilt,
+  structuralDefinition,
+  structuralReferences,
+  prepareCallHierarchy,
+  incomingCalls,
+  outgoingCalls,
+} from './structuralNav.js'
 
 /** Maps JSON-RPC methods that need DB access to the `lsp.<op>` name used by `protocolClient.ts`. */
 const METHOD_TO_REMOTE_OP: Record<string, string> = {
@@ -12,6 +21,9 @@ const METHOD_TO_REMOTE_OP: Record<string, string> = {
   'textDocument/references': 'lsp.references',
   'textDocument/documentSymbol': 'lsp.documentSymbol',
   'workspace/symbol': 'lsp.workspaceSymbol',
+  'textDocument/prepareCallHierarchy': 'lsp.prepareCallHierarchy',
+  'callHierarchy/incomingCalls': 'lsp.incomingCalls',
+  'callHierarchy/outgoingCalls': 'lsp.outgoingCalls',
 }
 
 export type JsonRpcRequest = { jsonrpc: '2.0'; id?: number | string; method: string; params?: any }
@@ -66,6 +78,7 @@ export async function handleRequest(
           referencesProvider: true,
           workspaceSymbolProvider: true,
           documentSymbolProvider: true,
+          callHierarchyProvider: true,
         },
       },
     }
@@ -108,6 +121,18 @@ export async function handleRequest(
     const rawWord = params?.text ?? params?.word ?? ''
     const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
     try {
+      // Phase 114 (§5.3): structural resolution first, exact and unambiguous.
+      // Semantic search below only runs when the graph isn't built, the
+      // identifier doesn't resolve, or it resolves to a node with no
+      // location (e.g. external) — never merged into one ranked list.
+      const graph = activeGraphStore()
+      if (await isGraphBuilt(graph)) {
+        const structural = await structuralDefinition(graph, q)
+        if (structural.length > 0) {
+          return { jsonrpc: '2.0', id, result: structural }
+        }
+      }
+
       const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
       const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
       const provider = buildProvider(providerType, model)
@@ -136,6 +161,7 @@ export async function handleRequest(
           range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
           symbolName: r.symbol_name,
           symbolKind: r.symbol_kind,
+          tags: ['fallback'],
         }))
         return { jsonrpc: '2.0', id, result: locations }
       }
@@ -167,6 +193,7 @@ export async function handleRequest(
           range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
           symbolName: r.symbol_name,
           symbolKind: r.symbol_kind,
+          tags: ['fallback'],
         }))
         return { jsonrpc: '2.0', id, result: locations }
       }
@@ -176,6 +203,7 @@ export async function handleRequest(
       const locations = results.map((r: any) => ({
         uri: `file://${r.paths?.[0] ?? r.blobHash}`,
         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        tags: ['fallback'],
       }))
       return { jsonrpc: '2.0', id, result: locations }
     } catch (e: any) {
@@ -188,6 +216,15 @@ export async function handleRequest(
     const rawWord = params?.text ?? params?.word ?? ''
     const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
     try {
+      // Phase 114 (§5.3): structural resolution first, exact and unambiguous.
+      const graph = activeGraphStore()
+      if (await isGraphBuilt(graph)) {
+        const structural = await structuralReferences(graph, q)
+        if (structural.length > 0) {
+          return { jsonrpc: '2.0', id, result: structural }
+        }
+      }
+
       // 1. All symbol definitions with this name (exact + substring) — gives line numbers
       const symbolRows = dbSession.rawDb.prepare(
         `SELECT s.symbol_name, s.symbol_kind, s.start_line, s.end_line, p.path
@@ -198,7 +235,7 @@ export async function handleRequest(
       ).all(q, `%${q}%`) as Array<{ symbol_name: string; symbol_kind: string; start_line: number; end_line: number; path: string }>
 
       // 2. FTS5: blobs that textually mention the term — join back to symbols for line numbers
-      let ftsLocations: Array<{ uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }> = []
+      let ftsLocations: Array<{ uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } }; tags: string[] }> = []
       try {
         const ftsRows = dbSession.rawDb.prepare(
           `SELECT blob_hash FROM blob_fts WHERE blob_fts MATCH ? LIMIT 20`,
@@ -220,6 +257,7 @@ export async function handleRequest(
             ftsLocations = symInBlobs.map((r) => ({
               uri: `file://${r.path}`,
               range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
+              tags: ['fallback'],
             }))
           } else {
             // No symbol-level precision available — fall back to file-level references
@@ -229,6 +267,7 @@ export async function handleRequest(
             ftsLocations = pathRows.map((r) => ({
               uri: `file://${r.path}`,
               range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+              tags: ['fallback'],
             }))
           }
         }
@@ -241,6 +280,7 @@ export async function handleRequest(
       const locations = [...symbolRows.map((r) => ({
         uri: `file://${r.path}`,
         range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
+        tags: ['fallback'],
       })), ...ftsLocations].filter((loc) => {
         const key = `${loc.uri}:${loc.range.start.line}`
         if (seen.has(key)) return false
@@ -319,6 +359,45 @@ export async function handleRequest(
         },
       }))
       return { jsonrpc: '2.0', id, result: symbols }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
+  if (req.method === 'textDocument/prepareCallHierarchy') {
+    const params = req.params ?? {}
+    const rawWord = params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
+    try {
+      const graph = activeGraphStore()
+      const items = await prepareCallHierarchy(graph, q)
+      return { jsonrpc: '2.0', id, result: items }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
+  if (req.method === 'callHierarchy/incomingCalls') {
+    const params = req.params ?? {}
+    const rawWord = params?.item?.data ?? params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
+    try {
+      const graph = activeGraphStore()
+      const calls = await incomingCalls(graph, q)
+      return { jsonrpc: '2.0', id, result: calls }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
+  if (req.method === 'callHierarchy/outgoingCalls') {
+    const params = req.params ?? {}
+    const rawWord = params?.item?.data ?? params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
+    try {
+      const graph = activeGraphStore()
+      const calls = await outgoingCalls(graph, q)
+      return { jsonrpc: '2.0', id, result: calls }
     } catch (e: any) {
       return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
     }

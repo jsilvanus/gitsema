@@ -14,7 +14,7 @@ This table shows which tools/commands are available in which interface. A checkm
 ### Legend
 - **CLI**: Command-line interface (85 commands)
 - **REPL**: Lightweight interactive search REPL (search only)
-- **LSP**: Language Server Protocol for IDE integration (5 protocol methods: hover, definition, references, symbol search)
+- **LSP**: Language Server Protocol for IDE integration (8 protocol methods: hover, definition, references, symbol search, call hierarchy)
 - **Guide**: Agentic tool-calling loop in `gitsema guide` (47 tools, max 5 roundtrips)
 - **MCP**: Model Context Protocol tools (45 tools for AI clients)
 - **HTTP**: REST API server via `gitsema tools serve` (~30 endpoints)
@@ -116,19 +116,23 @@ This table shows which tools/commands are available in which interface. A checkm
 
 ### LSP Interface Details
 
-**LSP is a specialized protocol for IDE integration, not a general command interface.** It exposes 5 JSON-RPC methods:
+**LSP is a specialized protocol for IDE integration, not a general command interface.** It exposes 8 JSON-RPC methods:
 
 | Method | Maps To | Use Case |
 |---|---|---|
 | `textDocument/hover` | `search` (semantic matching) | Show top-5 semantic matches when hovering over a symbol |
-| `textDocument/definition` | `code-search` (symbol + semantic lookup) | Go-to-definition: exact name match → substring match → semantic fallback |
-| `textDocument/references` | `search` + FTS (symbol + text references) | Find all references: symbol definitions + text mentions |
+| `textDocument/definition` | `graph` (structural-first, Phase 114) + `code-search` (symbol + semantic fallback) | Go-to-definition: exact structural match when the graph is built → exact name match → substring match → semantic fallback (fallback results tagged `tags: ['fallback']`) |
+| `textDocument/references` | `graph` (structural-first, Phase 114) + `search`/FTS (symbol + text fallback) | Find all references: exact structural callers/importers when the graph is built → symbol definitions + text mentions (fallback results tagged `tags: ['fallback']`) |
 | `textDocument/documentSymbol` | Symbol index | List all symbols (functions, classes, etc.) in the current document |
 | `workspace/symbol` | `code-search` (symbol search) | Workspace-wide symbol search by name pattern |
+| `textDocument/prepareCallHierarchy` | `graph` (Phase 114) | Resolve a symbol to a `CallHierarchyItem` (carries the graph node key in `data`) |
+| `callHierarchy/incomingCalls` | `graph callers` (Phase 114) | Direct (depth-1) callers of a symbol, via the `calls` edge type |
+| `callHierarchy/outgoingCalls` | `graph callees` (Phase 114) | Direct (depth-1) callees of a symbol, via the `calls` edge type |
 
 **Marked as available in LSP:**
 - `search` ✓ — hover operation uses semantic search
 - `code-search` ✓ — workspace/symbol and definition use symbol search
+- `graph` (partial) ✓ — definition/references/call-hierarchy methods query the structural graph first when built (Phase 114), falling back to semantic/FTS otherwise
 
 **Not available in LSP:**
 - All analysis commands (`evolution`, `clusters`, `change-points`, etc.) — LSP is read-only navigation, not analysis

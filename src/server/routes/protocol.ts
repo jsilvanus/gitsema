@@ -54,6 +54,9 @@ const LSP_OP_TO_METHOD: Record<string, string> = {
   references: 'textDocument/references',
   documentSymbol: 'textDocument/documentSymbol',
   workspaceSymbol: 'workspace/symbol',
+  prepareCallHierarchy: 'textDocument/prepareCallHierarchy',
+  incomingCalls: 'callHierarchy/incomingCalls',
+  outgoingCalls: 'callHierarchy/outgoingCalls',
 }
 
 export function protocolRouter(): Router {
