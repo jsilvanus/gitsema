@@ -2,7 +2,7 @@
 
 This document tracks the availability of gitsema tools and commands across all interfaces, and the implementation of common flags across the CLI. It serves as the single source of truth for interface parity and helps identify gaps, inconsistencies, and opportunities for unification.
 
-**Last updated:** 2026-06-16  
+**Last updated:** 2026-06-21  
 **Maintainer note:** Any tool change, interface change, or flag addition must be reflected in the tables below and in the canonical sections of `CLAUDE.md` / `docs/features.md` / `README.md`.
 
 ---
@@ -419,6 +419,7 @@ If you find a discrepancy, **update this file first**, then propagate the change
 | Phase 106+ | Structural extraction | `index --graph` flag; MCP tools updated |
 | Phase 107+ | Knowledge-graph edges | `graph build`, `graph callers/callees`, etc. |
 | Phase 108+ | Graph traversal tools | MCP `call_graph`, `graph_neighbors`, `hotspots` |
+| Phase 112 | Unified graph UI | `--out html\|markdown` added to `graph neighbors`/`graph path`/`blast-radius`/`relate`/`similar`/`hotspots`; shared `RenderableSubgraph` model renders as a force-graph (HTML) or ASCII tree (text) |
 | Future | CLI Interactive | Full CLI with autocomplete, history, interactive UI |
 | Future | Web UI | Browser-based dashboard with visualization |
 | Future | MCP HTTP | HTTP transport for MCP protocol |

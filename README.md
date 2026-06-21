@@ -442,13 +442,15 @@ Track semantic drift of a single file across its Git history.
 | `gitsema graph cycles [--edge-types <types>]` / `gitsema cycles [--edge-types <types>]` | Detect cycles in the structural graph (default: `imports`) |
 | `gitsema graph callers <symbol> [--depth <n>]` | Reverse `calls` traversal — who (transitively) calls `<symbol>` (default depth 3, max 3) |
 | `gitsema graph callees <symbol> [--depth <n>]` | Forward `calls` traversal — what `<symbol>` (transitively) calls (default depth 3, max 3) |
-| `gitsema graph neighbors <node> [--edge-types <types>] [--direction <dir>] [--depth <n>]` | Typed neighborhood of `<node>` — any edge kinds by default (default depth 1, max 3) |
-| `gitsema graph path <a> <b>` | Shortest typed path from `<a>` to `<b>` (max depth 3) |
-| `gitsema blast-radius <symbol> [--lens <lens>] [--depth <n>] [-k/--top <n>] [--weight-structural <n>]` | What changes if I touch this — structural dependents (`calls`/`imports`/`extends`/`implements`/`references`, reverse traversal) and/or semantically similar blobs (default lens: hybrid) |
-| `gitsema relate <symbol> [--lens <lens>] [-k/--top <n>]` | Callers/callees (structural, depth 1) and semantically similar blobs, labeled — both lenses, lose neither (default lens: hybrid) |
-| `gitsema similar <symbol> [--lens <lens>] [-k/--top <n>] [--weight-structural <n>]` | Symbols/files with a similar call/import shape (structural, Jaccard overlap) and/or semantically similar (vector) (default lens: hybrid) |
+| `gitsema graph neighbors <node> [--edge-types <types>] [--direction <dir>] [--depth <n>] [--out <spec>]` | Typed neighborhood of `<node>` — any edge kinds by default (default depth 1, max 3) |
+| `gitsema graph path <a> <b> [--out <spec>]` | Shortest typed path from `<a>` to `<b>` (max depth 3) |
+| `gitsema blast-radius <symbol> [--lens <lens>] [--depth <n>] [-k/--top <n>] [--weight-structural <n>] [--out <spec>]` | What changes if I touch this — structural dependents (`calls`/`imports`/`extends`/`implements`/`references`, reverse traversal) and/or semantically similar blobs (default lens: hybrid) |
+| `gitsema relate <symbol> [--lens <lens>] [-k/--top <n>] [--out <spec>]` | Callers/callees (structural, depth 1) and semantically similar blobs, labeled — both lenses, lose neither (default lens: hybrid) |
+| `gitsema similar <symbol> [--lens <lens>] [-k/--top <n>] [--weight-structural <n>] [--out <spec>]` | Symbols/files with a similar call/import shape (structural, Jaccard overlap) and/or semantically similar (vector) (default lens: hybrid) |
 | `gitsema unused [--edge-types <types>]` | Symbols/files with no inbound `calls`/`imports` edges — structural complement to `dead-concepts` |
-| `gitsema hotspots [--lens <lens>] [-k/--top <n>]` | Architectural risk = co-change (temporal) × call-coupling (structural) × churn — geometric mean of the signals the lens selects (default lens: hybrid). Also `POST /api/v1/graph/hotspots` and MCP `hotspots` |
+| `gitsema hotspots [--lens <lens>] [-k/--top <n>] [--out <spec>]` | Architectural risk = co-change (temporal) × call-coupling (structural) × churn — geometric mean of the signals the lens selects (default lens: hybrid). Also `POST /api/v1/graph/hotspots` and MCP `hotspots` |
+
+`--out <spec>` on the six commands above (repeatable: `text\|json[:file]\|html[:file]\|markdown[:file]`) renders a unified subgraph view: `html` is an interactive force-graph with clickable nodes (Phase 112), `text`/`markdown` are an ASCII tree / nested bullet list. Omitting `--out` leaves each command's own default text output unchanged.
 
 ### Workflow & CI
 

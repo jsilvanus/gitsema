@@ -1,11 +1,15 @@
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { similar } from '../../core/graph/similar.js'
+import { subgraphFromSeed } from '../../core/graph/subgraphView.js'
 import { parseLens } from '../lib/lens.js'
 import { renderResolutionError } from '../lib/graphRender.js'
+import { parseOutputSpec } from '../../utils/outputSink.js'
+import { emitSubgraphOutputs } from '../lib/graphOutput.js'
 
 export interface GraphSimilarCommandOptions {
   lens?: string
   top?: string
+  out?: string[]
 }
 
 export async function similarCommand(symbol: string, options: GraphSimilarCommandOptions = {}): Promise<void> {
@@ -21,6 +25,14 @@ export async function similarCommand(symbol: string, options: GraphSimilarComman
   }
 
   const node = result.resolved.node
+
+  if (options.out && options.out.length > 0) {
+    const sinks = options.out.map(parseOutputSpec)
+    const sub = await subgraphFromSeed(profile.graph, node.nodeKey, 2)
+    emitSubgraphOutputs(sinks, sub, `Similar to ${node.displayName}`)
+    return
+  }
+
   console.log(`Similar to ${node.displayName} (${node.nodeKey}) — lens: ${lens}\n`)
 
   if (lens !== 'semantic') {
