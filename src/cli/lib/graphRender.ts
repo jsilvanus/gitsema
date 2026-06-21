@@ -53,12 +53,30 @@ export function renderBlastRadius(result: BlastRadiusResult, node: GraphNodeReco
 
 // ─── Unified subgraph rendering (Phase 112, knowledge-graph §9) ──────────────
 
-function buildOutAdjacency(edges: GraphEdgeRecord[]): Map<string, GraphEdgeRecord[]> {
-  const adj = new Map<string, GraphEdgeRecord[]>()
+interface AdjEntry {
+  neighbor: string
+  edgeType: string
+  dir: 'out' | 'in'
+  edge: GraphEdgeRecord
+}
+
+/**
+ * Builds an incidence list (both directions) for each node, so traversal can
+ * reach predecessor-only nodes (e.g. a subgraph built from `direction: 'in'`
+ * hits, where every edge points *into* the root). Each edge is recorded
+ * twice — once per endpoint — tagged with the direction relative to that
+ * endpoint, so the renderer can draw `-[type]->` vs `<-[type]-` correctly.
+ */
+function buildAdjacency(edges: GraphEdgeRecord[]): Map<string, AdjEntry[]> {
+  const adj = new Map<string, AdjEntry[]>()
+  const push = (key: string, entry: AdjEntry) => {
+    const list = adj.get(key) ?? []
+    list.push(entry)
+    adj.set(key, list)
+  }
   for (const e of edges) {
-    const list = adj.get(e.srcKey) ?? []
-    list.push(e)
-    adj.set(e.srcKey, list)
+    push(e.srcKey, { neighbor: e.dstKey, edgeType: e.edgeType, dir: 'out', edge: e })
+    push(e.dstKey, { neighbor: e.srcKey, edgeType: e.edgeType, dir: 'in', edge: e })
   }
   return adj
 }
@@ -71,7 +89,7 @@ function buildOutAdjacency(edges: GraphEdgeRecord[]): Map<string, GraphEdgeRecor
 export function renderGraphTree(sub: RenderableSubgraph): string {
   if (sub.nodes.length === 0) return '(empty subgraph)'
   const byKey = new Map(sub.nodes.map((n) => [n.nodeKey, n]))
-  const outAdj = buildOutAdjacency(sub.edges)
+  const adj = buildAdjacency(sub.edges)
   const lines: string[] = []
   const visited = new Set<string>()
 
@@ -82,17 +100,17 @@ export function renderGraphTree(sub: RenderableSubgraph): string {
     return weight !== undefined ? `${base}  (risk ${weight.toFixed(3)})` : base
   }
 
-  function visit(key: string, prefix: string, isRoot: boolean, isLast: boolean, edgeType?: string): void {
+  function visit(key: string, prefix: string, isRoot: boolean, isLast: boolean, entry?: AdjEntry): void {
     const connector = isRoot ? '' : isLast ? '└─ ' : '├─ '
-    const edgeLabel = edgeType ? `-[${edgeType}]-> ` : ''
+    const edgeLabel = entry ? (entry.dir === 'out' ? `-[${entry.edgeType}]-> ` : `<-[${entry.edgeType}]- `) : ''
     const already = visited.has(key)
     lines.push(`${prefix}${connector}${edgeLabel}${labelFor(key)}${already ? '  (...)' : ''}`)
     if (already) return
     visited.add(key)
 
-    const children = outAdj.get(key) ?? []
+    const children = (adj.get(key) ?? []).filter((c) => c.edge !== entry?.edge)
     const childPrefix = isRoot ? prefix : prefix + (isLast ? '   ' : '│  ')
-    children.forEach((e, i) => visit(e.dstKey, childPrefix, false, i === children.length - 1, e.edgeType))
+    children.forEach((c, i) => visit(c.neighbor, childPrefix, false, i === children.length - 1, c))
   }
 
   const roots = sub.rootKeys.length > 0 ? sub.rootKeys : [sub.nodes[0].nodeKey]
@@ -104,7 +122,7 @@ export function renderGraphTree(sub: RenderableSubgraph): string {
 export function renderGraphMarkdown(sub: RenderableSubgraph): string {
   if (sub.nodes.length === 0) return '_(empty subgraph)_'
   const byKey = new Map(sub.nodes.map((n) => [n.nodeKey, n]))
-  const outAdj = buildOutAdjacency(sub.edges)
+  const adj = buildAdjacency(sub.edges)
   const lines: string[] = []
   const visited = new Set<string>()
 
@@ -115,14 +133,14 @@ export function renderGraphMarkdown(sub: RenderableSubgraph): string {
     return weight !== undefined ? `${base} — risk ${weight.toFixed(3)}` : base
   }
 
-  function visit(key: string, depth: number, edgeType?: string): void {
+  function visit(key: string, depth: number, entry?: AdjEntry): void {
     const indent = '  '.repeat(depth)
-    const edgeLabel = edgeType ? `\`${edgeType}\` → ` : ''
+    const edgeLabel = entry ? (entry.dir === 'out' ? `\`${entry.edgeType}\` → ` : `← \`${entry.edgeType}\` `) : ''
     const already = visited.has(key)
     lines.push(`${indent}- ${edgeLabel}${labelFor(key)}${already ? ' _(already shown)_' : ''}`)
     if (already) return
     visited.add(key)
-    for (const e of outAdj.get(key) ?? []) visit(e.dstKey, depth + 1, e.edgeType)
+    for (const c of (adj.get(key) ?? []).filter((c) => c.edge !== entry?.edge)) visit(c.neighbor, depth + 1, c)
   }
 
   const roots = sub.rootKeys.length > 0 ? sub.rootKeys : [sub.nodes[0].nodeKey]

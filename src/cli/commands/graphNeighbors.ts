@@ -1,6 +1,6 @@
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { neighbors } from '../../core/graph/traversal.js'
-import { subgraphFromSeed } from '../../core/graph/subgraphView.js'
+import { subgraphFromHits } from '../../core/graph/subgraphView.js'
 import type { EdgeType } from '../../core/storage/types.js'
 import { parseOutputSpec } from '../../utils/outputSink.js'
 import { emitSubgraphOutputs } from '../lib/graphOutput.js'
@@ -36,7 +36,7 @@ export async function graphNeighborsCommand(node: string, options: GraphNeighbor
 
   if (options.out && options.out.length > 0) {
     const sinks = options.out.map(parseOutputSpec)
-    const sub = await subgraphFromSeed(profile.graph, resolvedNode.nodeKey, depth ?? 2)
+    const sub = await subgraphFromHits(profile.graph, resolvedNode.nodeKey, result.hits, direction)
     emitSubgraphOutputs(sinks, sub, `Neighbors of ${resolvedNode.displayName}`)
     return
   }

@@ -1,6 +1,6 @@
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { blastRadius } from '../../core/graph/blastRadius.js'
-import { subgraphFromSeed } from '../../core/graph/subgraphView.js'
+import { subgraphFromHits } from '../../core/graph/subgraphView.js'
 import { parseLens } from '../lib/lens.js'
 import { renderResolutionError, renderBlastRadius } from '../lib/graphRender.js'
 import { parseOutputSpec } from '../../utils/outputSink.js'
@@ -28,7 +28,7 @@ export async function blastRadiusCommand(symbol: string, options: GraphBlastRadi
 
   if (options.out && options.out.length > 0) {
     const sinks = options.out.map(parseOutputSpec)
-    const sub = await subgraphFromSeed(profile.graph, result.resolved.node.nodeKey, depth ?? 2)
+    const sub = await subgraphFromHits(profile.graph, result.resolved.node.nodeKey, result.structural, 'in')
     emitSubgraphOutputs(sinks, sub, `Blast radius of ${result.resolved.node.displayName}`)
     return
   }

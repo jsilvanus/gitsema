@@ -17,11 +17,12 @@ import {
   subgraphFromSeeds,
   subgraphFromPath,
   subgraphFromHotspots,
+  subgraphFromHits,
   suggestedCommands,
 } from '../src/core/graph/subgraphView.js'
 import { renderGraphTree, renderGraphMarkdown } from '../src/cli/lib/graphRender.js'
 import { renderGraphHtml } from '../src/core/viz/htmlRenderer-graph.js'
-import type { GraphEdgeRecord, GraphNodeRecord, GraphPath } from '../src/core/storage/types.js'
+import type { GraphEdgeRecord, GraphHit, GraphNodeRecord, GraphPath } from '../src/core/storage/types.js'
 import type { HotspotScore } from '../src/core/graph/hotspots.js'
 
 const tmpDirs: string[] = []
@@ -148,6 +149,36 @@ describe('subgraphFromHotspots', () => {
   })
 })
 
+describe('subgraphFromHits', () => {
+  it('wires hits to the seed via their recorded edgeType, oriented "out"', async () => {
+    await withFixture(async (graph) => {
+      const hits: GraphHit[] = [{ nodeKey: 'file:b.ts', displayName: 'b.ts', kind: 'file', depth: 1, edgeType: 'imports' }]
+      const sub = await subgraphFromHits(graph, 'file:a.ts', hits, 'out')
+      expect(sub.rootKeys).toEqual(['file:a.ts'])
+      expect(sub.nodes.map((n) => n.nodeKey).sort()).toEqual(['file:a.ts', 'file:b.ts'])
+      expect(sub.edges).toEqual([{ srcKey: 'file:a.ts', dstKey: 'file:b.ts', edgeType: 'imports' }])
+    })
+  })
+
+  it('reverses edge direction for direction "in" (e.g. blast-radius dependents)', async () => {
+    await withFixture(async (graph) => {
+      const hits: GraphHit[] = [{ nodeKey: 'file:a.ts', displayName: 'a.ts', kind: 'file', depth: 1, edgeType: 'imports' }]
+      const sub = await subgraphFromHits(graph, 'file:b.ts', hits, 'in')
+      expect(sub.edges).toEqual([{ srcKey: 'file:a.ts', dstKey: 'file:b.ts', edgeType: 'imports' }])
+    })
+  })
+
+  it('excludes nodes not present in the filtered hit list', async () => {
+    await withFixture(async (graph) => {
+      // file:c.ts is reachable from file:a.ts via subgraph(), but is absent
+      // from this hand-filtered hit list, so it must not appear.
+      const hits: GraphHit[] = [{ nodeKey: 'file:b.ts', displayName: 'b.ts', kind: 'file', depth: 1, edgeType: 'imports' }]
+      const sub = await subgraphFromHits(graph, 'file:a.ts', hits, 'out')
+      expect(sub.nodes.map((n) => n.nodeKey)).not.toContain('file:c.ts')
+    })
+  })
+})
+
 describe('suggestedCommands', () => {
   it('suggests file-evolution and search for file nodes', () => {
     const node: GraphNodeRecord = { nodeKey: 'file:a.ts', kind: 'file', displayName: 'a.ts', path: 'a.ts' }
@@ -197,6 +228,22 @@ describe('renderGraphTree', () => {
     expect(renderGraphTree({ rootKeys: [], nodes: [], edges: [] })).toBe('(empty subgraph)')
   })
 
+  it('walks incoming edges so predecessor-only subgraphs are not just a lone root', () => {
+    // X -> B (B is the root, reached only via an incoming edge — e.g. blast-radius
+    // dependents or `graph neighbors B --direction in`). X must still appear.
+    const sub = {
+      rootKeys: ['B'],
+      nodes: [
+        { nodeKey: 'B', kind: 'file', displayName: 'B', path: 'B' },
+        { nodeKey: 'X', kind: 'file', displayName: 'X', path: 'X' },
+      ],
+      edges: [{ srcKey: 'X', dstKey: 'B', edgeType: 'imports' as const }],
+    }
+    const text = renderGraphTree(sub)
+    expect(text).toContain('X [file]')
+    expect(text).toMatch(/<-\[imports\]-/)
+  })
+
   it('shows risk weights when present', async () => {
     await withFixture(async (graph) => {
       const hotspots: HotspotScore[] = [
@@ -221,6 +268,19 @@ describe('renderGraphMarkdown', () => {
 
   it('renders a placeholder for an empty subgraph', () => {
     expect(renderGraphMarkdown({ rootKeys: [], nodes: [], edges: [] })).toBe('_(empty subgraph)_')
+  })
+
+  it('walks incoming edges so predecessor-only subgraphs are not just a lone root', () => {
+    const sub = {
+      rootKeys: ['B'],
+      nodes: [
+        { nodeKey: 'B', kind: 'file', displayName: 'B', path: 'B' },
+        { nodeKey: 'X', kind: 'file', displayName: 'X', path: 'X' },
+      ],
+      edges: [{ srcKey: 'X', dstKey: 'B', edgeType: 'imports' as const }],
+    }
+    const md = renderGraphMarkdown(sub)
+    expect(md).toContain('**X**')
   })
 })
 

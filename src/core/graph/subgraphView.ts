@@ -13,7 +13,7 @@
  * not the full path.
  */
 
-import type { EdgeType, GraphEdgeRecord, GraphNodeRecord, GraphPath, GraphStore } from '../storage/types.js'
+import type { EdgeType, GraphEdgeRecord, GraphHit, GraphNodeRecord, GraphPath, GraphStore } from '../storage/types.js'
 import { HOTSPOT_COUPLING_EDGE_TYPES, type HotspotScore } from './hotspots.js'
 
 export interface RenderableSubgraph {
@@ -29,6 +29,36 @@ export interface RenderableSubgraph {
 export async function subgraphFromSeed(graph: GraphStore, seedKey: string, depth = 2): Promise<RenderableSubgraph> {
   const sub = await graph.subgraph(seedKey, depth)
   return { rootKeys: [seedKey], nodes: sub.nodes, edges: sub.edges }
+}
+
+/**
+ * Builds a subgraph directly from an already-filtered `GraphHit[]` list (e.g.
+ * `neighbors()`/`blastRadius()`'s `result.structural`), instead of
+ * re-querying `GraphStore.subgraph()` — which traverses every edge type in
+ * both directions regardless of the caller's `--edge-types`/`--direction`/
+ * `--lens` filters, so it can include nodes the filtered result excluded.
+ * Each hit is wired to the seed via its recorded `edgeType`, oriented per
+ * `direction` (`'in'`: hit -> seed, `'out'`/`'both'`: seed -> hit). Hits
+ * beyond depth 1 are attached directly to the seed rather than through their
+ * true intermediate path, which the flat hit list doesn't retain.
+ */
+export async function subgraphFromHits(
+  graph: GraphStore,
+  seedKey: string,
+  hits: GraphHit[],
+  direction: 'out' | 'in' | 'both' = 'out',
+): Promise<RenderableSubgraph> {
+  const uniqueKeys = [...new Set([seedKey, ...hits.map((h) => h.nodeKey)])]
+  const nodes = (await Promise.all(uniqueKeys.map((k) => graph.getNode(k))))
+    .filter((n): n is GraphNodeRecord => n !== undefined)
+
+  const edges: GraphEdgeRecord[] = hits.map((h) =>
+    direction === 'in'
+      ? { srcKey: h.nodeKey, dstKey: seedKey, edgeType: h.edgeType ?? 'references' }
+      : { srcKey: seedKey, dstKey: h.nodeKey, edgeType: h.edgeType ?? 'references' },
+  )
+
+  return { rootKeys: [seedKey], nodes, edges }
 }
 
 /** Union of node-induced subgraphs around several seeds (e.g. callers + callees of one symbol). */
