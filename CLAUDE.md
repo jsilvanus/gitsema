@@ -127,24 +127,33 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 ### `gitsema status [file]`
 Show index statistics and database path. Pass a file path for per-file info.
 
-### `gitsema index [options]`
-Walk Git history and embed all blobs. Already-indexed blobs are skipped (dedup by blob hash).
+### `gitsema index` / `gitsema index start [options]`
+Bare `gitsema index` is read-only — it shows index coverage (blob counts per embedding model/config) and never writes. Actual indexing happens via `gitsema index start`: walks Git history and embeds all blobs, skipping already-indexed blobs (dedup by blob hash).
 
 | Flag | Default | Description |
 |---|---|---|
 | `--since <ref>` | last indexed commit | Date, tag, commit hash, or `"all"` for full re-index |
 | `--max-commits <n>` | unlimited | Cap commits per run (for splitting large histories) |
 | `--concurrency <n>` | `4` | Parallel embedding calls |
+| `--embed-batch-size <n>` | `1` | Texts per `embedBatch()` call (HTTP providers, `--chunker file`) |
 | `--ext <exts>` | all | Only index these comma-separated extensions |
 | `--max-size <size>` | `200kb` | Skip blobs larger than this |
 | `--exclude <patterns>` | none | Skip paths containing these comma-separated substrings |
-| `--chunker <strategy>` | `file` | `file` \| `function` \| `fixed` |
+| `--include-glob <patterns>` | — | Only index files matching these comma-separated glob patterns |
+| `--chunker <strategy>` (alias `--level`) | `file` | `file` \| `function` \| `fixed` |
 | `--window-size <n>` | `1500` | Characters per chunk (fixed chunker) |
 | `--overlap <n>` | `200` | Character overlap between adjacent fixed chunks |
 | `--file <paths...>` | — | Index specific files from HEAD only |
-| `--graph` | off | Extract structural references (imports/calls/extends/implements) for TS/TSX/JS/Python blobs into `structural_refs` (Phase 106 knowledge-graph track) |
+| `--remote <url>` | — | Send blobs to a remote gitsema server for embedding (overrides `GITSEMA_REMOTE`) |
+| `--branch <name>` | — | Restrict indexing to commits reachable from this branch |
+| `--model` / `--text-model` / `--code-model <model>` | — | Per-run model overrides |
+| `--quantize` | off | Store embeddings as int8-quantized vectors (4× smaller, ~1% recall loss) |
+| `--build-vss` / `--auto-build-vss [threshold]` | off | Build the usearch HNSW ANN index after indexing (auto variant triggers above a blob-count threshold, default 10000) |
+| `--allow-mixed` | off | Allow indexing with a different embed config than previously used |
+| `--profile <name>` | — | `speed` \| `balanced` \| `quality` preset |
+| `--graph` | off | Extract structural references (imports/calls/extends/implements) for TS/TSX/JS/Python blobs into `structural_refs` (Phase 106 knowledge-graph track; feeds `gitsema graph build`) |
 
-The indexer applies a multi-level fallback chain: whole-file → function chunker → fixed windows (1500 chars → 800 chars) when a blob exceeds the embedding model's context limit.
+The indexer applies a multi-level fallback chain: whole-file → function chunker → fixed windows (1500 chars → 800 chars) when a blob exceeds the embedding model's context limit. Other `index` subcommands: `index export` / `index import` (bundle transfer), `index update-modules` (directory-centroid embeddings), `index build-vss`, `index doctor`, `index vacuum`, `index gc`, `index rebuild-fts`, `index clear-model`.
 
 ### `gitsema search <query> [options]`
 
@@ -283,6 +292,23 @@ Return matching commits (default, no LLM call) or an LLM-generated explanation/t
 ### `gitsema guide [question] [options]`
 Interactive LLM chat that answers questions about the repository, using the active "guide" model config (falls back to the active narrator model). Prints gathered git context even when no LLM is configured (no network access). When a model is configured, runs a real agentic tool-calling loop (`@jsilvanus/chattydeer` `runAgentLoop`, maxRoundtrips 5) against the full `GUIDE_TOOLS` registry in `src/core/narrator/guideTools.ts` (49 tools, covering search, history, branch/merge, ownership, quality, diff/blame, clustering, workflow, structural graph, admin — including the Phase 110 `call_graph`/`blast_radius`/`hotspots` structural tools; Phase 104 is closing the remaining gaps). Index-gated tools return `{error}` gracefully when no `.gitsema` index exists. Supports `-i/--interactive` for a multi-turn REPL session (one agent session reused across turns).
 
+### Remaining command groups
+
+The commands above cover the most-used core workflows in detail. `gitsema --help` groups every command (mirrored in `src/cli/program.ts`'s `COMMAND_GROUPS`); full per-flag tables for all of these live in [`README.md`](README.md#command-reference) — don't re-derive them here, follow the link.
+
+| Group | Commands |
+|---|---|
+| Knowledge Graph | `graph build`, `co-change`, `deps`, `graph cycles`/`cycles`, `graph callers`/`graph callees`, `graph neighbors`, `graph path`, `blast-radius`, `relate`, `similar`, `unused`, `hotspots` |
+| File History (extra) | `blame` (alias `semantic-blame`), `impact` (`--lens structural\|hybrid` aliases `blast-radius`) |
+| Code Quality (extra) | `health`, `debt`, `refactor-candidates`, `lifecycle`, `doc-gap` |
+| Workflow & CI (extra) | `repos`, `watch`, `pr-report`, `ci-diff`, `cherry-pick-suggest` |
+| Workflows | `workflow list`, `workflow run <name>` (`pr-review` \| `incident` \| `release-audit`) |
+| Repo Insights | `cross-repo-similarity`, `experts` |
+| Visualization | `map`, `heatmap`, `project` |
+| Setup & Infrastructure (extra) | `models`, `remote-index <repoUrl>` |
+
+The Knowledge Graph layer (Phases 105–110) is built from `index --graph` output: `graph build` truncates and rebuilds `graph_nodes`/`edges` from `structural_refs`, `symbols`, and `blob_commits` (co-change edges). Structural traversal commands (`blast-radius`, `relate`, `similar`, `hotspots`) default to a **hybrid lens** — combining structural graph traversal with semantic (vector) similarity — selectable via `--lens semantic\|structural\|hybrid`.
+
 ---
 
 ## Architecture
@@ -332,9 +358,24 @@ git repo
    │                        (ungrouped: authorSearch.ts, impact.ts, mergeAudit.ts, debtScoring.ts,
    │                         experts.ts, cherryPick.ts, semanticDiff.ts, semanticBlame.ts, etc.)
    ↓
-[ src/cli/ ]               index.ts + commands/*.ts  — Commander.js CLI
-[ src/mcp/ ]               server.ts                 — MCP stdio server
-[ src/server/ ]            app.ts + routes/ + middleware/  — HTTP API server (remote backend)
+[ src/core/graph/ ]        build.ts          — truncate-and-rebuild graph_nodes/edges from structural_refs/symbols/blob_commits
+   │                        traversal.ts      — generic typed BFS (neighbors/path/callers/callees)
+   │                        blastRadius.ts, relate.ts, similar.ts, hotspots.ts, cycles.ts, deps.ts, unused.ts, coChange.ts
+   │                        structuralContext.ts, semanticNeighbors.ts, cascade.ts — hybrid-lens helpers
+   ↓
+[ src/core/narrator/ ]     narrator.ts       — runNarrate/runExplain (evidence-only or LLM prose)
+   │                        guideTools.ts     — GUIDE_TOOLS registry (agentic `guide` tool-calling loop)
+   │                        interpretations.ts — single source of truth for "how to read" each tool's output
+   │                        chattydeerProvider.ts, cliProvider.ts, cliAdapters.ts — HTTP / local-CLI LLM backends
+   │                        redact.ts         — secret/PII redaction applied to all outbound LLM content
+[ src/core/llm/ ]          narrator.ts       — system-prompt builders shared by narrator/guide/skill generator
+[ src/core/lsp/ ]          server.ts         — JSON-RPC semantic hover server (stdio or `--tcp`)
+[ src/core/viz/ ]          htmlRenderer*.ts  — interactive HTML output for evolution/search/clusters/map
+[ src/core/models/ ]       types.ts          — shared embedding/result type definitions
+   ↓
+[ src/cli/ ]               program.ts (COMMAND_GROUPS) + register/*.ts + commands/*.ts  — Commander.js CLI
+[ src/mcp/ ]               server.ts + tools/{search,analysis,clustering,graph,infrastructure,workflow,narrator}.ts — MCP stdio server
+[ src/server/ ]            app.ts + routes/{search,analysis,evolution,graph,guide,narrator,blobs,commits,projections,remote,status,watch}.ts — HTTP API server (remote backend)
 [ src/client/ ]            remoteClient.ts            — client for remote server mode
 ```
 
@@ -353,6 +394,12 @@ git repo
 3. Optionally: time-filter, recency blend, three-signal ranking
 4. Optionally: hybrid re-rank via FTS5 BM25
 5. Format and group results
+
+**Key data flow (knowledge graph, Phases 105–110):**
+1. `index --graph` extracts per-blob structural references (imports/calls/extends/implements) into `structural_refs`, and stable symbol identity (`qualified_name`/`signature_hash`) into `symbols` — TS/TSX/JS/Python only
+2. `gitsema graph build` resolves `structural_refs` against `symbols`/`paths` and truncate-rebuilds typed `graph_nodes`/`edges` (plus `co_change` edges derived from `blob_commits`)
+3. Traversal commands (`blast-radius`, `relate`, `similar`, `hotspots`, `graph callers/callees/neighbors/path`) read `graph_nodes`/`edges` directly — no re-derivation from Git
+4. Hybrid-lens commands (default lens for most of the above) blend this structural traversal with a semantic (vector) similarity pass over the same node/blob
 
 ---
 
