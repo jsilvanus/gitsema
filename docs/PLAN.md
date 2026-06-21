@@ -2769,7 +2769,7 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 ---
 
-### Phase 77 — Unified Indexing + Search Level Concept
+### Phase 77 — Unified Indexing + Search Level Concept *(completed)*
 
 **Background:** Indexing granularity (blob/function/fixed) and search granularity (file/chunk/symbol/module) are currently controlled by separate flags on separate commands (`--chunker` on `index start`, `--level` on `search`). Phase 71 adds a `--level` alias to `index start` to bridge the gap, but the underlying abstractions remain distinct.
 
@@ -2781,7 +2781,15 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 **Complexity:** Medium. Requires schema changes, config propagation, and backwards-compatible search query routing.
 
-**Status:** ⬜ not yet started.
+**Status:** ✅ complete (with two noted deviations below).
+1. Done as specified — `search.ts` auto-recalls the most recently used `embed_config` chunker when `--level` is omitted, mapping it to the right search mode (`src/cli/commands/search.ts`).
+2. Done as specified — `--level file|chunk|symbol|module` on `search` routes to `searchChunksFlag`/`searchSymbolsFlag`/`searchModulesFlag` (`src/cli/commands/search.ts`).
+3. Partially done — see deviation below.
+4. Partially done — see deviation below.
+
+**Deviations from the original spec:**
+- **Goal #3:** "`index start --level function` stores both whole-file and function-level embeddings in one run, today it's either/or" was *not* implemented as implicit dual-level storage under `--level function`. Instead, `index start` adds an explicit `--level multi` value: passing `multi` runs the file-level pass and then re-invokes itself with `--level function`/`--chunker function` to also store function-level embeddings (`src/cli/commands/index.ts`). Plain `--level function` still stores function-level embeddings only, matching its pre-Phase-77 behavior. Users who want both must opt in with `--level multi` rather than getting it "for free" under `function`.
+- **Goal #4:** `models add`/`models update --level <level>` persists `ModelProfile.level` and displays it (`src/cli/register/setup.ts`, `src/cli/commands/models.ts`), but the value is **not yet consumed** anywhere — `indexStartCommand` only resolves `options.level`/`--chunker` and profile chunker presets, and `searchCommand` only uses `options.level` or the latest `embed_config` chunker (never `profile.level`). So a saved `gitsema models add m --level function` default is currently inert; `index start`/`search` calls ignore it. Wiring `profile.level` into both commands as a fallback default (after explicit flags, before `embed_config` auto-recall) remains open follow-up work.
 
 ---
 
