@@ -165,7 +165,9 @@ This section documents all flags used across CLI commands, their consistency, an
 | `--model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override embedding model for current command |
 | `--text-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override text/prose embedding model |
 | `--code-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override source-code embedding model |
-| `--remote` | — | string | env | `search`, `first-seen`, `index start` | Proxy to remote gitsema server |
+| `--remote` | — | string | env | `search`, `first-seen`, `index start`, `tools mcp`, `tools lsp` | Proxy to remote gitsema server; for `tools mcp`/`tools lsp` (Phase 113) this delegates every data-access call via `POST /api/v1/protocol/:operation` instead of indexing/searching against a remote DB directly |
+| `--remote-key` | — | string | env (`GITSEMA_REMOTE_KEY`) | `tools mcp`, `tools lsp` | Bearer token for `--remote` |
+| `--remote-timeout` | — | int (ms) | `10000` | `tools mcp`, `tools lsp` | Abort a remote-delegated call after this many ms |
 | `--branch` | — | string | — | `search`, `first-seen`, `code-search`, `evolution`, `index start` | Restrict to commits reachable from branch |
 | `--hybrid` | — | bool | false | `search`, `first-seen`, `code-search` | Blend vector similarity with BM25 keyword matching |
 | `--bm25-weight` | — | float | 0.3 | `search`, `first-seen`, `code-search` | Weight for BM25 signal in hybrid search |
@@ -327,13 +329,13 @@ This table shows less common flags used by specific commands or command groups.
 - **Strengths:** Standardized protocol, works with Claude, other AI systems
 - **Gaps:** No maintenance commands, some graph commands, no visualization
 - **Protocol:** Stdio-based (JSON-RPC); `gitsema tools mcp`
-- **Future:** MCP HTTP bridge planned (Phase 102+)
+- **Remote delegation:** `gitsema tools mcp --remote <url>` proxies every tool call to a `gitsema tools serve`'s `POST /api/v1/protocol/mcp.<toolName>` route (Phase 113), closing the previously-planned "MCP HTTP bridge" gap
 
 ### HTTP API (`gitsema tools serve`)
 - **Status:** ~30 REST endpoints across multiple routes
 - **Strengths:** Language-agnostic, browser-accessible, remote delegation
 - **Gaps:** Missing graph commands (callers/callees/neighbors), some analysis endpoints
-- **Routes:** `search/`, `analysis/`, `evolution/`, `guide/`, `status/`, `graph/`, `commits/`, `blobs/`, `watch/`, `remote/`
+- **Routes:** `search/`, `analysis/`, `evolution/`, `guide/`, `status/`, `graph/`, `commits/`, `blobs/`, `watch/`, `remote/`, `protocol/` (Phase 113 — generic LSP/MCP remote-delegation dispatch)
 - **Authentication:** Optional bearer token via `--serve-key`
 
 ### CLI Interactive (Planned)

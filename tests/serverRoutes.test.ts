@@ -905,6 +905,52 @@ describe('Embedding provider failure → 502', () => {
 })
 
 // ===========================================================================
+// POST /api/v1/protocol/:operation (Phase 113 — LSP/MCP remote delegation)
+// ===========================================================================
+describe('POST /api/v1/protocol/:operation', () => {
+  it('dispatches mcp.<toolName> operations to the matching MCP tool handler', async () => {
+    const res = await request(app)
+      .post('/api/v1/protocol/mcp.get_skill')
+      .send({ args: {} })
+    expect(res.status).toBe(200)
+    expect(res.body.result).toBeDefined()
+    expect(res.body.result.content).toBeDefined()
+  })
+
+  it('dispatches lsp.<op> operations to the LSP handler', async () => {
+    const res = await request(app)
+      .post('/api/v1/protocol/lsp.references')
+      .send({ args: { text: 'foo' } })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('result')
+  })
+
+  it('returns 404 for an unknown mcp.* operation', async () => {
+    const res = await request(app)
+      .post('/api/v1/protocol/mcp.bogus_tool')
+      .send({ args: {} })
+    expect(res.status).toBe(404)
+    expect(res.body.error).toMatch(/Unknown MCP operation/)
+  })
+
+  it('returns 404 for an unknown lsp.* operation', async () => {
+    const res = await request(app)
+      .post('/api/v1/protocol/lsp.bogus_op')
+      .send({ args: {} })
+    expect(res.status).toBe(404)
+    expect(res.body.error).toMatch(/Unknown LSP operation/)
+  })
+
+  it('returns 404 for an operation with no recognized prefix', async () => {
+    const res = await request(app)
+      .post('/api/v1/protocol/bogus')
+      .send({ args: {} })
+    expect(res.status).toBe(404)
+    expect(res.body.error).toMatch(/Unknown operation/)
+  })
+})
+
+// ===========================================================================
 // Non-existent routes
 // ===========================================================================
 describe('non-existent routes', () => {

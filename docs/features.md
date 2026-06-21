@@ -267,6 +267,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
+| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 5 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
@@ -377,9 +378,26 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 
 | Subcommand | Description |
 |---|---|
-| `gitsema tools mcp` | MCP stdio server (preferred entry point for AI clients) |
-| `gitsema tools lsp [--tcp <port>]` | LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | MCP stdio server (preferred entry point for AI clients) |
+| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | LSP semantic hover server (JSON-RPC over stdio or TCP) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
+
+### Remote delegation (Phase 113)
+
+`tools mcp --remote <url>` and `tools lsp --remote <url>` delegate every data-access
+call to a running `gitsema tools serve` instance instead of executing locally — both
+protocols share one mechanism: `src/core/remote/protocolClient.ts`'s `callRemote()`
+posts `{ args }` to `POST /api/v1/protocol/<operation>` (`mcp.<toolName>` or
+`lsp.<op>`) and unwraps `{ result }` / `{ error }`. `--remote-key`/`GITSEMA_REMOTE_KEY`
+sets a Bearer token; `--remote-timeout`/default 10000ms aborts slow calls. On
+startup, both commands call `checkRemoteHealth()` (`GET /api/v1/status`) and exit
+non-zero immediately if the remote is unreachable, rather than failing on the first
+tool call. No MCP tool handler or LSP method handler was duplicated to add this —
+`registerTool()` (the single chokepoint every MCP tool passes through) and
+`handleRequest()` (LSP's existing JSON-RPC dispatcher) each gained one
+remote-delegation branch; the server-side route reuses the same tool-registration
+functions and LSP dispatcher via a small "capture" indirection, so business logic
+stays in one place.
 
 > Legacy top-level aliases `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work but emit a deprecation warning.
 

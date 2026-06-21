@@ -3,6 +3,16 @@ import { getActiveSession } from '../db/sqlite.js'
 import { embedQuery } from '../embedding/embedQuery.js'
 import { buildProvider } from '../embedding/providerFactory.js'
 import { createServer as createNetServer } from 'node:net'
+import { callRemote, type RemoteConfig } from '../remote/protocolClient.js'
+
+/** Maps JSON-RPC methods that need DB access to the `lsp.<op>` name used by `protocolClient.ts`. */
+const METHOD_TO_REMOTE_OP: Record<string, string> = {
+  'textDocument/hover': 'lsp.hover',
+  'textDocument/definition': 'lsp.definition',
+  'textDocument/references': 'lsp.references',
+  'textDocument/documentSymbol': 'lsp.documentSymbol',
+  'workspace/symbol': 'lsp.workspaceSymbol',
+}
 
 export type JsonRpcRequest = { jsonrpc: '2.0'; id?: number | string; method: string; params?: any }
 export type JsonRpcResponse = { jsonrpc: '2.0'; id?: number | string; result?: any; error?: any }
@@ -25,8 +35,28 @@ export function parseMessage(buffer: Buffer): JsonRpcRequest | null {
   }
 }
 
-export async function handleRequest(dbSession: ReturnType<typeof getActiveSession>, req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
+export async function handleRequest(
+  dbSession: ReturnType<typeof getActiveSession>,
+  req: JsonRpcRequest,
+  remote?: RemoteConfig,
+): Promise<JsonRpcResponse | null> {
   const id = req.id
+
+  // Phase 113: data-needing methods delegate to a remote `gitsema tools serve`
+  // instance when --remote is set; protocol-level methods below (initialize,
+  // shutdown, etc.) always run locally — there's nothing to delegate.
+  if (remote) {
+    const op = METHOD_TO_REMOTE_OP[req.method]
+    if (op) {
+      try {
+        const result = await callRemote(op, req.params, remote)
+        return { jsonrpc: '2.0', id, result }
+      } catch (e: any) {
+        return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e?.message ?? e) } }
+      }
+    }
+  }
+
   if (req.method === 'initialize') {
     return {
       jsonrpc: '2.0', id, result: {
@@ -298,12 +328,12 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
 }
 
 /** Start the LSP server over stdio. */
-export function startLspServer(dbSession: ReturnType<typeof getActiveSession>): void {
+export function startLspServer(dbSession: ReturnType<typeof getActiveSession>, remote?: RemoteConfig): void {
   const stdin = process.stdin
   stdin.on('data', async (chunk: Buffer) => {
     const req = parseMessage(chunk)
     if (!req) return
-    const res = await handleRequest(dbSession, req)
+    const res = await handleRequest(dbSession, req, remote)
     if (res) {
       const out = serializeMessage(res)
       process.stdout.write(out)
@@ -312,12 +342,12 @@ export function startLspServer(dbSession: ReturnType<typeof getActiveSession>): 
 }
 
 /** Start the LSP server over TCP (useful for IDEs that prefer TCP connections). */
-export function startLspTcpServer(dbSession: ReturnType<typeof getActiveSession>, port: number): void {
+export function startLspTcpServer(dbSession: ReturnType<typeof getActiveSession>, port: number, remote?: RemoteConfig): void {
   const server = createNetServer((socket) => {
     socket.on('data', async (chunk: Buffer) => {
       const req = parseMessage(chunk)
       if (!req) return
-      const res = await handleRequest(dbSession, req)
+      const res = await handleRequest(dbSession, req, remote)
       if (res) {
         socket.write(serializeMessage(res))
       }

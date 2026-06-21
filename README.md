@@ -156,11 +156,20 @@ Copies the active index into another storage backend (sqlite/postgres/qdrant) vi
 
 | Command | Description |
 |---|---|
-| `gitsema tools mcp` | Start the MCP stdio server (AI tool interface) |
-| `gitsema tools lsp [--tcp <port>]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | Start the MCP stdio server (AI tool interface) |
+| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
 The old top-level `gitsema mcp`, `gitsema lsp`, `gitsema serve`, and `gitsema backfill-fts` still work as hidden backward-compat aliases.
+
+**Remote delegation (Phase 113):** `--remote <url>` makes `tools mcp`/`tools lsp`
+delegate every data-access call to a running `gitsema tools serve` instance instead
+of running locally — both go through the same `POST /api/v1/protocol/:operation`
+route and `src/core/remote/protocolClient.ts` client (falls back to
+`GITSEMA_REMOTE`/`GITSEMA_REMOTE_KEY` if the flags are omitted, same precedence as
+`index --remote`). On startup, the command does a `GET /api/v1/status` health check
+and exits non-zero immediately if the remote is unreachable, rather than failing on
+the first tool call.
 
 `gitsema tools serve` defaults `POST /api/v1/remote/index` to **persistent** mode:
 the cloned repo and its index are stored under `GITSEMA_DATA_DIR` (default

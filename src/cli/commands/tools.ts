@@ -14,7 +14,23 @@ import { Command } from 'commander'
 import { startMcpServer } from '../../mcp/server.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { startLspServer, startLspTcpServer } from '../../core/lsp/server.js'
+import { checkRemoteHealth, type RemoteConfig } from '../../core/remote/protocolClient.js'
 import { serveCommand } from './serve.js'
+
+interface RemoteOpts {
+  remote?: string
+  remoteKey?: string
+  remoteTimeout?: string
+}
+
+/** Resolves --remote/--remote-key/--remote-timeout, falling back to GITSEMA_REMOTE/GITSEMA_REMOTE_KEY (same precedence as `index --remote`). */
+function resolveRemoteConfig(opts: RemoteOpts): RemoteConfig | undefined {
+  const url = opts.remote ?? process.env.GITSEMA_REMOTE
+  if (!url) return undefined
+  const key = opts.remoteKey ?? process.env.GITSEMA_REMOTE_KEY
+  const timeoutMs = opts.remoteTimeout ? parseInt(opts.remoteTimeout, 10) : undefined
+  return { url, key, timeoutMs }
+}
 
 export function toolsCommand(): Command {
   const cmd = new Command('tools')
@@ -26,8 +42,12 @@ export function toolsCommand(): Command {
   cmd
     .command('mcp')
     .description('Start the gitsema MCP server over stdio (exposes all gitsema capabilities to AI clients)')
-    .action(async () => {
-      await startMcpServer()
+    .option('--remote <url>', 'delegate all tool calls to a running `gitsema tools serve` instance (overrides GITSEMA_REMOTE)')
+    .option('--remote-key <token>', 'Bearer token for --remote (overrides GITSEMA_REMOTE_KEY)')
+    .option('--remote-timeout <ms>', 'timeout in ms for remote calls (default 10000)')
+    .action(async (opts: RemoteOpts) => {
+      const remote = resolveRemoteConfig(opts)
+      await startMcpServer({ remoteUrl: remote?.url, remoteKey: remote?.key, remoteTimeoutMs: remote?.timeoutMs })
     })
 
   // ── lsp ──────────────────────────────────────────────────────────────────
@@ -35,7 +55,20 @@ export function toolsCommand(): Command {
     .command('lsp')
     .description('Start the LSP-compatible semantic hover server (JSON-RPC over stdio or TCP)')
     .option('--tcp <port>', 'listen on TCP port instead of stdio (e.g. --tcp 2087)')
-    .action((opts: { tcp?: string }) => {
+    .option('--remote <url>', 'delegate all data-access calls to a running `gitsema tools serve` instance (overrides GITSEMA_REMOTE)')
+    .option('--remote-key <token>', 'Bearer token for --remote (overrides GITSEMA_REMOTE_KEY)')
+    .option('--remote-timeout <ms>', 'timeout in ms for remote calls (default 10000)')
+    .action(async (opts: RemoteOpts & { tcp?: string }) => {
+      const remote = resolveRemoteConfig(opts)
+      if (remote) {
+        try {
+          await checkRemoteHealth(remote)
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error(`Failed to connect to remote at ${remote.url}: ${msg}`)
+          process.exit(1)
+        }
+      }
       const session = getActiveSession()
       if (opts.tcp) {
         const port = parseInt(opts.tcp, 10)
@@ -43,9 +76,9 @@ export function toolsCommand(): Command {
           console.error('Error: --tcp requires a valid port number (1–65535)')
           process.exit(1)
         }
-        startLspTcpServer(session, port)
+        startLspTcpServer(session, port, remote)
       } else {
-        startLspServer(session)
+        startLspServer(session, remote)
       }
     })
 

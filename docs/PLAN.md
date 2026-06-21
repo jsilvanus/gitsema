@@ -4160,6 +4160,51 @@ from the parity set by design. No schema change.
 
 ---
 
+## LSP & MCP Fleshout Track (Phase 113+) — *in progress*
+
+> **Full design:** [`docs/lsp_and_mcp_fleshout.md`](lsp_and_mcp_fleshout.md) is the
+> single design reference for this track (current-state assessment, the
+> single-remote-delegation-mechanism principle, and Phases A–D). Build order is
+> **A → C → D → B** per the spec's own recommendation. Phase entries below use the
+> next free top-level phase numbers (112 is reserved for the Knowledge Graph
+> Track's "Unified graph UI"; this track starts at 113 to avoid collision).
+
+| Phase | Spec section | Title | Deliverable |
+|---|---|---|---|
+| **113** ✅ | §3 (Phase A) | Generic remote delegation for MCP + LSP | One shared mechanism (`src/core/remote/protocolClient.ts`) lets `gitsema tools mcp --remote <url>` and `gitsema tools lsp --remote <url>` delegate every data-access call to a running `gitsema tools serve` instance via `POST /api/v1/protocol/:operation`. |
+| **114** | §5 (Phase C) | LSP structural navigation | New LSP methods backed by the Phase 107 knowledge-graph tables (`structural_refs`/`graph_nodes`/`edges`) — `callHierarchy/incomingCalls`/`outgoingCalls`, structural-first/semantic-fallback precedence for existing methods. |
+| **115** | §6 (Phase D) | LSP diagnostics, code lens, rich hover | `textDocument/publishDiagnostics` on a background timer (not request-time), code lens, hover enrichment with temporal/risk/structure sections — behind a `--diagnostics` opt-in flag, all gracefully degrading. |
+| **116** | §4 (Phase B) | WebSocket transport | `--websocket <bind-address>` transport for MCP/LSP, depends on Phase 113's remote-delegation plumbing; auth via header, not subprotocol. |
+
+**Status:** Phase 113 ✅ complete. `src/core/remote/protocolClient.ts` exports
+`callRemote()`/`checkRemoteHealth()` — the single shared HTTP client both `tools
+mcp --remote` and `tools lsp --remote` use, posting `{ args }` to
+`POST /api/v1/protocol/<operation>` and unwrapping `{ result }`/`{ error }` (10s
+default timeout via `AbortController`, overridable with `--remote-timeout`). No
+MCP tool handler or LSP method handler was duplicated to add this: `registerTool()`
+(`src/mcp/registerTool.ts`, the single chokepoint every one of the 38 MCP tools
+already passes through) gained one remote-delegation branch keyed on a
+process-wide `setMcpRemoteConfig()`, and `handleRequest()`
+(`src/core/lsp/server.ts`, LSP's existing JSON-RPC dispatcher) gained one branch
+keyed on an optional `remote` parameter threaded through `startLspServer()`/
+`startLspTcpServer()` — both branches sit *before* the existing local-execution
+code path, so local mode is untouched. The new server-side route
+(`src/server/routes/protocol.ts`, mounted at `${base}/protocol`) builds its MCP
+dispatch table by calling the same `registerXxxTools(server)` functions the real
+MCP server uses against a fake `{ tool: (name, ..., fn) => map.set(name, fn) }`
+object (a "capture" indirection — zero duplicated tool logic), and dispatches
+`lsp.<op>` operations by calling `handleLspRequest()` directly with a synthetic
+JSON-RPC request. Both `tools mcp --remote` and `tools lsp --remote` perform a
+`checkRemoteHealth()` (`GET /api/v1/status`) at startup and exit non-zero
+immediately if the remote is unreachable, rather than failing on the first tool
+call (per spec §3). `--remote`/`--remote-key`/`--remote-timeout` fall back to
+`GITSEMA_REMOTE`/`GITSEMA_REMOTE_KEY` (same precedence as `index --remote`). No
+schema change. Tests: `tests/protocolClient.test.ts`,
+`tests/registerTool.test.ts`, plus remote-delegation additions to
+`tests/lsp.test.ts` and `tests/serverRoutes.test.ts`.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.

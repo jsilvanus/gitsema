@@ -35,6 +35,7 @@
  *   POST /analysis/ownership      (Phase 67)
  *   POST /analysis/workflow       (Phase 68)
  *   POST /analysis/eval           (Phase 64)
+ *   POST /protocol/:operation     (Phase 113 — LSP/MCP remote delegation)
  *   GET  /metrics                 (P2 — Prometheus exposition)
  *   GET  /openapi.json            (P2 — OpenAPI 3.1 spec)
  *   GET  /docs                    (P2 — Swagger UI)
@@ -56,6 +57,7 @@ import { evolutionRouter } from './routes/evolution.js'
 import { remoteRouter } from './routes/remote.js'
 import { analysisRouter } from './routes/analysis.js'
 import { graphRouter } from './routes/graph.js'
+import { protocolRouter } from './routes/protocol.js'
 import { watchRouter } from './routes/watch.js'
 import { projectionsRouter } from './routes/projections.js'
 import { openapiRouter } from './routes/openapi.js'
@@ -171,6 +173,9 @@ export function createApp(options: AppOptions): Express {
 
   // Phase 110/111: structural knowledge-graph routes (hotspots, …)
   app.use(`${base}/graph`, repoSessionMiddleware, graphRouter())
+
+  // Phase 113: generic LSP/MCP remote-delegation dispatch — see src/server/routes/protocol.ts
+  app.use(`${base}/protocol`, repoSessionMiddleware, protocolRouter())
 
   app.use(`${base}/watch`, repoSessionMiddleware, watchRouter({ textProvider }))
 

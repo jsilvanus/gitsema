@@ -13,6 +13,8 @@ import { registerWorkflowTools } from './tools/workflow.js'
 import { registerInfrastructureTools } from './tools/infrastructure.js'
 import { registerNarratorTools } from './tools/narrator.js'
 import { registerGraphTools } from './tools/graph.js'
+import { setMcpRemoteConfig } from './registerTool.js'
+import { checkRemoteHealth } from '../core/remote/protocolClient.js'
 import { readFileSync } from 'node:fs'
 
 // Read package version dynamically so the MCP server always matches package.json
@@ -25,7 +27,28 @@ try {
   // fall back to default
 }
 
-export async function startMcpServer(): Promise<void> {
+export interface McpServerOptions {
+  /** Base URL of a running `gitsema tools serve` instance (Phase 113 remote delegation). */
+  remoteUrl?: string
+  remoteKey?: string
+  remoteTimeoutMs?: number
+}
+
+export async function startMcpServer(options: McpServerOptions = {}): Promise<void> {
+  const { remoteUrl, remoteKey, remoteTimeoutMs } = options
+
+  if (remoteUrl) {
+    const cfg = { url: remoteUrl, key: remoteKey, timeoutMs: remoteTimeoutMs }
+    try {
+      await checkRemoteHealth(cfg)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`Failed to connect to remote at ${remoteUrl}: ${msg}\n`)
+      process.exit(1)
+    }
+    setMcpRemoteConfig(cfg)
+  }
+
   const server = new McpServer({
     name: 'gitsema',
     version: _mcpVersion,
