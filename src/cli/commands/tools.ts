@@ -89,7 +89,7 @@ export function toolsCommand(): Command {
   cmd
     .command('lsp')
     .description('Start the LSP-compatible semantic hover server (JSON-RPC over stdio or TCP)')
-    .option('--tcp <port>', 'listen on TCP port instead of stdio (e.g. --tcp 2087)')
+    .option('--tcp <port>', '[deprecated, use --websocket] listen on TCP port instead of stdio (e.g. --tcp 2087)')
     .option('--websocket <bind-address>', 'listen on WebSocket at /lsp instead of stdio (e.g. --websocket 0.0.0.0:4242); TLS is not terminated here, put a reverse proxy in front for wss://')
     .option('--key <token>', 'require this Bearer token for --websocket connections (overrides GITSEMA_WEBSOCKET_KEY); --tcp has no auth mechanism')
     .option('--remote <url>', 'delegate all data-access calls to a running `gitsema tools serve` instance (overrides GITSEMA_REMOTE)')
@@ -123,11 +123,13 @@ export function toolsCommand(): Command {
           console.error('Error: --tcp requires a valid port number (1–65535)')
           process.exit(1)
         }
-        // Known gap (review10 §3.5, tracked in PLAN.md/CLAUDE.md): --tcp has no
-        // auth mechanism at all, unlike --websocket/--http. Warn loudly until a
-        // bearer-token equivalent is added to this transport.
+        // Deprecated (Phase 120): --tcp has no auth mechanism at all, unlike
+        // --websocket/--http, and raw TCP has no header to carry a bearer token in
+        // (unlike WebSocket's upgrade request). --websocket is a strict superset of
+        // --tcp's use case (same JSON-RPC dispatcher, with working auth), so --tcp
+        // is deprecated rather than given a bespoke handshake-auth protocol.
         console.error(
-          `Warning: \`tools lsp --tcp\` has no authentication — any client that can reach port ${port} gets full LSP access (call hierarchy, diagnostics, structural defs). Prefer --websocket --key, or restrict network access to this port.`,
+          `Deprecation notice: \`tools lsp --tcp\` is deprecated and has no authentication — any client that can reach port ${port} gets full LSP access (call hierarchy, diagnostics, structural defs). Use \`--websocket <bind-address> --key <token>\` instead.`,
         )
         startLspTcpServer(session, port, remote, lspOptions)
       } else {

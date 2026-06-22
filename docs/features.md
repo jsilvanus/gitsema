@@ -380,7 +380,7 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | Subcommand | Description |
 |---|---|
 | `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--http <bind-address>] [--key <token>]` | MCP stdio server (preferred entry point for AI clients) |
-| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) |
+| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) — `--tcp` is deprecated, use `--websocket` |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
 
 ### Remote delegation (Phase 113)
@@ -453,11 +453,15 @@ delegation (Phase 113) is purely request/response and has no mechanism for the
 remote server to push notifications back to a local client — `gitsema tools lsp
 --remote <url> --diagnostics` prints a warning and runs without diagnostics.
 
-`gitsema tools lsp --tcp <port>` has no `--key`/authentication mechanism at all (unlike
-`--websocket`, which supports `--key`/`GITSEMA_WEBSOCKET_KEY`) — any client that can
-reach the port gets full LSP access. A startup warning is printed recommending
-`--websocket --key` instead; `--tcp` connections are still bounded by the same
-`DEFAULT_MAX_CONNECTIONS` cap as the other transports (review10 §3.5).
+`gitsema tools lsp --tcp <port>` is **deprecated** (Phase 120): it has no
+`--key`/authentication mechanism at all (unlike `--websocket`, which supports
+`--key`/`GITSEMA_WEBSOCKET_KEY`), and raw TCP has no header to carry a bearer
+token in — any client that can reach the port gets full LSP access. A
+deprecation warning is printed on every invocation recommending `--websocket
+--key` instead, which is a strict superset of `--tcp`'s use case (same
+JSON-RPC dispatcher, with working auth). `--tcp` connections remain bounded
+by the same `DEFAULT_MAX_CONNECTIONS` cap as the other transports
+(review10 §3.5) and the flag still works — it is not scheduled for removal.
 
 ### WebSocket transport (Phase 116)
 

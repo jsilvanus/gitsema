@@ -160,7 +160,7 @@ Copies the active index into another storage backend (sqlite/postgres/qdrant) vi
 | Command | Description |
 |---|---|
 | `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--http <bind-address>] [--key <token>]` | Start the MCP stdio server (AI tool interface) |
-| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) |
+| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) — `--tcp` is deprecated, use `--websocket` |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
 The old top-level `gitsema mcp`, `gitsema lsp`, `gitsema serve`, and `gitsema backfill-fts` still work as hidden backward-compat aliases.
@@ -209,10 +209,12 @@ response/request header), capped at 100 concurrent sessions; request bodies
 are capped the same way as `tools serve` (`GITSEMA_MAX_BODY_SIZE`, default
 1mb). Binding a non-loopback host without a key prints a startup warning.
 
-**Known gap:** `tools lsp --tcp` has no authentication mechanism at all (unlike
-`--websocket`/`--http`) — any client that can reach the port gets full LSP
-access. A startup warning is printed; prefer `--websocket --key` for any
-network-reachable deployment until this is closed.
+**`--tcp` is deprecated:** `tools lsp --tcp` has no authentication mechanism at
+all (unlike `--websocket`/`--http`), and raw TCP has no header to carry a
+bearer token in — any client that can reach the port gets full LSP access. Use
+`--websocket <bind-address> --key <token>` instead, which covers the same
+network-LSP use case with working auth. A deprecation warning is printed on
+every `--tcp` invocation; the flag is not yet scheduled for removal.
 
 `gitsema tools serve` defaults `POST /api/v1/remote/index` to **persistent** mode:
 the cloned repo and its index are stored under `GITSEMA_DATA_DIR` (default

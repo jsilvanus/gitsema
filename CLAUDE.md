@@ -1,12 +1,13 @@
 ## Canonical documentation
 
-These are the five canonical reference documents for this repository. Keep them accurate and up-to-date. 
+These are the seven canonical reference documents for this repository. Keep them accurate and up-to-date. 
 
 | [`README.md`](README.md) | User-facing overview: installation, quick start, configuration, command reference |
 | [`docs/features.md`](docs/features.md) | Comprehensive feature catalog grouped by area (indexing, search, MCP tools, HTTP API, etc.) |
 | [`docs/PLAN.md`](docs/PLAN.md) | Full development roadmap: phase history, current status, backlog, and planned phases |
 | [`docs/parity.md`](docs/parity.md) | **Tool parity & flag coherence:** canonical matrix of tool availability across CLI/REPL/Guide/MCP/HTTP and flag implementation consistency; update when tools or interfaces change |
 | [`docs/feature-ideas.md`](docs/feature-ideas.md) | **Undesigned feature ideas:** upcoming concepts not yet in active dev (PLAN.md) or fully designed; staging area for "what now?" and medium-term product direction |
+| [`docs/deprecations.md`](docs/deprecations.md) | **Deprecation registry:** every deprecated command/flag/transport, its replacement, when it was deprecated, and whether/when it's scheduled for removal; update whenever something is deprecated or actually removed |
 | [`skill/gitsema-ai-assistant.md`](skill/gitsema-ai-assistant.md) | AI workflow skill/playbook for operating gitsema in coding tasks |
 
 The latest review is here. Do not edit the review file, but update that file with new review file after a review.
@@ -20,8 +21,9 @@ When implementing a new feature or phase:
 2. Update the command/option tables in **`README.md`** if the feature adds a new command or flag.
 3. Mark the phase as completed in **`docs/PLAN.md`** and note any deviations from the original spec.
 4. **Update `docs/parity.md`** if the change affects tool availability across interfaces (CLI/REPL/Guide/MCP/HTTP) or adds/modifies command flags. See the "Maintenance & Governance" section in parity.md.
-5. Use latest review when starting the next iteration of development.
-6. **Add a changeset** describing the change (see "Releases & changesets" below). Do **not** run `npm version` or push `v*` tags manually — versioning and publishing are handled by changesets.
+5. **Update `docs/deprecations.md`** if the change deprecates a command/flag/transport (add a row with replacement + evidence) or actually removes something previously listed there (delete its row only once the removal has shipped).
+6. Use latest review when starting the next iteration of development.
+7. **Add a changeset** describing the change (see "Releases & changesets" below). Do **not** run `npm version` or push `v*` tags manually — versioning and publishing are handled by changesets.
 
 ---
 
@@ -231,7 +233,7 @@ Preferred entry point for all long-running protocol servers. Subcommands:
 | Subcommand | Description |
 |---|---|
 | `gitsema tools mcp` | Start the MCP stdio server (AI tool interface) |
-| `gitsema tools lsp [--tcp <port>]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools lsp [--tcp <port>]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP; `--tcp` is deprecated, use `--websocket`) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
 The old top-level `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work as hidden backward-compat aliases.
@@ -369,7 +371,7 @@ git repo
    │                        chattydeerProvider.ts, cliProvider.ts, cliAdapters.ts — HTTP / local-CLI LLM backends
    │                        redact.ts         — secret/PII redaction applied to all outbound LLM content
 [ src/core/llm/ ]          narrator.ts       — system-prompt builders shared by narrator/guide/skill generator
-[ src/core/lsp/ ]          server.ts         — JSON-RPC semantic hover server (stdio or `--tcp`)
+[ src/core/lsp/ ]          server.ts         — JSON-RPC semantic hover server (stdio, `--websocket`, or deprecated `--tcp`)
 [ src/core/viz/ ]          htmlRenderer*.ts  — interactive HTML output for evolution/search/clusters/map
 [ src/core/models/ ]       types.ts          — shared embedding/result type definitions
    ↓
@@ -633,4 +635,4 @@ For the full list of gaps and planned work, see [`docs/PLAN.md`](docs/PLAN.md) a
 | Gap | Notes |
 |---|---|
 | **Python model server** | Docker image and Dockerfile provided to avoid local Rust/wheel issues on Windows; use Docker to run the modelserver. |
-| **Unauthenticated `tools lsp --tcp`** | No Bearer-token mechanism at all (review10 §3.5), unlike `--websocket`/`--http` which support `--key`/`GITSEMA_WEBSOCKET_KEY`/`GITSEMA_MCP_HTTP_KEY`. A startup warning is printed; closing this requires either adding auth to the TCP transport or deprecating it in favor of `--websocket`. |
+| **Deprecated `tools lsp --tcp`** | No Bearer-token mechanism at all (review10 §3.5), unlike `--websocket`/`--http` which support `--key`/`GITSEMA_WEBSOCKET_KEY`/`GITSEMA_MCP_HTTP_KEY` — raw TCP has no header to carry a token in. Deprecated in favor of `--websocket` (Phase 120) rather than given a bespoke handshake-auth protocol; a deprecation warning is printed on every invocation, but the flag still works and is not yet scheduled for removal. |
