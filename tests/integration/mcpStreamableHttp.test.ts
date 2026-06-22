@@ -6,11 +6,12 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
+import type { Server } from 'node:http'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { startMcpStreamableHttpServer } from '../../src/mcp/streamableHttpServer.js'
 
-let port = 18500
+let port = 18600
 function nextPort(): number {
   return port++
 }
@@ -20,12 +21,18 @@ afterEach(() => {
   for (const close of closers.splice(0)) close()
 })
 
+/** Starts a test server on the next free port and waits for it to actually be listening. */
+async function startTestServer(authKey: string | undefined): Promise<{ port: number; server: Server }> {
+  const p = nextPort()
+  const server = startMcpStreamableHttpServer('127.0.0.1', p, authKey)
+  closers.push(() => server.close())
+  await new Promise<void>((resolve) => server.once('listening', resolve))
+  return { port: p, server }
+}
+
 describe('MCP Streamable HTTP transport (Phase 117)', () => {
   it('round-trips tools/list and tools/call over a real HTTP session', async () => {
-    const p = nextPort()
-    const httpServer = startMcpStreamableHttpServer('127.0.0.1', p, undefined)
-    closers.push(() => httpServer.close())
-    await new Promise((r) => setTimeout(r, 100))
+    const { port: p } = await startTestServer(undefined)
 
     const client = new Client({ name: 'test-client', version: '1.0.0' })
     const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${p}/mcp`))
@@ -40,10 +47,7 @@ describe('MCP Streamable HTTP transport (Phase 117)', () => {
   })
 
   it('reuses the same session across multiple sequential requests', async () => {
-    const p = nextPort()
-    const httpServer = startMcpStreamableHttpServer('127.0.0.1', p, undefined)
-    closers.push(() => httpServer.close())
-    await new Promise((r) => setTimeout(r, 100))
+    const { port: p } = await startTestServer(undefined)
 
     const client = new Client({ name: 'test-client', version: '1.0.0' })
     const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${p}/mcp`))
@@ -62,10 +66,7 @@ describe('MCP Streamable HTTP transport (Phase 117)', () => {
   })
 
   it('rejects requests with a missing or wrong Bearer token', async () => {
-    const p = nextPort()
-    const httpServer = startMcpStreamableHttpServer('127.0.0.1', p, 'secret-token')
-    closers.push(() => httpServer.close())
-    await new Promise((r) => setTimeout(r, 100))
+    const { port: p } = await startTestServer('secret-token')
 
     const client = new Client({ name: 'test-client', version: '1.0.0' })
     const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${p}/mcp`), {
@@ -75,10 +76,7 @@ describe('MCP Streamable HTTP transport (Phase 117)', () => {
   })
 
   it('accepts requests with the correct Bearer token', async () => {
-    const p = nextPort()
-    const httpServer = startMcpStreamableHttpServer('127.0.0.1', p, 'secret-token')
-    closers.push(() => httpServer.close())
-    await new Promise((r) => setTimeout(r, 100))
+    const { port: p } = await startTestServer('secret-token')
 
     const client = new Client({ name: 'test-client', version: '1.0.0' })
     const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${p}/mcp`), {

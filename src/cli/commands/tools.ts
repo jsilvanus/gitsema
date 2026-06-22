@@ -35,6 +35,16 @@ function resolveRemoteConfig(opts: RemoteOpts): RemoteConfig | undefined {
   return { url, key, timeoutMs }
 }
 
+/** Parses a `--websocket`/`--http` bind address, printing the error and exiting on failure. */
+function parseBindAddressOrExit(addr: string): { host: string; port: number } {
+  try {
+    return parseBindAddress(addr)
+  } catch (err: unknown) {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exit(1)
+  }
+}
+
 export function toolsCommand(): Command {
   const cmd = new Command('tools')
     .description(
@@ -56,24 +66,12 @@ export function toolsCommand(): Command {
         console.error(
           'Warning: --websocket is not part of the standard MCP transport set (stdio/SSE/Streamable HTTP); most MCP clients and harnesses do not support raw WebSocket and will fail to connect. Kept for forward compatibility; use stdio (default) unless your client specifically supports WebSocket.',
         )
-        let bind: { host: string; port: number }
-        try {
-          bind = parseBindAddress(opts.websocket)
-        } catch (err: unknown) {
-          console.error(err instanceof Error ? err.message : String(err))
-          process.exit(1)
-        }
+        const bind = parseBindAddressOrExit(opts.websocket)
         startMcpWebSocketServer(bind.host, bind.port, opts.key)
         return
       }
       if (opts.http) {
-        let bind: { host: string; port: number }
-        try {
-          bind = parseBindAddress(opts.http)
-        } catch (err: unknown) {
-          console.error(err instanceof Error ? err.message : String(err))
-          process.exit(1)
-        }
+        const bind = parseBindAddressOrExit(opts.http)
         startMcpStreamableHttpServer(bind.host, bind.port, opts.key)
         return
       }
@@ -109,13 +107,7 @@ export function toolsCommand(): Command {
       const session = getActiveSession()
       const lspOptions = { diagnostics: opts.diagnostics }
       if (opts.websocket) {
-        let bind: { host: string; port: number }
-        try {
-          bind = parseBindAddress(opts.websocket)
-        } catch (err: unknown) {
-          console.error(err instanceof Error ? err.message : String(err))
-          process.exit(1)
-        }
+        const bind = parseBindAddressOrExit(opts.websocket)
         startLspWebSocketServer(session, bind.host, bind.port, opts.key, remote, lspOptions)
       } else if (opts.tcp) {
         const port = parseInt(opts.tcp, 10)

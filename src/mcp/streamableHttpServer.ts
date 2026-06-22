@@ -62,6 +62,12 @@ export function startMcpStreamableHttpServer(host: string, port: number, authKey
         sessions.delete(sid)
       },
     })
+    // Also clean up on abrupt close/error (not just the graceful onsessionclosed
+    // handshake), otherwise a session that drops without DELETE-ing /mcp leaks
+    // its McpServer + transport in `sessions` forever.
+    transport.onclose = () => {
+      if (transport.sessionId) sessions.delete(transport.sessionId)
+    }
     await server.connect(transport)
     await transport.handleRequest(req, res)
   }
