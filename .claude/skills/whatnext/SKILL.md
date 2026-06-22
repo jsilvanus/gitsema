@@ -1,6 +1,6 @@
 ---
 name: whatnext
-description: Cross-check docs/PLAN.md, docs/feature-ideas.md, and the latest docs/reviewN.md against the actual source to find what's genuinely left to do, then present a prioritized findings report. Use when the user asks "what's left", "what should we do next", "what's outstanding", or wants a roadmap/backlog status check.
+description: Cross-check the latest docs/reviewN.md, then docs/PLAN.md, then docs/feature-ideas.md (in that priority order) against the actual source to find what's genuinely left to do, then present a prioritized findings report. Use when the user asks "what's left", "what should we do next", "what's outstanding", or wants a roadmap/backlog status check.
 argument-hint: [optional focus area, e.g. "storage backends" or "LSP"]
 ---
 
@@ -23,6 +23,15 @@ code:
   findings have already been fixed in later commits — **never report a
   review finding as "open" without checking the current source.**
 
+## Priority order
+
+Review findings outrank PLAN backlog, which outranks feature-ideas. Scan and
+report in that order — review findings are concrete and time-sensitive
+(often correctness/security issues against current code), PLAN backlog is
+committed-to roadmap work, and feature-ideas are undesigned, lowest-priority
+by definition. Don't let feature-ideas crowd the top of the report just
+because that doc is longer or newer.
+
 ## What to do
 
 1. **Find the canonical docs.** Read `CLAUDE.md`'s "Canonical documentation"
@@ -30,22 +39,9 @@ code:
    latest review file (its filename changes as new reviews are written —
    don't hardcode `review9.md`).
 
-2. **Scan `docs/PLAN.md`:**
-   - Grep for `^### Phase` headings without `✅`/`completed` in the title,
-     and read enough context around each to tell whether it's actually done
-     (older phases often lack the emoji but have completion language in the
-     body — don't assume an unmarked heading means undone work).
-   - Read the "Long-Term Investments" and "Non-goals for now" tables at the
-     bottom — these are easy to miss and are a common source of real backlog.
-
-3. **Scan `docs/feature-ideas.md`** for ideas not yet in `PLAN.md`. For each
-   one, check whether a later PLAN.md phase already shipped it (search
-   PLAN.md for the relevant keywords/command names) — flag any idea that's
-   actually done so it can be pruned later.
-
-4. **Scan the latest review doc.** For every numbered finding (especially
-   Critical/High severity ones), verify against current source before
-   trusting it:
+2. **Scan the latest review doc first.** For every numbered finding
+   (especially Critical/High severity ones), verify against current source
+   before trusting it:
    - For a "missing X" claim, grep for X in the cited file/module.
    - For a "function Y doesn't do Z" claim, read function Y and check.
    - Check `git log --oneline -- <file>` for the cited file to see if a later
@@ -54,6 +50,19 @@ code:
    - Classify each finding as **resolved** (cite the commit/code that fixed
      it), **still open** (cite the current code proving it), or
      **partially resolved** (some sub-points fixed, some not).
+
+3. **Scan `docs/PLAN.md` second:**
+   - Grep for `^### Phase` headings without `✅`/`completed` in the title,
+     and read enough context around each to tell whether it's actually done
+     (older phases often lack the emoji but have completion language in the
+     body — don't assume an unmarked heading means undone work).
+   - Read the "Long-Term Investments" and "Non-goals for now" tables at the
+     bottom — these are easy to miss and are a common source of real backlog.
+
+4. **Scan `docs/feature-ideas.md` last**, for ideas not yet in `PLAN.md`.
+   For each one, check whether a later PLAN.md phase already shipped it
+   (search PLAN.md for the relevant keywords/command names) — flag any idea
+   that's actually done so it can be pruned later.
 
 5. **Check changesets and version drift** (cheap, high-signal): compare
    `package.json`'s version against `docs/features.md`'s header banner and
@@ -70,9 +79,10 @@ Present a single findings report to the user, not a wall of raw doc dumps:
 
 1. **One-line summary** — how stale are the docs, roughly how much is
    actually left.
-2. **Verified still-open items**, grouped by source (review findings / PLAN
-   backlog / feature-ideas), each with: what it is, why it's still open
-   (cite file:line or command output), and a rough size/priority estimate.
+2. **Verified still-open items**, grouped by source **in priority order:
+   review findings, then PLAN backlog, then feature-ideas** — each with: what
+   it is, why it's still open (cite file:line or command output), and a
+   rough size/priority estimate.
 3. **Resolved-but-undocumented items** — things that are actually done but
    still listed as open in a doc; flag these for a doc-pruning pass (don't
    silently fix the docs yourself unless asked).
