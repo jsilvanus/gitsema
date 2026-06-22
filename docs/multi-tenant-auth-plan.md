@@ -1,7 +1,7 @@
 # Multi-Tenant Auth & User Access Control — Design Plan
 
 **Status:** draft — direction chosen, not yet built.
-**Targets:** proposed Phases 122–125 (numbers to be confirmed when scheduled into `docs/PLAN.md`).
+**Targets:** Phases 122–125 (`docs/PLAN.md` "Multi-Tenant Auth Track").
 **Scope:** gitsema-side ("Semahub Layer 1") user accounts, authentication, and
 a per-user / per-repo / per-branch authorization model for `gitsema tools
 serve`. Explicitly **excludes** Semahub's SaaS layer (signup marketing pages,

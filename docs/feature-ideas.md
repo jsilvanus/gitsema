@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-06-22 (added superadmin-locked model set idea; refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md`, kept cross-repo blob dedup as an open idea)
+**Last updated:** 2026-06-22 (refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md` and the superadmin-locked model set idea into `docs/locked-model-set-plan.md`; kept cross-repo blob dedup as an open idea)
 **Audience:** Developers considering next phases; product planning
 
 > **Note:** As of this update, the LSP/MCP remote-delegation foundation this
@@ -300,6 +300,17 @@ genuinely new/changed blobs introduced by the fork.
 ---
 
 ## Superadmin-Locked Model Set (Server-Side Model Allowlist)
+
+> **Refined into:** **[`docs/locked-model-set-plan.md`](locked-model-set-plan.md)**.
+> That doc's research found that the embedding half of this idea needed a
+> genuinely new capability — a multi-tenant server has only ever had a
+> single, process-wide embedding model with no per-request override, so
+> "locking" it was previously a no-op; the design adds multi-profile serving
+> first, then admin/org-level enabled-set control on top. The narrator/guide
+> half was already multi-model today and just needed admin-gating + a
+> never-persisted BYOK path, both designed in that doc. The gaps below are
+> kept for history; see that doc for resolved answers and remaining open
+> questions.
 
 ### Problem
 - On a shared/multi-tenant server (`gitsema tools serve`), nothing today

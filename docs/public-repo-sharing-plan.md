@@ -1,9 +1,9 @@
 # Public Repo Sharing: Visibility & Attach-as-Reader
 
 **Status:** draft
-**Target phases:** proposed, no numbers assigned yet — depends on
-`docs/multi-tenant-auth-plan.md` Phase A (users/sessions) and Phase B
-(`orgs`/`repo_grants`) landing first; see §5.
+**Target phases:** Phases 126–127 (`docs/PLAN.md` "Public Repo Sharing
+Track") — depends on `docs/multi-tenant-auth-plan.md` Phase A (122,
+users/sessions) and Phase B (123, `orgs`/`repo_grants`) landing first; see §5.
 **Scope:** the access-control layer on top of `gitsema tools serve`'s
 existing per-URL repo registry — a `visibility` flag, auto-granted read
 access when a second user attaches to an existing public repo's shared
