@@ -453,6 +453,12 @@ delegation (Phase 113) is purely request/response and has no mechanism for the
 remote server to push notifications back to a local client — `gitsema tools lsp
 --remote <url> --diagnostics` prints a warning and runs without diagnostics.
 
+`gitsema tools lsp --tcp <port>` has no `--key`/authentication mechanism at all (unlike
+`--websocket`, which supports `--key`/`GITSEMA_WEBSOCKET_KEY`) — any client that can
+reach the port gets full LSP access. A startup warning is printed recommending
+`--websocket --key` instead; `--tcp` connections are still bounded by the same
+`DEFAULT_MAX_CONNECTIONS` cap as the other transports (review10 §3.5).
+
 ### WebSocket transport (Phase 116)
 
 Both `gitsema tools mcp --websocket <bind-address>` and `gitsema tools lsp --websocket
@@ -460,7 +466,12 @@ Both `gitsema tools mcp --websocket <bind-address>` and `gitsema tools lsp --web
 respectively, as an alternative to stdio/TCP for clients that need a network-reachable
 transport (no `--path` flag in v1). `--key <token>` requires a matching
 `Authorization: Bearer <token>` header on the WS upgrade request (mirrors
-`gitsema tools serve --key`'s convention); unset means no auth. gitsema does not
+`gitsema tools serve --key`'s convention); unset means no auth. `--key` falls back to
+the shared `GITSEMA_WEBSOCKET_KEY` env var, and binding to a non-loopback host with no
+key prints a startup warning (review10 §3.3). Connections are bounded by a fixed
+`maxPayload` (`DEFAULT_MAX_WS_PAYLOAD`, 10MB) and a connection-count cap
+(`DEFAULT_MAX_CONNECTIONS`, 100; `src/core/util/websocket.ts`) so an unbounded client
+can't exhaust memory or fan out unbounded sessions. gitsema does not
 terminate TLS — put a reverse proxy in front for `wss://`.
 
 The MCP SDK ships no server-side WebSocket transport, so `src/mcp/webSocketTransport.ts`
@@ -490,7 +501,12 @@ fix for the MCP side.
 (`@modelcontextprotocol/sdk/server/streamableHttp.js`) — the SDK's actual recommended
 network transport, unlike the non-standard `--websocket`. `--key <token>` requires a
 matching `Authorization: Bearer <token>` header, same convention as `--websocket`/`gitsema
-tools serve --key`. gitsema does not terminate TLS — put a reverse proxy in front for
+tools serve --key`; it falls back to `GITSEMA_MCP_HTTP_KEY`, and binding to a
+non-loopback host with no key warns at startup (review10 §3.3). Request bodies are
+capped via `GITSEMA_MAX_BODY_SIZE` (default `1mb`, checked against the declared
+`Content-Length` since the SDK consumes the body stream itself) and concurrent
+sessions are capped at `DEFAULT_MAX_CONNECTIONS` (100), rejecting new sessions with
+`503` once full. gitsema does not terminate TLS — put a reverse proxy in front for
 `https://`.
 
 Sessions are stateful: a `POST /mcp` with no `Mcp-Session-Id` header and an `initialize`

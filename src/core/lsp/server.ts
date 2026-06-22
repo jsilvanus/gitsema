@@ -5,7 +5,7 @@ import { buildProvider } from '../embedding/providerFactory.js'
 import { createServer as createNetServer } from 'node:net'
 import { createServer as createHttpServer } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { checkBearerAuth } from '../util/websocket.js'
+import { checkBearerAuth, DEFAULT_MAX_WS_PAYLOAD, DEFAULT_MAX_CONNECTIONS, ConnectionLimiter } from '../util/websocket.js'
 import { callRemote, type RemoteConfig } from '../remote/protocolClient.js'
 import {
   activeGraphStore,
@@ -552,9 +552,17 @@ export function startLspTcpServer(
   options?: LspServerOptions,
 ): void {
   const sockets = new Set<import('node:net').Socket>()
+  const limiter = new ConnectionLimiter(DEFAULT_MAX_CONNECTIONS)
   const server = createNetServer((socket) => {
+    if (!limiter.tryAcquire()) {
+      socket.destroy()
+      return
+    }
     sockets.add(socket)
-    socket.on('close', () => sockets.delete(socket))
+    socket.on('close', () => {
+      sockets.delete(socket)
+      limiter.release()
+    })
     socket.on('data', async (chunk: Buffer) => {
       const req = parseMessage(chunk)
       if (!req) return
@@ -589,7 +597,8 @@ export function startLspWebSocketServer(
 ): import('node:http').Server {
   const sockets = new Set<WebSocket>()
   const httpServer = createHttpServer()
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({ noServer: true, maxPayload: DEFAULT_MAX_WS_PAYLOAD })
+  const limiter = new ConnectionLimiter(DEFAULT_MAX_CONNECTIONS)
 
   httpServer.on('upgrade', (req, socket, head) => {
     const url = req.url ?? ''
@@ -599,12 +608,20 @@ export function startLspWebSocketServer(
       socket.destroy()
       return
     }
+    if (!limiter.tryAcquire()) {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n')
+      socket.destroy()
+      return
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
   })
 
   wss.on('connection', (ws: WebSocket) => {
     sockets.add(ws)
-    ws.on('close', () => sockets.delete(ws))
+    ws.on('close', () => {
+      sockets.delete(ws)
+      limiter.release()
+    })
     ws.on('message', async (data: Buffer) => {
       let req: JsonRpcRequest
       try {

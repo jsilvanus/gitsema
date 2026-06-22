@@ -633,3 +633,4 @@ For the full list of gaps and planned work, see [`docs/PLAN.md`](docs/PLAN.md) a
 | Gap | Notes |
 |---|---|
 | **Python model server** | Docker image and Dockerfile provided to avoid local Rust/wheel issues on Windows; use Docker to run the modelserver. |
+| **Unauthenticated `tools lsp --tcp`** | No Bearer-token mechanism at all (review10 §3.5), unlike `--websocket`/`--http` which support `--key`/`GITSEMA_WEBSOCKET_KEY`/`GITSEMA_MCP_HTTP_KEY`. A startup warning is printed; closing this requires either adding auth to the TCP transport or deprecating it in favor of `--websocket`. |

@@ -27,8 +27,8 @@ export async function resolveNode(graph: GraphStore, identifier: string): Promis
   const fileNode = await graph.getNode(fileNodeKey(identifier))
   if (fileNode) return { status: 'found', node: fileNode }
 
-  const all = await graph.allNodes()
-  const candidates = all.filter((n) => n.kind !== 'file' && n.kind !== 'external' && n.displayName === identifier)
+  const matches = await graph.findByDisplayName(identifier)
+  const candidates = matches.filter((n) => n.kind !== 'file' && n.kind !== 'external')
   if (candidates.length === 1) return { status: 'found', node: candidates[0] }
   if (candidates.length > 1) return { status: 'ambiguous', candidates }
   return { status: 'not-found' }

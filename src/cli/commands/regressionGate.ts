@@ -15,13 +15,14 @@
  *   3 — one or more concepts drifted beyond threshold (CI gate failure)
  */
 
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch, cosineSimilarity } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_USAGE, EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
 import { resolveOutputs, getSink } from '../../utils/outputSink.js'
+import { isSafeGitRange } from '../../core/narrator/narrator.js'
 
 export interface RegressionGateOptions {
   base?: string
@@ -86,11 +87,18 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
   const { providerType, textModel: modelName } = resolveModels({})
   const provider = buildProviderOrExit(providerType, modelName, EXIT_RUNTIME)
 
-  // Resolve refs to commit hashes for display
+  // Resolve refs to commit hashes for display. Spawned via execFileSync (no shell)
+  // and gated through isSafeGitRange, the same pattern used by narrator.ts, since
+  // baseRef/headRef can otherwise be crafted to look like a git option (e.g. a
+  // leading `-`).
   let baseHash = baseRef; let headHash = headRef
   try {
-    baseHash = execSync(`git rev-parse --short ${baseRef}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
-    headHash = execSync(`git rev-parse --short ${headRef}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    if (isSafeGitRange(baseRef)) {
+      baseHash = execFileSync('git', ['rev-parse', '--short', baseRef], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    }
+    if (isSafeGitRange(headRef)) {
+      headHash = execFileSync('git', ['rev-parse', '--short', headRef], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    }
   } catch { /* use as-is */ }
 
   if (format === 'text') {

@@ -78,6 +78,9 @@ Configuration is read from environment variables or persisted via `gitsema confi
 | `GITSEMA_LOG_MAX_BYTES` | `1048576` | Log rotation threshold (1 MB) |
 | `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema tools serve` |
 | `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
+| `GITSEMA_WEBSOCKET_KEY` | *(optional)* | Bearer token fallback for `tools mcp --websocket`/`tools lsp --websocket` when `--key` is omitted |
+| `GITSEMA_MCP_HTTP_KEY` | *(optional)* | Bearer token fallback for `tools mcp --http` when `--key` is omitted |
+| `GITSEMA_MAX_BODY_SIZE` | `1mb` | Body-size cap for `tools serve` and `tools mcp --http` (e.g. `5mb`) |
 | `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
 | `GITSEMA_DATA_DIR` | `~/.gitsema/data` | Root directory where `gitsema tools serve` persists cloned repos + index DBs (`repos/<repoId>/{repo,index.db}`, `registry.db`) |
 
@@ -183,21 +186,33 @@ server-push notification and remote delegation is request/response-only).
 **WebSocket transport (Phase 116):** `--websocket <bind-address>` (e.g.
 `--websocket 0.0.0.0:4242`) listens on a fixed `/mcp` or `/lsp` path instead of
 stdio/TCP. `--key <token>` requires a matching `Authorization: Bearer <token>`
-header on the WS upgrade request; gitsema does not terminate TLS, so put a
-reverse proxy in front for `wss://`. Unlike `--remote` delegation, WebSocket
-supports server push, so `--diagnostics` works normally together with
-`--websocket`. Raw WebSocket is not one of MCP's standard transports, so
-`gitsema tools mcp --websocket` prints a startup warning that most MCP clients
-won't support it — kept for forward compatibility only; prefer `--http`
-(below) for MCP.
+header on the WS upgrade request, falling back to `GITSEMA_WEBSOCKET_KEY` if
+`--key` is omitted (shared by `tools mcp --websocket` and `tools lsp
+--websocket`); gitsema does not terminate TLS, so put a reverse proxy in front
+for `wss://`. Unlike `--remote` delegation, WebSocket supports server push, so
+`--diagnostics` works normally together with `--websocket`. Raw WebSocket is
+not one of MCP's standard transports, so `gitsema tools mcp --websocket`
+prints a startup warning that most MCP clients won't support it — kept for
+forward compatibility only; prefer `--http` (below) for MCP. Both WebSocket
+servers cap message size (`maxPayload`, 10MB default) and concurrent
+connections (100 default); binding a non-loopback host without a key prints a
+startup warning.
 
 **MCP Streamable HTTP transport (Phase 117):** `gitsema tools mcp --http
 <bind-address>` (e.g. `--http 0.0.0.0:4242`) listens on a fixed `/mcp` path
 using the MCP SDK's own `StreamableHTTPServerTransport` — the SDK's actual
 recommended network transport. Same `--key <token>` Bearer-auth convention as
-`--websocket`; gitsema does not terminate TLS, so put a reverse proxy in front
-for `https://`. Sessions are stateful and span multiple HTTP requests (tracked
-via the `Mcp-Session-Id` response/request header).
+`--websocket`, falling back to `GITSEMA_MCP_HTTP_KEY`; gitsema does not
+terminate TLS, so put a reverse proxy in front for `https://`. Sessions are
+stateful and span multiple HTTP requests (tracked via the `Mcp-Session-Id`
+response/request header), capped at 100 concurrent sessions; request bodies
+are capped the same way as `tools serve` (`GITSEMA_MAX_BODY_SIZE`, default
+1mb). Binding a non-loopback host without a key prints a startup warning.
+
+**Known gap:** `tools lsp --tcp` has no authentication mechanism at all (unlike
+`--websocket`/`--http`) — any client that can reach the port gets full LSP
+access. A startup warning is printed; prefer `--websocket --key` for any
+network-reachable deployment until this is closed.
 
 `gitsema tools serve` defaults `POST /api/v1/remote/index` to **persistent** mode:
 the cloned repo and its index are stored under `GITSEMA_DATA_DIR` (default

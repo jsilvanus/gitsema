@@ -16,7 +16,7 @@
  */
 
 import * as fs from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
@@ -25,6 +25,7 @@ import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { structuralContextForPath, formatStructuralContext, type StructuralContext } from '../../core/graph/structuralContext.js'
 import { parseLens } from '../lib/lens.js'
+import { isSafeGitRange } from '../../core/narrator/narrator.js'
 
 export interface CodeReviewOptions {
   base?: string
@@ -93,8 +94,15 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
   } else if (opts.base || opts.head) {
     const base = opts.base ?? 'main'
     const head = opts.head ?? 'HEAD'
+    // Spawned via execFileSync (no shell) and gated through isSafeGitRange (same
+    // pattern as narrator.ts), since base/head are otherwise externally controllable
+    // and could be crafted to look like a git option (e.g. a leading `-`).
+    if (!isSafeGitRange(base) || !isSafeGitRange(head)) {
+      console.error(`Invalid --base/--head value: "${base}" / "${head}"`)
+      process.exit(EXIT_USAGE)
+    }
     try {
-      diffText = execSync(`git diff ${base}...${head}`, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
+      diffText = execFileSync('git', ['diff', `${base}...${head}`], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
     } catch (err) {
       console.error(`git diff failed: ${err instanceof Error ? err.message : String(err)}`)
       process.exit(EXIT_USAGE)
