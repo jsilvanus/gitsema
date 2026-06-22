@@ -3,6 +3,35 @@ import { getActiveSession } from '../db/sqlite.js'
 import { embedQuery } from '../embedding/embedQuery.js'
 import { buildProvider } from '../embedding/providerFactory.js'
 import { createServer as createNetServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
+import { WebSocketServer, type WebSocket } from 'ws'
+import { checkBearerAuth } from '../util/websocket.js'
+import { callRemote, type RemoteConfig } from '../remote/protocolClient.js'
+import {
+  activeGraphStore,
+  isGraphBuilt,
+  structuralDefinition,
+  structuralReferences,
+  prepareCallHierarchy,
+  incomingCalls,
+  outgoingCalls,
+} from './structuralNav.js'
+import { buildHoverMarkdown } from './hoverContent.js'
+import { startBackgroundRefresh, getAnalysisCache, type DiagnosticItem } from './analysisCache.js'
+import { callers } from '../graph/traversal.js'
+
+/** Maps JSON-RPC methods that need DB access to the `lsp.<op>` name used by `protocolClient.ts`. */
+const METHOD_TO_REMOTE_OP: Record<string, string> = {
+  'textDocument/hover': 'lsp.hover',
+  'textDocument/definition': 'lsp.definition',
+  'textDocument/references': 'lsp.references',
+  'textDocument/documentSymbol': 'lsp.documentSymbol',
+  'workspace/symbol': 'lsp.workspaceSymbol',
+  'textDocument/prepareCallHierarchy': 'lsp.prepareCallHierarchy',
+  'callHierarchy/incomingCalls': 'lsp.incomingCalls',
+  'callHierarchy/outgoingCalls': 'lsp.outgoingCalls',
+  'textDocument/codeLens': 'lsp.codeLens',
+}
 
 export type JsonRpcRequest = { jsonrpc: '2.0'; id?: number | string; method: string; params?: any }
 export type JsonRpcResponse = { jsonrpc: '2.0'; id?: number | string; result?: any; error?: any }
@@ -25,8 +54,28 @@ export function parseMessage(buffer: Buffer): JsonRpcRequest | null {
   }
 }
 
-export async function handleRequest(dbSession: ReturnType<typeof getActiveSession>, req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
+export async function handleRequest(
+  dbSession: ReturnType<typeof getActiveSession>,
+  req: JsonRpcRequest,
+  remote?: RemoteConfig,
+): Promise<JsonRpcResponse | null> {
   const id = req.id
+
+  // Phase 113: data-needing methods delegate to a remote `gitsema tools serve`
+  // instance when --remote is set; protocol-level methods below (initialize,
+  // shutdown, etc.) always run locally — there's nothing to delegate.
+  if (remote) {
+    const op = METHOD_TO_REMOTE_OP[req.method]
+    if (op) {
+      try {
+        const result = await callRemote(op, req.params, remote)
+        return { jsonrpc: '2.0', id, result }
+      } catch (e: any) {
+        return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e?.message ?? e) } }
+      }
+    }
+  }
+
   if (req.method === 'initialize') {
     return {
       jsonrpc: '2.0', id, result: {
@@ -36,6 +85,8 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
           referencesProvider: true,
           workspaceSymbolProvider: true,
           documentSymbolProvider: true,
+          callHierarchyProvider: true,
+          codeLensProvider: true,
         },
       },
     }
@@ -60,12 +111,26 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       const provider = buildProvider(providerType, model)
       const queryEmb = await embedQuery(provider, q)
       const results = await vectorSearch(queryEmb, { topK: 5, model, query: q })
-      // Return proper MarkupContent with Markdown hover card
-      const lines = results.map((r: any) => {
+      const semanticLines = results.map((r: any) => {
         const path = r.paths?.[0] ?? r.blobHash
         return `- \`${path}\` — similarity: ${r.score.toFixed(3)}`
       })
-      const value = `**Semantic matches for \`${q}\`**\n\n${lines.join('\n')}`
+
+      // Phase 115 (§6.1): enrich with optional Temporal/Risk/Structure
+      // sections, joined onto the existing semantic result via the symbol's
+      // own (blobHash, path) identity — never blocks hover on missing data.
+      const symbolRow = dbSession.rawDb.prepare(
+        `SELECT s.blob_hash, p.path FROM symbols s
+         JOIN paths p ON s.blob_hash = p.blob_hash
+         WHERE LOWER(s.symbol_name) = LOWER(?) LIMIT 1`,
+      ).get(q) as { blob_hash: string; path: string } | undefined
+
+      const value = await buildHoverMarkdown({
+        query: q,
+        semanticLines,
+        blobHash: symbolRow?.blob_hash,
+        path: symbolRow?.path,
+      })
       const contents = { kind: 'markdown', value }
       return { jsonrpc: '2.0', id, result: { contents } }
     } catch (e: any) {
@@ -78,6 +143,18 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
     const rawWord = params?.text ?? params?.word ?? ''
     const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
     try {
+      // Phase 114 (§5.3): structural resolution first, exact and unambiguous.
+      // Semantic search below only runs when the graph isn't built, the
+      // identifier doesn't resolve, or it resolves to a node with no
+      // location (e.g. external) — never merged into one ranked list.
+      const graph = activeGraphStore()
+      if (await isGraphBuilt(graph)) {
+        const structural = await structuralDefinition(graph, q)
+        if (structural.length > 0) {
+          return { jsonrpc: '2.0', id, result: structural }
+        }
+      }
+
       const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
       const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
       const provider = buildProvider(providerType, model)
@@ -106,6 +183,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
           range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
           symbolName: r.symbol_name,
           symbolKind: r.symbol_kind,
+          tags: ['fallback'],
         }))
         return { jsonrpc: '2.0', id, result: locations }
       }
@@ -137,6 +215,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
           range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
           symbolName: r.symbol_name,
           symbolKind: r.symbol_kind,
+          tags: ['fallback'],
         }))
         return { jsonrpc: '2.0', id, result: locations }
       }
@@ -146,6 +225,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       const locations = results.map((r: any) => ({
         uri: `file://${r.paths?.[0] ?? r.blobHash}`,
         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        tags: ['fallback'],
       }))
       return { jsonrpc: '2.0', id, result: locations }
     } catch (e: any) {
@@ -158,6 +238,15 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
     const rawWord = params?.text ?? params?.word ?? ''
     const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
     try {
+      // Phase 114 (§5.3): structural resolution first, exact and unambiguous.
+      const graph = activeGraphStore()
+      if (await isGraphBuilt(graph)) {
+        const structural = await structuralReferences(graph, q)
+        if (structural.length > 0) {
+          return { jsonrpc: '2.0', id, result: structural }
+        }
+      }
+
       // 1. All symbol definitions with this name (exact + substring) — gives line numbers
       const symbolRows = dbSession.rawDb.prepare(
         `SELECT s.symbol_name, s.symbol_kind, s.start_line, s.end_line, p.path
@@ -168,7 +257,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       ).all(q, `%${q}%`) as Array<{ symbol_name: string; symbol_kind: string; start_line: number; end_line: number; path: string }>
 
       // 2. FTS5: blobs that textually mention the term — join back to symbols for line numbers
-      let ftsLocations: Array<{ uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }> = []
+      let ftsLocations: Array<{ uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } }; tags: string[] }> = []
       try {
         const ftsRows = dbSession.rawDb.prepare(
           `SELECT blob_hash FROM blob_fts WHERE blob_fts MATCH ? LIMIT 20`,
@@ -190,6 +279,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
             ftsLocations = symInBlobs.map((r) => ({
               uri: `file://${r.path}`,
               range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
+              tags: ['fallback'],
             }))
           } else {
             // No symbol-level precision available — fall back to file-level references
@@ -199,6 +289,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
             ftsLocations = pathRows.map((r) => ({
               uri: `file://${r.path}`,
               range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+              tags: ['fallback'],
             }))
           }
         }
@@ -211,6 +302,7 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
       const locations = [...symbolRows.map((r) => ({
         uri: `file://${r.path}`,
         range: { start: { line: Math.max(0, r.start_line - 1), character: 0 }, end: { line: Math.max(0, r.end_line - 1), character: 0 } },
+        tags: ['fallback'],
       })), ...ftsLocations].filter((loc) => {
         const key = `${loc.uri}:${loc.range.start.line}`
         if (seen.has(key)) return false
@@ -269,6 +361,57 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
     }
   }
 
+  if (req.method === 'textDocument/codeLens') {
+    const params = req.params ?? {}
+    const uri: string = typeof params?.textDocument?.uri === 'string' ? params.textDocument.uri
+      : typeof params?.uri === 'string' ? params.uri : ''
+    try {
+      const filePath = uri.replace(/^file:\/\//, '')
+      if (!filePath) return { jsonrpc: '2.0', id, result: [] }
+
+      const pathRow = dbSession.rawDb.prepare(
+        `SELECT p.blob_hash FROM paths p
+         JOIN blob_commits bc ON p.blob_hash = bc.blob_hash
+         JOIN commits c ON bc.commit_hash = c.commit_hash
+         WHERE p.path = ? OR p.path LIKE ?
+         ORDER BY c.timestamp DESC LIMIT 1`,
+      ).get(filePath, `%${filePath}`) as { blob_hash: string } | undefined
+      if (!pathRow) return { jsonrpc: '2.0', id, result: [] }
+
+      const symbolRows = dbSession.rawDb.prepare(
+        `SELECT symbol_name, qualified_name, start_line FROM symbols WHERE blob_hash = ? ORDER BY start_line ASC`,
+      ).all(pathRow.blob_hash) as Array<{ symbol_name: string; qualified_name: string | null; start_line: number }>
+
+      // Phase 115 (§6.3): "Called N times · Last touched <date>" per symbol —
+      // call counts from the structural graph (if built), last-touched from
+      // the cached analysis pass; both omitted gracefully when unavailable.
+      const graph = activeGraphStore()
+      const graphBuilt = await isGraphBuilt(graph)
+      const cache = getAnalysisCache()
+
+      const lenses = []
+      for (const r of symbolRows) {
+        const identifier = r.qualified_name ?? r.symbol_name
+        const parts: string[] = []
+        if (graphBuilt) {
+          const result = await callers(graph, identifier, 1)
+          if (result.resolved.status === 'found') parts.push(`Called ${result.hits.length}×`)
+        }
+        const debt = cache?.debtByPath.get(filePath)
+        if (debt) parts.push(`debt ${debt.debtScore.toFixed(2)}`)
+        if (parts.length === 0) continue
+        const line = Math.max(0, r.start_line - 1)
+        lenses.push({
+          range: { start: { line, character: 0 }, end: { line, character: 0 } },
+          command: { title: parts.join(' · '), command: '' },
+        })
+      }
+      return { jsonrpc: '2.0', id, result: lenses }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
   if (req.method === 'workspace/symbol') {
     const params = req.params ?? {}
     const query: string = typeof params?.query === 'string' ? params.query : ''
@@ -294,30 +437,128 @@ export async function handleRequest(dbSession: ReturnType<typeof getActiveSessio
     }
   }
 
+  if (req.method === 'textDocument/prepareCallHierarchy') {
+    const params = req.params ?? {}
+    const rawWord = params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
+    try {
+      const graph = activeGraphStore()
+      const items = await prepareCallHierarchy(graph, q)
+      return { jsonrpc: '2.0', id, result: items }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
+  if (req.method === 'callHierarchy/incomingCalls') {
+    const params = req.params ?? {}
+    const rawWord = params?.item?.data ?? params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
+    try {
+      const graph = activeGraphStore()
+      const calls = await incomingCalls(graph, q)
+      return { jsonrpc: '2.0', id, result: calls }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
+  if (req.method === 'callHierarchy/outgoingCalls') {
+    const params = req.params ?? {}
+    const rawWord = params?.item?.data ?? params?.text ?? params?.word ?? ''
+    const q = typeof rawWord === 'string' && rawWord.length > 0 ? rawWord : 'symbol'
+    try {
+      const graph = activeGraphStore()
+      const calls = await outgoingCalls(graph, q)
+      return { jsonrpc: '2.0', id, result: calls }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
   return { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } }
 }
 
+export interface LspServerOptions {
+  /** Phase 115 (§6.2): opt-in background diagnostics (default off — see false-positive-rate note in PLAN.md). */
+  diagnostics?: boolean
+  /** Refresh interval for the diagnostics cache, in ms. Default 5 minutes. */
+  diagnosticsIntervalMs?: number
+}
+
+const DEFAULT_DIAGNOSTICS_INTERVAL_MS = 5 * 60 * 1000
+
+function buildDiagnosticsNotification(path: string, items: DiagnosticItem[]): JsonRpcResponse {
+  return {
+    jsonrpc: '2.0',
+    method: 'textDocument/publishDiagnostics',
+    params: {
+      uri: `file://${path}`,
+      diagnostics: items.map(({ severity, message, range }) => ({ severity, message, range, source: 'gitsema' })),
+    },
+  } as any
+}
+
+/**
+ * Starts the diagnostics background refresh loop and returns a callback that
+ * pushes a `textDocument/publishDiagnostics` notification (via `write`) for
+ * every flagged path on each refresh cycle. No-op (returns `null`) when
+ * `--diagnostics` wasn't requested or a `remote` is set — diagnostics push
+ * notifications, which Phase 113's request/response remote mechanism doesn't
+ * support, so this degrades to "disabled" rather than attempting it remotely.
+ */
+function maybeStartDiagnostics(
+  dbSession: ReturnType<typeof getActiveSession>,
+  options: LspServerOptions | undefined,
+  remote: RemoteConfig | undefined,
+  publish: (message: JsonRpcResponse) => void,
+): ReturnType<typeof setInterval> | null {
+  if (!options?.diagnostics || remote) return null
+  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
+  const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const provider = buildProvider(providerType, model)
+  const intervalMs = options.diagnosticsIntervalMs ?? DEFAULT_DIAGNOSTICS_INTERVAL_MS
+  return startBackgroundRefresh(dbSession, provider, intervalMs, (diagnosticsByPath) => {
+    for (const [path, items] of diagnosticsByPath) {
+      publish(buildDiagnosticsNotification(path, items))
+    }
+  })
+}
+
 /** Start the LSP server over stdio. */
-export function startLspServer(dbSession: ReturnType<typeof getActiveSession>): void {
+export function startLspServer(
+  dbSession: ReturnType<typeof getActiveSession>,
+  remote?: RemoteConfig,
+  options?: LspServerOptions,
+): void {
   const stdin = process.stdin
   stdin.on('data', async (chunk: Buffer) => {
     const req = parseMessage(chunk)
     if (!req) return
-    const res = await handleRequest(dbSession, req)
+    const res = await handleRequest(dbSession, req, remote)
     if (res) {
       const out = serializeMessage(res)
       process.stdout.write(out)
     }
   })
+  maybeStartDiagnostics(dbSession, options, remote, (message) => process.stdout.write(serializeMessage(message)))
 }
 
 /** Start the LSP server over TCP (useful for IDEs that prefer TCP connections). */
-export function startLspTcpServer(dbSession: ReturnType<typeof getActiveSession>, port: number): void {
+export function startLspTcpServer(
+  dbSession: ReturnType<typeof getActiveSession>,
+  port: number,
+  remote?: RemoteConfig,
+  options?: LspServerOptions,
+): void {
+  const sockets = new Set<import('node:net').Socket>()
   const server = createNetServer((socket) => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
     socket.on('data', async (chunk: Buffer) => {
       const req = parseMessage(chunk)
       if (!req) return
-      const res = await handleRequest(dbSession, req)
+      const res = await handleRequest(dbSession, req, remote)
       if (res) {
         socket.write(serializeMessage(res))
       }
@@ -326,6 +567,68 @@ export function startLspTcpServer(dbSession: ReturnType<typeof getActiveSession>
   server.listen(port, () => {
     process.stderr.write(`LSP server listening on TCP port ${port}\n`)
   })
+  maybeStartDiagnostics(dbSession, options, remote, (message) => {
+    const data = serializeMessage(message)
+    for (const socket of sockets) socket.write(data)
+  })
+}
+
+/**
+ * Start the LSP server over WebSocket, on a fixed `/lsp` path (Phase 116).
+ * Unlike `--tcp`/stdio, messages are raw JSON per WS text frame (no
+ * `Content-Length` framing). Unlike `--remote` delegation, WebSocket
+ * supports server push, so `--diagnostics` works normally here.
+ */
+export function startLspWebSocketServer(
+  dbSession: ReturnType<typeof getActiveSession>,
+  host: string,
+  port: number,
+  authKey: string | undefined,
+  remote?: RemoteConfig,
+  options?: LspServerOptions,
+): import('node:http').Server {
+  const sockets = new Set<WebSocket>()
+  const httpServer = createHttpServer()
+  const wss = new WebSocketServer({ noServer: true })
+
+  httpServer.on('upgrade', (req, socket, head) => {
+    const url = req.url ?? ''
+    const path = url.split('?')[0]
+    if (path !== '/lsp' || !checkBearerAuth(req, authKey)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+  })
+
+  wss.on('connection', (ws: WebSocket) => {
+    sockets.add(ws)
+    ws.on('close', () => sockets.delete(ws))
+    ws.on('message', async (data: Buffer) => {
+      let req: JsonRpcRequest
+      try {
+        req = JSON.parse(data.toString('utf8')) as JsonRpcRequest
+      } catch {
+        return
+      }
+      const res = await handleRequest(dbSession, req, remote)
+      if (res) {
+        ws.send(JSON.stringify(res))
+      }
+    })
+  })
+
+  httpServer.listen(port, host, () => {
+    process.stderr.write(`LSP server listening on ws://${host}:${port}/lsp\n`)
+  })
+
+  maybeStartDiagnostics(dbSession, options, remote, (message) => {
+    const payload = JSON.stringify(message)
+    for (const ws of sockets) ws.send(payload)
+  })
+
+  return httpServer
 }
 
 /** Quick sanity check: verify the LSP server can be started (for doctor --lsp). */

@@ -268,6 +268,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
+| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
@@ -378,11 +379,130 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 
 | Subcommand | Description |
 |---|---|
-| `gitsema tools mcp` | MCP stdio server (preferred entry point for AI clients) |
-| `gitsema tools lsp [--tcp <port>]` | LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--http <bind-address>] [--key <token>]` | MCP stdio server (preferred entry point for AI clients) |
+| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
 
+### Remote delegation (Phase 113)
+
+`tools mcp --remote <url>` and `tools lsp --remote <url>` delegate every data-access
+call to a running `gitsema tools serve` instance instead of executing locally — both
+protocols share one mechanism: `src/core/remote/protocolClient.ts`'s `callRemote()`
+posts `{ args }` to `POST /api/v1/protocol/<operation>` (`mcp.<toolName>` or
+`lsp.<op>`) and unwraps `{ result }` / `{ error }`. `--remote-key`/`GITSEMA_REMOTE_KEY`
+sets a Bearer token; `--remote-timeout`/default 10000ms aborts slow calls. On
+startup, both commands call `checkRemoteHealth()` (`GET /api/v1/status`) and exit
+non-zero immediately if the remote is unreachable, rather than failing on the first
+tool call. No MCP tool handler or LSP method handler was duplicated to add this —
+`registerTool()` (the single chokepoint every MCP tool passes through) and
+`handleRequest()` (LSP's existing JSON-RPC dispatcher) each gained one
+remote-delegation branch; the server-side route reuses the same tool-registration
+functions and LSP dispatcher via a small "capture" indirection, so business logic
+stays in one place.
+
 > Legacy top-level aliases `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work but emit a deprecation warning.
+
+### Structural navigation (Phase 114)
+
+`textDocument/definition` and `textDocument/references` are structural-first: when
+the Phase 106/107 knowledge graph is built (`gitsema graph build`) and the queried
+identifier resolves to an exact graph node, the LSP server returns that exact
+location (or its structural referrers) with no semantic ranking involved. When the
+graph isn't built, the identifier doesn't resolve, or it resolves with no incoming
+edges, the server falls back to the prior symbol/FTS/semantic-search behavior —
+every fallback location is tagged `tags: ['fallback']` so clients can distinguish
+exact structural results from approximate ones. The two never mix into one ranked
+list (per the LSP & MCP fleshout spec §5.3).
+
+Three new JSON-RPC methods add call-hierarchy support, backed by the same graph:
+`textDocument/prepareCallHierarchy` resolves a symbol to a `CallHierarchyItem`
+(carrying the resolved graph node key in `data`), and `callHierarchy/incomingCalls`
+/ `callHierarchy/outgoingCalls` return its direct (depth-1) callers/callees via the
+`calls` edge type. The server advertises `callHierarchyProvider: true` in
+`initialize`. All of this reuses `src/core/graph/traversal.ts` and `resolveNode.ts`
+directly (`src/core/lsp/structuralNav.ts`) — no new graph-query SQL was added; the
+only new SQL is a `symbols` table lookup (by `qualified_name` + `blob_hash`) to
+recover line ranges for graph nodes, since the graph itself stores no line data.
+
+### Diagnostics, code lens, and rich hover (Phase 115)
+
+`textDocument/hover` now enriches its existing semantic-match section with up to
+three optional sections — **Temporal** (last author + change frequency, from
+`blob_commits`/`commits`), **Risk & quality** (debt score, hotspot risk, security
+pattern match count), and **Structure** (caller/callee counts, when the Phase
+106/107 knowledge graph is built) — each independently omitted, never erroring
+the whole hover, when its data source is unavailable. Debt/hotspot/security
+signals are computed once on a background timer (default every 5 minutes, never
+synchronously inside a request) by `src/core/lsp/analysisCache.ts`, which reuses
+`scoreDebt()`/`computeHotspots()`/`scanForVulnerabilities()` directly — no
+duplicated scoring logic.
+
+A new `textDocument/codeLens` method annotates each symbol in a file with
+`Called N× · debt X.XX`-style text, reading from the same cache and the
+Phase 107 graph's caller counts. `initialize` now advertises
+`codeLensProvider: true`, and `lsp.codeLens` is remote-delegatable like any other
+LSP data method.
+
+Diagnostics (`textDocument/publishDiagnostics`) are opt-in via
+`gitsema tools lsp --diagnostics` (off by default — the false-positive rate of
+the v1 thresholds, debt score ≥ 0.7 or hotspot risk ≥ 0.6, is unproven). When
+enabled, the server pushes a notification per flagged file on each background
+refresh cycle, over stdout (stdio transport) or to every connected socket (TCP
+transport). Diagnostics are not supported in `--remote` mode, since remote
+delegation (Phase 113) is purely request/response and has no mechanism for the
+remote server to push notifications back to a local client — `gitsema tools lsp
+--remote <url> --diagnostics` prints a warning and runs without diagnostics.
+
+### WebSocket transport (Phase 116)
+
+Both `gitsema tools mcp --websocket <bind-address>` and `gitsema tools lsp --websocket
+<bind-address>` (e.g. `--websocket 0.0.0.0:4242`) listen on fixed `/mcp`/`/lsp` paths
+respectively, as an alternative to stdio/TCP for clients that need a network-reachable
+transport (no `--path` flag in v1). `--key <token>` requires a matching
+`Authorization: Bearer <token>` header on the WS upgrade request (mirrors
+`gitsema tools serve --key`'s convention); unset means no auth. gitsema does not
+terminate TLS — put a reverse proxy in front for `wss://`.
+
+The MCP SDK ships no server-side WebSocket transport, so `src/mcp/webSocketTransport.ts`
+is a small hand-rolled `Transport` implementation over a `ws` socket, negotiating the
+`mcp` WS subprotocol for interop with the SDK's own client-side `WebSocketClientTransport`
+(which only works unauthenticated, since it can't set custom headers). Because the SDK's
+`Protocol.connect()` can only be called once per `McpServer` instance, each WebSocket
+connection gets its own freshly-built server (`buildMcpServer()`) rather than sharing one
+instance the way stdio does. On the LSP side, WebSocket reuses the same stateless
+`handleRequest()` dispatcher as TCP, just framed as raw JSON per WS text frame instead of
+`Content-Length`-prefixed chunks — and unlike `--remote` delegation, WebSocket supports
+server push, so `--diagnostics` works normally over `--websocket`.
+
+**MCP `--websocket` is a known design flaw, kept only for forward compatibility.**
+Raw WebSocket was never one of MCP's standard transports (stdio / HTTP+SSE / Streamable
+HTTP); essentially no real-world MCP client or harness (Claude Desktop, Claude Code,
+etc.) supports connecting to an MCP server over plain WebSocket, so `gitsema tools mcp
+--websocket` prints a warning on startup that it is likely unusable with most clients.
+LSP `--websocket` has no such caveat — LSP has no standardized transport set, and
+WebSocket is a normal way IDEs reach LSP servers. Phase 117 (below) adds the proper
+fix for the MCP side.
+
+### MCP Streamable HTTP transport (Phase 117)
+
+`gitsema tools mcp --http <bind-address>` (e.g. `--http 0.0.0.0:4242`) listens on a fixed
+`/mcp` path using the MCP SDK's own `StreamableHTTPServerTransport`
+(`@modelcontextprotocol/sdk/server/streamableHttp.js`) — the SDK's actual recommended
+network transport, unlike the non-standard `--websocket`. `--key <token>` requires a
+matching `Authorization: Bearer <token>` header, same convention as `--websocket`/`gitsema
+tools serve --key`. gitsema does not terminate TLS — put a reverse proxy in front for
+`https://`.
+
+Sessions are stateful: a `POST /mcp` with no `Mcp-Session-Id` header and an `initialize`
+body starts a new session (fresh `McpServer` via `buildMcpServer()`, fresh
+`StreamableHTTPServerTransport` with `sessionIdGenerator: () => randomUUID()`), and the
+generated session ID is returned in response headers. Every subsequent request
+(`POST`/`GET`/`DELETE`) carrying that `Mcp-Session-Id` header is routed to the *same*
+transport instance — unlike the WebSocket transport, where `Protocol.connect()` is called
+once per *connection*, here it's called once per *session*, and one session can span many
+HTTP requests. Unknown session IDs get `404`; non-`initialize` requests with no session ID
+get `400` — matching the SDK's documented stateful-mode contract. No `EventStore`
+(resumability) in v1, same "keep it minimal" posture as Phase 116.
 
 ---
 

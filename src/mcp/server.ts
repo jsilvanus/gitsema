@@ -13,6 +13,8 @@ import { registerWorkflowTools } from './tools/workflow.js'
 import { registerInfrastructureTools } from './tools/infrastructure.js'
 import { registerNarratorTools } from './tools/narrator.js'
 import { registerGraphTools } from './tools/graph.js'
+import { setMcpRemoteConfig } from './registerTool.js'
+import { checkRemoteHealth } from '../core/remote/protocolClient.js'
 import { readFileSync } from 'node:fs'
 
 // Read package version dynamically so the MCP server always matches package.json
@@ -25,13 +27,27 @@ try {
   // fall back to default
 }
 
-export async function startMcpServer(): Promise<void> {
+export interface McpServerOptions {
+  /** Base URL of a running `gitsema tools serve` instance (Phase 113 remote delegation). */
+  remoteUrl?: string
+  remoteKey?: string
+  remoteTimeoutMs?: number
+}
+
+/**
+ * Build a fresh `McpServer` with every domain tool set registered. Each
+ * `Protocol`/`McpServer` instance can only ever be connected to one
+ * transport (the SDK throws on a second `connect()` call), so multi-client
+ * transports (e.g. the WebSocket server, Phase 116) must call this once per
+ * connection rather than sharing a single instance the way the stdio
+ * transport does.
+ */
+export function buildMcpServer(): McpServer {
   const server = new McpServer({
     name: 'gitsema',
     version: _mcpVersion,
   })
 
-  // Register domain-grouped tool sets
   registerSearchTools(server)
   registerAnalysisTools(server)
   registerClusteringTools(server)
@@ -40,6 +56,34 @@ export async function startMcpServer(): Promise<void> {
   registerNarratorTools(server)
   registerGraphTools(server)
 
+  return server
+}
+
+/**
+ * Health-checks a remote `gitsema tools serve` instance and, if reachable,
+ * arms `registerTool()`'s remote delegation for the rest of the process.
+ * Shared by the stdio, `--websocket`, and `--http` transports so `--remote`
+ * works no matter which one is selected.
+ */
+export async function setupMcpRemote(remote: { url: string; key?: string; timeoutMs?: number }): Promise<void> {
+  try {
+    await checkRemoteHealth(remote)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`Failed to connect to remote at ${remote.url}: ${msg}\n`)
+    process.exit(1)
+  }
+  setMcpRemoteConfig(remote)
+}
+
+export async function startMcpServer(options: McpServerOptions = {}): Promise<void> {
+  const { remoteUrl, remoteKey, remoteTimeoutMs } = options
+
+  if (remoteUrl) {
+    await setupMcpRemote({ url: remoteUrl, key: remoteKey, timeoutMs: remoteTimeoutMs })
+  }
+
+  const server = buildMcpServer()
   const transport = new StdioServerTransport()
   await server.connect(transport)
 }

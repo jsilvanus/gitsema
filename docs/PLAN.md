@@ -4200,6 +4200,242 @@ no Commander/CLI dependency, so this stays comfortably within core. Tests:
 
 ---
 
+## LSP & MCP Fleshout Track (Phase 113+) — *in progress*
+
+> **Full design:** [`docs/lsp_and_mcp_fleshout.md`](lsp_and_mcp_fleshout.md) is the
+> single design reference for this track (current-state assessment, the
+> single-remote-delegation-mechanism principle, and Phases A–D). Build order is
+> **A → C → D → B** per the spec's own recommendation. Phase entries below use the
+> next free top-level phase numbers (112 is reserved for the Knowledge Graph
+> Track's "Unified graph UI"; this track starts at 113 to avoid collision).
+
+| Phase | Spec section | Title | Deliverable |
+|---|---|---|---|
+| **113** ✅ | §3 (Phase A) | Generic remote delegation for MCP + LSP | One shared mechanism (`src/core/remote/protocolClient.ts`) lets `gitsema tools mcp --remote <url>` and `gitsema tools lsp --remote <url>` delegate every data-access call to a running `gitsema tools serve` instance via `POST /api/v1/protocol/:operation`. |
+| **114** ✅ | §5 (Phase C) | LSP structural navigation | New LSP methods backed by the Phase 107 knowledge-graph tables (`structural_refs`/`graph_nodes`/`edges`) — `callHierarchy/incomingCalls`/`outgoingCalls`, structural-first/semantic-fallback precedence for existing methods. |
+| **115** ✅ | §6 (Phase D) | LSP diagnostics, code lens, rich hover | `textDocument/publishDiagnostics` on a background timer (not request-time), code lens, hover enrichment with temporal/risk/structure sections — behind a `--diagnostics` opt-in flag, all gracefully degrading. |
+| **116** ✅ | §4 (Phase B) | WebSocket transport | `--websocket <bind-address>` transport for MCP/LSP, depends on Phase 113's remote-delegation plumbing; auth via header, not subprotocol. |
+| **117** ✅ | not in spec; follow-up to §4 | MCP Streamable HTTP transport | Added `@modelcontextprotocol/sdk/server/streamableHttp.js`'s `StreamableHTTPServerTransport` as a real network transport for `gitsema tools mcp` (`--http <bind-address>`), since raw `--websocket` (Phase 116) is a known design flaw most MCP clients/harnesses don't support — Streamable HTTP is the SDK's actual recommended network transport. |
+
+**Status:** Phase 113 ✅ complete. `src/core/remote/protocolClient.ts` exports
+`callRemote()`/`checkRemoteHealth()` — the single shared HTTP client both `tools
+mcp --remote` and `tools lsp --remote` use, posting `{ args }` to
+`POST /api/v1/protocol/<operation>` and unwrapping `{ result }`/`{ error }` (10s
+default timeout via `AbortController`, overridable with `--remote-timeout`). No
+MCP tool handler or LSP method handler was duplicated to add this: `registerTool()`
+(`src/mcp/registerTool.ts`, the single chokepoint every one of the 38 MCP tools
+already passes through) gained one remote-delegation branch keyed on a
+process-wide `setMcpRemoteConfig()`, and `handleRequest()`
+(`src/core/lsp/server.ts`, LSP's existing JSON-RPC dispatcher) gained one branch
+keyed on an optional `remote` parameter threaded through `startLspServer()`/
+`startLspTcpServer()` — both branches sit *before* the existing local-execution
+code path, so local mode is untouched. The new server-side route
+(`src/server/routes/protocol.ts`, mounted at `${base}/protocol`) builds its MCP
+dispatch table by calling the same `registerXxxTools(server)` functions the real
+MCP server uses against a fake `{ tool: (name, ..., fn) => map.set(name, fn) }`
+object (a "capture" indirection — zero duplicated tool logic), and dispatches
+`lsp.<op>` operations by calling `handleLspRequest()` directly with a synthetic
+JSON-RPC request. Both `tools mcp --remote` and `tools lsp --remote` perform a
+`checkRemoteHealth()` (`GET /api/v1/status`) at startup and exit non-zero
+immediately if the remote is unreachable, rather than failing on the first tool
+call (per spec §3). `--remote`/`--remote-key`/`--remote-timeout` fall back to
+`GITSEMA_REMOTE`/`GITSEMA_REMOTE_KEY` (same precedence as `index --remote`). No
+schema change. Tests: `tests/protocolClient.test.ts`,
+`tests/registerTool.test.ts`, plus remote-delegation additions to
+`tests/lsp.test.ts` and `tests/serverRoutes.test.ts`.
+
+**Phase 114 ✅ complete.** `src/core/lsp/structuralNav.ts` is the new module the
+spec asked for: it wraps `src/core/graph/resolveNode.ts` and
+`src/core/graph/traversal.ts`'s `callers()`/`callees()` to build LSP-shaped
+`StructuralLocation`/`CallHierarchyItem` results, instantiating a fresh
+`SqliteGraphStore()` per call (consistent with the LSP server's existing
+global-active-session threading — no `storage.*`/cwd config resolution, unlike the
+MCP graph tools). `textDocument/definition` and `textDocument/references` in
+`src/core/lsp/server.ts` now check `isGraphBuilt()` first and, when the graph has
+nodes and the identifier resolves with at least one hit, return the exact
+structural result with no fallback mixed in; every location returned by the
+pre-existing symbol/FTS/semantic-search code paths is now tagged
+`tags: ['fallback']` so it's never confused with an exact structural result (spec
+§5.3). Three new JSON-RPC methods — `textDocument/prepareCallHierarchy`,
+`callHierarchy/incomingCalls`, `callHierarchy/outgoingCalls` — call
+`prepareCallHierarchy()`/`incomingCalls()`/`outgoingCalls()` from
+`structuralNav.ts`; `initialize` now advertises `callHierarchyProvider: true`. One
+deviation from a literal LSP `CallHierarchyItem` round-trip: since this codebase's
+LSP methods already take a bare `params.text`/`params.word` identifier rather than
+a real document position, `incomingCalls`/`outgoingCalls` accept either a bare
+identifier or `params.item.data` (the resolved graph node key returned by
+`prepareCallHierarchy`), so protocol-correct clients and the existing
+text-based-invocation convention both work. Line ranges for graph nodes (which
+store no line data themselves) are recovered with one `symbols` table lookup by
+`(qualified_name, blob_hash)` — the same identity Phase 105/107 already use to
+build the node — keeping the "no new graph-query SQL" constraint from §5.1. No
+schema change. All three new methods got `lsp.<op>` remote-delegation entries
+(`METHOD_TO_REMOTE_OP` in `server.ts`, `LSP_OP_TO_METHOD` in
+`src/server/routes/protocol.ts`) for free, since Phase 113's delegation mechanism
+is method-name-driven. Tests: `tests/lspStructural.test.ts` (graph fixture mirrors
+`tests/graphTraversal.test.ts`; covers exact structural definition/references,
+call-hierarchy prepare/incoming/outgoing, and fallback-with-no-graph).
+
+**Phase 115 ✅ complete.** `src/core/lsp/analysisCache.ts` is the new
+background-refreshed cache the spec asked for: it calls the existing
+`scoreDebt()`/`computeHotspots()`/`scanForVulnerabilities()` once per refresh
+cycle (default 5 min, configurable via `LspServerOptions.diagnosticsIntervalMs`)
+and serves `debtByPath`/`hotspotByPath`/`securityCountByBlob` lookups from the
+cached result — no analysis logic runs inside a hover/codeLens/diagnostics
+*request*, satisfying §6.2. Each signal (debt/hotspot/security) is independently
+best-effort: a failure in one (no embeddings indexed, no graph built, provider
+unreachable) never blocks the others or the cache refresh itself.
+`src/core/lsp/hoverContent.ts` is the new hover-enrichment module: it joins
+`Temporal` (last touch + change frequency from `blob_commits`/`commits`),
+`Risk & quality` (debt/hotspot/security counts from the analysis cache), and
+`Structure` (caller/callee counts from Phase 114's `traversal.ts`, when the
+graph is built) onto the pre-existing semantic-match section in
+`textDocument/hover` — each section independently omitted, never erroring the
+whole hover, when its data source is unavailable (§6.1's ordering: Semantic →
+Temporal → Risk & quality → Structure). One deviation from the spec's literal
+`buildHoverMarkdown(blobHash, symbol)` signature: `hoverContent.ts` accepts a
+structured `HoverContext` (`{ query, semanticLines, blobHash?, path? }`)
+instead, since `server.ts`'s hover handler already computes the semantic
+results itself (it owns the embedding-provider call) — `hoverContent.ts` only
+joins *additional* analysis data onto an already-computed semantic result,
+keeping it free of any embedding/provider concerns per the "thin
+plumbing-free-of-analysis-logic" constraint. A new `textDocument/codeLens`
+handler in `server.ts` annotates each symbol in a file with
+`Called N× · debt X.XX`-style text, reading caller counts from `callers()` and
+debt scores from the same shared `AnalysisCache` singleton hover uses — no
+duplicated analysis calls across the two surfaces. Diagnostics are opt-in via
+a new `gitsema tools lsp --diagnostics` flag (off by default — the
+false-positive rate of the conservative `debtScore >= 0.7` /
+`hotspotRisk >= 0.6` thresholds is unproven at v1); `LspServerOptions` threads
+through `startLspServer()`/`startLspTcpServer()`, which now push
+`textDocument/publishDiagnostics` notifications (over stdout or to every
+connected TCP socket, respectively) on each background refresh cycle. One
+deliberate limitation, not in the spec: diagnostics never run in `--remote`
+mode (`maybeStartDiagnostics()` returns `null`), since Phase 113's
+remote-delegation mechanism is purely request/response
+(`POST /api/v1/protocol/:operation`) with no way for the remote server to push
+a server-initiated notification back to a local LSP client; `tools.ts` prints
+a warning when `--remote` and `--diagnostics` are combined rather than
+silently dropping the flag. `initialize` now also advertises
+`codeLensProvider: true`. `textDocument/codeLens` got an `lsp.codeLens`
+remote-delegation entry (`METHOD_TO_REMOTE_OP`/`LSP_OP_TO_METHOD`) since it's a
+normal request/response method, unlike diagnostics. No schema change. Tests:
+`tests/lspHover.test.ts` (each hover section's independent presence/absence),
+`tests/lspDiagnostics.test.ts` (debt/hotspot threshold flagging, background
+refresh's immediate first run, diagnostics push notification shape, and
+`--diagnostics`/`--remote` gating).
+
+**Phase 116 ✅ complete.** Added `ws` as a real dependency: confirmed Node
+20+/22 ships a global *client* `WebSocket` but no server, and that the
+installed `@modelcontextprotocol/sdk` (v1.29.0) ships no server-side
+WebSocket transport (only `client/websocket.js`, a browser-`WebSocket`-based
+*client* transport) — both per the spec's "check before assuming" guidance.
+`src/mcp/webSocketTransport.ts` is a new minimal MCP `Transport`
+implementation over a `ws` socket, mirroring `StdioServerTransport`'s shape
+(`start()`/`send()`/`close()` + `onmessage`/`onerror`/`onclose`); it
+negotiates the `mcp` WS subprotocol for interop with the SDK's own
+`WebSocketClientTransport` (which can't set an `Authorization` header, since
+it uses the global `WebSocket`, so it only works against an unauthenticated
+server). One deviation from the §4 sketch driven by an SDK constraint
+discovered mid-implementation: `Protocol.connect()` throws if called twice
+on the same instance, so a single shared `McpServer` (as the stdio path
+uses) can't serve multiple WS clients — `src/mcp/server.ts` now exports
+`buildMcpServer()`, a small extracted helper that builds a fresh `McpServer`
+with all 7 tool sets registered, and `src/mcp/webSocketServer.ts` (new file)
+calls it once per incoming WS connection. `startMcpServer()`'s stdio path
+was refactored to call the same helper, so there's no duplicated
+registration logic between the two transports. On the LSP side,
+`startLspWebSocketServer()` (new function in `src/core/lsp/server.ts`) is
+a stateless `handleRequest()` caller like `startLspTcpServer()`, just framed
+as raw JSON per WS text frame instead of `Content-Length`-prefixed chunks —
+no per-connection server instance needed there, since LSP has no
+SDK-imposed connect-once constraint. `maybeStartDiagnostics()` was
+refactored to hand callers a `JsonRpcResponse` object instead of a
+pre-serialized string, so each transport (stdio/TCP/WebSocket) can frame the
+push notification itself; this let diagnostics work unmodified over
+WebSocket — confirming the spec's expectation that, unlike `--remote`
+delegation (request/response only), WebSocket's server-push capability
+needs no special-casing in `maybeStartDiagnostics()`'s gating (which keys
+only on `remote`, not the client-facing transport). New shared helper
+`src/core/util/websocket.ts`: `parseBindAddress()` (parses `host:port`) and
+`checkBearerAuth()` (mirrors `authMiddleware`'s `Authorization: Bearer
+<token>` convention against a raw `http.IncomingMessage`, since the new WS
+servers don't run through Express). Both `gitsema tools mcp --websocket
+<bind-address> [--key <token>]` and `gitsema tools lsp --websocket
+<bind-address> [--key <token>]` listen on fixed `/mcp`/`/lsp` paths
+respectively (no `--path` flag, per the spec's v1 scope); TLS is not
+terminated by gitsema — `wss://` requires a reverse proxy in front, same as
+documented for `gitsema tools serve`. No schema change. Tests:
+`tests/integration/mcpWebsocket.test.ts` (real `ws`-backed client transport
++ the real SDK `Client`, round-trips `tools/list`, and asserts
+missing/wrong/correct Bearer token outcomes) and
+`tests/integration/lspWebsocket.test.ts` (real `ws` client, round-trips
+`textDocument/hover`, same auth assertions).
+
+With Phase 116 complete, all four phases of `docs/lsp_and_mcp_fleshout.md`
+(A/113, C/114, D/115, B/116) are implemented.
+
+**Phase 117 ✅ complete — MCP Streamable HTTP transport.** Raw WebSocket
+(Phase 116) turned out to be a design flaw for the MCP side specifically:
+MCP's standard transports are stdio, HTTP+SSE (legacy), and Streamable HTTP
+— no MCP client/harness in practice (Claude Desktop, Claude Code, etc.)
+speaks raw WebSocket to an MCP server. `gitsema tools mcp --websocket` keeps
+printing a startup warning to that effect and is kept only for forward
+compatibility; it was not removed. The real fix, implemented here: the SDK's
+own `StreamableHTTPServerTransport`
+(`@modelcontextprotocol/sdk/server/streamableHttp.js`) as a proper network
+transport.
+
+- New flag `gitsema tools mcp --http <bind-address>` (e.g. `--http
+  0.0.0.0:4242`), parallel to `--websocket`, reusing
+  `parseBindAddress()`/`checkBearerAuth()` from `src/core/util/websocket.ts`
+  as-is (the planned rename to a generic `protocolServer.ts` was skipped —
+  not worth the diff/risk for two call sites that both happen to be
+  protocol-server helpers regardless of the file's name).
+- New `src/mcp/streamableHttpServer.ts`: a plain Node `http.createServer()`
+  (not Express, consistent with `webSocketServer.ts`) that checks the Bearer
+  header via `checkBearerAuth()` on every request, then routes by
+  `Mcp-Session-Id` header against a `Map<sessionId,
+  StreamableHTTPServerTransport>`:
+  - No session header + `POST` → builds a fresh `McpServer` via
+    `buildMcpServer()`, constructs a `new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(), onsessioninitialized,
+    onsessionclosed })`, `await server.connect(transport)`, then `await
+    transport.handleRequest(req, res)` (this is the `initialize` request;
+    the transport itself validates that). One `McpServer` instance now
+    serves every subsequent request in that session — unlike the WebSocket
+    transport's once-per-connection `connect()`, Streamable HTTP's
+    `Protocol.connect()` is called once per *session*, and a session spans
+    many HTTP requests.
+  - Known session header (any method, including the SSE-opening `GET` and
+    the session-ending `DELETE`) → looked up in the map and delegated
+    straight to that session's `transport.handleRequest(req, res)`.
+  - Unknown session header → `404` with a JSON-RPC error body; non-`POST`
+    with no session header → `400` — matching the SDK's documented
+    stateful-mode contract exactly.
+  - `onsessionclosed` removes the entry from the map.
+- Auth: `checkBearerAuth()` short-circuits with `401` before any session
+  routing.
+- `enableJsonResponse` left at its default (SSE-preferred); no `EventStore`
+  (resumability) — same "keep it minimal" posture as Phase 116.
+- Tests: `tests/integration/mcpStreamableHttp.test.ts`, using the SDK's own
+  `StreamableHTTPClientTransport` (no hand-rolled client needed, unlike
+  WebSocket, since `requestInit.headers` lets tests set `Authorization`
+  directly) + the real `Client`: round-trips `tools/list`, asserts the same
+  `transport.sessionId` is reused across two sequential `tools/list` calls
+  (proving one `McpServer` serves the whole session), and asserts
+  missing/wrong/correct Bearer token outcomes. 4/4 passing; full suite
+  (1213 tests) green.
+- Docs: `features.md` (new "MCP Streamable HTTP transport (Phase 117)"
+  subsection + `tools mcp` table row), `README.md` (`--http` flag in the
+  command table + a descriptive paragraph), `docs/parity.md` (transport-list
+  footnote), changeset (`minor`).
+- LSP was out of scope for this phase, as planned — Streamable HTTP is an
+  MCP-specific concept; LSP's existing stdio/TCP/WebSocket/`--remote`
+  transport set is unchanged.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.

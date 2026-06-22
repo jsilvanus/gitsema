@@ -14,7 +14,7 @@ This table shows which tools/commands are available in which interface. A checkm
 ### Legend
 - **CLI**: Command-line interface (85 commands)
 - **REPL**: Lightweight interactive search REPL (search only)
-- **LSP**: Language Server Protocol for IDE integration (5 protocol methods: hover, definition, references, symbol search)
+- **LSP**: Language Server Protocol for IDE integration (8 protocol methods: hover, definition, references, symbol search, call hierarchy)
 - **Guide**: Agentic tool-calling loop in `gitsema guide` (47 tools, max 5 roundtrips)
 - **MCP**: Model Context Protocol tools (45 tools for AI clients)
 - **HTTP**: REST API server via `gitsema tools serve` (~30 endpoints)
@@ -116,19 +116,30 @@ This table shows which tools/commands are available in which interface. A checkm
 
 ### LSP Interface Details
 
-**LSP is a specialized protocol for IDE integration, not a general command interface.** It exposes 5 JSON-RPC methods:
+**LSP is a specialized protocol for IDE integration, not a general command interface.** It exposes 9 JSON-RPC request/response methods, plus one server-push notification:
 
 | Method | Maps To | Use Case |
 |---|---|---|
-| `textDocument/hover` | `search` (semantic matching) | Show top-5 semantic matches when hovering over a symbol |
-| `textDocument/definition` | `code-search` (symbol + semantic lookup) | Go-to-definition: exact name match → substring match → semantic fallback |
-| `textDocument/references` | `search` + FTS (symbol + text references) | Find all references: symbol definitions + text mentions |
+| `textDocument/hover` | `search` (semantic matching) + debt/health/graph (Phase 115 enrichment) | Show top-5 semantic matches, plus optional Temporal/Risk & quality/Structure sections when their data is available |
+| `textDocument/definition` | `graph` (structural-first, Phase 114) + `code-search` (symbol + semantic fallback) | Go-to-definition: exact structural match when the graph is built → exact name match → substring match → semantic fallback (fallback results tagged `tags: ['fallback']`) |
+| `textDocument/references` | `graph` (structural-first, Phase 114) + `search`/FTS (symbol + text fallback) | Find all references: exact structural callers/importers when the graph is built → symbol definitions + text mentions (fallback results tagged `tags: ['fallback']`) |
 | `textDocument/documentSymbol` | Symbol index | List all symbols (functions, classes, etc.) in the current document |
 | `workspace/symbol` | `code-search` (symbol search) | Workspace-wide symbol search by name pattern |
+| `textDocument/prepareCallHierarchy` | `graph` (Phase 114) | Resolve a symbol to a `CallHierarchyItem` (carries the graph node key in `data`) |
+| `callHierarchy/incomingCalls` | `graph callers` (Phase 114) | Direct (depth-1) callers of a symbol, via the `calls` edge type |
+| `callHierarchy/outgoingCalls` | `graph callees` (Phase 114) | Direct (depth-1) callees of a symbol, via the `calls` edge type |
+| `textDocument/codeLens` | `graph callers` + `debt-score` (Phase 115) | Per-symbol `Called N× · debt X.XX` annotations, read from the background analysis cache |
+
+**Server-push notification (not request/response, not remote-delegatable):**
+- `textDocument/publishDiagnostics` — flags high-debt (`debtScore ≥ 0.7`) / high-hotspot-risk (`hotspotRisk ≥ 0.6`) files on a background timer; opt-in via `gitsema tools lsp --diagnostics` (off by default); **not supported with `--remote`**, since Phase 113's remote-delegation mechanism is request/response-only and has no way for the remote server to push notifications back to a local client (Phase 115). **Supported with `--websocket`** (Phase 116) — WebSocket carries server push fine, so this gating is keyed only on `--remote`, not on the client-facing transport.
+
+**Transports (Phase 113/116/117):** both `tools mcp` and `tools lsp` are available over stdio (default), `--tcp <port>` (LSP only), `--websocket <bind-address>` (fixed `/mcp`/`/lsp` path, header-based Bearer auth via `--key`; for MCP this is a known design flaw kept only for forward compatibility, since raw WebSocket isn't a standard MCP transport), and `--remote <url>` (request/response delegation to `tools serve`). `tools mcp` additionally supports `--http <bind-address>` (Phase 117) — the SDK's `StreamableHTTPServerTransport`, MCP's actual standard network transport, same `--key` Bearer-auth convention; prefer it over `--websocket` for MCP. None of these change the capability surface tracked in the tables above — they're alternative ways to reach the same JSON-RPC methods/MCP tools.
 
 **Marked as available in LSP:**
 - `search` ✓ — hover operation uses semantic search
 - `code-search` ✓ — workspace/symbol and definition use symbol search
+- `graph` (partial) ✓ — definition/references/call-hierarchy/codeLens methods query the structural graph first when built (Phase 114/115), falling back to semantic/FTS otherwise
+- `debt-score` (partial) ✓ — hover's Risk & quality section and codeLens read debt scores from the Phase 115 background analysis cache
 
 **Not available in LSP:**
 - All analysis commands (`evolution`, `clusters`, `change-points`, etc.) — LSP is read-only navigation, not analysis
@@ -165,7 +176,9 @@ This section documents all flags used across CLI commands, their consistency, an
 | `--model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override embedding model for current command |
 | `--text-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override text/prose embedding model |
 | `--code-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override source-code embedding model |
-| `--remote` | — | string | env | `search`, `first-seen`, `index start` | Proxy to remote gitsema server |
+| `--remote` | — | string | env | `search`, `first-seen`, `index start`, `tools mcp`, `tools lsp` | Proxy to remote gitsema server; for `tools mcp`/`tools lsp` (Phase 113) this delegates every data-access call via `POST /api/v1/protocol/:operation` instead of indexing/searching against a remote DB directly |
+| `--remote-key` | — | string | env (`GITSEMA_REMOTE_KEY`) | `tools mcp`, `tools lsp` | Bearer token for `--remote` |
+| `--remote-timeout` | — | int (ms) | `10000` | `tools mcp`, `tools lsp` | Abort a remote-delegated call after this many ms |
 | `--branch` | — | string | — | `search`, `first-seen`, `code-search`, `evolution`, `index start` | Restrict to commits reachable from branch |
 | `--hybrid` | — | bool | false | `search`, `first-seen`, `code-search` | Blend vector similarity with BM25 keyword matching |
 | `--bm25-weight` | — | float | 0.3 | `search`, `first-seen`, `code-search` | Weight for BM25 signal in hybrid search |
@@ -327,13 +340,13 @@ This table shows less common flags used by specific commands or command groups.
 - **Strengths:** Standardized protocol, works with Claude, other AI systems
 - **Gaps:** No maintenance commands, some graph commands, no visualization
 - **Protocol:** Stdio-based (JSON-RPC); `gitsema tools mcp`
-- **Future:** MCP HTTP bridge planned (Phase 102+)
+- **Remote delegation:** `gitsema tools mcp --remote <url>` proxies every tool call to a `gitsema tools serve`'s `POST /api/v1/protocol/mcp.<toolName>` route (Phase 113), closing the previously-planned "MCP HTTP bridge" gap
 
 ### HTTP API (`gitsema tools serve`)
 - **Status:** ~30 REST endpoints across multiple routes
 - **Strengths:** Language-agnostic, browser-accessible, remote delegation
 - **Gaps:** Missing graph commands (callers/callees/neighbors), some analysis endpoints
-- **Routes:** `search/`, `analysis/`, `evolution/`, `guide/`, `status/`, `graph/`, `commits/`, `blobs/`, `watch/`, `remote/`
+- **Routes:** `search/`, `analysis/`, `evolution/`, `guide/`, `status/`, `graph/`, `commits/`, `blobs/`, `watch/`, `remote/`, `protocol/` (Phase 113 — generic LSP/MCP remote-delegation dispatch)
 - **Authentication:** Optional bearer token via `--serve-key`
 
 ### CLI Interactive (Planned)

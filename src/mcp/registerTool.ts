@@ -1,6 +1,7 @@
 import { embedQuery } from '../core/embedding/embedQuery.js'
 import { formatDate } from '../core/search/ranking.js'
 import type { Embedding } from '../core/models/types.js'
+import { callRemote, type RemoteConfig } from '../core/remote/protocolClient.js'
 
 export function serializeSearchResults(results: any[]): string {
   if (results.length === 0) return '(no results)'
@@ -21,6 +22,18 @@ type EmbedResult = EmbedOk | EmbedErr
 
 type McpHandler = (args: any, helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<EmbedResult>; serializeSearchResults: (r: any[]) => string }) => Promise<any> | any
 
+// Phase 113: when set (via `gitsema tools mcp --remote <url>`), every tool
+// registered through `registerTool()` delegates to the remote server's
+// `POST /api/v1/protocol/mcp.<name>` route instead of running its handler
+// locally. This is process-wide state set once at server startup, before any
+// tool is ever invoked — see src/mcp/server.ts.
+let _mcpRemoteConfig: RemoteConfig | null = null
+
+/** Enables/disables remote delegation for all tools registered via `registerTool()`. */
+export function setMcpRemoteConfig(cfg: RemoteConfig | null): void {
+  _mcpRemoteConfig = cfg
+}
+
 /**
  * Registers one MCP tool. `description` is the "HOW TO USE" guidance the MCP
  * client's model sees (what the tool does / when to call it); `schema` is its
@@ -32,6 +45,15 @@ type McpHandler = (args: any, helpers: { embed: (provider: any, text: string, pr
 export function registerTool(server: any, name: string, description: string, schema: any, handler: McpHandler): void {
   server.tool(name, description, schema, async (args: any) => {
     const makeErr = (msg: string) => ({ content: [{ type: 'text', text: msg }] })
+
+    if (_mcpRemoteConfig) {
+      try {
+        return await callRemote(`mcp.${name}`, args, _mcpRemoteConfig)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return makeErr(`Error: ${msg}`)
+      }
+    }
 
     const helpers: { embed: (provider: any, text: string, prefix?: string) => Promise<EmbedResult>; serializeSearchResults: (r: any[]) => string } = {
       embed: async (provider: any, text: string, prefix = 'Error embedding query') => {
