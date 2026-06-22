@@ -473,6 +473,17 @@ instance the way stdio does. On the LSP side, WebSocket reuses the same stateles
 `Content-Length`-prefixed chunks — and unlike `--remote` delegation, WebSocket supports
 server push, so `--diagnostics` works normally over `--websocket`.
 
+**MCP `--websocket` is a known design flaw, kept only for forward compatibility.**
+Raw WebSocket was never one of MCP's standard transports (stdio / HTTP+SSE / Streamable
+HTTP); essentially no real-world MCP client or harness (Claude Desktop, Claude Code,
+etc.) supports connecting to an MCP server over plain WebSocket, so `gitsema tools mcp
+--websocket` prints a warning on startup that it is likely unusable with most clients.
+LSP `--websocket` has no such caveat — LSP has no standardized transport set, and
+WebSocket is a normal way IDEs reach LSP servers. The plan is to add a proper MCP
+Streamable HTTP transport (`@modelcontextprotocol/sdk/server/streamableHttp.js`,
+the SDK's actual recommended network transport) alongside `--websocket`; see
+`docs/PLAN.md` for the Streamable HTTP design.
+
 ---
 
 ## Maintenance & DB

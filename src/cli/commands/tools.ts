@@ -51,6 +51,9 @@ export function toolsCommand(): Command {
     .option('--key <token>', 'require this Bearer token for --websocket connections')
     .action(async (opts: RemoteOpts & { websocket?: string; key?: string }) => {
       if (opts.websocket) {
+        console.error(
+          'Warning: --websocket is not part of the standard MCP transport set (stdio/SSE/Streamable HTTP); most MCP clients and harnesses do not support raw WebSocket and will fail to connect. Kept for forward compatibility; use stdio (default) unless your client specifically supports WebSocket.',
+        )
         let bind: { host: string; port: number }
         try {
           bind = parseBindAddress(opts.websocket)

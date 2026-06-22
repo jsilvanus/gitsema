@@ -4175,6 +4175,7 @@ from the parity set by design. No schema change.
 | **114** ✅ | §5 (Phase C) | LSP structural navigation | New LSP methods backed by the Phase 107 knowledge-graph tables (`structural_refs`/`graph_nodes`/`edges`) — `callHierarchy/incomingCalls`/`outgoingCalls`, structural-first/semantic-fallback precedence for existing methods. |
 | **115** ✅ | §6 (Phase D) | LSP diagnostics, code lens, rich hover | `textDocument/publishDiagnostics` on a background timer (not request-time), code lens, hover enrichment with temporal/risk/structure sections — behind a `--diagnostics` opt-in flag, all gracefully degrading. |
 | **116** ✅ | §4 (Phase B) | WebSocket transport | `--websocket <bind-address>` transport for MCP/LSP, depends on Phase 113's remote-delegation plumbing; auth via header, not subprotocol. |
+| **117** (planned) | not in spec; follow-up to §4 | MCP Streamable HTTP transport | Add `@modelcontextprotocol/sdk/server/streamableHttp.js`'s `StreamableHTTPServerTransport` as a real network transport for `gitsema tools mcp`, since raw `--websocket` (Phase 116) is a known design flaw most MCP clients/harnesses don't support — Streamable HTTP is the SDK's actual recommended network transport. |
 
 **Status:** Phase 113 ✅ complete. `src/core/remote/protocolClient.ts` exports
 `callRemote()`/`checkRemoteHealth()` — the single shared HTTP client both `tools
@@ -4333,6 +4334,71 @@ missing/wrong/correct Bearer token outcomes) and
 
 With Phase 116 complete, all four phases of `docs/lsp_and_mcp_fleshout.md`
 (A/113, C/114, D/115, B/116) are implemented.
+
+**Phase 117 (planned, not started) — MCP Streamable HTTP transport.** Raw
+WebSocket (Phase 116) turned out to be a design flaw for the MCP side
+specifically: MCP's standard transports are stdio, HTTP+SSE (legacy), and
+Streamable HTTP — no MCP client/harness in practice (Claude Desktop, Claude
+Code, etc.) speaks raw WebSocket to an MCP server. `gitsema tools mcp
+--websocket` now prints a startup warning to that effect and is kept only
+for forward compatibility, in case WebSocket support appears in clients
+later; it is not being removed. The real fix is to add the SDK's own
+`StreamableHTTPServerTransport` (`@modelcontextprotocol/sdk/server/streamableHttp.js`)
+as a proper network transport. Design, not yet implemented:
+
+- New flag `gitsema tools mcp --http <bind-address>` (e.g. `--http
+  0.0.0.0:4242`), parallel to `--websocket`, reusing
+  `parseBindAddress()`/`checkBearerAuth()` from `src/core/util/websocket.ts`
+  (rename or generalize that module — it's no longer WS-specific once it
+  backs two transports; likely `src/core/util/protocolServer.ts`).
+- New `src/mcp/streamableHttpServer.ts`: a plain Node `http.createServer()`
+  (not Express, to stay dependency-light and consistent with
+  `webSocketServer.ts`) that on every request checks the Bearer header via
+  `checkBearerAuth()`, then delegates to a session map of
+  `Map<sessionId, { server: McpServer; transport: StreamableHTTPServerTransport }>`
+  — the standard pattern from the SDK's own docs/examples:
+  - `POST /mcp` with no `Mcp-Session-Id` header and an `initialize` request
+    body → build a fresh `McpServer` via the existing `buildMcpServer()`
+    (Phase 116 already extracted this), construct a `new
+    StreamableHTTPServerTransport({ sessionIdGenerator: () =>
+    randomUUID(), onsessioninitialized: (sid) => sessions.set(sid, {...}) })`,
+    `await server.connect(transport)`, then `await
+    transport.handleRequest(req, res, parsedBody)`.
+  - `POST /mcp` with a known `Mcp-Session-Id` header → look up the existing
+    session's transport and call `handleRequest()` on it (same `McpServer`
+    instance handles every request in that session — unlike the WebSocket
+    transport, Streamable HTTP's `Protocol.connect()` is called once per
+    *session*, not once per HTTP request, so this doesn't hit the
+    one-transport-per-server constraint repeatedly).
+  - `GET /mcp` with a known session ID → `handleRequest()` opens the SSE
+    stream for server-to-client push (notifications, e.g. could carry
+    future LSP-style diagnostics-equivalent features if MCP ever wants
+    them).
+  - `DELETE /mcp` with a known session ID → `handleRequest()` ends the
+    session; remove from the session map in `onsessionclosed`.
+  - Unknown/missing session ID on a non-initialize request → 400, matching
+    the SDK's documented stateful-mode contract.
+- Auth: same Bearer-header check as `--websocket`/`--key`, applied before
+  routing to the session map (a 401 short-circuits before any session
+  logic runs).
+- `enableJsonResponse`: leave default (SSE-preferred) for v1; consider
+  exposing as a flag later if a client needs plain JSON responses instead
+  of streaming.
+- No `EventStore` (resumability) in v1 — out of scope, same "keep it
+  minimal" posture as Phase 116's WebSocket transport.
+- Tests: `tests/integration/mcpStreamableHttp.test.ts` using the SDK's own
+  `StreamableHTTPClientTransport` (client-side, ships in the SDK — unlike
+  WebSocket, so no hand-rolled client class needed this time) + the real
+  `Client`: round-trip `tools/list`/`tools/call`, multi-request session
+  reuse (two sequential calls on the same session, confirming one
+  `McpServer` instance serves both), and auth-rejection assertions.
+- Docs/changeset: same governance checklist as Phase 116 — `features.md`
+  (new subsection), `README.md` (`--http` flag in the command table),
+  `PLAN.md` (mark 117 ✅ once shipped), `docs/parity.md` (transport-list
+  footnote update), changeset (`minor`).
+- LSP is explicitly out of scope for this phase — Streamable HTTP is an MCP
+  concept; LSP has no equivalent standard and its existing
+  stdio/TCP/WebSocket/`--remote` transport set is sufficient.
 
 ---
 
