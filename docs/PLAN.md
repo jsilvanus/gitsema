@@ -4598,6 +4598,49 @@ track.
 
 ---
 
+### Phase 120 — Deprecate `tools lsp --tcp` ✅ complete
+
+**Design:** no separate design doc — scoped from a follow-up discussion on
+review10 §3.5/Phase 119's known gap (`tools lsp --tcp` has no authentication).
+
+**Goal:** Close the unauthenticated-`--tcp` gap by deprecating the flag
+rather than adding auth to it. Raw TCP has no request framing to carry a
+bearer token in (unlike `--websocket`'s upgrade request or `--http`'s
+headers), so a fix would require inventing a bespoke handshake-auth
+protocol just for this one transport. `--websocket --key` already covers
+the same network-LSP use case (same JSON-RPC dispatcher, same methods, see
+`docs/parity.md` §0) with working, tested auth — so deprecation in favor of
+it is strictly better than adding new bespoke protocol surface.
+
+**Scope:**
+1. `--tcp <port>`'s Commander description now reads
+   `[deprecated, use --websocket]` (`src/cli/commands/tools.ts`).
+2. The existing per-invocation `console.error` warning (previously "no
+   authentication... prefer --websocket --key") now reads as an explicit
+   `Deprecation notice:` and recommends `--websocket <bind-address> --key
+   <token>` directly.
+3. `--tcp` itself is unchanged functionally — same `startLspTcpServer()`,
+   same `ConnectionLimiter` cap — this phase is messaging-only. No removal
+   timeline has been set; removal would be a separate, explicitly-scheduled
+   future phase once usage data/feedback suggests it's safe.
+4. Updated `CLAUDE.md`, `README.md`, `docs/features.md`, and `docs/parity.md`
+   to describe `--tcp` as deprecated (steering to `--websocket`) rather than
+   as an open security gap needing a fix.
+
+**Acceptance criteria:**
+- `gitsema tools lsp --tcp <port>` still starts the TCP server (no behavior
+  change) but prints a deprecation notice, not just a security warning.
+- `CLAUDE.md`/`README.md`/`docs/features.md`/`docs/parity.md` all describe
+  `--tcp` as deprecated in favor of `--websocket`, not as an unresolved gap.
+- `pnpm build && pnpm test` clean.
+
+**Files touched:** `src/cli/commands/tools.ts`, `CLAUDE.md`, `README.md`,
+`docs/features.md`, `docs/parity.md`, `docs/PLAN.md`.
+
+**Status:** ✅ complete.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.

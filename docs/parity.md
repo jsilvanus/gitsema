@@ -22,12 +22,14 @@ tools are available — that's §1.
 | REPL | Local (direct DB access in-process) | — | n/a | n/a |
 | Guide | Local (in-process agentic loop) | — | n/a | n/a |
 | `tools mcp` | stdio (spawned as a local child process) | `--websocket <bind-address>` (non-standard MCP transport, kept for forward compatibility); `--http <bind-address>` (Streamable HTTP — MCP's actual standard network transport, Phase 117) | `--key`/`GITSEMA_WEBSOCKET_KEY` (websocket); `--key`/`GITSEMA_MCP_HTTP_KEY` (http) | `maxPayload` 10MB + max 100 connections/sessions on both network modes (review10 §3) |
-| `tools lsp` | stdio (spawned as a local child process) | `--tcp <port>` (raw TCP, `Content-Length`-framed); `--websocket <bind-address>` | **none** (`--tcp` — documented gap, review10 §3.5); `--key`/`GITSEMA_WEBSOCKET_KEY` (`--websocket`) | max 100 connections on both network modes; `maxPayload` 10MB on `--websocket` |
+| `tools lsp` | stdio (spawned as a local child process) | `--tcp <port>` (raw TCP, `Content-Length`-framed, **deprecated**, Phase 120); `--websocket <bind-address>` | **none** (`--tcp` — deprecated in favor of `--websocket` rather than fixed, review10 §3.5/Phase 120); `--key`/`GITSEMA_WEBSOCKET_KEY` (`--websocket`) | max 100 connections on both network modes; `maxPayload` 10MB on `--websocket` |
 | `tools serve` | Always a server (no local-only mode) | HTTP (REST-ish routes) | `--key`/`GITSEMA_SERVE_KEY` | `express.json({ limit })` body-size cap |
 
 All network modes that support a key (everything except `--tcp`) print a
 startup warning if bound to a non-loopback address with no key configured.
-`--tcp` has no key option at all, so it always warns.
+`--tcp` has no key option at all (raw TCP has no header to carry a token in),
+so it always warns — and prints a deprecation notice on every invocation
+recommending `--websocket --key` instead.
 
 **`--remote <url>` is a separate axis, not another network-exposure mode.**
 It's how *this* gitsema process delegates outbound to a remote `tools serve`
@@ -45,7 +47,7 @@ This table shows which tools/commands are available in which interface. A checkm
 ### Legend
 - **CLI**: Command-line interface (85 commands)
 - **REPL**: Lightweight interactive search REPL (search only)
-- **LSP**: Language Server Protocol for IDE integration (9 protocol methods: hover, definition, references, document/workspace symbol, call hierarchy, code lens) — available over stdio, `--tcp`, or `--websocket` (see §0); tool availability is identical across all three, since they're just transports onto the same dispatcher
+- **LSP**: Language Server Protocol for IDE integration (9 protocol methods: hover, definition, references, document/workspace symbol, call hierarchy, code lens) — available over stdio, `--tcp` (deprecated, Phase 120), or `--websocket` (see §0); tool availability is identical across all three, since they're just transports onto the same dispatcher
 - **Guide**: Agentic tool-calling loop in `gitsema guide` (49 tools, max 5 roundtrips)
 - **MCP**: Model Context Protocol tools (38 tools for AI clients) — available over stdio, `--websocket`, or `--http` (see §0); tool availability is identical across all three, since they're just transports onto the same `McpServer`
 - **HTTP**: REST API server via `gitsema tools serve` (~30 endpoints)
@@ -211,7 +213,7 @@ This section documents all flags used across CLI commands, their consistency, an
 | `--remote-timeout` | — | int (ms) | `10000` | `tools mcp`, `tools lsp` | Abort a remote-delegated call after this many ms |
 | `--websocket` | — | `<bind-address>` | — | `tools mcp`, `tools lsp` | Network transport (raw WebSocket) on a fixed `/mcp`/`/lsp` path — inbound exposure, distinct from `--remote` (see §0) |
 | `--http` | — | `<bind-address>` | — | `tools mcp` | Streamable HTTP network transport on a fixed `/mcp` path (Phase 117) — MCP's standard network transport, preferred over `--websocket` |
-| `--tcp` | — | `<port>` | — | `tools lsp` | Raw TCP network transport, `Content-Length`-framed — **no `--key`/auth option** (see §0) |
+| `--tcp` | — | `<port>` | — | `tools lsp` | **Deprecated** (Phase 120) raw TCP network transport, `Content-Length`-framed — **no `--key`/auth option**, raw TCP has no header to carry a token in (see §0); use `--websocket --key` instead |
 | `--key` | — | string | env (`GITSEMA_WEBSOCKET_KEY`/`GITSEMA_MCP_HTTP_KEY`/`GITSEMA_SERVE_KEY`, transport-dependent) | `tools mcp --websocket\|--http`, `tools lsp --websocket`, `tools serve` | Bearer token required of inbound network clients; not supported by `--tcp` |
 | `--branch` | — | string | — | `search`, `first-seen`, `code-search`, `evolution`, `index start` | Restrict to commits reachable from branch |
 | `--hybrid` | — | bool | false | `search`, `first-seen`, `code-search` | Blend vector similarity with BM25 keyword matching |
@@ -471,6 +473,7 @@ If you find a discrepancy, **update this file first**, then propagate the change
 | Phase 116 | MCP/LSP WebSocket transport | `tools mcp --websocket`, `tools lsp --websocket` — no change to tool/method availability, just a network transport (§0) |
 | Phase 117 | MCP Streamable HTTP transport | `tools mcp --http` — MCP's standard network transport, supersedes `--websocket` for MCP clients; no change to tool availability (§0) |
 | Phase 119 (review10 close-out) | Network-transport resource bounds | Payload/connection/session caps and non-loopback-without-key warnings added to all `--websocket`/`--http`/`--tcp` modes; no parity impact (security hardening, internal) |
+| Phase 120 | `tools lsp --tcp` deprecated | No tool/method availability change — `--tcp` still works identically, now prints a deprecation notice on every invocation steering callers to `--websocket --key` (§0); not yet scheduled for removal |
 | Future | CLI Interactive | Full CLI with autocomplete, history, interactive UI |
 | Future | Web UI | Browser-based dashboard with visualization |
 
@@ -496,7 +499,7 @@ If you find a discrepancy, **update this file first**, then propagate the change
 
 - [ ] Beta Web UI with visualization (map, heatmap, project)
 - [ ] Full parity across all interfaces (all tools everywhere applicable)
-- [ ] Authentication mechanism for `tools lsp --tcp` (currently unauthenticated by design — see §0; tracked as a known gap in `CLAUDE.md`)
+- [ ] Remove `tools lsp --tcp` once downstream clients have migrated to `--websocket` (deprecated, not removed, as of Phase 120 — see §0; tracked in `CLAUDE.md`)
 
 ---
 
