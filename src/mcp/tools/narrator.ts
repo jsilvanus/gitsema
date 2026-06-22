@@ -10,10 +10,12 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
 import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
+import { registerTool } from '../registerTool.js'
 
 export function registerNarratorTools(server: McpServer) {
   // narrate_repo
-  server.tool(
+  registerTool(
+    server,
     'narrate_repo',
     'Return commit evidence (or an LLM narrative when evidence_only=false) for repository development history. ' +
     'By default (evidence_only=true) returns raw classified commits so the calling agent can narrate itself. ' +
@@ -80,7 +82,8 @@ export function registerNarratorTools(server: McpServer) {
   )
 
   // explain_issue_or_error
-  server.tool(
+  registerTool(
+    server,
     'explain_issue_or_error',
     'Return commit evidence (or an LLM timeline when evidence_only=false) for a bug, error, or concept traced through git history. ' +
     'By default (evidence_only=true) returns matching commits so the calling agent can build its own explanation. ' +

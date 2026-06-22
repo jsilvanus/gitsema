@@ -59,19 +59,28 @@ export function buildMcpServer(): McpServer {
   return server
 }
 
+/**
+ * Health-checks a remote `gitsema tools serve` instance and, if reachable,
+ * arms `registerTool()`'s remote delegation for the rest of the process.
+ * Shared by the stdio, `--websocket`, and `--http` transports so `--remote`
+ * works no matter which one is selected.
+ */
+export async function setupMcpRemote(remote: { url: string; key?: string; timeoutMs?: number }): Promise<void> {
+  try {
+    await checkRemoteHealth(remote)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`Failed to connect to remote at ${remote.url}: ${msg}\n`)
+    process.exit(1)
+  }
+  setMcpRemoteConfig(remote)
+}
+
 export async function startMcpServer(options: McpServerOptions = {}): Promise<void> {
   const { remoteUrl, remoteKey, remoteTimeoutMs } = options
 
   if (remoteUrl) {
-    const cfg = { url: remoteUrl, key: remoteKey, timeoutMs: remoteTimeoutMs }
-    try {
-      await checkRemoteHealth(cfg)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      process.stderr.write(`Failed to connect to remote at ${remoteUrl}: ${msg}\n`)
-      process.exit(1)
-    }
-    setMcpRemoteConfig(cfg)
+    await setupMcpRemote({ url: remoteUrl, key: remoteKey, timeoutMs: remoteTimeoutMs })
   }
 
   const server = buildMcpServer()

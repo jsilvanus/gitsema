@@ -11,7 +11,7 @@
  */
 
 import { Command } from 'commander'
-import { startMcpServer } from '../../mcp/server.js'
+import { startMcpServer, setupMcpRemote } from '../../mcp/server.js'
 import { startMcpWebSocketServer } from '../../mcp/webSocketServer.js'
 import { startMcpStreamableHttpServer } from '../../mcp/streamableHttpServer.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
@@ -62,6 +62,9 @@ export function toolsCommand(): Command {
     .option('--http <bind-address>', 'listen on the MCP Streamable HTTP transport at /mcp instead of stdio (e.g. --http 0.0.0.0:4242); this is the SDK\'s standard network transport — prefer it over --websocket')
     .option('--key <token>', 'require this Bearer token for --websocket/--http connections')
     .action(async (opts: RemoteOpts & { websocket?: string; http?: string; key?: string }) => {
+      const remote = resolveRemoteConfig(opts)
+      if (remote) await setupMcpRemote(remote)
+
       if (opts.websocket) {
         console.error(
           'Warning: --websocket is not part of the standard MCP transport set (stdio/SSE/Streamable HTTP); most MCP clients and harnesses do not support raw WebSocket and will fail to connect. Kept for forward compatibility; use stdio (default) unless your client specifically supports WebSocket.',
@@ -75,8 +78,7 @@ export function toolsCommand(): Command {
         startMcpStreamableHttpServer(bind.host, bind.port, opts.key)
         return
       }
-      const remote = resolveRemoteConfig(opts)
-      await startMcpServer({ remoteUrl: remote?.url, remoteKey: remote?.key, remoteTimeoutMs: remote?.timeoutMs })
+      await startMcpServer({})
     })
 
   // ── lsp ──────────────────────────────────────────────────────────────────
