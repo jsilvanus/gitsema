@@ -58,7 +58,8 @@ export function toolsCommand(): Command {
     .option('--remote <url>', 'delegate all data-access calls to a running `gitsema tools serve` instance (overrides GITSEMA_REMOTE)')
     .option('--remote-key <token>', 'Bearer token for --remote (overrides GITSEMA_REMOTE_KEY)')
     .option('--remote-timeout <ms>', 'timeout in ms for remote calls (default 10000)')
-    .action(async (opts: RemoteOpts & { tcp?: string }) => {
+    .option('--diagnostics', 'push textDocument/publishDiagnostics for high-debt/hotspot files on a background timer (opt-in, off by default; not supported with --remote)')
+    .action(async (opts: RemoteOpts & { tcp?: string; diagnostics?: boolean }) => {
       const remote = resolveRemoteConfig(opts)
       if (remote) {
         try {
@@ -68,17 +69,21 @@ export function toolsCommand(): Command {
           console.error(`Failed to connect to remote at ${remote.url}: ${msg}`)
           process.exit(1)
         }
+        if (opts.diagnostics) {
+          console.error('Warning: --diagnostics is not supported with --remote; diagnostics will not run.')
+        }
       }
       const session = getActiveSession()
+      const lspOptions = { diagnostics: opts.diagnostics }
       if (opts.tcp) {
         const port = parseInt(opts.tcp, 10)
         if (isNaN(port) || port < 1 || port > 65535) {
           console.error('Error: --tcp requires a valid port number (1–65535)')
           process.exit(1)
         }
-        startLspTcpServer(session, port, remote)
+        startLspTcpServer(session, port, remote, lspOptions)
       } else {
-        startLspServer(session, remote)
+        startLspServer(session, remote, lspOptions)
       }
     })
 

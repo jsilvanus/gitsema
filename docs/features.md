@@ -267,7 +267,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
-| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 8 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113) |
+| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
@@ -379,7 +379,7 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | Subcommand | Description |
 |---|---|
 | `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | MCP stdio server (preferred entry point for AI clients) |
-| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio or TCP) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
 
 ### Remote delegation (Phase 113)
@@ -422,6 +422,35 @@ Three new JSON-RPC methods add call-hierarchy support, backed by the same graph:
 directly (`src/core/lsp/structuralNav.ts`) — no new graph-query SQL was added; the
 only new SQL is a `symbols` table lookup (by `qualified_name` + `blob_hash`) to
 recover line ranges for graph nodes, since the graph itself stores no line data.
+
+### Diagnostics, code lens, and rich hover (Phase 115)
+
+`textDocument/hover` now enriches its existing semantic-match section with up to
+three optional sections — **Temporal** (last author + change frequency, from
+`blob_commits`/`commits`), **Risk & quality** (debt score, hotspot risk, security
+pattern match count), and **Structure** (caller/callee counts, when the Phase
+106/107 knowledge graph is built) — each independently omitted, never erroring
+the whole hover, when its data source is unavailable. Debt/hotspot/security
+signals are computed once on a background timer (default every 5 minutes, never
+synchronously inside a request) by `src/core/lsp/analysisCache.ts`, which reuses
+`scoreDebt()`/`computeHotspots()`/`scanForVulnerabilities()` directly — no
+duplicated scoring logic.
+
+A new `textDocument/codeLens` method annotates each symbol in a file with
+`Called N× · debt X.XX`-style text, reading from the same cache and the
+Phase 107 graph's caller counts. `initialize` now advertises
+`codeLensProvider: true`, and `lsp.codeLens` is remote-delegatable like any other
+LSP data method.
+
+Diagnostics (`textDocument/publishDiagnostics`) are opt-in via
+`gitsema tools lsp --diagnostics` (off by default — the false-positive rate of
+the v1 thresholds, debt score ≥ 0.7 or hotspot risk ≥ 0.6, is unproven). When
+enabled, the server pushes a notification per flagged file on each background
+refresh cycle, over stdout (stdio transport) or to every connected socket (TCP
+transport). Diagnostics are not supported in `--remote` mode, since remote
+delegation (Phase 113) is purely request/response and has no mechanism for the
+remote server to push notifications back to a local client — `gitsema tools lsp
+--remote <url> --diagnostics` prints a warning and runs without diagnostics.
 
 ---
 

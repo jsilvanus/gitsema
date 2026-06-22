@@ -13,6 +13,9 @@ import {
   incomingCalls,
   outgoingCalls,
 } from './structuralNav.js'
+import { buildHoverMarkdown } from './hoverContent.js'
+import { startBackgroundRefresh, getAnalysisCache, type DiagnosticItem } from './analysisCache.js'
+import { callers } from '../graph/traversal.js'
 
 /** Maps JSON-RPC methods that need DB access to the `lsp.<op>` name used by `protocolClient.ts`. */
 const METHOD_TO_REMOTE_OP: Record<string, string> = {
@@ -24,6 +27,7 @@ const METHOD_TO_REMOTE_OP: Record<string, string> = {
   'textDocument/prepareCallHierarchy': 'lsp.prepareCallHierarchy',
   'callHierarchy/incomingCalls': 'lsp.incomingCalls',
   'callHierarchy/outgoingCalls': 'lsp.outgoingCalls',
+  'textDocument/codeLens': 'lsp.codeLens',
 }
 
 export type JsonRpcRequest = { jsonrpc: '2.0'; id?: number | string; method: string; params?: any }
@@ -79,6 +83,7 @@ export async function handleRequest(
           workspaceSymbolProvider: true,
           documentSymbolProvider: true,
           callHierarchyProvider: true,
+          codeLensProvider: true,
         },
       },
     }
@@ -103,12 +108,26 @@ export async function handleRequest(
       const provider = buildProvider(providerType, model)
       const queryEmb = await embedQuery(provider, q)
       const results = await vectorSearch(queryEmb, { topK: 5, model, query: q })
-      // Return proper MarkupContent with Markdown hover card
-      const lines = results.map((r: any) => {
+      const semanticLines = results.map((r: any) => {
         const path = r.paths?.[0] ?? r.blobHash
         return `- \`${path}\` — similarity: ${r.score.toFixed(3)}`
       })
-      const value = `**Semantic matches for \`${q}\`**\n\n${lines.join('\n')}`
+
+      // Phase 115 (§6.1): enrich with optional Temporal/Risk/Structure
+      // sections, joined onto the existing semantic result via the symbol's
+      // own (blobHash, path) identity — never blocks hover on missing data.
+      const symbolRow = dbSession.rawDb.prepare(
+        `SELECT s.blob_hash, p.path FROM symbols s
+         JOIN paths p ON s.blob_hash = p.blob_hash
+         WHERE LOWER(s.symbol_name) = LOWER(?) LIMIT 1`,
+      ).get(q) as { blob_hash: string; path: string } | undefined
+
+      const value = await buildHoverMarkdown({
+        query: q,
+        semanticLines,
+        blobHash: symbolRow?.blob_hash,
+        path: symbolRow?.path,
+      })
       const contents = { kind: 'markdown', value }
       return { jsonrpc: '2.0', id, result: { contents } }
     } catch (e: any) {
@@ -339,6 +358,57 @@ export async function handleRequest(
     }
   }
 
+  if (req.method === 'textDocument/codeLens') {
+    const params = req.params ?? {}
+    const uri: string = typeof params?.textDocument?.uri === 'string' ? params.textDocument.uri
+      : typeof params?.uri === 'string' ? params.uri : ''
+    try {
+      const filePath = uri.replace(/^file:\/\//, '')
+      if (!filePath) return { jsonrpc: '2.0', id, result: [] }
+
+      const pathRow = dbSession.rawDb.prepare(
+        `SELECT p.blob_hash FROM paths p
+         JOIN blob_commits bc ON p.blob_hash = bc.blob_hash
+         JOIN commits c ON bc.commit_hash = c.commit_hash
+         WHERE p.path = ? OR p.path LIKE ?
+         ORDER BY c.timestamp DESC LIMIT 1`,
+      ).get(filePath, `%${filePath}`) as { blob_hash: string } | undefined
+      if (!pathRow) return { jsonrpc: '2.0', id, result: [] }
+
+      const symbolRows = dbSession.rawDb.prepare(
+        `SELECT symbol_name, qualified_name, start_line FROM symbols WHERE blob_hash = ? ORDER BY start_line ASC`,
+      ).all(pathRow.blob_hash) as Array<{ symbol_name: string; qualified_name: string | null; start_line: number }>
+
+      // Phase 115 (§6.3): "Called N times · Last touched <date>" per symbol —
+      // call counts from the structural graph (if built), last-touched from
+      // the cached analysis pass; both omitted gracefully when unavailable.
+      const graph = activeGraphStore()
+      const graphBuilt = await isGraphBuilt(graph)
+      const cache = getAnalysisCache()
+
+      const lenses = []
+      for (const r of symbolRows) {
+        const identifier = r.qualified_name ?? r.symbol_name
+        const parts: string[] = []
+        if (graphBuilt) {
+          const result = await callers(graph, identifier, 1)
+          if (result.resolved.status === 'found') parts.push(`Called ${result.hits.length}×`)
+        }
+        const debt = cache?.debtByPath.get(filePath)
+        if (debt) parts.push(`debt ${debt.debtScore.toFixed(2)}`)
+        if (parts.length === 0) continue
+        const line = Math.max(0, r.start_line - 1)
+        lenses.push({
+          range: { start: { line, character: 0 }, end: { line, character: 0 } },
+          command: { title: parts.join(' · '), command: '' },
+        })
+      }
+      return { jsonrpc: '2.0', id, result: lenses }
+    } catch (e: any) {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: String(e) } }
+    }
+  }
+
   if (req.method === 'workspace/symbol') {
     const params = req.params ?? {}
     const query: string = typeof params?.query === 'string' ? params.query : ''
@@ -406,8 +476,58 @@ export async function handleRequest(
   return { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } }
 }
 
+export interface LspServerOptions {
+  /** Phase 115 (§6.2): opt-in background diagnostics (default off — see false-positive-rate note in PLAN.md). */
+  diagnostics?: boolean
+  /** Refresh interval for the diagnostics cache, in ms. Default 5 minutes. */
+  diagnosticsIntervalMs?: number
+}
+
+const DEFAULT_DIAGNOSTICS_INTERVAL_MS = 5 * 60 * 1000
+
+function buildDiagnosticsNotification(path: string, items: DiagnosticItem[]): JsonRpcResponse {
+  return {
+    jsonrpc: '2.0',
+    method: 'textDocument/publishDiagnostics',
+    params: {
+      uri: `file://${path}`,
+      diagnostics: items.map(({ severity, message, range }) => ({ severity, message, range, source: 'gitsema' })),
+    },
+  } as any
+}
+
+/**
+ * Starts the diagnostics background refresh loop and returns a callback that
+ * pushes a `textDocument/publishDiagnostics` notification (via `write`) for
+ * every flagged path on each refresh cycle. No-op (returns `null`) when
+ * `--diagnostics` wasn't requested or a `remote` is set — diagnostics push
+ * notifications, which Phase 113's request/response remote mechanism doesn't
+ * support, so this degrades to "disabled" rather than attempting it remotely.
+ */
+function maybeStartDiagnostics(
+  dbSession: ReturnType<typeof getActiveSession>,
+  options: LspServerOptions | undefined,
+  remote: RemoteConfig | undefined,
+  write: (data: string) => void,
+): ReturnType<typeof setInterval> | null {
+  if (!options?.diagnostics || remote) return null
+  const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
+  const model = process.env.GITSEMA_MODEL ?? 'nomic-embed-text'
+  const provider = buildProvider(providerType, model)
+  const intervalMs = options.diagnosticsIntervalMs ?? DEFAULT_DIAGNOSTICS_INTERVAL_MS
+  return startBackgroundRefresh(dbSession, provider, intervalMs, (diagnosticsByPath) => {
+    for (const [path, items] of diagnosticsByPath) {
+      write(serializeMessage(buildDiagnosticsNotification(path, items)))
+    }
+  })
+}
+
 /** Start the LSP server over stdio. */
-export function startLspServer(dbSession: ReturnType<typeof getActiveSession>, remote?: RemoteConfig): void {
+export function startLspServer(
+  dbSession: ReturnType<typeof getActiveSession>,
+  remote?: RemoteConfig,
+  options?: LspServerOptions,
+): void {
   const stdin = process.stdin
   stdin.on('data', async (chunk: Buffer) => {
     const req = parseMessage(chunk)
@@ -418,11 +538,20 @@ export function startLspServer(dbSession: ReturnType<typeof getActiveSession>, r
       process.stdout.write(out)
     }
   })
+  maybeStartDiagnostics(dbSession, options, remote, (data) => process.stdout.write(data))
 }
 
 /** Start the LSP server over TCP (useful for IDEs that prefer TCP connections). */
-export function startLspTcpServer(dbSession: ReturnType<typeof getActiveSession>, port: number, remote?: RemoteConfig): void {
+export function startLspTcpServer(
+  dbSession: ReturnType<typeof getActiveSession>,
+  port: number,
+  remote?: RemoteConfig,
+  options?: LspServerOptions,
+): void {
+  const sockets = new Set<import('node:net').Socket>()
   const server = createNetServer((socket) => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
     socket.on('data', async (chunk: Buffer) => {
       const req = parseMessage(chunk)
       if (!req) return
@@ -434,6 +563,9 @@ export function startLspTcpServer(dbSession: ReturnType<typeof getActiveSession>
   })
   server.listen(port, () => {
     process.stderr.write(`LSP server listening on TCP port ${port}\n`)
+  })
+  maybeStartDiagnostics(dbSession, options, remote, (data) => {
+    for (const socket of sockets) socket.write(data)
   })
 }
 

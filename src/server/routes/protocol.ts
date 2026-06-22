@@ -57,6 +57,7 @@ const LSP_OP_TO_METHOD: Record<string, string> = {
   prepareCallHierarchy: 'textDocument/prepareCallHierarchy',
   incomingCalls: 'callHierarchy/incomingCalls',
   outgoingCalls: 'callHierarchy/outgoingCalls',
+  codeLens: 'textDocument/codeLens',
 }
 
 export function protocolRouter(): Router {

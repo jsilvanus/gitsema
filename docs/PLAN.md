@@ -4173,7 +4173,7 @@ from the parity set by design. No schema change.
 |---|---|---|---|
 | **113** ✅ | §3 (Phase A) | Generic remote delegation for MCP + LSP | One shared mechanism (`src/core/remote/protocolClient.ts`) lets `gitsema tools mcp --remote <url>` and `gitsema tools lsp --remote <url>` delegate every data-access call to a running `gitsema tools serve` instance via `POST /api/v1/protocol/:operation`. |
 | **114** ✅ | §5 (Phase C) | LSP structural navigation | New LSP methods backed by the Phase 107 knowledge-graph tables (`structural_refs`/`graph_nodes`/`edges`) — `callHierarchy/incomingCalls`/`outgoingCalls`, structural-first/semantic-fallback precedence for existing methods. |
-| **115** | §6 (Phase D) | LSP diagnostics, code lens, rich hover | `textDocument/publishDiagnostics` on a background timer (not request-time), code lens, hover enrichment with temporal/risk/structure sections — behind a `--diagnostics` opt-in flag, all gracefully degrading. |
+| **115** ✅ | §6 (Phase D) | LSP diagnostics, code lens, rich hover | `textDocument/publishDiagnostics` on a background timer (not request-time), code lens, hover enrichment with temporal/risk/structure sections — behind a `--diagnostics` opt-in flag, all gracefully degrading. |
 | **116** | §4 (Phase B) | WebSocket transport | `--websocket <bind-address>` transport for MCP/LSP, depends on Phase 113's remote-delegation plumbing; auth via header, not subprotocol. |
 
 **Status:** Phase 113 ✅ complete. `src/core/remote/protocolClient.ts` exports
@@ -4234,6 +4234,55 @@ schema change. All three new methods got `lsp.<op>` remote-delegation entries
 is method-name-driven. Tests: `tests/lspStructural.test.ts` (graph fixture mirrors
 `tests/graphTraversal.test.ts`; covers exact structural definition/references,
 call-hierarchy prepare/incoming/outgoing, and fallback-with-no-graph).
+
+**Phase 115 ✅ complete.** `src/core/lsp/analysisCache.ts` is the new
+background-refreshed cache the spec asked for: it calls the existing
+`scoreDebt()`/`computeHotspots()`/`scanForVulnerabilities()` once per refresh
+cycle (default 5 min, configurable via `LspServerOptions.diagnosticsIntervalMs`)
+and serves `debtByPath`/`hotspotByPath`/`securityCountByBlob` lookups from the
+cached result — no analysis logic runs inside a hover/codeLens/diagnostics
+*request*, satisfying §6.2. Each signal (debt/hotspot/security) is independently
+best-effort: a failure in one (no embeddings indexed, no graph built, provider
+unreachable) never blocks the others or the cache refresh itself.
+`src/core/lsp/hoverContent.ts` is the new hover-enrichment module: it joins
+`Temporal` (last touch + change frequency from `blob_commits`/`commits`),
+`Risk & quality` (debt/hotspot/security counts from the analysis cache), and
+`Structure` (caller/callee counts from Phase 114's `traversal.ts`, when the
+graph is built) onto the pre-existing semantic-match section in
+`textDocument/hover` — each section independently omitted, never erroring the
+whole hover, when its data source is unavailable (§6.1's ordering: Semantic →
+Temporal → Risk & quality → Structure). One deviation from the spec's literal
+`buildHoverMarkdown(blobHash, symbol)` signature: `hoverContent.ts` accepts a
+structured `HoverContext` (`{ query, semanticLines, blobHash?, path? }`)
+instead, since `server.ts`'s hover handler already computes the semantic
+results itself (it owns the embedding-provider call) — `hoverContent.ts` only
+joins *additional* analysis data onto an already-computed semantic result,
+keeping it free of any embedding/provider concerns per the "thin
+plumbing-free-of-analysis-logic" constraint. A new `textDocument/codeLens`
+handler in `server.ts` annotates each symbol in a file with
+`Called N× · debt X.XX`-style text, reading caller counts from `callers()` and
+debt scores from the same shared `AnalysisCache` singleton hover uses — no
+duplicated analysis calls across the two surfaces. Diagnostics are opt-in via
+a new `gitsema tools lsp --diagnostics` flag (off by default — the
+false-positive rate of the conservative `debtScore >= 0.7` /
+`hotspotRisk >= 0.6` thresholds is unproven at v1); `LspServerOptions` threads
+through `startLspServer()`/`startLspTcpServer()`, which now push
+`textDocument/publishDiagnostics` notifications (over stdout or to every
+connected TCP socket, respectively) on each background refresh cycle. One
+deliberate limitation, not in the spec: diagnostics never run in `--remote`
+mode (`maybeStartDiagnostics()` returns `null`), since Phase 113's
+remote-delegation mechanism is purely request/response
+(`POST /api/v1/protocol/:operation`) with no way for the remote server to push
+a server-initiated notification back to a local LSP client; `tools.ts` prints
+a warning when `--remote` and `--diagnostics` are combined rather than
+silently dropping the flag. `initialize` now also advertises
+`codeLensProvider: true`. `textDocument/codeLens` got an `lsp.codeLens`
+remote-delegation entry (`METHOD_TO_REMOTE_OP`/`LSP_OP_TO_METHOD`) since it's a
+normal request/response method, unlike diagnostics. No schema change. Tests:
+`tests/lspHover.test.ts` (each hover section's independent presence/absence),
+`tests/lspDiagnostics.test.ts` (debt/hotspot threshold flagging, background
+refresh's immediate first run, diagnostics push notification shape, and
+`--diagnostics`/`--remote` gating).
 
 ---
 

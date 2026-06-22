@@ -116,11 +116,11 @@ This table shows which tools/commands are available in which interface. A checkm
 
 ### LSP Interface Details
 
-**LSP is a specialized protocol for IDE integration, not a general command interface.** It exposes 8 JSON-RPC methods:
+**LSP is a specialized protocol for IDE integration, not a general command interface.** It exposes 9 JSON-RPC request/response methods, plus one server-push notification:
 
 | Method | Maps To | Use Case |
 |---|---|---|
-| `textDocument/hover` | `search` (semantic matching) | Show top-5 semantic matches when hovering over a symbol |
+| `textDocument/hover` | `search` (semantic matching) + debt/health/graph (Phase 115 enrichment) | Show top-5 semantic matches, plus optional Temporal/Risk & quality/Structure sections when their data is available |
 | `textDocument/definition` | `graph` (structural-first, Phase 114) + `code-search` (symbol + semantic fallback) | Go-to-definition: exact structural match when the graph is built → exact name match → substring match → semantic fallback (fallback results tagged `tags: ['fallback']`) |
 | `textDocument/references` | `graph` (structural-first, Phase 114) + `search`/FTS (symbol + text fallback) | Find all references: exact structural callers/importers when the graph is built → symbol definitions + text mentions (fallback results tagged `tags: ['fallback']`) |
 | `textDocument/documentSymbol` | Symbol index | List all symbols (functions, classes, etc.) in the current document |
@@ -128,11 +128,16 @@ This table shows which tools/commands are available in which interface. A checkm
 | `textDocument/prepareCallHierarchy` | `graph` (Phase 114) | Resolve a symbol to a `CallHierarchyItem` (carries the graph node key in `data`) |
 | `callHierarchy/incomingCalls` | `graph callers` (Phase 114) | Direct (depth-1) callers of a symbol, via the `calls` edge type |
 | `callHierarchy/outgoingCalls` | `graph callees` (Phase 114) | Direct (depth-1) callees of a symbol, via the `calls` edge type |
+| `textDocument/codeLens` | `graph callers` + `debt-score` (Phase 115) | Per-symbol `Called N× · debt X.XX` annotations, read from the background analysis cache |
+
+**Server-push notification (not request/response, not remote-delegatable):**
+- `textDocument/publishDiagnostics` — flags high-debt (`debtScore ≥ 0.7`) / high-hotspot-risk (`hotspotRisk ≥ 0.6`) files on a background timer; opt-in via `gitsema tools lsp --diagnostics` (off by default); **not supported with `--remote`**, since Phase 113's remote-delegation mechanism is request/response-only and has no way for the remote server to push notifications back to a local client (Phase 115)
 
 **Marked as available in LSP:**
 - `search` ✓ — hover operation uses semantic search
 - `code-search` ✓ — workspace/symbol and definition use symbol search
-- `graph` (partial) ✓ — definition/references/call-hierarchy methods query the structural graph first when built (Phase 114), falling back to semantic/FTS otherwise
+- `graph` (partial) ✓ — definition/references/call-hierarchy/codeLens methods query the structural graph first when built (Phase 114/115), falling back to semantic/FTS otherwise
+- `debt-score` (partial) ✓ — hover's Risk & quality section and codeLens read debt scores from the Phase 115 background analysis cache
 
 **Not available in LSP:**
 - All analysis commands (`evolution`, `clusters`, `change-points`, etc.) — LSP is read-only navigation, not analysis

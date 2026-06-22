@@ -157,7 +157,7 @@ Copies the active index into another storage backend (sqlite/postgres/qdrant) vi
 | Command | Description |
 |---|---|
 | `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | Start the MCP stdio server (AI tool interface) |
-| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
 The old top-level `gitsema mcp`, `gitsema lsp`, `gitsema serve`, and `gitsema backfill-fts` still work as hidden backward-compat aliases.
@@ -170,6 +170,15 @@ route and `src/core/remote/protocolClient.ts` client (falls back to
 `index --remote`). On startup, the command does a `GET /api/v1/status` health check
 and exits non-zero immediately if the remote is unreachable, rather than failing on
 the first tool call.
+
+**Rich hover, code lens, diagnostics (Phase 115):** `textDocument/hover` adds
+optional Temporal/Risk & quality/Structure sections to its semantic matches, and
+`textDocument/codeLens` annotates symbols with caller counts and debt scores —
+both backed by a background-refreshed analysis cache (never computed inside a
+request). Pass `--diagnostics` to also push `textDocument/publishDiagnostics`
+notifications for high-debt/high-hotspot-risk files on the same background timer
+(off by default; not supported together with `--remote`, since diagnostics are a
+server-push notification and remote delegation is request/response-only).
 
 `gitsema tools serve` defaults `POST /api/v1/remote/index` to **persistent** mode:
 the cloned repo and its index are stored under `GITSEMA_DATA_DIR` (default
