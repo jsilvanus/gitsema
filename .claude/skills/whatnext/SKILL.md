@@ -69,7 +69,30 @@ because that doc is longer or newer.
    the latest review's stated version — stale headers are themselves a
    findable, fixable backlog item.
 
-6. **If an argument was given**, scope the scan to that area (e.g. only
+6. **Scan `docs/deprecations.md` for removal candidates.** gitsema's stated
+   policy there is "warn forever, remove only if a specific reason arises" —
+   so don't propose removal just because something is old. Only flag a §1
+   hard deprecation as a **removal candidate** when there's a concrete
+   reason beyond age, e.g.:
+   - The deprecated form is now actively harmful or misleading to keep (a
+     security gap the replacement closes, like the `--tcp`/`--websocket`
+     case), not just superseded.
+   - The replacement has been the documented default for many phases *and*
+     a later review/PLAN entry already floats removing it (grep PLAN.md and
+     the latest review for the deprecated command/flag name to check).
+   - The deprecated form is untested, undocumented outside
+     `deprecations.md`, or its only remaining references are the alias
+     registration and its own warning (grep the whole repo, including
+     `tests/`, for the deprecated form — if nothing exercises it except the
+     alias itself, that's signal, not proof).
+   For each candidate, state *why now* (the specific reason, not just
+   "it's old") and what removing it would touch (alias registration site,
+   any tests asserting the old form still works, the `deprecations.md` row
+   itself). If no deprecation meets this bar, say so explicitly rather than
+   forcing a candidate — most runs should find zero, given the project's
+   policy.
+
+7. **If an argument was given**, scope the scan to that area (e.g. only
    report findings/ideas/phases related to "storage backends") but still do
    the full resolved-vs-open verification pass for anything in scope.
 
@@ -86,7 +109,11 @@ Present a single findings report to the user, not a wall of raw doc dumps:
 3. **Resolved-but-undocumented items** — things that are actually done but
    still listed as open in a doc; flag these for a doc-pruning pass (don't
    silently fix the docs yourself unless asked).
-4. **Recommendation** — what you'd tackle first and why, in 2-3 sentences.
+4. **Deprecation removal candidates** (only if any were found in step 6) —
+   each with the specific "why now" reason, not just age, and what removing
+   it would touch. If none were found, a one-line "no removal candidates
+   this run" is enough — don't pad this section.
+5. **Recommendation** — what you'd tackle first and why, in 2-3 sentences.
 
 Keep the report tight. Cite evidence (file:line, commit hash, grep/test
 output) for every claim of "open" or "resolved" — this skill's entire value
