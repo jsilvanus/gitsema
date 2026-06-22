@@ -13,6 +13,7 @@
 import { Command } from 'commander'
 import { startMcpServer } from '../../mcp/server.js'
 import { startMcpWebSocketServer } from '../../mcp/webSocketServer.js'
+import { startMcpStreamableHttpServer } from '../../mcp/streamableHttpServer.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { startLspServer, startLspTcpServer, startLspWebSocketServer } from '../../core/lsp/server.js'
 import { checkRemoteHealth, type RemoteConfig } from '../../core/remote/protocolClient.js'
@@ -48,8 +49,9 @@ export function toolsCommand(): Command {
     .option('--remote-key <token>', 'Bearer token for --remote (overrides GITSEMA_REMOTE_KEY)')
     .option('--remote-timeout <ms>', 'timeout in ms for remote calls (default 10000)')
     .option('--websocket <bind-address>', 'listen on WebSocket at /mcp instead of stdio (e.g. --websocket 0.0.0.0:4242); TLS is not terminated here, put a reverse proxy in front for wss://')
-    .option('--key <token>', 'require this Bearer token for --websocket connections')
-    .action(async (opts: RemoteOpts & { websocket?: string; key?: string }) => {
+    .option('--http <bind-address>', 'listen on the MCP Streamable HTTP transport at /mcp instead of stdio (e.g. --http 0.0.0.0:4242); this is the SDK\'s standard network transport — prefer it over --websocket')
+    .option('--key <token>', 'require this Bearer token for --websocket/--http connections')
+    .action(async (opts: RemoteOpts & { websocket?: string; http?: string; key?: string }) => {
       if (opts.websocket) {
         console.error(
           'Warning: --websocket is not part of the standard MCP transport set (stdio/SSE/Streamable HTTP); most MCP clients and harnesses do not support raw WebSocket and will fail to connect. Kept for forward compatibility; use stdio (default) unless your client specifically supports WebSocket.',
@@ -62,6 +64,17 @@ export function toolsCommand(): Command {
           process.exit(1)
         }
         startMcpWebSocketServer(bind.host, bind.port, opts.key)
+        return
+      }
+      if (opts.http) {
+        let bind: { host: string; port: number }
+        try {
+          bind = parseBindAddress(opts.http)
+        } catch (err: unknown) {
+          console.error(err instanceof Error ? err.message : String(err))
+          process.exit(1)
+        }
+        startMcpStreamableHttpServer(bind.host, bind.port, opts.key)
         return
       }
       const remote = resolveRemoteConfig(opts)

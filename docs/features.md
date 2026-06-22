@@ -378,7 +378,7 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 
 | Subcommand | Description |
 |---|---|
-| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--key <token>]` | MCP stdio server (preferred entry point for AI clients) |
+| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--http <bind-address>] [--key <token>]` | MCP stdio server (preferred entry point for AI clients) |
 | `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
 
@@ -479,10 +479,29 @@ HTTP); essentially no real-world MCP client or harness (Claude Desktop, Claude C
 etc.) supports connecting to an MCP server over plain WebSocket, so `gitsema tools mcp
 --websocket` prints a warning on startup that it is likely unusable with most clients.
 LSP `--websocket` has no such caveat — LSP has no standardized transport set, and
-WebSocket is a normal way IDEs reach LSP servers. The plan is to add a proper MCP
-Streamable HTTP transport (`@modelcontextprotocol/sdk/server/streamableHttp.js`,
-the SDK's actual recommended network transport) alongside `--websocket`; see
-`docs/PLAN.md` for the Streamable HTTP design.
+WebSocket is a normal way IDEs reach LSP servers. Phase 117 (below) adds the proper
+fix for the MCP side.
+
+### MCP Streamable HTTP transport (Phase 117)
+
+`gitsema tools mcp --http <bind-address>` (e.g. `--http 0.0.0.0:4242`) listens on a fixed
+`/mcp` path using the MCP SDK's own `StreamableHTTPServerTransport`
+(`@modelcontextprotocol/sdk/server/streamableHttp.js`) — the SDK's actual recommended
+network transport, unlike the non-standard `--websocket`. `--key <token>` requires a
+matching `Authorization: Bearer <token>` header, same convention as `--websocket`/`gitsema
+tools serve --key`. gitsema does not terminate TLS — put a reverse proxy in front for
+`https://`.
+
+Sessions are stateful: a `POST /mcp` with no `Mcp-Session-Id` header and an `initialize`
+body starts a new session (fresh `McpServer` via `buildMcpServer()`, fresh
+`StreamableHTTPServerTransport` with `sessionIdGenerator: () => randomUUID()`), and the
+generated session ID is returned in response headers. Every subsequent request
+(`POST`/`GET`/`DELETE`) carrying that `Mcp-Session-Id` header is routed to the *same*
+transport instance — unlike the WebSocket transport, where `Protocol.connect()` is called
+once per *connection*, here it's called once per *session*, and one session can span many
+HTTP requests. Unknown session IDs get `404`; non-`initialize` requests with no session ID
+get `400` — matching the SDK's documented stateful-mode contract. No `EventStore`
+(resumability) in v1, same "keep it minimal" posture as Phase 116.
 
 ---
 

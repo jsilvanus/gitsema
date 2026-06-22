@@ -156,7 +156,7 @@ Copies the active index into another storage backend (sqlite/postgres/qdrant) vi
 
 | Command | Description |
 |---|---|
-| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--key <token>]` | Start the MCP stdio server (AI tool interface) |
+| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--http <bind-address>] [--key <token>]` | Start the MCP stdio server (AI tool interface) |
 | `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
@@ -186,7 +186,18 @@ stdio/TCP. `--key <token>` requires a matching `Authorization: Bearer <token>`
 header on the WS upgrade request; gitsema does not terminate TLS, so put a
 reverse proxy in front for `wss://`. Unlike `--remote` delegation, WebSocket
 supports server push, so `--diagnostics` works normally together with
-`--websocket`.
+`--websocket`. Raw WebSocket is not one of MCP's standard transports, so
+`gitsema tools mcp --websocket` prints a startup warning that most MCP clients
+won't support it — kept for forward compatibility only; prefer `--http`
+(below) for MCP.
+
+**MCP Streamable HTTP transport (Phase 117):** `gitsema tools mcp --http
+<bind-address>` (e.g. `--http 0.0.0.0:4242`) listens on a fixed `/mcp` path
+using the MCP SDK's own `StreamableHTTPServerTransport` — the SDK's actual
+recommended network transport. Same `--key <token>` Bearer-auth convention as
+`--websocket`; gitsema does not terminate TLS, so put a reverse proxy in front
+for `https://`. Sessions are stateful and span multiple HTTP requests (tracked
+via the `Mcp-Session-Id` response/request header).
 
 `gitsema tools serve` defaults `POST /api/v1/remote/index` to **persistent** mode:
 the cloned repo and its index are stored under `GITSEMA_DATA_DIR` (default
