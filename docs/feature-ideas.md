@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-06-22 (added shared/deduplicated public-repo indexing idea)
+**Last updated:** 2026-06-22 (added superadmin-locked model set idea; refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md`, kept cross-repo blob dedup as an open idea)
 **Audience:** Developers considering next phases; product planning
 
 > **Note:** As of this update, the LSP/MCP remote-delegation foundation this
@@ -251,101 +251,140 @@ a language-specific structural extractor, or an org-specific compliance scan.
 
 ## Shared/Deduplicated Indexing for Public Repos
 
-### Problem
-- The Semahub vision (and the multi-tenant auth work in
-  `docs/multi-tenant-auth-plan.md`) assumes a remote server can index repos on
-  behalf of many users, but says nothing about **public** repos specifically.
-- Today, `gitsema tools serve`'s `GITSEMA_DATA_DIR` persistent-repo model
-  (Phase 100) and the planned `repo_grants` access model both key storage by
-  `repoId` with no concept of "this repo's content is identical to one
-  another user already indexed." If ten users each register
-  `github.com/torvalds/linux` against the same server, today's model clones
-  and embeds it ten separate times — ten full histories, ten sets of
-  embeddings, ten times the storage and compute, for content that is
-  byte-for-byte identical at the blob level.
-- This is exactly the kind of abuse/cost vector that matters once a server is
-  open to multiple tenants (per the auth design currently being added): one
-  user "forking" a popular public repo and re-triggering a full index is pure
-  waste — gitsema's own content-addressed dedup (the blob-hash identity
-  design constraint) already solves this *within* one repo's history, but
-  there's nothing today that recognizes "this whole repo, or significant
-  parts of it, has already been indexed by someone else."
+> **Refined into:** the access-control half of this idea (a `visibility`
+> flag, auto-granted read access when a user attaches to an existing public
+> repo, and abuse-resistant gating of first-index vs. refresh) has been
+> promoted to its own design document:
+> **[`docs/public-repo-sharing-plan.md`](public-repo-sharing-plan.md)**.
+> That doc's research also found that the storage/clone-duplication concern
+> this idea originally worried about is **already solved** today —
+> `src/core/indexing/repoRegistry.ts` already dedupes registrations by
+> normalized URL onto one clone/index DB, and re-indexing an unchanged repo
+> is already cheap (incremental + blob-hash dedup). See that doc's §2 for
+> the full citations.
 
-### Intended Behavior
-For a repo whose remote URL is recognized as **public** (or explicitly
-marked shared), the server should index it **once** and let every user who
-registers that same URL search against the existing index, rather than
-re-cloning and re-embedding from scratch. Two shapes this could take:
+The second, looser shape below — cross-repo blob-level dedup for forks with
+*different* URLs — was explicitly kept **out of scope** for that design (it's
+architecturally a much bigger lift) and remains here as a genuinely
+undesigned idea:
 
-1. **One canonical index per public repo URL.** The server normalizes the
-   remote URL (already has `normalized_url` on `repos` per the Phase 100
-   schema) and, on a second registration of the same URL, attaches the
-   requesting user/org as a *reader* of the existing index instead of
-   creating a new one. Per-user value-add (e.g. a private branch, as raised
-   in the personal-grants discussion in `multi-tenant-auth-plan.md` §3 Axis
-   C) layers on top as an incremental partial index against the same base,
-   not a full reindex.
-2. **Partial index reuse / blob-level sharing across repos.** Looser than
-   (1): even for *different* URLs (e.g. a fork), recognize when blobs are
-   byte-identical (same blob hash — which is already how gitsema dedupes
-   *within* a repo) and skip re-embedding those blobs server-wide, only
-   embedding the genuinely new/changed blobs introduced by the fork. This is
-   a bigger lift since today's schema scopes `blobs`/`embeddings` per index
-   DB (or per storage-backend scope), not globally across repos.
+### Remaining open idea: partial index reuse / blob-level sharing across forks
+Even for different URLs (e.g. a fork), recognize when blobs are
+byte-identical (same blob hash — already how gitsema dedupes *within* one
+repo) and skip re-embedding those blobs server-wide, only embedding the
+genuinely new/changed blobs introduced by the fork.
 
-Either shape needs a definition of "public" — likely: the server checks the
-origin host's API (GitHub/GitLab/etc. "is this repo public") at registration
-time, or an operator-set allowlist/heuristic, or simply "any URL, dedup by
-exact blob hash, regardless of visibility" (shape 2 doesn't actually require
-knowing visibility at all — it's blob-hash equality, which is content, not a
-policy fact).
-
-### Design Gaps
-- [ ] Shape (1) vs (2) vs both — (1) is far simpler (de-dupe at the
-      whole-repo level) but provides zero benefit for forks/mirrors with
-      partially overlapping history; (2) handles forks but requires
-      cross-repo blob/embedding storage scoping that doesn't exist today.
-- [ ] How is "public" determined? Provider API call (GitHub/GitLab "is
-      public" check, needs network access + provider-specific clients),
-      operator allowlist, or sidestepped entirely by going straight to
-      blob-hash dedup regardless of visibility?
-- [ ] If multiple users share one canonical index, how does access control
-      interact with `multi-tenant-auth-plan.md`'s `repo_grants` model — is
-      "read access to a public repo's shared index" implicit for any
-      authenticated user, or still a grant row (just auto-issued)?
-- [ ] Re-indexing/refresh ownership: if repo X is shared across N users, who
-      can trigger `index start --since all`, and how do per-user overrides
-      (e.g. someone indexing with `--graph` when the canonical index doesn't
-      have graph data) get reconciled without forking the canonical index?
-- [ ] Storage/billing implications for Semahub Layer 2: a shared public index
-      breaks the naive "bill per indexed repo per user" model — needs a
-      "first indexer pays, others read free (or at reduced cost)" policy,
-      which is product/billing territory, not gitsema-side, but the
-      *mechanism* gitsema exposes (shared index, attach-as-reader) has to
-      exist for Semahub to build that policy on top of it.
-- [ ] Quota/abuse angle that motivated this idea: should the server simply
-      *rate-limit or reject* re-indexing a URL that's already indexed and
-      unchanged (cheap, no new mechanism) as a stopgap, independent of
-      whether full shared-index support ever ships? That's a much smaller,
-      separate hardening change worth calling out if this idea stalls.
+- [ ] Requires re-scoping `blobs`/`embeddings` storage to be content-
+      addressed *globally* rather than per-repo-DB file, cutting across the
+      storage-backend abstraction (`src/core/storage/types.ts`) and every
+      backend (sqlite/postgres/qdrant).
+- [ ] Needs a cross-repo identity for a blob beyond what one index DB knows
+      — either a shared blob registry + per-repo lookup tables, or a
+      sync/copy mechanism between DBs.
+- [ ] Interacts with whatever visibility/grant model
+      `public-repo-sharing-plan.md` ships — sharing blobs across two
+      *different* repos' indexes raises the same "who's allowed to read
+      what" questions as that doc, just one level deeper (blob-level instead
+      of repo-level).
 
 ### Effort Estimate
-- Shape (1) alone: moderate — mostly registration-time URL-lookup logic plus
-  a new "attach existing repo as reader" path in the `GITSEMA_DATA_DIR`
-  repo-registry code (Phase 100) and an auto-grant interaction with
-  `repo_grants`. Rough order: 400-700 LOC.
-- Shape (2): substantial — requires re-scoping `blobs`/`embeddings` storage
-  to be content-addressed *globally* rather than per-repo-DB, which cuts
-  across the storage-backend abstraction (`src/core/storage/types.ts`) and
-  every existing backend (sqlite/postgres/qdrant). Likely a multi-phase
-  effort comparable in size to the storage-backends work itself.
+- Substantial — comparable in size to the storage-backends work itself
+  (multi-phase). Not estimated further until shape-1's access-control layer
+  (`public-repo-sharing-plan.md`) ships and proves out the simpler case.
 
 ### Prerequisites
-- Logically follows the multi-tenant auth/access-control work
-  (`docs/multi-tenant-auth-plan.md`) — sharing an index across users only
-  matters once a server actually has multiple distinct user identities to
-  share it *between*. Should be scoped as a Semahub-adjacent Layer 1 idea
-  once that auth work lands, not before.
+- `docs/public-repo-sharing-plan.md` landing first (the visibility/grant
+  model this would need to extend), and likely `multi-tenant-auth-plan.md`
+  before that.
+
+---
+
+## Superadmin-Locked Model Set (Server-Side Model Allowlist)
+
+### Problem
+- On a shared/multi-tenant server (`gitsema tools serve`), nothing today
+  stops a user from indexing or querying with whatever
+  `GITSEMA_MODEL`/`GITSEMA_TEXT_MODEL`/`GITSEMA_CODE_MODEL` they pass —
+  there's no concept of an operator-controlled allowed set.
+- This matters most for **embedding models**: vectors from two different
+  embedding models aren't comparable, so if a shared index's vectors mix
+  models, search silently degrades or breaks. A server operator needs to be
+  able to pin the server to one (or a small vetted few) embedding model(s)
+  so every repo's index stays internally consistent.
+- It also applies to narrator/guide chat models (used by `narrate`/`explain`/
+  `guide`), though the motivation there is different (cost/quality/abuse
+  control of LLM calls) rather than vector compatibility.
+- There's currently no "superadmin" role concept at all in gitsema — today's
+  server auth is a single global `GITSEMA_SERVE_KEY` plus per-repo
+  `repo_tokens` (see `docs/multi-tenant-auth-plan.md` for the in-progress
+  identity/role model this idea would need to sit on top of).
+
+### Intended Behavior
+A server superadmin configures an **allowed model set** — separately for
+embedding models and for narrator/guide models — via a new admin CLI/API
+(not just a config file edit, per the answered design question, since this
+needs to be a controlled, auditable admin action once roles exist). Regular
+users:
+- When the allowed set has exactly one model, see it as a **pre-selected,
+  disabled** choice (not an editable picker) wherever a model would
+  otherwise be selectable (`index start --model`, `gitsema config set
+  model`, etc.) — they always see *which* model is active, they just can't
+  change it.
+- When the allowed set has more than one model, get a real picker limited to
+  that set.
+- Can still **bring their own API key (BYOK)** to use a model of their own
+  choosing for narrator/guide chat, even when the server's own default
+  narrator/guide model is locked or disabled entirely ("lock to none" is an
+  explicit valid server posture for chat — i.e. no server-provided chat
+  model at all, BYOK-only). BYOK does not apply to embedding models, since
+  BYOK embeddings would reintroduce the vector-incompatibility problem this
+  idea exists to prevent.
+- Per the answered design question, the allowed set is **global by default**
+  (set by the superadmin for the whole server) but an **org_admin may
+  further narrow** (never widen) the set for their own org — layering on top
+  of `docs/multi-tenant-auth-plan.md`'s org/role model rather than
+  introducing a second, separate permission system.
+
+### Design Gaps
+- [ ] The "superadmin" role doesn't exist yet — does it ride on top of
+      `multi-tenant-auth-plan.md`'s eventual `org_admin`/user roles as a new
+      server-wide role, or is it a separate concept (e.g. tied to whoever
+      holds `GITSEMA_SERVE_KEY` today)? This idea is blocked on that role
+      existing in some form.
+- [ ] Exact shape of the new admin CLI/API: `gitsema admin models allow
+      <model> [--kind embedding|narrator]` / `gitsema admin models deny
+      <model>`? An HTTP route under `/api/v1/admin/...`? Both?
+- [ ] What happens to a repo's *existing* index if the superadmin later
+      removes its embedding model from the allowed set — does search just
+      stop working for that repo (data still there, queries rejected), or
+      does it force a re-index banner/block?
+- [ ] How does org-level narrowing interact with personal groups
+      (`multi-tenant-auth-plan.md` §4.2a) — does a personal group count as
+      an "org" for this purpose, or do personal-group users always inherit
+      the server-wide set unmodified?
+- [ ] Where does the "pre-selected, disabled" single-model UX surface
+      outside the CLI — does the (currently nonexistent) Semahub web
+      dashboard need this too, or is this purely a CLI/HTTP-API-level
+      concern for now?
+- [ ] BYOK credential storage/handling for narrator/guide: does the user's
+      own API key get stored server-side (raising the same plaintext-secret
+      precedent question as `multi-tenant-auth-plan.md` §4.1), or is it
+      supplied per-request only and never persisted?
+
+### Effort Estimate
+- Depends heavily on the role-model prerequisite landing first. Once a
+  role/permission system exists (per `multi-tenant-auth-plan.md`), this is a
+  moderate addition: a new allowlist concept (global + org-level override),
+  admin CLI/routes to manage it, and enforcement points at every model-
+  selection site (`index start`, `config set model/textModel/codeModel`,
+  narrator/guide model activation). Rough order: 500-800 LOC, mostly
+  enforcement-point plumbing rather than novel architecture.
+
+### Prerequisites
+- Needs a superadmin/role concept to exist — directly depends on
+  `docs/multi-tenant-auth-plan.md` landing (at least Phase A's user/session
+  model, likely Phase B's org/role model for the org-level narrowing
+  behavior). Not actionable before that.
 
 ---
 
