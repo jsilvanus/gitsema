@@ -13,7 +13,7 @@ The latest review is here. Do not edit the review file, but update that file wit
 
 | Document | Purpose |
 |---|---|
-| [`docs/review9.md`](docs/review9.md) | Latest strategic review: LLM layer, pluggable storage backends, server-side persistence, docs parity |
+| [`docs/review10.md`](docs/review10.md) | Latest strategic review: knowledge-graph completion (Phases 105–112), LSP/MCP network transports (Phases 113–117), review9 close-out verification |
 
 When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.
