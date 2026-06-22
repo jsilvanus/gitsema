@@ -131,7 +131,9 @@ This table shows which tools/commands are available in which interface. A checkm
 | `textDocument/codeLens` | `graph callers` + `debt-score` (Phase 115) | Per-symbol `Called N× · debt X.XX` annotations, read from the background analysis cache |
 
 **Server-push notification (not request/response, not remote-delegatable):**
-- `textDocument/publishDiagnostics` — flags high-debt (`debtScore ≥ 0.7`) / high-hotspot-risk (`hotspotRisk ≥ 0.6`) files on a background timer; opt-in via `gitsema tools lsp --diagnostics` (off by default); **not supported with `--remote`**, since Phase 113's remote-delegation mechanism is request/response-only and has no way for the remote server to push notifications back to a local client (Phase 115)
+- `textDocument/publishDiagnostics` — flags high-debt (`debtScore ≥ 0.7`) / high-hotspot-risk (`hotspotRisk ≥ 0.6`) files on a background timer; opt-in via `gitsema tools lsp --diagnostics` (off by default); **not supported with `--remote`**, since Phase 113's remote-delegation mechanism is request/response-only and has no way for the remote server to push notifications back to a local client (Phase 115). **Supported with `--websocket`** (Phase 116) — WebSocket carries server push fine, so this gating is keyed only on `--remote`, not on the client-facing transport.
+
+**Transports (Phase 113/116):** both `tools mcp` and `tools lsp` are available over stdio (default), `--tcp <port>` (LSP only), `--websocket <bind-address>` (fixed `/mcp`/`/lsp` path, header-based Bearer auth via `--key`), and `--remote <url>` (request/response delegation to `tools serve`). None of these change the capability surface tracked in the tables above — they're alternative ways to reach the same JSON-RPC methods/MCP tools.
 
 **Marked as available in LSP:**
 - `search` ✓ — hover operation uses semantic search

@@ -378,8 +378,8 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 
 | Subcommand | Description |
 |---|---|
-| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | MCP stdio server (preferred entry point for AI clients) |
-| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--key <token>]` | MCP stdio server (preferred entry point for AI clients) |
+| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
 
 ### Remote delegation (Phase 113)
@@ -451,6 +451,27 @@ transport). Diagnostics are not supported in `--remote` mode, since remote
 delegation (Phase 113) is purely request/response and has no mechanism for the
 remote server to push notifications back to a local client — `gitsema tools lsp
 --remote <url> --diagnostics` prints a warning and runs without diagnostics.
+
+### WebSocket transport (Phase 116)
+
+Both `gitsema tools mcp --websocket <bind-address>` and `gitsema tools lsp --websocket
+<bind-address>` (e.g. `--websocket 0.0.0.0:4242`) listen on fixed `/mcp`/`/lsp` paths
+respectively, as an alternative to stdio/TCP for clients that need a network-reachable
+transport (no `--path` flag in v1). `--key <token>` requires a matching
+`Authorization: Bearer <token>` header on the WS upgrade request (mirrors
+`gitsema tools serve --key`'s convention); unset means no auth. gitsema does not
+terminate TLS — put a reverse proxy in front for `wss://`.
+
+The MCP SDK ships no server-side WebSocket transport, so `src/mcp/webSocketTransport.ts`
+is a small hand-rolled `Transport` implementation over a `ws` socket, negotiating the
+`mcp` WS subprotocol for interop with the SDK's own client-side `WebSocketClientTransport`
+(which only works unauthenticated, since it can't set custom headers). Because the SDK's
+`Protocol.connect()` can only be called once per `McpServer` instance, each WebSocket
+connection gets its own freshly-built server (`buildMcpServer()`) rather than sharing one
+instance the way stdio does. On the LSP side, WebSocket reuses the same stateless
+`handleRequest()` dispatcher as TCP, just framed as raw JSON per WS text frame instead of
+`Content-Length`-prefixed chunks — and unlike `--remote` delegation, WebSocket supports
+server push, so `--diagnostics` works normally over `--websocket`.
 
 ---
 

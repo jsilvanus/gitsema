@@ -12,9 +12,11 @@
 
 import { Command } from 'commander'
 import { startMcpServer } from '../../mcp/server.js'
+import { startMcpWebSocketServer } from '../../mcp/webSocketServer.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
-import { startLspServer, startLspTcpServer } from '../../core/lsp/server.js'
+import { startLspServer, startLspTcpServer, startLspWebSocketServer } from '../../core/lsp/server.js'
 import { checkRemoteHealth, type RemoteConfig } from '../../core/remote/protocolClient.js'
+import { parseBindAddress } from '../../core/util/websocket.js'
 import { serveCommand } from './serve.js'
 
 interface RemoteOpts {
@@ -45,7 +47,20 @@ export function toolsCommand(): Command {
     .option('--remote <url>', 'delegate all tool calls to a running `gitsema tools serve` instance (overrides GITSEMA_REMOTE)')
     .option('--remote-key <token>', 'Bearer token for --remote (overrides GITSEMA_REMOTE_KEY)')
     .option('--remote-timeout <ms>', 'timeout in ms for remote calls (default 10000)')
-    .action(async (opts: RemoteOpts) => {
+    .option('--websocket <bind-address>', 'listen on WebSocket at /mcp instead of stdio (e.g. --websocket 0.0.0.0:4242); TLS is not terminated here, put a reverse proxy in front for wss://')
+    .option('--key <token>', 'require this Bearer token for --websocket connections')
+    .action(async (opts: RemoteOpts & { websocket?: string; key?: string }) => {
+      if (opts.websocket) {
+        let bind: { host: string; port: number }
+        try {
+          bind = parseBindAddress(opts.websocket)
+        } catch (err: unknown) {
+          console.error(err instanceof Error ? err.message : String(err))
+          process.exit(1)
+        }
+        startMcpWebSocketServer(bind.host, bind.port, opts.key)
+        return
+      }
       const remote = resolveRemoteConfig(opts)
       await startMcpServer({ remoteUrl: remote?.url, remoteKey: remote?.key, remoteTimeoutMs: remote?.timeoutMs })
     })
@@ -55,11 +70,13 @@ export function toolsCommand(): Command {
     .command('lsp')
     .description('Start the LSP-compatible semantic hover server (JSON-RPC over stdio or TCP)')
     .option('--tcp <port>', 'listen on TCP port instead of stdio (e.g. --tcp 2087)')
+    .option('--websocket <bind-address>', 'listen on WebSocket at /lsp instead of stdio (e.g. --websocket 0.0.0.0:4242); TLS is not terminated here, put a reverse proxy in front for wss://')
+    .option('--key <token>', 'require this Bearer token for --websocket connections')
     .option('--remote <url>', 'delegate all data-access calls to a running `gitsema tools serve` instance (overrides GITSEMA_REMOTE)')
     .option('--remote-key <token>', 'Bearer token for --remote (overrides GITSEMA_REMOTE_KEY)')
     .option('--remote-timeout <ms>', 'timeout in ms for remote calls (default 10000)')
     .option('--diagnostics', 'push textDocument/publishDiagnostics for high-debt/hotspot files on a background timer (opt-in, off by default; not supported with --remote)')
-    .action(async (opts: RemoteOpts & { tcp?: string; diagnostics?: boolean }) => {
+    .action(async (opts: RemoteOpts & { tcp?: string; websocket?: string; key?: string; diagnostics?: boolean }) => {
       const remote = resolveRemoteConfig(opts)
       if (remote) {
         try {
@@ -75,7 +92,16 @@ export function toolsCommand(): Command {
       }
       const session = getActiveSession()
       const lspOptions = { diagnostics: opts.diagnostics }
-      if (opts.tcp) {
+      if (opts.websocket) {
+        let bind: { host: string; port: number }
+        try {
+          bind = parseBindAddress(opts.websocket)
+        } catch (err: unknown) {
+          console.error(err instanceof Error ? err.message : String(err))
+          process.exit(1)
+        }
+        startLspWebSocketServer(session, bind.host, bind.port, opts.key, remote, lspOptions)
+      } else if (opts.tcp) {
         const port = parseInt(opts.tcp, 10)
         if (isNaN(port) || port < 1 || port > 65535) {
           console.error('Error: --tcp requires a valid port number (1–65535)')

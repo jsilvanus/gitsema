@@ -156,8 +156,8 @@ Copies the active index into another storage backend (sqlite/postgres/qdrant) vi
 
 | Command | Description |
 |---|---|
-| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>]` | Start the MCP stdio server (AI tool interface) |
-| `gitsema tools lsp [--tcp <port>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP) |
+| `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--key <token>]` | Start the MCP stdio server (AI tool interface) |
+| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
 The old top-level `gitsema mcp`, `gitsema lsp`, `gitsema serve`, and `gitsema backfill-fts` still work as hidden backward-compat aliases.
@@ -179,6 +179,14 @@ request). Pass `--diagnostics` to also push `textDocument/publishDiagnostics`
 notifications for high-debt/high-hotspot-risk files on the same background timer
 (off by default; not supported together with `--remote`, since diagnostics are a
 server-push notification and remote delegation is request/response-only).
+
+**WebSocket transport (Phase 116):** `--websocket <bind-address>` (e.g.
+`--websocket 0.0.0.0:4242`) listens on a fixed `/mcp` or `/lsp` path instead of
+stdio/TCP. `--key <token>` requires a matching `Authorization: Bearer <token>`
+header on the WS upgrade request; gitsema does not terminate TLS, so put a
+reverse proxy in front for `wss://`. Unlike `--remote` delegation, WebSocket
+supports server push, so `--diagnostics` works normally together with
+`--websocket`.
 
 `gitsema tools serve` defaults `POST /api/v1/remote/index` to **persistent** mode:
 the cloned repo and its index are stored under `GITSEMA_DATA_DIR` (default

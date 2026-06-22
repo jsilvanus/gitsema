@@ -3,6 +3,9 @@ import { getActiveSession } from '../db/sqlite.js'
 import { embedQuery } from '../embedding/embedQuery.js'
 import { buildProvider } from '../embedding/providerFactory.js'
 import { createServer as createNetServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
+import { WebSocketServer, type WebSocket } from 'ws'
+import { checkBearerAuth } from '../util/websocket.js'
 import { callRemote, type RemoteConfig } from '../remote/protocolClient.js'
 import {
   activeGraphStore,
@@ -508,7 +511,7 @@ function maybeStartDiagnostics(
   dbSession: ReturnType<typeof getActiveSession>,
   options: LspServerOptions | undefined,
   remote: RemoteConfig | undefined,
-  write: (data: string) => void,
+  publish: (message: JsonRpcResponse) => void,
 ): ReturnType<typeof setInterval> | null {
   if (!options?.diagnostics || remote) return null
   const providerType = process.env.GITSEMA_PROVIDER ?? 'ollama'
@@ -517,7 +520,7 @@ function maybeStartDiagnostics(
   const intervalMs = options.diagnosticsIntervalMs ?? DEFAULT_DIAGNOSTICS_INTERVAL_MS
   return startBackgroundRefresh(dbSession, provider, intervalMs, (diagnosticsByPath) => {
     for (const [path, items] of diagnosticsByPath) {
-      write(serializeMessage(buildDiagnosticsNotification(path, items)))
+      publish(buildDiagnosticsNotification(path, items))
     }
   })
 }
@@ -538,7 +541,7 @@ export function startLspServer(
       process.stdout.write(out)
     }
   })
-  maybeStartDiagnostics(dbSession, options, remote, (data) => process.stdout.write(data))
+  maybeStartDiagnostics(dbSession, options, remote, (message) => process.stdout.write(serializeMessage(message)))
 }
 
 /** Start the LSP server over TCP (useful for IDEs that prefer TCP connections). */
@@ -564,9 +567,68 @@ export function startLspTcpServer(
   server.listen(port, () => {
     process.stderr.write(`LSP server listening on TCP port ${port}\n`)
   })
-  maybeStartDiagnostics(dbSession, options, remote, (data) => {
+  maybeStartDiagnostics(dbSession, options, remote, (message) => {
+    const data = serializeMessage(message)
     for (const socket of sockets) socket.write(data)
   })
+}
+
+/**
+ * Start the LSP server over WebSocket, on a fixed `/lsp` path (Phase 116).
+ * Unlike `--tcp`/stdio, messages are raw JSON per WS text frame (no
+ * `Content-Length` framing). Unlike `--remote` delegation, WebSocket
+ * supports server push, so `--diagnostics` works normally here.
+ */
+export function startLspWebSocketServer(
+  dbSession: ReturnType<typeof getActiveSession>,
+  host: string,
+  port: number,
+  authKey: string | undefined,
+  remote?: RemoteConfig,
+  options?: LspServerOptions,
+): import('node:http').Server {
+  const sockets = new Set<WebSocket>()
+  const httpServer = createHttpServer()
+  const wss = new WebSocketServer({ noServer: true })
+
+  httpServer.on('upgrade', (req, socket, head) => {
+    const url = req.url ?? ''
+    const path = url.split('?')[0]
+    if (path !== '/lsp' || !checkBearerAuth(req, authKey)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+  })
+
+  wss.on('connection', (ws: WebSocket) => {
+    sockets.add(ws)
+    ws.on('close', () => sockets.delete(ws))
+    ws.on('message', async (data: Buffer) => {
+      let req: JsonRpcRequest
+      try {
+        req = JSON.parse(data.toString('utf8')) as JsonRpcRequest
+      } catch {
+        return
+      }
+      const res = await handleRequest(dbSession, req, remote)
+      if (res) {
+        ws.send(JSON.stringify(res))
+      }
+    })
+  })
+
+  httpServer.listen(port, host, () => {
+    process.stderr.write(`LSP server listening on ws://${host}:${port}/lsp\n`)
+  })
+
+  maybeStartDiagnostics(dbSession, options, remote, (message) => {
+    const payload = JSON.stringify(message)
+    for (const ws of sockets) ws.send(payload)
+  })
+
+  return httpServer
 }
 
 /** Quick sanity check: verify the LSP server can be started (for doctor --lsp). */

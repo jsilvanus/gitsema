@@ -4174,7 +4174,7 @@ from the parity set by design. No schema change.
 | **113** ✅ | §3 (Phase A) | Generic remote delegation for MCP + LSP | One shared mechanism (`src/core/remote/protocolClient.ts`) lets `gitsema tools mcp --remote <url>` and `gitsema tools lsp --remote <url>` delegate every data-access call to a running `gitsema tools serve` instance via `POST /api/v1/protocol/:operation`. |
 | **114** ✅ | §5 (Phase C) | LSP structural navigation | New LSP methods backed by the Phase 107 knowledge-graph tables (`structural_refs`/`graph_nodes`/`edges`) — `callHierarchy/incomingCalls`/`outgoingCalls`, structural-first/semantic-fallback precedence for existing methods. |
 | **115** ✅ | §6 (Phase D) | LSP diagnostics, code lens, rich hover | `textDocument/publishDiagnostics` on a background timer (not request-time), code lens, hover enrichment with temporal/risk/structure sections — behind a `--diagnostics` opt-in flag, all gracefully degrading. |
-| **116** | §4 (Phase B) | WebSocket transport | `--websocket <bind-address>` transport for MCP/LSP, depends on Phase 113's remote-delegation plumbing; auth via header, not subprotocol. |
+| **116** ✅ | §4 (Phase B) | WebSocket transport | `--websocket <bind-address>` transport for MCP/LSP, depends on Phase 113's remote-delegation plumbing; auth via header, not subprotocol. |
 
 **Status:** Phase 113 ✅ complete. `src/core/remote/protocolClient.ts` exports
 `callRemote()`/`checkRemoteHealth()` — the single shared HTTP client both `tools
@@ -4283,6 +4283,56 @@ normal request/response method, unlike diagnostics. No schema change. Tests:
 `tests/lspDiagnostics.test.ts` (debt/hotspot threshold flagging, background
 refresh's immediate first run, diagnostics push notification shape, and
 `--diagnostics`/`--remote` gating).
+
+**Phase 116 ✅ complete.** Added `ws` as a real dependency: confirmed Node
+20+/22 ships a global *client* `WebSocket` but no server, and that the
+installed `@modelcontextprotocol/sdk` (v1.29.0) ships no server-side
+WebSocket transport (only `client/websocket.js`, a browser-`WebSocket`-based
+*client* transport) — both per the spec's "check before assuming" guidance.
+`src/mcp/webSocketTransport.ts` is a new minimal MCP `Transport`
+implementation over a `ws` socket, mirroring `StdioServerTransport`'s shape
+(`start()`/`send()`/`close()` + `onmessage`/`onerror`/`onclose`); it
+negotiates the `mcp` WS subprotocol for interop with the SDK's own
+`WebSocketClientTransport` (which can't set an `Authorization` header, since
+it uses the global `WebSocket`, so it only works against an unauthenticated
+server). One deviation from the §4 sketch driven by an SDK constraint
+discovered mid-implementation: `Protocol.connect()` throws if called twice
+on the same instance, so a single shared `McpServer` (as the stdio path
+uses) can't serve multiple WS clients — `src/mcp/server.ts` now exports
+`buildMcpServer()`, a small extracted helper that builds a fresh `McpServer`
+with all 7 tool sets registered, and `src/mcp/webSocketServer.ts` (new file)
+calls it once per incoming WS connection. `startMcpServer()`'s stdio path
+was refactored to call the same helper, so there's no duplicated
+registration logic between the two transports. On the LSP side,
+`startLspWebSocketServer()` (new function in `src/core/lsp/server.ts`) is
+a stateless `handleRequest()` caller like `startLspTcpServer()`, just framed
+as raw JSON per WS text frame instead of `Content-Length`-prefixed chunks —
+no per-connection server instance needed there, since LSP has no
+SDK-imposed connect-once constraint. `maybeStartDiagnostics()` was
+refactored to hand callers a `JsonRpcResponse` object instead of a
+pre-serialized string, so each transport (stdio/TCP/WebSocket) can frame the
+push notification itself; this let diagnostics work unmodified over
+WebSocket — confirming the spec's expectation that, unlike `--remote`
+delegation (request/response only), WebSocket's server-push capability
+needs no special-casing in `maybeStartDiagnostics()`'s gating (which keys
+only on `remote`, not the client-facing transport). New shared helper
+`src/core/util/websocket.ts`: `parseBindAddress()` (parses `host:port`) and
+`checkBearerAuth()` (mirrors `authMiddleware`'s `Authorization: Bearer
+<token>` convention against a raw `http.IncomingMessage`, since the new WS
+servers don't run through Express). Both `gitsema tools mcp --websocket
+<bind-address> [--key <token>]` and `gitsema tools lsp --websocket
+<bind-address> [--key <token>]` listen on fixed `/mcp`/`/lsp` paths
+respectively (no `--path` flag, per the spec's v1 scope); TLS is not
+terminated by gitsema — `wss://` requires a reverse proxy in front, same as
+documented for `gitsema tools serve`. No schema change. Tests:
+`tests/integration/mcpWebsocket.test.ts` (real `ws`-backed client transport
++ the real SDK `Client`, round-trips `tools/list`, and asserts
+missing/wrong/correct Bearer token outcomes) and
+`tests/integration/lspWebsocket.test.ts` (real `ws` client, round-trips
+`textDocument/hover`, same auth assertions).
+
+With Phase 116 complete, all four phases of `docs/lsp_and_mcp_fleshout.md`
+(A/113, C/114, D/115, B/116) are implemented.
 
 ---
 

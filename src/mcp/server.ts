@@ -34,6 +34,31 @@ export interface McpServerOptions {
   remoteTimeoutMs?: number
 }
 
+/**
+ * Build a fresh `McpServer` with every domain tool set registered. Each
+ * `Protocol`/`McpServer` instance can only ever be connected to one
+ * transport (the SDK throws on a second `connect()` call), so multi-client
+ * transports (e.g. the WebSocket server, Phase 116) must call this once per
+ * connection rather than sharing a single instance the way the stdio
+ * transport does.
+ */
+export function buildMcpServer(): McpServer {
+  const server = new McpServer({
+    name: 'gitsema',
+    version: _mcpVersion,
+  })
+
+  registerSearchTools(server)
+  registerAnalysisTools(server)
+  registerClusteringTools(server)
+  registerWorkflowTools(server)
+  registerInfrastructureTools(server)
+  registerNarratorTools(server)
+  registerGraphTools(server)
+
+  return server
+}
+
 export async function startMcpServer(options: McpServerOptions = {}): Promise<void> {
   const { remoteUrl, remoteKey, remoteTimeoutMs } = options
 
@@ -49,20 +74,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
     setMcpRemoteConfig(cfg)
   }
 
-  const server = new McpServer({
-    name: 'gitsema',
-    version: _mcpVersion,
-  })
-
-  // Register domain-grouped tool sets
-  registerSearchTools(server)
-  registerAnalysisTools(server)
-  registerClusteringTools(server)
-  registerWorkflowTools(server)
-  registerInfrastructureTools(server)
-  registerNarratorTools(server)
-  registerGraphTools(server)
-
+  const server = buildMcpServer()
   const transport = new StdioServerTransport()
   await server.connect(transport)
 }
