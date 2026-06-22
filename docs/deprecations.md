@@ -1,0 +1,99 @@
+# Deprecations
+
+Canonical list of every deprecated command, flag, and transport in gitsema:
+what replaced it, when it was deprecated, and whether (and when) it's
+scheduled for removal.
+
+**Last updated:** 2026-06-22
+
+**Removal policy:** gitsema has never set a removal date for anything in this
+file. Every hard deprecation below has been kept indefinitely since it was
+introduced — the project's practice so far is "warn forever, remove only if
+a specific reason arises" rather than time-boxed sunsetting. If that changes
+for a given item, this file is the place that says so (see the "Removal"
+column) — check here, not assumptions, before relying on "deprecated things
+eventually disappear."
+
+---
+
+## 1. Hard deprecations (runtime warning printed, replacement exists)
+
+These print a `Deprecation notice: ...` (or equivalent) to stderr on every
+invocation, steering the caller to a replacement. They remain fully
+functional — the warning is the only behavior change.
+
+| Deprecated form | Replacement | Since | Removal | Evidence |
+|---|---|---|---|---|
+| `gitsema mcp` | `gitsema tools mcp` | Phase 59 (v0.61.0) | Not scheduled | `src/cli/register/all.ts:507-509` |
+| `gitsema lsp` | `gitsema tools lsp` | Phase 59 (v0.61.0) | Not scheduled | `src/cli/commands/lsp.ts:7-10` |
+| `gitsema serve` | `gitsema tools serve` | Phase 59 (v0.61.0) | Not scheduled | `src/cli/register/all.ts:276-283` |
+| `gitsema doctor` | `gitsema index doctor` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:251-258` |
+| `gitsema vacuum` | `gitsema index vacuum` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:264-266` |
+| `gitsema rebuild-fts` | `gitsema index rebuild-fts` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:272-275` |
+| `gitsema backfill-fts` | `gitsema index backfill-fts` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:281-283` |
+| `gitsema update-modules` | `gitsema index update-modules` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:289-292` |
+| `gitsema gc` | `gitsema index gc` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:298-302` |
+| `gitsema clear-model` | `gitsema index clear-model` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:315-318` |
+| `gitsema build-vss` | `gitsema index build-vss` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:324-329` |
+| `gitsema policy check` (two-word) | `gitsema policy-check` (kebab-case) | Phase 94 (v0.91.0) | Not scheduled | `src/cli/register/analysis.ts:63-75` |
+| `gitsema tools lsp --tcp <port>` | `gitsema tools lsp --websocket <bind-address> --key <token>` | Phase 120 | Not scheduled (raw TCP has no header to carry a Bearer token in — see §3) | `src/cli/commands/tools.ts:92,126-133` |
+
+---
+
+## 2. Legacy flags (no runtime warning, auto-translated, no removal plan)
+
+Introduced by Phase 70's (v0.69.0) unified `--out <format>[:<file>]` output
+system. `--dump`, `--html`, and `--format` are transparently translated to an
+equivalent `--out` spec internally (`resolveOutputs()` in
+`src/utils/outputSink.ts`) on every command that accepts `--out`. Unlike §1,
+these print **no warning** — they are documented in `--help` text as
+`(legacy: prefer --out <fmt>)` but are not flagged as deprecated, and there
+is no indication they will ever be removed (existing scripts that use them
+keep working identically). Present on: `search`, `evolution`
+(`concept-evolution`), `first-seen`, `file-evolution`, `triage`,
+`policy-check`, `ownership`, `workflow run`, `experts`, `dead-concepts`,
+`impact`, `clusters`, `cluster-diff`, `cluster-timeline`, `change-points`,
+`file-change-points`, `cluster-change-points`, `branch-summary`,
+`merge-audit`, `merge-preview`, `author`, `narrate`/`explain`, `ci-diff`,
+`security-scan`, `debt`, `graph` subcommands, and others — see each
+command's `--help` output for the exact flag set.
+
+| Legacy flag | Preferred form |
+|---|---|
+| `--dump [file]` | `--out json[:file]` |
+| `--html [file]` | `--out html[:file]` |
+| `--format <fmt>` | `--out <fmt>[:file]` |
+
+---
+
+## 3. Silent aliases (alternate names, not deprecated, no warning, no removal plan)
+
+These are not deprecations at all — both forms are first-class, permanently
+supported names for the same command, kept for discoverability or muscle
+memory. Listed here only so this file is a complete map of "is X going
+away?" questions; **do not** read these as deprecated.
+
+| Alias | Canonical form | Evidence |
+|---|---|---|
+| `gitsema concept-evolution` | `gitsema evolution` | `src/cli/register/all.ts:61-62` |
+| `gitsema semantic-blame` | `gitsema blame` | `src/cli/register/all.ts:307-308` |
+| `gitsema export-index` (hidden) | `gitsema index export` | `src/cli/register/indexing.ts:148-156` |
+| `gitsema import-index` (hidden) | `gitsema index import` | `src/cli/register/indexing.ts:158-165` |
+
+---
+
+## How to use this document
+
+- **"Will my script break?"** — check §1 first. If your command/flag is
+  there, it still works today; only the replacement column tells you what
+  to migrate to, and the Removal column tells you if/when it stops working
+  (currently: never, for everything listed).
+- **Adding a new deprecation:** add a row to §1 (or §2 if it's a silent
+  flag translation, not a warned-and-replaced command), citing the
+  Commander registration site (`file:line`) and the PLAN.md phase that
+  introduced it. If you set an actual removal date or version, put it in
+  the Removal column — don't leave future readers guessing.
+- **Removing something that was deprecated here:** delete its row only
+  after the removal has actually shipped (not when it's merely planned),
+  and note the removal in a `docs/PLAN.md` phase entry the same way the
+  deprecation itself was documented.
