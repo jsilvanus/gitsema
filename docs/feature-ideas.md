@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-06-22
+**Last updated:** 2026-06-22 (added shared/deduplicated public-repo indexing idea)
 **Audience:** Developers considering next phases; product planning
 
 > **Note:** As of this update, the LSP/MCP remote-delegation foundation this
@@ -246,6 +246,106 @@ a language-specific structural extractor, or an org-specific compliance scan.
 ### Prerequisites
 - None blocking; lowest priority of the open ideas since no specific plugin
   use case has been requested yet.
+
+---
+
+## Shared/Deduplicated Indexing for Public Repos
+
+### Problem
+- The Semahub vision (and the multi-tenant auth work in
+  `docs/multi-tenant-auth-plan.md`) assumes a remote server can index repos on
+  behalf of many users, but says nothing about **public** repos specifically.
+- Today, `gitsema tools serve`'s `GITSEMA_DATA_DIR` persistent-repo model
+  (Phase 100) and the planned `repo_grants` access model both key storage by
+  `repoId` with no concept of "this repo's content is identical to one
+  another user already indexed." If ten users each register
+  `github.com/torvalds/linux` against the same server, today's model clones
+  and embeds it ten separate times — ten full histories, ten sets of
+  embeddings, ten times the storage and compute, for content that is
+  byte-for-byte identical at the blob level.
+- This is exactly the kind of abuse/cost vector that matters once a server is
+  open to multiple tenants (per the auth design currently being added): one
+  user "forking" a popular public repo and re-triggering a full index is pure
+  waste — gitsema's own content-addressed dedup (the blob-hash identity
+  design constraint) already solves this *within* one repo's history, but
+  there's nothing today that recognizes "this whole repo, or significant
+  parts of it, has already been indexed by someone else."
+
+### Intended Behavior
+For a repo whose remote URL is recognized as **public** (or explicitly
+marked shared), the server should index it **once** and let every user who
+registers that same URL search against the existing index, rather than
+re-cloning and re-embedding from scratch. Two shapes this could take:
+
+1. **One canonical index per public repo URL.** The server normalizes the
+   remote URL (already has `normalized_url` on `repos` per the Phase 100
+   schema) and, on a second registration of the same URL, attaches the
+   requesting user/org as a *reader* of the existing index instead of
+   creating a new one. Per-user value-add (e.g. a private branch, as raised
+   in the personal-grants discussion in `multi-tenant-auth-plan.md` §3 Axis
+   C) layers on top as an incremental partial index against the same base,
+   not a full reindex.
+2. **Partial index reuse / blob-level sharing across repos.** Looser than
+   (1): even for *different* URLs (e.g. a fork), recognize when blobs are
+   byte-identical (same blob hash — which is already how gitsema dedupes
+   *within* a repo) and skip re-embedding those blobs server-wide, only
+   embedding the genuinely new/changed blobs introduced by the fork. This is
+   a bigger lift since today's schema scopes `blobs`/`embeddings` per index
+   DB (or per storage-backend scope), not globally across repos.
+
+Either shape needs a definition of "public" — likely: the server checks the
+origin host's API (GitHub/GitLab/etc. "is this repo public") at registration
+time, or an operator-set allowlist/heuristic, or simply "any URL, dedup by
+exact blob hash, regardless of visibility" (shape 2 doesn't actually require
+knowing visibility at all — it's blob-hash equality, which is content, not a
+policy fact).
+
+### Design Gaps
+- [ ] Shape (1) vs (2) vs both — (1) is far simpler (de-dupe at the
+      whole-repo level) but provides zero benefit for forks/mirrors with
+      partially overlapping history; (2) handles forks but requires
+      cross-repo blob/embedding storage scoping that doesn't exist today.
+- [ ] How is "public" determined? Provider API call (GitHub/GitLab "is
+      public" check, needs network access + provider-specific clients),
+      operator allowlist, or sidestepped entirely by going straight to
+      blob-hash dedup regardless of visibility?
+- [ ] If multiple users share one canonical index, how does access control
+      interact with `multi-tenant-auth-plan.md`'s `repo_grants` model — is
+      "read access to a public repo's shared index" implicit for any
+      authenticated user, or still a grant row (just auto-issued)?
+- [ ] Re-indexing/refresh ownership: if repo X is shared across N users, who
+      can trigger `index start --since all`, and how do per-user overrides
+      (e.g. someone indexing with `--graph` when the canonical index doesn't
+      have graph data) get reconciled without forking the canonical index?
+- [ ] Storage/billing implications for Semahub Layer 2: a shared public index
+      breaks the naive "bill per indexed repo per user" model — needs a
+      "first indexer pays, others read free (or at reduced cost)" policy,
+      which is product/billing territory, not gitsema-side, but the
+      *mechanism* gitsema exposes (shared index, attach-as-reader) has to
+      exist for Semahub to build that policy on top of it.
+- [ ] Quota/abuse angle that motivated this idea: should the server simply
+      *rate-limit or reject* re-indexing a URL that's already indexed and
+      unchanged (cheap, no new mechanism) as a stopgap, independent of
+      whether full shared-index support ever ships? That's a much smaller,
+      separate hardening change worth calling out if this idea stalls.
+
+### Effort Estimate
+- Shape (1) alone: moderate — mostly registration-time URL-lookup logic plus
+  a new "attach existing repo as reader" path in the `GITSEMA_DATA_DIR`
+  repo-registry code (Phase 100) and an auto-grant interaction with
+  `repo_grants`. Rough order: 400-700 LOC.
+- Shape (2): substantial — requires re-scoping `blobs`/`embeddings` storage
+  to be content-addressed *globally* rather than per-repo-DB, which cuts
+  across the storage-backend abstraction (`src/core/storage/types.ts`) and
+  every existing backend (sqlite/postgres/qdrant). Likely a multi-phase
+  effort comparable in size to the storage-backends work itself.
+
+### Prerequisites
+- Logically follows the multi-tenant auth/access-control work
+  (`docs/multi-tenant-auth-plan.md`) — sharing an index across users only
+  matters once a server actually has multiple distinct user identities to
+  share it *between*. Should be scoped as a Semahub-adjacent Layer 1 idea
+  once that auth work lands, not before.
 
 ---
 
