@@ -2,8 +2,39 @@
 
 This document tracks the availability of gitsema tools and commands across all interfaces, and the implementation of common flags across the CLI. It serves as the single source of truth for interface parity and helps identify gaps, inconsistencies, and opportunities for unification.
 
-**Last updated:** 2026-06-21  
+**Last updated:** 2026-06-22 (the only date in this document — see §4 for why)  
 **Maintainer note:** Any tool change, interface change, or flag addition must be reflected in the tables below and in the canonical sections of `CLAUDE.md` / `docs/features.md` / `README.md`.
+
+---
+
+## 0. Local vs. Remote/Server Interfaces
+
+gitsema's actual logic — search, indexing, the structural graph, everything —
+always runs against one local index (SQLite/Postgres/Qdrant). Every interface
+below is either purely **local** (no network exposure) or a **server** mode
+that opens a socket so another process/machine can reach that same local
+logic. This section is about *how a client reaches gitsema*, not about which
+tools are available — that's §1.
+
+| Interface | Default mode | Network mode(s) | Auth | Resource bounds |
+|---|---|---|---|---|
+| CLI | Local (direct DB access in-process) | — | n/a | n/a |
+| REPL | Local (direct DB access in-process) | — | n/a | n/a |
+| Guide | Local (in-process agentic loop) | — | n/a | n/a |
+| `tools mcp` | stdio (spawned as a local child process) | `--websocket <bind-address>` (non-standard MCP transport, kept for forward compatibility); `--http <bind-address>` (Streamable HTTP — MCP's actual standard network transport, Phase 117) | `--key`/`GITSEMA_WEBSOCKET_KEY` (websocket); `--key`/`GITSEMA_MCP_HTTP_KEY` (http) | `maxPayload` 10MB + max 100 connections/sessions on both network modes (review10 §3) |
+| `tools lsp` | stdio (spawned as a local child process) | `--tcp <port>` (raw TCP, `Content-Length`-framed); `--websocket <bind-address>` | **none** (`--tcp` — documented gap, review10 §3.5); `--key`/`GITSEMA_WEBSOCKET_KEY` (`--websocket`) | max 100 connections on both network modes; `maxPayload` 10MB on `--websocket` |
+| `tools serve` | Always a server (no local-only mode) | HTTP (REST-ish routes) | `--key`/`GITSEMA_SERVE_KEY` | `express.json({ limit })` body-size cap |
+
+All network modes that support a key (everything except `--tcp`) print a
+startup warning if bound to a non-loopback address with no key configured.
+`--tcp` has no key option at all, so it always warns.
+
+**`--remote <url>` is a separate axis, not another network-exposure mode.**
+It's how *this* gitsema process delegates outbound to a remote `tools serve`
+instance (Phase 113) — it has nothing to do with how a client reaches *this*
+process. A single `tools mcp` invocation could simultaneously be reached over
+`--http` (inbound) while delegating its own data access via `--remote`
+(outbound) to a different server.
 
 ---
 
@@ -14,17 +45,16 @@ This table shows which tools/commands are available in which interface. A checkm
 ### Legend
 - **CLI**: Command-line interface (85 commands)
 - **REPL**: Lightweight interactive search REPL (search only)
-- **LSP**: Language Server Protocol for IDE integration (8 protocol methods: hover, definition, references, symbol search, call hierarchy)
-- **Guide**: Agentic tool-calling loop in `gitsema guide` (47 tools, max 5 roundtrips)
-- **MCP**: Model Context Protocol tools (45 tools for AI clients)
+- **LSP**: Language Server Protocol for IDE integration (9 protocol methods: hover, definition, references, document/workspace symbol, call hierarchy, code lens) — available over stdio, `--tcp`, or `--websocket` (see §0); tool availability is identical across all three, since they're just transports onto the same dispatcher
+- **Guide**: Agentic tool-calling loop in `gitsema guide` (49 tools, max 5 roundtrips)
+- **MCP**: Model Context Protocol tools (38 tools for AI clients) — available over stdio, `--websocket`, or `--http` (see §0); tool availability is identical across all three, since they're just transports onto the same `McpServer`
 - **HTTP**: REST API server via `gitsema tools serve` (~30 endpoints)
 - **CLI Interactive** (planned): Full CLI in interactive mode
 - **Web UI** (planned): Browser-based interface
-- **MCP HTTP** (planned): MCP over HTTP instead of stdio
 
 ### Tool Matrix
 
-| Tool/Command | CLI | REPL | LSP | Guide | MCP | HTTP | Interactive | Web UI | MCP HTTP |
+| Tool/Command | CLI | REPL | LSP | Guide | MCP | HTTP | Interactive | Web UI |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **Search & Discovery** |
 | `search` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -133,7 +163,7 @@ This table shows which tools/commands are available in which interface. A checkm
 **Server-push notification (not request/response, not remote-delegatable):**
 - `textDocument/publishDiagnostics` — flags high-debt (`debtScore ≥ 0.7`) / high-hotspot-risk (`hotspotRisk ≥ 0.6`) files on a background timer; opt-in via `gitsema tools lsp --diagnostics` (off by default); **not supported with `--remote`**, since Phase 113's remote-delegation mechanism is request/response-only and has no way for the remote server to push notifications back to a local client (Phase 115). **Supported with `--websocket`** (Phase 116) — WebSocket carries server push fine, so this gating is keyed only on `--remote`, not on the client-facing transport.
 
-**Transports (Phase 113/116/117):** both `tools mcp` and `tools lsp` are available over stdio (default), `--tcp <port>` (LSP only), `--websocket <bind-address>` (fixed `/mcp`/`/lsp` path, header-based Bearer auth via `--key`; for MCP this is a known design flaw kept only for forward compatibility, since raw WebSocket isn't a standard MCP transport), and `--remote <url>` (request/response delegation to `tools serve`). `tools mcp` additionally supports `--http <bind-address>` (Phase 117) — the SDK's `StreamableHTTPServerTransport`, MCP's actual standard network transport, same `--key` Bearer-auth convention; prefer it over `--websocket` for MCP. None of these change the capability surface tracked in the tables above — they're alternative ways to reach the same JSON-RPC methods/MCP tools.
+**Transports (Phase 113/116/117):** see §0 for the full local-vs-network breakdown of `tools mcp`/`tools lsp` transports and their auth. None of those transports change the capability surface tracked in the tables above — they're alternative ways to reach the same JSON-RPC methods/MCP tools.
 
 **Marked as available in LSP:**
 - `search` ✓ — hover operation uses semantic search
@@ -179,6 +209,10 @@ This section documents all flags used across CLI commands, their consistency, an
 | `--remote` | — | string | env | `search`, `first-seen`, `index start`, `tools mcp`, `tools lsp` | Proxy to remote gitsema server; for `tools mcp`/`tools lsp` (Phase 113) this delegates every data-access call via `POST /api/v1/protocol/:operation` instead of indexing/searching against a remote DB directly |
 | `--remote-key` | — | string | env (`GITSEMA_REMOTE_KEY`) | `tools mcp`, `tools lsp` | Bearer token for `--remote` |
 | `--remote-timeout` | — | int (ms) | `10000` | `tools mcp`, `tools lsp` | Abort a remote-delegated call after this many ms |
+| `--websocket` | — | `<bind-address>` | — | `tools mcp`, `tools lsp` | Network transport (raw WebSocket) on a fixed `/mcp`/`/lsp` path — inbound exposure, distinct from `--remote` (see §0) |
+| `--http` | — | `<bind-address>` | — | `tools mcp` | Streamable HTTP network transport on a fixed `/mcp` path (Phase 117) — MCP's standard network transport, preferred over `--websocket` |
+| `--tcp` | — | `<port>` | — | `tools lsp` | Raw TCP network transport, `Content-Length`-framed — **no `--key`/auth option** (see §0) |
+| `--key` | — | string | env (`GITSEMA_WEBSOCKET_KEY`/`GITSEMA_MCP_HTTP_KEY`/`GITSEMA_SERVE_KEY`, transport-dependent) | `tools mcp --websocket\|--http`, `tools lsp --websocket`, `tools serve` | Bearer token required of inbound network clients; not supported by `--tcp` |
 | `--branch` | — | string | — | `search`, `first-seen`, `code-search`, `evolution`, `index start` | Restrict to commits reachable from branch |
 | `--hybrid` | — | bool | false | `search`, `first-seen`, `code-search` | Blend vector similarity with BM25 keyword matching |
 | `--bm25-weight` | — | float | 0.3 | `search`, `first-seen`, `code-search` | Weight for BM25 signal in hybrid search |
@@ -329,25 +363,25 @@ This table shows less common flags used by specific commands or command groups.
 - **Subcommands:** `:top`, `:level`, `:hybrid`, `:help`, `:quit`
 
 ### Guide (Agentic Tool-Calling)
-- **Status:** 47 tools registered; up to 5 roundtrips
+- **Status:** 49 tools registered; up to 5 roundtrips
 - **Strengths:** Sophisticated multi-step workflows, LLM-driven
 - **Gaps:** No maintenance commands (doctor, vacuum, gc), some graph commands, no visualization
 - **Constraints:** Max ~4000 chars per result for token budget
 - **Tools:** Defined in `guideTools.ts` with schema definitions and executors
 
 ### MCP (Model Context Protocol)
-- **Status:** 45 tools exposed for external AI clients
+- **Status:** 38 tools exposed for external AI clients
 - **Strengths:** Standardized protocol, works with Claude, other AI systems
 - **Gaps:** No maintenance commands, some graph commands, no visualization
-- **Protocol:** Stdio-based (JSON-RPC); `gitsema tools mcp`
-- **Remote delegation:** `gitsema tools mcp --remote <url>` proxies every tool call to a `gitsema tools serve`'s `POST /api/v1/protocol/mcp.<toolName>` route (Phase 113), closing the previously-planned "MCP HTTP bridge" gap
+- **Transports:** stdio (default), `--websocket`, `--http` (Streamable HTTP, Phase 117) — see §0; identical 38-tool surface on all three
+- **Remote delegation:** `gitsema tools mcp --remote <url>` proxies every tool call to a `gitsema tools serve`'s `POST /api/v1/protocol/mcp.<toolName>` route (Phase 113) — a separate, outbound-delegation axis from the inbound transport above (see §0)
 
 ### HTTP API (`gitsema tools serve`)
 - **Status:** ~30 REST endpoints across multiple routes
 - **Strengths:** Language-agnostic, browser-accessible, remote delegation
 - **Gaps:** Missing graph commands (callers/callees/neighbors), some analysis endpoints
 - **Routes:** `search/`, `analysis/`, `evolution/`, `guide/`, `status/`, `graph/`, `commits/`, `blobs/`, `watch/`, `remote/`, `protocol/` (Phase 113 — generic LSP/MCP remote-delegation dispatch)
-- **Authentication:** Optional bearer token via `--serve-key`
+- **Authentication:** Optional bearer token via `--key`/`GITSEMA_SERVE_KEY`
 
 ### CLI Interactive (Planned)
 - **Status:** Not yet implemented
@@ -358,11 +392,6 @@ This table shows less common flags used by specific commands or command groups.
 - **Status:** Not yet implemented
 - **Proposed:** Browser-based interface for search, analysis, visualization
 - **Expected surface:** Most CLI commands (visualization focus), subset of flags
-
-### MCP HTTP (Planned)
-- **Status:** Not yet implemented
-- **Proposed:** MCP protocol over HTTP instead of stdio
-- **Expected surface:** Same 45 MCP tools, new HTTP transport
 
 ---
 
@@ -396,6 +425,12 @@ Update the parity tables whenever:
    - Update corresponding cell in matrix
    - Document reason (e.g., "phase XYZ pending", "not applicable")
    - File issue or update PLAN.md if a gap
+
+6. **A new network transport is added for an existing interface** (e.g.
+   `tools mcp`/`tools lsp` gain another `--flag <bind>` mode):
+   - Update §0's table — this is *not* a new Tool Matrix column, since a
+     transport doesn't change which tools/methods are reachable
+   - Add the bind flag and its auth flag (if any) to §2
 
 ### Single Source of Truth
 
@@ -433,9 +468,11 @@ If you find a discrepancy, **update this file first**, then propagate the change
 | Phase 107+ | Knowledge-graph edges | `graph build`, `graph callers/callees`, etc. |
 | Phase 108+ | Graph traversal tools | MCP `call_graph`, `graph_neighbors`, `hotspots` |
 | Phase 112 | Unified graph UI | `--out html\|markdown` added to `graph neighbors`/`graph path`/`blast-radius`/`relate`/`similar`/`hotspots`; shared `RenderableSubgraph` model renders as a force-graph (HTML) or ASCII tree (text) |
+| Phase 116 | MCP/LSP WebSocket transport | `tools mcp --websocket`, `tools lsp --websocket` — no change to tool/method availability, just a network transport (§0) |
+| Phase 117 | MCP Streamable HTTP transport | `tools mcp --http` — MCP's standard network transport, supersedes `--websocket` for MCP clients; no change to tool availability (§0) |
+| Phase 119 (review10 close-out) | Network-transport resource bounds | Payload/connection/session caps and non-loopback-without-key warnings added to all `--websocket`/`--http`/`--tcp` modes; no parity impact (security hardening, internal) |
 | Future | CLI Interactive | Full CLI with autocomplete, history, interactive UI |
 | Future | Web UI | Browser-based dashboard with visualization |
-| Future | MCP HTTP | HTTP transport for MCP protocol |
 
 ---
 
@@ -458,11 +495,11 @@ If you find a discrepancy, **update this file first**, then propagate the change
 ### Long-Term (Phase 113+)
 
 - [ ] Beta Web UI with visualization (map, heatmap, project)
-- [ ] MCP HTTP bridge implementation
 - [ ] Full parity across all interfaces (all tools everywhere applicable)
+- [ ] Authentication mechanism for `tools lsp --tcp` (currently unauthenticated by design — see §0; tracked as a known gap in `CLAUDE.md`)
 
 ---
 
-**Document Status:** ✓ Current (2026-06-16)  
-**Next Review:** When Phase 111+ starts (tool/interface changes)  
+**Document Status:** ✓ Current — see the "Last updated" date at the top of this document (single source of truth; do not add a second date elsewhere in this file).  
+**Next Review:** When a tool/interface/transport change ships.  
 **Maintainer:** jsilvanus@gmail.com
