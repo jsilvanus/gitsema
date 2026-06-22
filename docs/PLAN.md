@@ -4200,7 +4200,7 @@ no Commander/CLI dependency, so this stays comfortably within core. Tests:
 
 ---
 
-## LSP & MCP Fleshout Track (Phase 113+) — *in progress*
+## LSP & MCP Fleshout Track (Phase 113+) — ✅ complete
 
 > **Full design:** [`docs/lsp_and_mcp_fleshout.md`](lsp_and_mcp_fleshout.md) is the
 > single design reference for this track (current-state assessment, the
@@ -4434,35 +4434,30 @@ transport.
   MCP-specific concept; LSP's existing stdio/TCP/WebSocket/`--remote`
   transport set is unchanged.
 
-### Phase 118 — review9 close-out: narrator redaction, Postgres health probe, doc staleness
+### Phase 118 — review9 close-out: narrator redaction, Postgres health probe, doc staleness ✅ complete
 
 **Design:** no separate design doc — scoped directly from a `/whatnext` audit
 that re-verified `docs/review9.md`'s findings against current source. Three
 of review9's items were confirmed already resolved (command injection,
-backend-silent-failures, docs parity for `storage.*`); these four were
-confirmed still open. Approach: close the one remaining High-severity
-security gap first, then the smaller correctness/doc-staleness items.
+backend-silent-failures, docs parity for `storage.*`); four more were
+flagged as still open. **Correction made during execution:** item 1 below
+(the narrator redaction gap) turned out to already be fixed by commit
+`edbe0d3` ("fix(narrator): redact all LLM prompts at the callLlm
+chokepoint", with `tests/narratorRedactCallLlm.test.ts` and a changeset,
+explicitly citing review9 §3) — the original `/whatnext` audit's grep only
+searched for `redactAll`, missing the single `redact()` call added at the
+`callLlm` chokepoint, which covers all 11 bespoke narrators regardless of
+caller. Left here for the record; no work was needed for item 1.
 
-**Goal:** Finish closing out `docs/review9.md` by fixing the last open
-Critical/High finding (inconsistent LLM redaction) and three smaller,
-independently-shippable correctness/documentation gaps that a fresh source
-audit confirmed are still live.
+**Goal:** Finish closing out `docs/review9.md`'s remaining open items: three
+small, independently-shippable correctness/documentation gaps that a fresh
+source audit confirmed are still live (the fourth, originally-flagged
+redaction gap was found already resolved — see Design note above).
 
 **Scope:**
 
-1. **Redaction gap in the 11 bespoke narrators (HIGH, security).**
-   `src/core/llm/narrator.ts`'s `narrateEvolution`, `narrateClusters`,
-   `narrateSecurityFindings`, `narrateSearchResults`, `narrateClusterDiff`,
-   `narrateClusterTimeline`, `narrateChangePoints`, `narrateFileChangePoints`,
-   `narrateDiff`, `narrateHealthTimeline`, and `narrateLifecycle` (lines
-   129–487) each call `callLlm(...)` directly with no `redactAll()` wrap —
-   confirmed in `narrateSecurityFindings` (lines 194–218), whose prompt
-   embeds file paths/findings unredacted. The generic `narrateToolResult`
-   (line 507+) already redacts correctly (`redactAll([json])` at line 524).
-   Route the 11 legacy functions through `narrateToolResult`/`redactAll`
-   (review9 §3 / §6.3's "collapse the bespoke narrators" recommendation),
-   and add a test asserting every `callLlm` caller in `llm/narrator.ts`
-   redacts first. *(Medium effort.)*
+1. ~~Redaction gap in the 11 bespoke narrators (HIGH, security).~~ **Already
+   resolved** — see Design note above. No action taken in this phase.
 2. **Postgres backend has no connection health-check probe (Medium,
    correctness).** Qdrant already has `verifyQdrantClient()`
    (`src/core/storage/qdrant/connection.ts:31`, memoized probe via
@@ -4491,9 +4486,6 @@ audit confirmed are still live.
    trivial, the enforcing test is the real work.)*
 
 **Acceptance criteria:**
-- All 11 bespoke `narrate*` functions in `src/core/llm/narrator.ts` redact
-  their prompts before calling `callLlm`, verified by a new test that
-  exercises (or statically asserts) every `callLlm` call site.
 - A bad/unreachable Postgres `storage.metadata.url` fails with an actionable
   error message at first use, not an opaque driver error.
 - The LSP & MCP Fleshout Track heading no longer says "in progress".
@@ -4501,9 +4493,7 @@ audit confirmed are still live.
   if they're allowed to drift apart again.
 - `pnpm test` passes with no regressions.
 
-**Files likely touched:** `src/core/llm/narrator.ts`, `tests/narrator.test.ts`
-(or a new `tests/review9.test.ts` mirroring Phase 92's `tests/review7.test.ts`
-pattern), `src/core/storage/postgres/connection.ts`,
+**Files likely touched:** `src/core/storage/postgres/connection.ts`,
 `src/core/storage/postgres/metadataStore.ts`/`vectorStore.ts`,
 `docs/PLAN.md` (heading only), `docs/features.md`, `tests/docsSync.test.ts`.
 
@@ -4513,6 +4503,17 @@ resolved per the same audit and need no further work here. review9 §8 (the
 SQLite dispatch recursion foot-gun documentation) was not re-flagged by the
 audit as open but wasn't independently re-verified either — worth a quick
 look in a future pass if anyone touches `vectorSearch.ts`'s dispatch logic.
+
+**Status:** ✅ complete. Added `verifyPgPool()` (`src/core/storage/postgres/connection.ts`,
+`SELECT 1` probe memoized via `WeakSet<Pool>`, mirroring `verifyQdrantClient()`)
+and wired it into both Postgres `ready()` chokepoints (`metadataStore.ts`,
+`vectorStore.ts`), with unit tests against a mocked `Pool`
+(`tests/postgresConnection.test.ts`). Flipped the LSP & MCP Fleshout Track
+heading to "✅ complete". Fixed `docs/features.md`'s version banner
+(`v0.96.0` · 1266 tests) and added an enforcing assertion in
+`tests/docsSync.test.ts` so the banner version can't silently drift from
+`package.json` again. `pnpm test`: 1244 passed, 22 skipped (gated
+Postgres/Qdrant integration suites), no regressions.
 
 ---
 

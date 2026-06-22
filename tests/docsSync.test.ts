@@ -153,4 +153,12 @@ describe('package.json', () => {
     const [major, minor] = pkg.version.split('.').map(Number)
     expect(major * 1000 + minor).toBeGreaterThanOrEqual(80)
   })
+
+  it('docs/features.md banner version matches package.json (review9 §5.3 / Phase 118)', () => {
+    const pkg = JSON.parse(read('package.json'))
+    const banner = read('docs/features.md').split('\n', 5).join('\n')
+    const match = banner.match(/Current version: \*\*v(\d+\.\d+\.\d+)\*\*/)
+    expect(match, 'docs/features.md should have a "Current version: **vX.Y.Z**" banner').not.toBeNull()
+    expect(match![1], 'docs/features.md banner version is stale — update it to match package.json').toBe(pkg.version)
+  })
 })

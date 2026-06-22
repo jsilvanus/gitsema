@@ -7,6 +7,7 @@
 
 import type { Pool } from 'pg'
 import { ensurePostgresSchema } from './migrations.js'
+import { verifyPgPool } from './connection.js'
 import type { CommitEntry } from '../../git/commitMap.js'
 import type { MetadataStore, StorageStats, StructuralRefRecord } from '../types.js'
 
@@ -14,6 +15,7 @@ export class PostgresMetadataStore implements MetadataStore {
   constructor(private readonly pool: Pool) {}
 
   private async ready(): Promise<Pool> {
+    await verifyPgPool(this.pool)
     await ensurePostgresSchema(this.pool)
     return this.pool
   }
