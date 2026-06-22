@@ -71,7 +71,12 @@ the same `user_id` before any authorization check runs.
 ### Axis B — **Membership** (which org does this user belong to, and with what authority?)
 
 An **org** is the unit of self-service grant authority — it answers "who
-can grant repo access without the global admin key?" An `org_members` row
+can grant repo access without the global admin key?" Every org has a
+`kind`: `personal` (auto-created with its owning user, exactly one member,
+forever) or `team` (created explicitly, any number of members). This
+keeps "my own stuff" and "stuff I share with a team" as the same
+underlying mechanism (an org repos can belong to) without forcing every
+solo user through an org-creation step — see §4.2a. An `org_members` row
 ties a `user_id` to an `org_id` with a role: `org_admin` (can manage
 members and grant any org repo) or `member` (can only manage grants on
 repos they personally own, per Axis C's `owner` role).
@@ -136,14 +141,65 @@ manage.
   the common "mint once, use in CI forever" case while giving sessions (which
   are more likely to be entered on a shared/laptop) a default lifetime.
 
+### 4.2a Personal groups: every user is also a one-member org
+
+Per the answered design question, account creation and org creation are
+fused for the common case: when a user is created, the server (if enabled)
+automatically creates a `kind: 'personal'` org for them and makes them its
+sole, permanent `org_admin`. This gives every user a place to own repos
+without first having to think about orgs — the same shape GitHub/GitLab
+use for "your personal namespace vs. an organization namespace."
+
+- **Server config gate.** Controlled by a new `auth.personalGroups` config
+  key (`GITSEMA_PERSONAL_GROUPS` env var override, following the existing
+  `storage.*`/`GITSEMA_STORAGE_*` precedent for boolean feature toggles),
+  **default `true`** per the answered question — a freshly configured
+  server creates personal groups out of the box, with no extra setup
+  required to get the GitHub-style behavior. Operators who want
+  strictly-org-managed repos (e.g. a server provisioned entirely by an
+  external admin tool) can set it `false`; existing personal groups aren't
+  retroactively deleted if the flag is later flipped off, but new users
+  stop getting one.
+- **Invariant: exactly one member, forever.** A `kind: 'personal'` org's
+  `org_members` row count is fixed at 1 and is enforced at the route layer
+  (`gitsema orgs members add` rejects any target org with `kind =
+  'personal'`, regardless of caller role) — per the answered design
+  question, a personal group never becomes a team. A user who wants to
+  share access creates or uses a `kind: 'team'` org instead; this keeps the
+  personal/team distinction load-bearing rather than cosmetic.
+- **Default repo placement.** Per the answered design question, a repo
+  created with no explicit org/owner (e.g. `gitsema index --remote` with no
+  `--org` flag) defaults to the creating user's personal group when
+  `auth.personalGroups` is enabled, rather than landing at `org_id = NULL`
+  as it does today. If the flag is disabled server-wide, today's `org_id =
+  NULL` behavior is unchanged. This means most solo users never need to
+  touch `gitsema orgs`/`gitsema repos grant` at all — they get an owned,
+  private-by-default repo automatically.
+- **Moving a repo between orgs.** Per the answered design question, a repo
+  must be movable between its personal group and a team org (and between
+  team orgs) after creation — e.g. "I prototyped this solo, now my team
+  wants it." `gitsema repos move-to-org <repo-id> <org>` updates `repos.org_id`
+  directly; this only changes which org's `org_admin`s get blanket access —
+  any individual `repo_grants` rows already issued on that repo (to
+  specific users, regardless of org) are untouched by the move, since grants
+  are keyed by `(user_id, repo_id)`, not by org. Only the repo's current
+  owner (or a `org_admin` of its *current* org) may move it; landing in the
+  destination org does not require that org's admin to approve the move
+  (consistent with "any owner can self-service," §4.2) but the move is
+  recorded in the Phase D audit log once that phase exists, since
+  org-membership changes that affect access are exactly the kind of event
+  worth auditing.
+
 ### 4.2 Authorization: per-user, per-repo, per-branch grants, with org-scoped self-service
 
-- `repos` gains a nullable `org_id` column. Existing repos (added before
-  this feature ships) keep `org_id = NULL` and remain reachable only via
-  `GITSEMA_SERVE_KEY` or pre-existing `repo_tokens` rows until an admin
-  assigns them to an org (`gitsema repos set-org <repo-id> <org-id>`) —
-  this is the migration path; nothing breaks on upgrade, but new
-  user-grant-based access is opt-in per repo.
+- `orgs` gains a `kind` column (`personal` | `team`); `repos` gains a
+  nullable `org_id` column. Existing repos (added before this feature
+  ships) keep `org_id = NULL` and remain reachable only via
+  `GITSEMA_SERVE_KEY` or pre-existing `repo_tokens` rows until an admin (or
+  the repo's de-facto owner) moves them into an org (§4.2a's
+  `gitsema repos move-to-org`, which also serves as the one-time migration
+  path) — nothing breaks on upgrade, but new user-grant-based access is
+  opt-in per repo until moved.
 - `repo_grants(user_id, repo_id, role, branch_pattern)` is the source of
   truth for what a given user can do. `role` gates the HTTP verb class
   (`read` → GET-shaped analysis/search routes; `write` → indexing/grant
@@ -183,15 +239,18 @@ gitsema auth token list
 gitsema auth token revoke <prefix>
 gitsema auth whoami
 
-gitsema orgs create <name>                 # superadmin (bootstrap) or existing org_admin
-gitsema orgs members add/remove <org> <username> [--role org_admin|member]
+gitsema orgs create <name>                 # always kind=team; superadmin (bootstrap) or existing org_admin
+gitsema orgs members add/remove <org> <username> [--role org_admin|member]   # rejected on kind=personal orgs
 
 gitsema repos grant <repo-id> <username> --role read|write|owner [--branch <pattern>]
 gitsema repos grants list <repo-id>
 gitsema repos revoke <repo-id> <username>
+gitsema repos move-to-org <repo-id> <org>   # works personal->team, team->personal (back to owner), team->team
 
-gitsema users create <username> --org <org> [--role org_admin|member]   # org_admin only
+gitsema users create <username> --org <org> [--role org_admin|member]   # org_admin only; also provisions <username>'s personal group if auth.personalGroups is enabled
 gitsema users list --org <org>
+
+gitsema config set auth.personalGroups true|false   # server-side toggle, default true
 ```
 
 This is additive — none of today's `gitsema repos *`/`gitsema config *`
@@ -221,13 +280,31 @@ commands change shape; `repos token *` keeps working per §4.2.
 - No authorization changes yet — a logged-in user with no grants can do
   nothing beyond `whoami` until Phase B ships; this phase is purely identity
   and credential plumbing, deployable independently.
+- **No personal groups yet** — `orgs` doesn't exist until Phase B, so user
+  creation in Phase A does not provision a personal group. Phase B's
+  migration backfills one `kind: 'personal'` org per pre-existing user when
+  `auth.personalGroups` is enabled at upgrade time (see Phase B below).
 
-### Phase B — Orgs, repo/branch grants, self-service (~700–900 LOC)
+### Phase B — Orgs, personal groups, repo/branch grants, self-service (~850–1100 LOC)
 
-- New tables: `orgs` (id, name, created_at), `org_members` (org_id,
-  user_id, role, joined_at), `repo_grants` (id, user_id, repo_id, role,
-  branch_pattern nullable, granted_by, created_at). `repos` gains nullable
-  `org_id`.
+- New tables: `orgs` (id, name, **kind**: `personal`\|`team`, created_at),
+  `org_members` (org_id, user_id, role, joined_at), `repo_grants` (id,
+  user_id, repo_id, role, branch_pattern nullable, granted_by, created_at).
+  `repos` gains nullable `org_id`.
+- New config key `auth.personalGroups` (`GITSEMA_PERSONAL_GROUPS` env
+  override), default `true` (§4.2a).
+- User-creation path (both the new `gitsema users create` and Phase A's
+  already-shipped account creation, retrofitted) provisions a `kind:
+  'personal'` org + a sole `org_admin` `org_members` row for that user
+  whenever `auth.personalGroups` is enabled at creation time. A one-time
+  migration backfills a personal org for every pre-existing `users` row
+  when an upgrade first enables the flag.
+- Route-layer invariant: any `orgs members add/remove` targeting a `kind:
+  'personal'` org 403s unconditionally (§4.2a) — checked before role
+  checks, since no role should be able to override this.
+- Default org resolution: when a repo is created/registered with no
+  explicit org, resolve to the creating user's personal org if
+  `auth.personalGroups` is enabled, else `org_id = NULL` (today's behavior).
 - Authorization middleware: resolve `req.userId` → look up `repo_grants`
   for the requested `repoId`; gate by `role` (read/write/owner) per route
   class; intersect/union `branch_pattern`s against the request's `branch`
@@ -238,14 +315,17 @@ commands change shape; `repos token *` keeps working per §4.2.
   optional string — the largest mechanical change in this design, but
   additive (single-string callers keep working unchanged).
 - CLI: `gitsema orgs create/members add/remove`, `gitsema repos
-  grant/grants-list/revoke`, `gitsema users create/list`, `gitsema repos
-  set-org`.
+  grant/grants-list/revoke/move-to-org`, `gitsema users create/list`,
+  `gitsema config set auth.personalGroups`.
 - `docs/deprecations.md`: add `repo_tokens`/`gitsema repos token *` as a §2
   legacy (no-warning) mechanism once this phase ships.
 - Tests: grant resolution (role gating, branch intersection, org-admin vs.
   repo-owner self-service paths, 403 on out-of-grant branch requests),
-  migration safety (pre-existing `org_id = NULL` repos remain reachable via
-  legacy auth only).
+  personal-group invariant (member-add rejection, exactly-one-row
+  enforcement), `move-to-org` (grants survive the move, only current
+  owner/org_admin may initiate it), migration safety (pre-existing `org_id
+  = NULL` repos remain reachable via legacy auth only until moved;
+  pre-existing users get a personal org backfilled exactly once).
 
 ### Phase C — SSO/OIDC linking (~400–600 LOC, depends on Phase A)
 
@@ -269,13 +349,16 @@ commands change shape; `repos token *` keeps working per §4.2.
   `grant.revoke`, `token.create`, `token.revoke`, `login.success`,
   `login.failure`, `org.member.add`), target, timestamp.
 - `gitsema audit log [--org <org>] [--repo <repo-id>]` CLI to query it.
+  `org.repo.moved` (§4.2a's `move-to-org`) is one of the logged actions.
 - Lowest priority of the four — nothing in Phases A–C depends on it, and
   the feature-ideas.md Semahub write-up only asked for it as a Design Gap,
   not a hard requirement. Reasonable to schedule after seeing real usage of
   Phases A–C rather than guessing at the right granularity now.
 
-**Total estimated effort:** ~1850–2550 LOC across four phases, roughly in
-line with the storage-backends design's three-phase sizing.
+**Total estimated effort:** ~2000–2700 LOC across four phases (Phase B grew
+by ~150 LOC for personal-group provisioning/invariant-enforcement/
+`move-to-org` relative to the original estimate), roughly in line with the
+storage-backends design's three-phase sizing.
 
 ---
 
@@ -307,3 +390,11 @@ These are left open deliberately rather than answered speculatively:
   CLI and a future browser client) rather than a cookie, so this doesn't
   block Phase A, but CSRF hardening should be revisited if/when a
   browser-based client is built.
+- **Personal-group lifecycle on user deletion/rename.** If a user account
+  is deleted, what happens to repos still parked in their personal group
+  (orphaned, transferred to a designated org, blocked until manually moved
+  via `move-to-org`)? And if a username changes, does the personal org's
+  display name follow it automatically? Neither was asked about explicitly;
+  blocking-deletion-until-moved is the safest default (mirrors most "can't
+  delete a non-empty namespace" precedents elsewhere) but should be
+  confirmed before Phase B's user-deletion path (not yet designed here) ships.
