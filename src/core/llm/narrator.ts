@@ -21,6 +21,7 @@ import type { HealthSnapshot } from '../search/temporal/healthTimeline.js'
 import type { ConceptLifecycleResult } from '../search/conceptLifecycle.js'
 import { buildNarratorSystemPrompt, getInterpretation } from '../narrator/interpretations.js'
 import { redact, redactAll } from '../narrator/redact.js'
+import { capJson } from '../narrator/resultCap.js'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -493,8 +494,6 @@ Provide a concise narrative summary:`
 // narrateToolResult — generic narration for any TOOL_INTERPRETATIONS-backed result
 // ---------------------------------------------------------------------------
 
-const NARRATE_RESULT_MAX_CHARS = 4000
-
 export interface NarrateToolResultOptions {
   maxTokens?: number
 }
@@ -521,9 +520,7 @@ export async function narrateToolResult(
   } catch (err) {
     return `(LLM narration unavailable — could not serialize result: ${err instanceof Error ? err.message : String(err)})`
   }
-  if (json.length > NARRATE_RESULT_MAX_CHARS) {
-    json = `${json.slice(0, NARRATE_RESULT_MAX_CHARS)}…truncated`
-  }
+  json = capJson(json)
   json = redactAll([json]).texts[0]
 
   const interpretation = getInterpretation(toolKey)
