@@ -71,14 +71,13 @@ import { parseLens } from '../../cli/lib/lens.js'
 import { vectorSearchWithSession } from '../search/analysis/vectorSearch.js'
 import type { ToolCategory } from './interpretations.js'
 import { logger } from '../../utils/logger.js'
+import { capJson } from './resultCap.js'
 
 // ---------------------------------------------------------------------------
 // Result size capping
 // ---------------------------------------------------------------------------
 
-const MAX_RESULT_CHARS = 4000
-
-/** Serialize `value` to JSON and cap the result to ~4000 chars. */
+/** Serialize `value` to JSON and cap the result to `RESULT_CHAR_CAP` chars. */
 function toCappedJson(value: unknown): string {
   let json: string
   try {
@@ -86,8 +85,7 @@ function toCappedJson(value: unknown): string {
   } catch (err) {
     return JSON.stringify({ error: `serialization failed: ${err instanceof Error ? err.message : String(err)}` })
   }
-  if (json.length <= MAX_RESULT_CHARS) return json
-  return `${json.slice(0, MAX_RESULT_CHARS)}…truncated`
+  return capJson(json)
 }
 
 function errorResult(message: string): { error: string } {
