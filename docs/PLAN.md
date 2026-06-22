@@ -4517,6 +4517,87 @@ Postgres/Qdrant integration suites), no regressions.
 
 ---
 
+### Phase 119 — review10 close-out: network-transport resource bounds, hotspots cap, shell-interpolation cleanup ✅ complete
+
+**Design:** no separate design doc — scoped directly from `docs/review10.md`'s
+8-item priority list (§7).
+
+**Goal:** Close every concrete improvement point review10 raised: bound the
+two new network transports (Phase 116/117), cap an unbounded HTTP/MCP
+parameter, finish the shell-interpolation cleanup review9 started, and fix
+three lower-severity correctness/defense-in-depth gaps in the knowledge-graph
+track.
+
+**Scope (review10 §7 priority order):**
+
+1. **Bound the new network transports (§3).** Added `maxPayload`
+   (`DEFAULT_MAX_WS_PAYLOAD`, 10MB) to both `WebSocketServer` instances
+   (`src/mcp/webSocketServer.ts`, `src/core/lsp/server.ts`); added a
+   body-size cap to the Streamable HTTP listener reusing
+   `GITSEMA_MAX_BODY_SIZE` (`src/mcp/streamableHttpServer.ts`); added a
+   shared `ConnectionLimiter` (`src/core/util/websocket.ts`,
+   `DEFAULT_MAX_CONNECTIONS = 100`) to all three new listeners plus the LSP
+   TCP server and the Streamable HTTP session map.
+2. **Cap `hotspots` `topK` (§2.1).** Added `.max(500)` to the Zod schema on
+   `src/server/routes/graph.ts` and the MCP tool in
+   `src/mcp/tools/graph.ts`.
+3. **Finish the shell-interpolation cleanup (§5.1).** Switched
+   `regressionGate.ts`/`codeReview.ts` from template-string `execSync` to
+   `execFileSync` array form, gated through the same `isSafeGitRange()`
+   regex allowlist `narrator.ts` uses (review9 §2's fix).
+4. **Non-loopback-without-`--key` startup warning + env-var fallbacks
+   (§3.3).** Added `warnIfNonLoopbackWithoutKey()` (`src/core/util/websocket.ts`),
+   called from `tools mcp --websocket`/`--http` and `tools lsp --websocket`;
+   added `GITSEMA_WEBSOCKET_KEY` (shared by both `--websocket` flags) and
+   `GITSEMA_MCP_HTTP_KEY` env-var fallbacks in `src/cli/commands/tools.ts`,
+   matching the `GITSEMA_SERVE_KEY`/`GITSEMA_REMOTE_KEY` convention.
+5. **Document the unauthenticated `--tcp` LSP transport (§3.5).** Added a
+   startup warning in `tools.ts` and a known-gap row in `CLAUDE.md`; no auth
+   mechanism added to `--tcp` itself in this phase (deferred — either add
+   auth or steer users to `--websocket --key`).
+6. **Index `displayName` lookups in `resolveNode()` (§2.2).** Added an
+   index on `graph_nodes(display_name)` (`idx_graph_nodes_display_name`,
+   `src/core/db/sqlite.ts`'s idempotent `initTables()` — no schema-version
+   bump needed, matching the existing `idx_edges_*` pattern).
+7. **Align `esc()` with `escHtml()`'s escape set (§2.4).** The browser-side
+   `esc()` in `htmlRenderer-shared.ts`'s `COMMON_JS` now also escapes `"`
+   and `'`, matching the server-side `escHtml()`.
+8. **Stack-overflow guard in `cycles.ts`'s `dfs()` (§2.3).** A fixed
+   recursion-depth cap proved fragile (still overflowed well below the cap
+   on a 20000-node chain, since each native call frame is larger than
+   assumed). Rewrote `dfs()` to walk an explicit frame stack instead of
+   recursing, which removes the native call-stack dependency entirely; added
+   `tests/cycles.test.ts` exercising a long acyclic chain and a 20000-node
+   chain that closes into one cycle (verifying no stack overflow).
+
+**Acceptance criteria:**
+- Both `WebSocketServer` instances and the Streamable HTTP listener reject
+  oversized payloads/bodies and cap concurrent connections/sessions.
+- `hotspots` `topK` is rejected above 500 on the HTTP route and MCP tool.
+- No `execSync`/template-string git invocation remains in `regressionGate.ts`/
+  `codeReview.ts`.
+- Binding `tools mcp --websocket`/`--http` or `tools lsp --websocket` to a
+  non-loopback host with no key prints a warning; `GITSEMA_WEBSOCKET_KEY`/
+  `GITSEMA_MCP_HTTP_KEY` work as `--key` fallbacks.
+- `findCycles()` does not stack-overflow on a 20000-node acyclic chain
+  regardless of native call-stack size (no recursion-depth cap needed).
+- `pnpm build && pnpm test` clean.
+
+**Files touched:** `src/core/util/websocket.ts`, `src/mcp/webSocketServer.ts`,
+`src/mcp/streamableHttpServer.ts`, `src/core/lsp/server.ts`,
+`src/cli/commands/tools.ts`, `src/server/routes/graph.ts`,
+`src/mcp/tools/graph.ts`, `src/cli/commands/regressionGate.ts`,
+`src/cli/commands/codeReview.ts`, `src/core/db/sqlite.ts`,
+`src/core/storage/postgres/migrations.ts`, `src/core/storage/types.ts`,
+`src/core/storage/sqlite/profile.ts`, `src/core/storage/postgres/graphStore.ts`,
+`src/core/storage/unsupportedGraphStore.ts`, `src/core/graph/resolveNode.ts`,
+`src/core/viz/htmlRenderer-shared.ts`, `src/core/graph/cycles.ts`,
+`tests/cycles.test.ts`, `CLAUDE.md`, `README.md`.
+
+**Status:** ✅ complete.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.

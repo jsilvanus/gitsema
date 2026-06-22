@@ -368,6 +368,7 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 
     CREATE INDEX IF NOT EXISTS idx_edges_src_type ON edges(src_key, edge_type);
     CREATE INDEX IF NOT EXISTS idx_edges_dst_type ON edges(dst_key, edge_type);
+    CREATE INDEX IF NOT EXISTS idx_graph_nodes_display_name ON graph_nodes(display_name);
   `)
 
   if (isFresh) {

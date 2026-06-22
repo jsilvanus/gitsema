@@ -13,7 +13,7 @@ import { parseLens } from '../../cli/lib/lens.js'
 
 const HotspotsBodySchema = z.object({
   lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid'),
-  topK: z.number().int().positive().optional().default(20),
+  topK: z.number().int().positive().max(500).optional().default(20),
 })
 
 export function graphRouter(): Router {

@@ -377,6 +377,11 @@ export class SqliteGraphStore implements GraphStore {
     return db.select().from(graphNodes).all().map(rowToNode)
   }
 
+  async findByDisplayName(displayName: string): Promise<GraphNodeRecord[]> {
+    const { db } = getActiveSession()
+    return db.select().from(graphNodes).where(eq(graphNodes.displayName, displayName)).all().map(rowToNode)
+  }
+
   async allEdges(edgeTypes?: EdgeType[]): Promise<GraphEdgeRecord[]> {
     const { db } = getActiveSession()
     const rows = edgeTypes && edgeTypes.length > 0

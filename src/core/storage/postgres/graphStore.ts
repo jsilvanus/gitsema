@@ -72,6 +72,12 @@ export class PostgresGraphStore implements GraphStore {
     return res.rows.map(rowToNode)
   }
 
+  async findByDisplayName(displayName: string): Promise<GraphNodeRecord[]> {
+    await ensurePostgresSchema(this.pool)
+    const res = await this.pool.query('SELECT * FROM graph_nodes WHERE display_name = $1', [displayName])
+    return res.rows.map(rowToNode)
+  }
+
   async allEdges(edgeTypes?: EdgeType[]): Promise<GraphEdgeRecord[]> {
     await ensurePostgresSchema(this.pool)
     const res = edgeTypes && edgeTypes.length > 0

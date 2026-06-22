@@ -223,6 +223,8 @@ export interface GraphStore {
   getNode(nodeKey: string): Promise<GraphNodeRecord | undefined>
   /** All nodes (small graphs only — used by `cycles`/`deps`). */
   allNodes(): Promise<GraphNodeRecord[]>
+  /** Nodes whose `displayName` (qualified name) exactly matches, via an indexed lookup (review10 §2.2). */
+  findByDisplayName(displayName: string): Promise<GraphNodeRecord[]>
   /** All edges, optionally filtered to the given edge types. */
   allEdges(edgeTypes?: EdgeType[]): Promise<GraphEdgeRecord[]>
   /** Edges touching `nodeKey`, optionally filtered by direction and edge types. */

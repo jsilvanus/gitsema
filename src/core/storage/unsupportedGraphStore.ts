@@ -33,6 +33,10 @@ export class UnsupportedGraphStore implements GraphStore {
     throw new Error(ERROR_MESSAGE)
   }
 
+  async findByDisplayName(_displayName: string): Promise<GraphNodeRecord[]> {
+    throw new Error(ERROR_MESSAGE)
+  }
+
   async allEdges(_edgeTypes?: EdgeType[]): Promise<GraphEdgeRecord[]> {
     throw new Error(ERROR_MESSAGE)
   }

@@ -96,7 +96,7 @@ export function registerGraphTools(server: McpServer) {
     'Architectural risk ranking (Phase 110): risk = co-change (temporal) × call-coupling (structural) × churn, over the structural graph (`gitsema index --graph` + `gitsema graph build`). Default lens `hybrid` fuses all three signals; `structural` ranks by coupling only; `semantic` by co-change × churn.',
     {
       lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid').describe('Which lens(es) drive the risk score (default: hybrid)'),
-      top_k: z.number().int().positive().optional().default(20).describe('Number of hotspots to return'),
+      top_k: z.number().int().positive().max(500).optional().default(20).describe('Number of hotspots to return (max 500)'),
     },
     async ({ lens, top_k }) => {
       try {

@@ -34,14 +34,31 @@ export async function findCycles(graph: GraphStore, edgeTypes: EdgeType[] = ['im
   const stack: string[] = []
   const visited = new Set<string>()
 
-  function dfs(node: string): void {
-    if (found.length >= MAX_CYCLES) return
-    visited.add(node)
-    onStack.add(node)
-    stack.push(node)
+  // Iterative DFS with an explicit call-stack (each frame: node + next adjacency
+  // index to visit), rather than native recursion — a long acyclic chain can be
+  // arbitrarily deep, and recursing once per node would stack-overflow Node well
+  // before any interesting depth.
+  function dfs(start: string): void {
+    const frames: { node: string; idx: number }[] = [{ node: start, idx: 0 }]
+    visited.add(start)
+    onStack.add(start)
+    stack.push(start)
 
-    for (const next of adjacency.get(node) ?? []) {
+    while (frames.length > 0) {
       if (found.length >= MAX_CYCLES) break
+      const frame = frames[frames.length - 1]
+      const neighbors = adjacency.get(frame.node) ?? []
+
+      if (frame.idx >= neighbors.length) {
+        stack.pop()
+        onStack.delete(frame.node)
+        frames.pop()
+        continue
+      }
+
+      const next = neighbors[frame.idx]
+      frame.idx++
+
       if (onStack.has(next)) {
         const idx = stack.indexOf(next)
         const cycle = stack.slice(idx)
@@ -52,15 +69,23 @@ export async function findCycles(graph: GraphStore, edgeTypes: EdgeType[] = ['im
           found.push(normalized)
         }
       } else if (!visited.has(next)) {
-        dfs(next)
+        visited.add(next)
+        onStack.add(next)
+        stack.push(next)
+        frames.push({ node: next, idx: 0 })
       }
     }
 
-    stack.pop()
-    onStack.delete(node)
+    // Unwind any frames left on the stack (e.g. due to the MAX_CYCLES break).
+    while (frames.length > 0) {
+      const frame = frames.pop()!
+      stack.pop()
+      onStack.delete(frame.node)
+    }
   }
 
   for (const node of adjacency.keys()) {
+    if (found.length >= MAX_CYCLES) break
     if (!visited.has(node)) dfs(node)
   }
 
