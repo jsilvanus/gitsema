@@ -156,24 +156,29 @@ A **managed platform** built on top of the self-hosted remote MCP foundation:
 
 ### Design Gaps
 
-- [ ] `gitsema auth login`/`logout`/`token` commands (currently no `auth` command group — tokens are managed via `gitsema config set`/repo tokens today)
-- [ ] How are user credentials stored locally? (keychain integration?)
-- [ ] Token expiration & refresh flow?
-- [ ] What's the max index size per user tier?
-- [ ] Rate limits (queries/sec, indexing jobs/month)?
-- [ ] Team sharing (shared indexes, collaborative access)?
-- [ ] Audit logging (who indexed what, when)?
-- [ ] SLA and uptime guarantees?
-- [ ] Data residency (GDPR compliance)?
+> **Refined into:** the gitsema-side identity/auth/access-control work
+> (user accounts, `gitsema auth login/logout/token`, per-user per-repo
+> per-branch grants, org-scoped self-service, SSO linking) has been promoted
+> to its own design document: **[`docs/multi-tenant-auth-plan.md`](multi-tenant-auth-plan.md)**.
+> The gaps below are kept for history; see that doc for resolved answers and
+> the remaining genuinely-open questions.
+
+- [x] `gitsema auth login`/`logout`/`token` commands — see `multi-tenant-auth-plan.md` §4.3, §5 Phase A.
+- [x] How are user credentials stored locally? — see `multi-tenant-auth-plan.md` §4.1 (follows the existing `config.json` plaintext-secret precedent, `~/.config/gitsema/credentials.json`, 0o600).
+- [x] Token expiration & refresh flow? — see `multi-tenant-auth-plan.md` §4.1 (sessions expire, API keys don't by default, `--expires` opt-in).
+- [x] Team sharing (shared indexes, collaborative access)? — see `multi-tenant-auth-plan.md` §4.2 (orgs, per-repo/per-branch `repo_grants`, org-scoped self-service).
+- [ ] What's the max index size per user tier? — still open; Semahub Layer-2 (billing/quota) territory, not gitsema-side.
+- [ ] Rate limits (queries/sec, indexing jobs/month)? — still open; per-user/org quotas explicitly out of scope for `multi-tenant-auth-plan.md` Phases A–D (see its §6), deferred to Semahub Layer 2.
+- [ ] Audit logging (who indexed what, when)? — partially addressed: `multi-tenant-auth-plan.md` §5 Phase D scopes a gitsema-side `audit_log` table, but it's the lowest-priority phase and may slip.
+- [ ] SLA and uptime guarantees? — still open; Semahub Layer-2.
+- [ ] Data residency (GDPR compliance)? — still open; Semahub Layer-2.
 
 ### MVP Scope
 
 Start small:
 1. **Phase A (Semahub):** User signup, index storage, job queue
-2. **Phase B (gitsema, small):** `gitsema auth login/logout/token` convenience commands wrapping existing config/token plumbing
+2. **Phase B (gitsema):** see `docs/multi-tenant-auth-plan.md` for the now-fully-designed phased plan (Phases A–D there, ~1850–2550 LOC total) — supersedes the placeholder estimate that used to be here.
 3. **Phase C (Semahub):** Web dashboard, billing
-
-**Total effort:** Semahub: 6-10 weeks (gitsema-side work is now minimal — a thin `auth` command group, ~200-300 LOC)
 
 ### Competitive Advantages
 
