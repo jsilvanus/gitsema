@@ -15,6 +15,7 @@
 
 import type { Pool } from 'pg'
 import { ensurePostgresSchema } from './migrations.js'
+import { verifyPgPool } from './connection.js'
 import { scoreAndDedupe, type RerankCandidate } from '../rerank.js'
 import type { Embedding, SearchResult, SearchResultKind } from '../../models/types.js'
 import { pathRelevanceScore, type VectorSearchOptions } from '../../search/analysis/vectorSearch.js'
@@ -33,6 +34,7 @@ export class PgVectorStore implements VectorStore {
   constructor(private readonly pool: Pool) {}
 
   private async ready(): Promise<Pool> {
+    await verifyPgPool(this.pool)
     await ensurePostgresSchema(this.pool)
     return this.pool
   }

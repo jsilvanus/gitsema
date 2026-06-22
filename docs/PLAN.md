@@ -4200,7 +4200,7 @@ no Commander/CLI dependency, so this stays comfortably within core. Tests:
 
 ---
 
-## LSP & MCP Fleshout Track (Phase 113+) — *in progress*
+## LSP & MCP Fleshout Track (Phase 113+) — ✅ complete
 
 > **Full design:** [`docs/lsp_and_mcp_fleshout.md`](lsp_and_mcp_fleshout.md) is the
 > single design reference for this track (current-state assessment, the
@@ -4433,6 +4433,87 @@ transport.
 - LSP was out of scope for this phase, as planned — Streamable HTTP is an
   MCP-specific concept; LSP's existing stdio/TCP/WebSocket/`--remote`
   transport set is unchanged.
+
+### Phase 118 — review9 close-out: narrator redaction, Postgres health probe, doc staleness ✅ complete
+
+**Design:** no separate design doc — scoped directly from a `/whatnext` audit
+that re-verified `docs/review9.md`'s findings against current source. Three
+of review9's items were confirmed already resolved (command injection,
+backend-silent-failures, docs parity for `storage.*`); four more were
+flagged as still open. **Correction made during execution:** item 1 below
+(the narrator redaction gap) turned out to already be fixed by commit
+`edbe0d3` ("fix(narrator): redact all LLM prompts at the callLlm
+chokepoint", with `tests/narratorRedactCallLlm.test.ts` and a changeset,
+explicitly citing review9 §3) — the original `/whatnext` audit's grep only
+searched for `redactAll`, missing the single `redact()` call added at the
+`callLlm` chokepoint, which covers all 11 bespoke narrators regardless of
+caller. Left here for the record; no work was needed for item 1.
+
+**Goal:** Finish closing out `docs/review9.md`'s remaining open items: three
+small, independently-shippable correctness/documentation gaps that a fresh
+source audit confirmed are still live (the fourth, originally-flagged
+redaction gap was found already resolved — see Design note above).
+
+**Scope:**
+
+1. ~~Redaction gap in the 11 bespoke narrators (HIGH, security).~~ **Already
+   resolved** — see Design note above. No action taken in this phase.
+2. **Postgres backend has no connection health-check probe (Medium,
+   correctness).** Qdrant already has `verifyQdrantClient()`
+   (`src/core/storage/qdrant/connection.ts:31`, memoized probe via
+   `getCollections()`, called from `vectorStore.ts:110/218/261/322`), but
+   `src/core/storage/postgres/connection.ts` still only exposes
+   `getPgPool()`/`closeAllPgPools()` — a typo'd Postgres URL still surfaces
+   as an opaque error at first query instead of a clear, actionable message.
+   Add a memoized `verifyPgPool()`-style probe (`SELECT 1`) mirroring the
+   Qdrant pattern, called from the Postgres `MetadataStore`/`VectorStore`
+   methods on first use (review9 §7.2, partially resolved). *(Small effort.)*
+3. **`LSP & MCP Fleshout Track` header is stale (Low, doc drift).**
+   `docs/PLAN.md`'s "## LSP & MCP Fleshout Track (Phase 113+)" heading still
+   reads "— *in progress*", but all five listed phases (113–117) are marked
+   ✅ complete in the table and status notes below it. Flip the header to
+   reflect completion (e.g. "— ✅ complete", matching the Knowledge Graph
+   Track's heading style). *(Trivial effort.)*
+4. **`features.md` / `package.json` version drift, again (Low, doc parity).**
+   `package.json` currently says `0.96.0`; `docs/features.md:3`'s banner
+   still says an older version/schema/test-count combination. This is the
+   same staleness class flagged in review8 §5.2 and review9 §5.3 — it keeps
+   recurring because nothing enforces it mechanically. Fix the banner, and
+   this time add a small test (e.g. in `tests/docsSync.test.ts`) asserting
+   the `features.md` banner version matches `package.json`'s `version` field
+   (schema/test-count can stay manually maintained, but the version number
+   should not drift silently again). *(Small-medium effort — doc fix is
+   trivial, the enforcing test is the real work.)*
+
+**Acceptance criteria:**
+- A bad/unreachable Postgres `storage.metadata.url` fails with an actionable
+  error message at first use, not an opaque driver error.
+- The LSP & MCP Fleshout Track heading no longer says "in progress".
+- `features.md`'s version banner matches `package.json`, and a test fails
+  if they're allowed to drift apart again.
+- `pnpm test` passes with no regressions.
+
+**Files likely touched:** `src/core/storage/postgres/connection.ts`,
+`src/core/storage/postgres/metadataStore.ts`/`vectorStore.ts`,
+`docs/PLAN.md` (heading only), `docs/features.md`, `tests/docsSync.test.ts`.
+
+**Deferred / not in scope:** review9 §6.1/§6.2/§6.4 (shared `rerank.ts`,
+`providerCommon.ts`, and the `MAX_RESULT_CHARS` constant) are already
+resolved per the same audit and need no further work here. review9 §8 (the
+SQLite dispatch recursion foot-gun documentation) was not re-flagged by the
+audit as open but wasn't independently re-verified either — worth a quick
+look in a future pass if anyone touches `vectorSearch.ts`'s dispatch logic.
+
+**Status:** ✅ complete. Added `verifyPgPool()` (`src/core/storage/postgres/connection.ts`,
+`SELECT 1` probe memoized via `WeakSet<Pool>`, mirroring `verifyQdrantClient()`)
+and wired it into both Postgres `ready()` chokepoints (`metadataStore.ts`,
+`vectorStore.ts`), with unit tests against a mocked `Pool`
+(`tests/postgresConnection.test.ts`). Flipped the LSP & MCP Fleshout Track
+heading to "✅ complete". Fixed `docs/features.md`'s version banner
+(`v0.96.0` · 1266 tests) and added an enforcing assertion in
+`tests/docsSync.test.ts` so the banner version can't silently drift from
+`package.json` again. `pnpm test`: 1244 passed, 22 skipped (gated
+Postgres/Qdrant integration suites), no regressions.
 
 ---
 

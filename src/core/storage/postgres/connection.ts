@@ -20,6 +20,27 @@ export function getPgPool(connectionString: string): Pool {
   return pool
 }
 
+const verifiedPools = new WeakSet<Pool>()
+
+/**
+ * Probe a Postgres pool once (memoized per pool) so a bad URL / unreachable
+ * server fails with an actionable message pointing at the config key, rather
+ * than an opaque driver error at the first query (review9 §7.2).
+ */
+export async function verifyPgPool(pool: Pool): Promise<void> {
+  if (verifiedPools.has(pool)) return
+  try {
+    await pool.query('SELECT 1')
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    throw new Error(
+      `Cannot connect to the Postgres storage backend ` +
+      `(storage.metadata.url / GITSEMA_STORAGE_METADATA_URL): ${detail}`,
+    )
+  }
+  verifiedPools.add(pool)
+}
+
 /** Closes and forgets all cached pools (tests). */
 export async function closeAllPgPools(): Promise<void> {
   const all = [...pools.values()]
