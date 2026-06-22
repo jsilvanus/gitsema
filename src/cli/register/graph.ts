@@ -83,11 +83,13 @@ export function registerGraph(program: Command) {
     .option('--edge-types <types>', 'comma-separated edge types to traverse (default: all)')
     .option('--direction <dir>', "'out' | 'in' | 'both' (default: both)")
     .option('--depth <n>', 'limit traversal depth (max 3)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file]', collectOut, [] as string[])
     .action(graphNeighborsCommand)
 
   graph
     .command('path <a> <b>')
     .description('Shortest typed path from <a> to <b> (structural lens; max depth 3)')
+    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file]', collectOut, [] as string[])
     .action(graphPathCommand)
 
   // Phase 109: --lens toggle + fusion commands (knowledge-graph §7/§8).
@@ -96,7 +98,8 @@ export function registerGraph(program: Command) {
       .command('blast-radius <symbol>')
       .description('What changes if I touch this — structural dependents and/or semantically related blobs (default lens: hybrid)')
       .option('--depth <n>', 'structural traversal depth (max 3)')
-      .option('-k, --top <n>', 'number of semantic results to return (default 10)'),
+      .option('-k, --top <n>', 'number of semantic results to return (default 10)')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file]', collectOut, [] as string[]),
     'hybrid',
   ).action(blastRadiusCommand)
 
@@ -104,7 +107,8 @@ export function registerGraph(program: Command) {
     program
       .command('relate <symbol>')
       .description('Callers/callees (structural) and semantically similar blobs (vector), labeled — both lenses, lose neither (default lens: hybrid)')
-      .option('-k, --top <n>', 'number of semantic results to return (default 10)'),
+      .option('-k, --top <n>', 'number of semantic results to return (default 10)')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file]', collectOut, [] as string[]),
     'hybrid',
   ).action(relateCommand)
 
@@ -112,7 +116,8 @@ export function registerGraph(program: Command) {
     program
       .command('similar <symbol>')
       .description('Symbols/files with a similar call/import shape (structural) and/or semantically similar (vector) (default lens: hybrid)')
-      .option('-k, --top <n>', 'number of results to return per lens (default 10)'),
+      .option('-k, --top <n>', 'number of results to return per lens (default 10)')
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file]', collectOut, [] as string[]),
     'hybrid',
   ).action(similarCommand)
 
@@ -129,7 +134,7 @@ export function registerGraph(program: Command) {
       .description('Architectural risk = co-change (temporal) × call-coupling (structural) × churn (default lens: hybrid)')
       .option('-k, --top <n>', 'number of hotspots to return (default 20)')
       .option('--dump [file]', 'output structured JSON; writes to <file> if given (legacy: prefer --out json)')
-      .option('--out <spec>', 'output spec (repeatable): text|json[:file] (overrides --dump)', collectOut, [] as string[]),
+      .option('--out <spec>', 'output spec (repeatable): text|json[:file]|html[:file]|markdown[:file] (overrides --dump)', collectOut, [] as string[]),
     'hybrid',
   ).action(hotspotsCommand)
 }

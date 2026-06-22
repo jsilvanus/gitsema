@@ -120,7 +120,7 @@
 |   [Phase 100 — Persistent, registry-backed server-side repo storage](#phase-100-—-persistent-registry-backed-server-side-repo-storage) | 3472 |
 |   [Phases 101–103 — Pluggable storage backends & index scoping](#phases-101–103-—-pluggable-storage-backends-index-scoping) | 3540 |
 |   [Phase 104 — Full-toolset guide coverage, per-command `--narrate`, and a guided `gitsema setup` wizard](#phase-104-—-full-toolset-guide-coverage-per-command-narrate-and-a-guided-gitsema-setup-wizard) | 3742 |
-| [Knowledge Graph Track (Phases 105–112) — *planned*](#knowledge-graph-track-phases-105–112-—-planned) | 3888 |
+| [Knowledge Graph Track (Phases 105–112) — ✅ complete](#knowledge-graph-track-phases-105–112-—-complete) | 3888 |
 
 ---
 
@@ -3893,7 +3893,7 @@ in parallel or last.
 
 ---
 
-## Knowledge Graph Track (Phases 105–112) — *planned*
+## Knowledge Graph Track (Phases 105–112) — ✅ complete
 
 > **Full design:** [`docs/knowledge-graph.md`](knowledge-graph.md) is the single
 > design reference for this track (two-level symbol identity, schema, per-language
@@ -3941,7 +3941,7 @@ include `co-change`, `deps`, `cycles`, `callers`/`callees`/`path`/`neighbors`,
 | **109** | `--lens` toggle + structural ranking | — | Cross-cutting `--lens` + `--weight-structural` in the re-rank loop; new commands `blast-radius`, `relate`, `similar --lens`, `unused`; `impact` gains `--lens`. Semantic stays the default for existing commands. |
 | **110** ✅ | Fusion: cascade planner + hotspots | — | Cascade query planner (`FTS → vector → graph traversal → merge/rerank`); `hotspots`; structural enrichment of `code-review`/`explain`/`guide`/`triage`. |
 | **111** ✅ | Lens coverage & parity sweep | — | Cross-cutting adoption pass over the whole command surface (CLI + MCP + HTTP): shared `addLensOption()` helper, uniform §7.3 defaults + per-hit lens labeling, docs/skill/`interpretations.ts` parity, and a test asserting every lens-capable command exposes `lens`. Done before the UI phase so it covers the 110 fusion commands too. |
-| **112** | Unified graph UI (HTML + CLI) | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. Also adds a CLI/text-mode subgraph view (ASCII tree or list rendering of nodes/edges) for terminal-only workflows, alongside the HTML view. |
+| **112** ✅ | Unified graph UI (HTML + CLI) | — | Render subgraphs in HTML (reuse `htmlRenderer-clusters.ts` force-graph); nodes deep-link into existing per-command HTML views — binds the standalone HTML outputs together. Also adds a CLI/text-mode subgraph view (ASCII tree or list rendering of nodes/edges) for terminal-only workflows, alongside the HTML view. |
 
 Each phase ends with working software, tests, a `features.md` entry, a `PLAN.md`
 status update, and a changeset. **Start point: Phase 105** (isolated, test-heavy,
@@ -4157,6 +4157,46 @@ assert every lens-capable surface exposes `lens`/`--lens` with the correct defau
 `deps`/`cycles`/`callers`/`callees`/`neighbors`/`path`/`unused` structural-only) do
 not take `--lens` — only one lens is meaningful for them — so they are excluded
 from the parity set by design. No schema change.
+
+**Status:** Phase 112 ✅ complete (knowledge-graph §9). Adds a unified
+`RenderableSubgraph` model (`src/core/graph/subgraphView.ts`: `rootKeys`, `nodes`,
+`edges`, optional per-node `weights`) so the six traversal/fusion commands —
+`graph neighbors`, `graph path`, `blast-radius`, `relate`, `similar`, `hotspots` —
+render through one shape instead of six bespoke result types.
+`subgraphFromSeed`/`subgraphFromSeeds` delegate to the Phase 108 `GraphStore.subgraph()`
+(the real, depth-bounded node-induced subgraph) rather than re-deriving edges from a
+flat `GraphHit[]` list; `subgraphFromPath` follows a `graph path` result's exact hop
+chain; `subgraphFromHotspots` keeps only the hotspot cohort's nodes and the
+coupling/co-change edges among them, carrying `risk` as the per-node weight. Each
+command gains `--out <spec>` support (`text|json[:file]|html[:file]|markdown[:file]`,
+the existing project-wide convention — `hotspots` already had it for `text`/`json`
+and now adds `html`/`markdown`):
+- **HTML force-graph** (`src/core/viz/htmlRenderer-graph.ts`, `renderGraphHtml()`) —
+  reuses the canvas-based force-sim pattern and `BASE_CSS`/`COMMON_JS`/`safeJson()`
+  helpers from `htmlRenderer-clusters.ts`/`htmlRenderer-shared.ts`. Clicking a node
+  opens a detail sidebar with its kind/path/weight/key and **suggested follow-up CLI
+  commands** (`suggestedCommands()`, e.g. `gitsema file-evolution <path> --out
+  html:evolution.html`) as the "deep link" into other per-command HTML views — copyable
+  commands rather than literal hyperlinks, since the target HTML files aren't
+  guaranteed to exist yet (there is no live server backing these standalone files).
+- **CLI/text-mode subgraph view** (`src/cli/lib/graphRender.ts`, `renderGraphTree()`) —
+  an indented ASCII tree rooted at `rootKeys`, with `-[edgeType]->` hop labels and
+  `(...)` markers for already-visited nodes (cycle-safe). A parallel
+  `renderGraphMarkdown()` renders the same subgraph as a nested bullet list for the
+  `markdown` sink.
+- `src/cli/lib/graphOutput.ts` (`emitSubgraphOutputs()`) dispatches a resolved
+  `OutputSpec[]` to the right renderer per sink, shared by all six commands.
+
+**Deviations from the original sketch:** (1) deep links are suggested CLI commands,
+not `<a href>` hyperlinks, for the reason above; (2) when `--out` is not passed, each
+command's pre-existing bespoke text rendering is completely unchanged — the new
+`renderGraphTree()` only backs an *explicit* `--out text`, so this phase adds no
+default-output behavior change; (3) `suggestedCommands()` lives in
+`src/core/graph/subgraphView.ts` (not `src/cli/lib/`) so that the core-layer
+`htmlRenderer-graph.ts` does not import from `src/cli/` (core never depends on cli,
+per the architecture in `CLAUDE.md`) — it returns plain command-string templates with
+no Commander/CLI dependency, so this stays comfortably within core. Tests:
+`tests/subgraphView.test.ts`, `tests/graphOutput.test.ts`.
 
 ---
 
@@ -4408,10 +4448,11 @@ To ensure functionality works in all scenarios, the following test strategy is n
 
 ### Implementation roadmap for scenarios
 
-**Already implemented (Phases 1–111):**
+**Already implemented (Phases 1–112):**
 - Scenario 1: Local indexing, search, MCP stdio server
 - Scenario 2 (partial): Remote HTTP API (`gitsema tools serve`), incremental indexing via `--since`
 - Scenario 3 (partial): Postgres/Qdrant backends, per-repo isolation in schema
+- Unified graph UI: HTML force-graph + CLI ASCII-tree subgraph rendering (Phase 112)
 
 **Needed for Scenario 2 (self-hosted single-developer):**
 - [Phase 73+] Deployment guide: Docker Compose template, environment variables, quickstart
@@ -4423,7 +4464,6 @@ To ensure functionality works in all scenarios, the following test strategy is n
 - [Phase 101] Index scoping: `storage.scope` configuration, multi-tenant isolation
 
 **Needed for all scenarios + Web UI:**
-- [Phase 112] Unified graph UI (HTML + CLI subgraph rendering)
 - [Phase 114+] Web UI: interactive search, graph viz, temporal heatmaps, token management
 - [Phase 116+] Performance: VSS/HNSW for faster search, query caching, incremental indexing optimizations
 

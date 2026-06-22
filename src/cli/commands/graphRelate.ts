@@ -1,11 +1,15 @@
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { relate } from '../../core/graph/relate.js'
+import { subgraphFromSeed } from '../../core/graph/subgraphView.js'
 import { parseLens } from '../lib/lens.js'
 import { renderResolutionError } from '../lib/graphRender.js'
+import { parseOutputSpec } from '../../utils/outputSink.js'
+import { emitSubgraphOutputs } from '../lib/graphOutput.js'
 
 export interface GraphRelateCommandOptions {
   top?: string
   lens?: string
+  out?: string[]
 }
 
 export async function relateCommand(symbol: string, options: GraphRelateCommandOptions = {}): Promise<void> {
@@ -21,6 +25,14 @@ export async function relateCommand(symbol: string, options: GraphRelateCommandO
   }
 
   const node = result.resolved.node
+
+  if (options.out && options.out.length > 0) {
+    const sinks = options.out.map(parseOutputSpec)
+    const sub = await subgraphFromSeed(profile.graph, node.nodeKey, 2)
+    emitSubgraphOutputs(sinks, sub, `Related to ${node.displayName}`)
+    return
+  }
+
   console.log(`Related to ${node.displayName} (${node.nodeKey}) — lens: ${result.lens}\n`)
 
   if (result.lens !== 'semantic') {

@@ -1,11 +1,15 @@
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { neighbors } from '../../core/graph/traversal.js'
+import { subgraphFromHits } from '../../core/graph/subgraphView.js'
 import type { EdgeType } from '../../core/storage/types.js'
+import { parseOutputSpec } from '../../utils/outputSink.js'
+import { emitSubgraphOutputs } from '../lib/graphOutput.js'
 
 export interface GraphNeighborsCommandOptions {
   edgeTypes?: string
   direction?: string
   depth?: string
+  out?: string[]
 }
 
 export async function graphNeighborsCommand(node: string, options: GraphNeighborsCommandOptions = {}): Promise<void> {
@@ -29,6 +33,14 @@ export async function graphNeighborsCommand(node: string, options: GraphNeighbor
   }
 
   const resolvedNode = result.resolved.node
+
+  if (options.out && options.out.length > 0) {
+    const sinks = options.out.map(parseOutputSpec)
+    const sub = await subgraphFromHits(profile.graph, resolvedNode.nodeKey, result.hits, direction)
+    emitSubgraphOutputs(sinks, sub, `Neighbors of ${resolvedNode.displayName}`)
+    return
+  }
+
   console.log(`Neighbors of ${resolvedNode.displayName} (${resolvedNode.nodeKey}):\n`)
 
   if (result.hits.length === 0) {

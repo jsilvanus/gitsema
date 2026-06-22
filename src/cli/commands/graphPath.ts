@@ -1,7 +1,14 @@
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { path } from '../../core/graph/traversal.js'
+import { subgraphFromPath } from '../../core/graph/subgraphView.js'
+import { parseOutputSpec } from '../../utils/outputSink.js'
+import { emitSubgraphOutputs } from '../lib/graphOutput.js'
 
-export async function graphPathCommand(a: string, b: string): Promise<void> {
+export interface GraphPathCommandOptions {
+  out?: string[]
+}
+
+export async function graphPathCommand(a: string, b: string, options: GraphPathCommandOptions = {}): Promise<void> {
   const profile = getCachedStorageProfile(process.cwd())
   const result = await path(profile.graph, a, b)
 
@@ -26,6 +33,15 @@ export async function graphPathCommand(a: string, b: string): Promise<void> {
 
   const fromNode = result.from.node
   const toNode = result.to.node
+
+  if (options.out && options.out.length > 0) {
+    const sinks = options.out.map(parseOutputSpec)
+    const sub = result.path
+      ? await subgraphFromPath(profile.graph, fromNode.nodeKey, toNode.nodeKey, result.path)
+      : { rootKeys: [fromNode.nodeKey, toNode.nodeKey], nodes: [fromNode, toNode], edges: [] }
+    emitSubgraphOutputs(sinks, sub, `Path from ${fromNode.displayName} to ${toNode.displayName}`)
+    return
+  }
 
   if (!result.path) {
     console.log(`No path found from ${fromNode.displayName} to ${toNode.displayName} within the traversal depth limit.`)

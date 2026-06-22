@@ -7,8 +7,10 @@
 import { writeFileSync } from 'node:fs'
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { computeHotspots, churnByPath, type HotspotsResult } from '../../core/graph/hotspots.js'
+import { subgraphFromHotspots } from '../../core/graph/subgraphView.js'
 import { parseLens, type Lens } from '../lib/lens.js'
-import { resolveOutputs, getSink, hasSinkFormat } from '../../utils/outputSink.js'
+import { resolveOutputs, getSink, hasSinkFormat, type OutputSpec } from '../../utils/outputSink.js'
+import { emitSubgraphOutputs } from '../lib/graphOutput.js'
 
 export interface HotspotsCommandOptions {
   lens?: string
@@ -68,6 +70,13 @@ export async function hotspotsCommand(options: HotspotsCommandOptions = {}): Pro
     } else {
       process.stdout.write(json + '\n')
     }
+    if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html') && !hasSinkFormat(sinks, 'markdown')) return
+  }
+
+  const graphSinks = [getSink(sinks, 'html'), getSink(sinks, 'markdown')].filter((s): s is OutputSpec => s !== undefined)
+  if (graphSinks.length > 0) {
+    const sub = await subgraphFromHotspots(profile.graph, result.hotspots)
+    emitSubgraphOutputs(graphSinks, sub, 'Architectural hotspots')
     if (!hasSinkFormat(sinks, 'text')) return
   }
 
