@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, blob, real, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, blob, real, primaryKey, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
 
 /**
  * Sub-file fragments produced by a chunker (function / fixed strategy).
@@ -49,8 +49,13 @@ export const repos = sqliteTable('repos', {
   ephemeral: integer('ephemeral').notNull().default(0),
   /** Owning org (Phase 123 / multi-tenant-auth §5 Phase B); NULL = legacy unscoped repo (v28). */
   orgId: integer('org_id').references(() => orgs.id),
+  /** 'private' (default) | 'public' — gates attach-as-reader auto-grants (Phase 126 / public-repo-sharing §5 Phase 1, v31). */
+  visibility: text('visibility').notNull().default('private'),
+  /** The user whose registration request first created this repo (Phase 126, v31). NULL for repos created before this column existed. */
+  ownerUserId: integer('owner_user_id').references(() => users.id),
 }, (table) => ({
   uniqNormalizedUrl: uniqueIndex('idx_repos_normalized_url').on(table.normalizedUrl),
+  idxNormalizedUrlVisibility: index('idx_repos_normalized_url_visibility').on(table.normalizedUrl, table.visibility),
 }))
 
 export const savedQueries = sqliteTable('saved_queries', {
@@ -495,6 +500,8 @@ export const repoGrants = sqliteTable('repo_grants', {
   branchPattern: text('branch_pattern'),
   grantedBy: integer('granted_by').notNull().references(() => users.id),
   createdAt: integer('created_at').notNull(),
+  /** Provenance of this grant, e.g. 'auto-public' for attach-as-reader grants auto-issued on registration (Phase 126, v31). NULL for manually-issued grants. */
+  source: text('source'),
 }, (table) => ({
   uniqGrant: uniqueIndex('idx_repo_grants_user_repo_branch').on(table.userId, table.repoId, table.branchPattern),
 }))

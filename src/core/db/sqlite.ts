@@ -66,8 +66,11 @@ export interface DbSession {
  *       (Phase 124 / multi-tenant-auth §5 Phase C)
  * 30 — Added audit_log table for the identity/authorization audit trail
  *       (Phase 125 / multi-tenant-auth §5 Phase D)
+ * 31 — Added repos.visibility + repos.owner_user_id columns and a
+ *       repo_grants.source column for the public/private repo-sharing layer
+ *       (Phase 126 / public-repo-sharing §5 Phase 1)
  */
-export const CURRENT_SCHEMA_VERSION = 30
+export const CURRENT_SCHEMA_VERSION = 31
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -297,7 +300,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 
     -- Multi-repo registry (Phase 41 / v14); db_path added in v15;
     -- normalized_url, clone_path, last_indexed_at, ephemeral added in v23
-    -- (persistent server-side repo storage); org_id added in v28 (Phase 123)
+    -- (persistent server-side repo storage); org_id added in v28 (Phase 123);
+    -- visibility, owner_user_id added in v31 (Phase 126 / public-repo-sharing)
     CREATE TABLE IF NOT EXISTS repos (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -308,8 +312,11 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       clone_path TEXT,
       last_indexed_at INTEGER,
       ephemeral INTEGER NOT NULL DEFAULT 0,
-      org_id INTEGER REFERENCES orgs(id)
+      org_id INTEGER REFERENCES orgs(id),
+      visibility TEXT NOT NULL DEFAULT 'private',
+      owner_user_id INTEGER REFERENCES users(id)
     );
+    CREATE INDEX IF NOT EXISTS idx_repos_normalized_url_visibility ON repos(normalized_url, visibility);
 
     -- Per-repo access control tokens (review7 §4.1 / v21): token is stored as SHA-256 hash.
     -- token_prefix stores the first 8 chars of the original token for display/revoke lookup.
@@ -428,6 +435,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     );
     CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
 
+    -- source added in v31 (Phase 126 / public-repo-sharing) — provenance for
+    -- auto-issued grants, e.g. 'auto-public' for attach-as-reader grants.
     CREATE TABLE IF NOT EXISTS repo_grants (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -435,7 +444,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       role TEXT NOT NULL,
       branch_pattern TEXT,
       granted_by INTEGER NOT NULL REFERENCES users(id),
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      source TEXT
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_repo_grants_user_repo_branch
       ON repo_grants(user_id, repo_id, branch_pattern);

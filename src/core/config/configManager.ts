@@ -67,6 +67,9 @@ export const ENV_KEY_MAP: Record<string, string> = {
   'auth.personalGroups': 'GITSEMA_PERSONAL_GROUPS',
   // Multi-tenant auth — SSO linking (Phase 124)
   'auth.ssoProviders': 'GITSEMA_SSO_PROVIDERS',
+  // Public repo sharing (Phase 126)
+  'auth.allowPublicAutoIndex': 'GITSEMA_PUBLIC_AUTO_INDEX',
+  'auth.minReindexIntervalSeconds': 'GITSEMA_MIN_REINDEX_INTERVAL_SECONDS',
 }
 
 /**
@@ -132,6 +135,9 @@ export const ALL_KEYS: ReadonlyArray<string> = [
   'auth.personalGroups',
   // Multi-tenant auth — SSO linking (Phase 124)
   'auth.ssoProviders',
+  // Public repo sharing (Phase 126)
+  'auth.allowPublicAutoIndex',
+  'auth.minReindexIntervalSeconds',
 ]
 
 // ---------------------------------------------------------------------------

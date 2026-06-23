@@ -369,6 +369,46 @@ audit events — the equivalent operator-only CLI-direct paths (`gitsema repos g
 v1, since those paths already require local DB access, a stronger trust boundary than
 the network surface this audit trail is primarily meant to cover.
 
+### Public repo sharing (Phases 126–127)
+
+Registration-flow extension layered on top of Phases 122-123's `repo_grants`
+model, letting a repo owner opt their persisted repo into shared read access
+without minting individual grants by hand. Three axes:
+- **Visibility flag** — `repos.visibility` (`'private'` default, `'public'`),
+  set via `gitsema repos visibility <repoId> public|private` (operator-only —
+  no network auth boundary on this command). `repos.owner_user_id` records the
+  first user (or `null` for an operator/no-auth caller) whose registration
+  request created the repo; first-claimer semantics are preserved across
+  re-indexes — later registration requests never overwrite it.
+- **Attach-as-reader auto-grant** — when an authenticated, non-owner caller
+  triggers `POST /api/v1/remote/index` against an *existing* `public` repo
+  they don't already have a grant on, a `read`-role `repo_grants` row is
+  auto-issued for them with `source: 'auto-public'` (distinguishing it from a
+  manually issued grant). A caller who already holds a higher role
+  (`write`/`owner`) is never downgraded.
+- **Trigger rights** — registering a *brand-new* repo as `public` requires
+  `auth.allowPublicAutoIndex` / `GITSEMA_PUBLIC_AUTO_INDEX` (default `false`)
+  to be enabled, unless the caller is an operator (no `req.userId` — local
+  CLI/global-key/no-auth-required request, the same stronger-trust-tier
+  precedent established in Phases 122-125). Once a public repo exists,
+  non-owner re-index triggers are throttled to at most one per
+  `auth.minReindexIntervalSeconds` / `GITSEMA_MIN_REINDEX_INTERVAL_SECONDS`
+  (default 300s) per `(user, repo)` pair, returning `429` + `Retry-After`; the
+  repo's owner is never throttled.
+
+**Implementation note — two independent databases.** A `gitsema tools serve`
+deployment has two separate SQLite files: the cwd-relative active session
+(`.gitsema/index.db`, the canonical store for the entire Phase 122-125 auth/
+orgs/grants system, resolved by `authMiddleware`) and the registry session
+(`${GITSEMA_DATA_DIR}/registry.db`, cwd-independent, tracking persisted-repo
+clone/index paths since Phase 41). Both run the full schema with independent
+per-file FK enforcement, so an `owner_user_id` valid in one is not
+automatically valid in the other. `registry.db` keeps its original sole
+purpose and never stores `owner_user_id`; the active DB is the canonical
+store for `visibility`/`owner_user_id`/`repo_grants`, kept in sync by a
+dual-write in `runIndexJob` after each successful persisted index. See
+`docs/PLAN.md`'s Phase 126/127 entry for the full deviation note.
+
 ### Persistent server-side repo storage
 
 `POST /api/v1/remote/index` **persists** the clone + index by default (`persist: true`),

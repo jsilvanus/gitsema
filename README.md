@@ -124,6 +124,7 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema repos grants <repo-id>` | List grants on a repo (operator-only) |
 | `gitsema repos revoke <repo-id> <username>` | Revoke a user's grants on a repo (operator-only) |
 | `gitsema repos move-to-org <repo-id> <org>` | Move a repo to a different org; grants survive untouched (operator-only) |
+| `gitsema repos visibility <repo-id> public\|private` | Set a persisted repo's visibility flag, gating attach-as-reader auto-grants (operator-only) |
 | `gitsema auth sso link <provider> <external-id> <username>` | Link an external SSO/OIDC identity to an existing user; provider must be in `GITSEMA_SSO_PROVIDERS` (operator-only) |
 | `gitsema auth sso unlink <provider> <external-id>` | Unlink an external identity (operator-only) |
 | `gitsema auth sso list <username>` | List SSO identities linked to a user (operator-only) |
@@ -246,6 +247,17 @@ back to the legacy ephemeral (temp-dir, `GITSEMA_CLONE_KEEP`-governed) behavior.
 Manage persisted repos with `gitsema repos list-persisted` and
 `gitsema repos remove <repoId> [--purge]`. See
 [`docs/features.md`](docs/features.md#persistent-server-side-repo-storage) for details.
+
+**Public repo sharing (Phases 126–127):** pass `visibility: 'public'` in the
+`POST /api/v1/remote/index` request body to flag a repo as public (default
+`'private'`). A non-owner authenticated caller indexing an existing public
+repo is auto-granted `read` access; registering a *brand-new* public repo
+requires `auth.allowPublicAutoIndex` / `GITSEMA_PUBLIC_AUTO_INDEX` (default
+off) unless the caller is an operator. Non-owner re-index triggers on a
+public repo are throttled to one per `auth.minReindexIntervalSeconds` /
+`GITSEMA_MIN_REINDEX_INTERVAL_SECONDS` (default 300s, returns `429` +
+`Retry-After`). See
+[`docs/features.md`](docs/features.md#public-repo-sharing-phases-126127) for details.
 
 > **Deploying the server?** See the [deployment guide](docs/deploy.md) for Docker /
 > docker-compose, systemd, the Postgres + Qdrant backends, key security, backups,

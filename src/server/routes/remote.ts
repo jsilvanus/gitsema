@@ -35,7 +35,7 @@ import {
   getCloneSemaphore,
   sanitiseUrl,
 } from '../../core/git/cloneRepo.js'
-import { getOrOpenLabeledDb, getOrOpenSessionAtPath, withDbSession } from '../../core/db/sqlite.js'
+import { getActiveSession, getOrOpenLabeledDb, getOrOpenSessionAtPath, withDbSession } from '../../core/db/sqlite.js'
 import {
   getRegistrySession,
   getRepoClonePath,
@@ -47,7 +47,11 @@ import {
   registerPersistedRepo,
   touchLastIndexed,
   withRepoLock,
+  isPublicAutoIndexAllowed,
+  getMinReindexIntervalSeconds,
+  type RepoVisibility,
 } from '../../core/indexing/repoRegistry.js'
+import { createGrant, resolveUserRepoAccess } from '../../core/auth/grants.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -107,6 +111,12 @@ const RemoteIndexBodySchema = z.object({
   persist: z.boolean().optional().default(true),
   /** Target a specific already-registered persisted repo explicitly. */
   repoId: RepoIdSchema.optional(),
+  /**
+   * Visibility to register a brand-new persisted repo with. Only honored on
+   * first creation (Phase 126 / public-repo-sharing §4.1) — has no effect on
+   * an already-registered repo. Defaults to 'private'.
+   */
+  visibility: z.enum(['private', 'public']).optional(),
 }).strict()
 
 // ---------------------------------------------------------------------------
@@ -311,6 +321,31 @@ function scheduleJobCleanup(jobId: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Refresh throttle (Phase 126 / public-repo-sharing §4.4) — limits how often
+// a non-owner caller can trigger a re-index of an already-registered public
+// repo. Keyed by `${repoId}:${userId}` so the repo's owner (and operator
+// callers, who skip the check entirely) are never throttled.
+// ---------------------------------------------------------------------------
+
+const _lastReindexTriggerAt = new Map<string, number>()
+
+/** Returns remaining throttle seconds (0 if not throttled), and records this attempt if allowed. */
+function checkAndRecordReindexThrottle(repoId: string, userId: number, cwd?: string): number {
+  const key = `${repoId}:${userId}`
+  const minIntervalMs = getMinReindexIntervalSeconds(cwd) * 1000
+  const now = Date.now()
+  const last = _lastReindexTriggerAt.get(key)
+  if (last !== undefined) {
+    const elapsed = now - last
+    if (elapsed < minIntervalMs) {
+      return Math.ceil((minIntervalMs - elapsed) / 1000)
+    }
+  }
+  _lastReindexTriggerAt.set(key, now)
+  return 0
+}
+
+// ---------------------------------------------------------------------------
 // Core job runner
 // ---------------------------------------------------------------------------
 
@@ -322,6 +357,9 @@ interface PersistentJobContext {
   normalizedUrl: string
   clonePath: string
   dbPath: string
+  /** Only meaningful on first creation — see registerPersistedRepo's ON CONFLICT note. */
+  visibility: RepoVisibility
+  ownerUserId: number | null
 }
 
 async function runIndexJob(
@@ -411,7 +449,7 @@ async function runIndexJob(
 
     if (persistent) {
       const registrySession = getRegistrySession()
-      registerPersistedRepo(registrySession, {
+      const repoRow = {
         id: persistent.repoId,
         name: persistent.name,
         url: persistent.url,
@@ -419,8 +457,21 @@ async function runIndexJob(
         clonePath: persistent.clonePath,
         dbPath: persistent.dbPath,
         ephemeral: false,
-      })
+        visibility: persistent.visibility,
+      }
+      // registry.db's own local `users` table is unrelated to whichever DB
+      // authMiddleware resolved req.userId against, so ownerUserId is
+      // deliberately omitted from this write — it would otherwise violate
+      // registry.db's own repos.owner_user_id FK (public-repo-sharing §4).
+      // registry.db remains the source of truth for clone/index paths only.
+      registerPersistedRepo(registrySession, repoRow)
       touchLastIndexed(registrySession, persistent.repoId)
+      // Mirror the repo row into the active (auth) DB too — the one
+      // authMiddleware resolves req.userId against, and the one
+      // orgs.ts's existing repo_grants endpoints already operate on
+      // (Phase 122-125) — including ownerUserId, which only this DB needs
+      // for the visibility/ownership/grant logic below (Phase 126).
+      registerPersistedRepo(getActiveSession(), { ...repoRow, ownerUserId: persistent.ownerUserId })
     }
 
     logger.info(
@@ -501,7 +552,7 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       return
     }
 
-    const { repoUrl, credentials, cloneDepth, indexOptions = {}, dbLabel, persist, repoId: requestedRepoId } = parsed.data
+    const { repoUrl, credentials, cloneDepth, indexOptions = {}, dbLabel, persist, repoId: requestedRepoId, visibility: requestedVisibility } = parsed.data
 
     // --- 2. SSRF guard -------------------------------------------------------
     try {
@@ -543,6 +594,59 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
         }
       }
 
+      // Visibility/ownership are read from the active DB's mirrored repo row
+      // (getActiveSession()), not registrySession — registry.db is
+      // cwd-independent clone/index-path bookkeeping only and deliberately
+      // never stores ownerUserId (its own local `users` table is unrelated
+      // to whichever DB authMiddleware resolved req.userId against). The
+      // mirror row is written in runIndexJob after the first successful
+      // index of a repo (Phase 126 / public-repo-sharing §4).
+      const existingAuth = existing ? getRepo(getActiveSession(), existing.id) : null
+
+      // --- 2c. First-index gate for brand-new public repos (Phase 126 §4.2) --
+      // "Operator" callers (no req.userId — local CLI/global-key/no-auth-
+      // required requests) bypass the gate, mirroring the Phase 122-125
+      // precedent that operator-equivalent access is a stronger trust tier
+      // than any network role.
+      const isOperator = req.userId === undefined
+      if (!existing && requestedVisibility === 'public' && !isOperator && !isPublicAutoIndexAllowed()) {
+        res.status(403).json({
+          error: 'Registering new repos as public requires auth.allowPublicAutoIndex to be enabled',
+        })
+        return
+      }
+
+      // --- 2d. Refresh throttle for re-indexing an existing public repo
+      // by a non-owner caller (Phase 126 §4.4) -------------------------------
+      if (existing && existingAuth?.visibility === 'public' && req.userId !== undefined && req.userId !== existingAuth.ownerUserId) {
+        const retryAfter = checkAndRecordReindexThrottle(existing.id, req.userId)
+        if (retryAfter > 0) {
+          res.setHeader('Retry-After', String(retryAfter))
+          res.status(429).json({ error: 'Re-index triggered too recently for this repo', retryAfter })
+          return
+        }
+      }
+
+      // --- 2e. Attach-as-reader: auto-grant read access to a non-owner
+      // caller on an existing public repo they don't already have access to
+      // (Phase 126 §4.3 / public-repo-sharing — "auto-public" provenance) ---
+      const activeRawDb = getActiveSession().rawDb
+      if (
+        existing && existingAuth?.visibility === 'public' && req.userId !== undefined && req.userId !== existingAuth.ownerUserId &&
+        resolveUserRepoAccess(activeRawDb, req.userId, existing.id) === undefined
+      ) {
+        // Only issue the auto-grant when the user holds no applicable grant
+        // yet — createGrant() would otherwise overwrite a pre-existing
+        // higher-role (write/owner) all-branches grant with 'read'.
+        createGrant(activeRawDb, {
+          userId: req.userId,
+          repoId: existing.id,
+          role: 'read',
+          grantedBy: existingAuth.ownerUserId ?? req.userId,
+          source: 'auto-public',
+        })
+      }
+
       const repoId = existing?.id ?? deriveRepoId(normalizedUrl)
       persistent = {
         repoId,
@@ -551,6 +655,8 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
         normalizedUrl,
         clonePath: existing?.clonePath ?? getRepoClonePath(repoId),
         dbPath: existing?.dbPath ?? getRepoDbPath(repoId),
+        visibility: existingAuth?.visibility ?? requestedVisibility ?? 'private',
+        ownerUserId: existingAuth?.ownerUserId ?? req.userId ?? null,
       }
     }
 
