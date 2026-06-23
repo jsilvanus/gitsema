@@ -299,6 +299,7 @@ This table shows less common flags used by specific commands or command groups.
 | `--diff-file` | `code-review` | path | — | Read diff from patch file instead of git |
 | `--lsp` | `index doctor` | bool | false | Only run LSP startup check |
 | `--extended` | `index doctor` | bool | false | Run extended pre-flight checks |
+| `--fix` | `index doctor` | bool | false | Auto-repair fixable issues (missing FTS content, orphan embeddings) and re-report |
 | `--no-cache` | `search` | bool | false | Skip query embedding cache |
 | `--cache` | `search` | bool | true | Use query embedding cache |
 | `--edge-types` | `deps`, `graph cycles`, `graph neighbors`, `unused` | string | varies | Comma-separated edge types to traverse |

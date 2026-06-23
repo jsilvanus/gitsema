@@ -4,8 +4,11 @@ import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { runStorageDoctor } from '../../core/storage/doctor.js'
 import { verifyLspStartup } from '../../core/lsp/server.js'
 import { execSync } from 'node:child_process'
+import { backfillFts } from '../../core/indexing/backfillFts.js'
+import { rebuildFts } from '../../core/db/rebuildFts.js'
+import { runGarbageCollection } from '../../core/indexing/gc.js'
 
-export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } = {}): Promise<void> {
+export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; fix?: boolean } = {}): Promise<void> {
   if (opts.lsp) {
     const result = verifyLspStartup()
     console.log(`LSP startup check: ${result.ok ? '✓' : '✗'}  ${result.message}`)
@@ -44,7 +47,7 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } 
   }
 
   const rawDb = getRawDb()
-  const report = runDoctor(rawDb)
+  let report = runDoctor(rawDb)
 
   console.log('=== gitsema doctor ===')
   console.log('')
@@ -87,6 +90,33 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } 
   } else {
     console.log('')
     console.log('No issues detected. Index looks healthy.')
+  }
+
+  // ── Auto-fix ─────────────────────────────────────────────────────────────
+  if (opts.fix && (report.ftsMissingCount > 0 || report.orphanEmbeddings > 0)) {
+    console.log('')
+    console.log('=== Applying fixes ===')
+
+    if (report.ftsMissingCount > 0) {
+      console.log(`Backfilling FTS content for ${report.ftsMissingCount} blob(s)...`)
+      const backfillStats = await backfillFts()
+      console.log(`  Backfilled: ${backfillStats.backfilled}  Oversized: ${backfillStats.oversized}  Failed: ${backfillStats.failed}`)
+      const rebuildResult = rebuildFts(rawDb)
+      console.log(`  FTS5 rebuild complete. ${rebuildResult.rebuilt} rows indexed.`)
+    }
+
+    if (report.orphanEmbeddings > 0) {
+      console.log(`Garbage-collecting unreachable blob records...`)
+      const gcStats = await runGarbageCollection({ dryRun: false })
+      console.log(`  Removed: ${gcStats.removed}/${gcStats.total}`)
+    }
+
+    report = runDoctor(rawDb)
+    console.log('')
+    console.log('=== Post-fix report ===')
+    console.log(`FTS rows:          ${report.ftsCount}`)
+    console.log(`FTS missing:       ${report.ftsMissingCount}`)
+    console.log(`Orphan embeddings: ${report.orphanEmbeddings}`)
   }
 
   // Also run LSP check

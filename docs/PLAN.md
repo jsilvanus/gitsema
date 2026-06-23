@@ -4936,6 +4936,19 @@ Deviations from the design doc, discovered during implementation:
 
 ---
 
+### Phase 131 — `gitsema index doctor --fix` auto-repair *(completed)*
+
+**Goal:** `index doctor` already detects missing FTS content and orphan embeddings and prints the manual command to fix each (`index rebuild-fts`/`index backfill-fts`, `index gc`). Fold those into a single `--fix` flag so users don't have to run a separate command per finding.
+
+**Implemented scope:**
+- `gitsema index doctor --fix` (and the deprecated top-level `gitsema doctor --fix` alias): when `ftsMissingCount > 0`, runs `backfillFts()` (re-fetches blob content from Git) followed by `rebuildFts()` (re-syncs the FTS5 virtual table); when `orphanEmbeddings > 0`, runs `runGarbageCollection({ dryRun: false })`. Re-runs `runDoctor()` afterward and prints a "Post-fix report" with the refreshed counts.
+- Scoped to the sqlite backend only (the non-sqlite `runStorageDoctor()` path is unaffected — no `--fix` support there yet).
+- Standalone `index rebuild-fts`, `index backfill-fts`, and `index gc` commands are unchanged and still work for users who want to run one fix in isolation or who use them in non-interactive scripts.
+
+**Status:** ✅ complete.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.

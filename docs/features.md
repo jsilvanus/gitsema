@@ -693,6 +693,7 @@ get `400` — matching the SDK's documented stateful-mode contract. No `EventSto
 |---|---|
 | Index statistics | `gitsema status [file]` |
 | DB integrity check | `gitsema index doctor` |
+| Auto-repair fixable issues (missing FTS content, orphan embeddings) | `gitsema index doctor --fix` |
 | SQLite VACUUM + ANALYZE | `gitsema index vacuum` |
 | Garbage-collect orphan embeddings | `gitsema index gc` |
 | Rebuild FTS5 index | `gitsema index rebuild-fts` |

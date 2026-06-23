@@ -275,7 +275,7 @@ Maintenance operations on the active index, grouped under `gitsema index`:
 
 | Subcommand | Description |
 |---|---|
-| `gitsema index doctor [--lsp] [--extended]` | Integrity checks, schema/provenance checks, index health report |
+| `gitsema index doctor [--lsp] [--extended] [--fix]` | Integrity checks, schema/provenance checks, index health report; `--fix` auto-repairs missing FTS content and orphan embeddings, then re-reports |
 | `gitsema index vacuum` | `VACUUM`/`ANALYZE` the SQLite database |
 | `gitsema index gc [--dry-run]` | Garbage-collect unreachable blob records |
 | `gitsema index rebuild-fts [-y]` | Rebuild the FTS5 index from stored data |

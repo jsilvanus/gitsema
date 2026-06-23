@@ -169,7 +169,8 @@ export function registerIndexing(program: Command) {
     .description('Run integrity checks, schema version/provenance checks, and report index health')
     .option('--lsp', 'only run the LSP startup check')
     .option('--extended', 'run extended pre-flight checks (model reachability, index freshness, latency class)')
-    .action(async (opts: { lsp?: boolean; extended?: boolean }) => {
+    .option('--fix', 'automatically repair fixable issues found (missing FTS content, orphan embeddings) and re-report')
+    .action(async (opts: { lsp?: boolean; extended?: boolean; fix?: boolean }) => {
       await doctorCommand(opts)
     })
 
@@ -255,7 +256,8 @@ export function registerIndexing(program: Command) {
     .description('[deprecated] use `gitsema index doctor`')
     .option('--lsp', 'only run the LSP startup check (gitsema index doctor --lsp)')
     .option('--extended', 'run extended pre-flight checks')
-    .action(async (opts: { lsp?: boolean; extended?: boolean }) => {
+    .option('--fix', 'automatically repair fixable issues found and re-report')
+    .action(async (opts: { lsp?: boolean; extended?: boolean; fix?: boolean }) => {
       console.warn('Deprecation notice: `gitsema doctor` is deprecated — use `gitsema index doctor` instead.')
       await doctorCommand(opts)
     })
