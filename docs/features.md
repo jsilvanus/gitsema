@@ -279,6 +279,8 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `GET /api/v1/repos/:repoId/grants`, `POST /api/v1/repos/:repoId/grants` | List/create a repo or branch-scoped grant; create requires `owner` role on the repo (Phase 123) |
 | `DELETE /api/v1/repos/:repoId/grants/:userId` | Revoke a user's grants on a repo; requires `owner` role (Phase 123) |
 | `POST /api/v1/repos/:repoId/move-to-org` | Move a repo to a different org (or back to none); requires `owner` role, grants survive untouched (Phase 123) |
+| `GET /api/v1/auth/sso` | List SSO/OIDC identities linked to the calling user (Phase 124) |
+| `DELETE /api/v1/auth/sso/:provider/:externalId` | Unlink an SSO/OIDC identity linked to the calling user; 404 if not owned by them (Phase 124) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
 | `GET /openapi.json` | OpenAPI 3.1 JSON specification (P2) |
@@ -328,6 +330,28 @@ pattern used by `gitsema auth login/logout/whoami/token`. Deliberate scope limit
 evolution/graph HTTP routes are not yet retrofitted to enforce `resolveUserRepoAccess`;
 newly created repos do not default into the creator's personal org; and there is no
 backfill migration granting pre-existing users a personal org retroactively.
+
+### SSO/OIDC identity linking (Phase 124)
+
+Linking, not replacing — a user keeps their password/API keys alongside any linked
+external identity; both resolve to the same `userId`. `sso_identities` maps a
+`(provider, external_id)` pair (unique) to a `user_id`. Providers must be explicitly
+allowlisted via `auth.ssoProviders` / `GITSEMA_SSO_PROVIDERS` (comma-separated, empty
+by default — no provider is allowed until configured). Linking a new identity is
+**operator-only**: `gitsema auth sso link <provider> <external-id> <username>` writes
+directly to the local server DB, the same precedent as `gitsema auth create-user`
+(Phase 122) and `gitsema orgs create` (Phase 123). Self-service is read/delete-only over
+HTTP: `GET /api/v1/auth/sso` lists the calling user's own linked identities, and
+`DELETE /api/v1/auth/sso/:provider/:externalId` unlinks one of the calling user's own
+identities (404 if it isn't linked to them) — linking is deliberately **not** exposed
+over HTTP, since without a live OIDC verification flow that would let any authenticated
+user claim an arbitrary `external_id`. `gitsema auth sso unlink/list` are also available
+as operator commands for managing any user's identities. Deliberate scope deviation
+(see `docs/PLAN.md` Phase 124 for detail): this phase ships the linking data model and
+CRUD only — it does **not** implement the device-code browser-based OIDC flow
+(`gitsema auth login <server-url> --sso <provider>`) from the design doc, since that
+requires choosing and integrating an OIDC client library (a new dependency against
+CLAUDE.md's minimal-deps preference) and a live identity provider to test against.
 
 ### Persistent server-side repo storage
 

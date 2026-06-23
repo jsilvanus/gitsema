@@ -23,7 +23,8 @@ vi.mock('../src/core/db/sqlite.js', async (importOriginal) => {
 
 import { createApp } from '../src/server/app.js'
 import { getRawDb } from '../src/core/db/sqlite.js'
-import { createUser } from '../src/core/auth/identity.js'
+import { createUser, getUserByUsername } from '../src/core/auth/identity.js'
+import { linkSsoIdentity } from '../src/core/auth/sso.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
 const mockProvider: EmbeddingProvider = {
@@ -45,8 +46,9 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.GITSEMA_SERVE_KEY
+  delete process.env.GITSEMA_SSO_PROVIDERS
   const rawDb = getRawDb()
-  rawDb.exec('DELETE FROM users; DELETE FROM sessions; DELETE FROM api_keys;')
+  rawDb.exec('DELETE FROM users; DELETE FROM sessions; DELETE FROM api_keys; DELETE FROM sso_identities;')
 })
 
 describe('POST /api/v1/auth/login', () => {
@@ -185,6 +187,57 @@ describe('API key routes', () => {
     const sessionToken = await loginAsAlice()
     const res = await request(app)
       .delete('/api/v1/auth/tokens/deadbeef')
+      .set('Authorization', `Bearer ${sessionToken}`)
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('SSO identity self-service routes', () => {
+  it('lists identities linked to the calling user', async () => {
+    process.env.GITSEMA_SSO_PROVIDERS = 'google'
+    const alice = getUserByUsername(getRawDb(), 'alice')
+    linkSsoIdentity(getRawDb(), { provider: 'google', externalId: 'sub-1', userId: alice!.id })
+    const sessionToken = await loginAsAlice()
+
+    const res = await request(app)
+      .get('/api/v1/auth/sso')
+      .set('Authorization', `Bearer ${sessionToken}`)
+    expect(res.status).toBe(200)
+    expect(res.body.identities).toHaveLength(1)
+    expect(res.body.identities[0]).toMatchObject({ provider: 'google', externalId: 'sub-1' })
+  })
+
+  it('returns 401 with no token', async () => {
+    const res = await request(app).get('/api/v1/auth/sso')
+    expect(res.status).toBe(401)
+  })
+
+  it('unlinks an identity owned by the calling user', async () => {
+    process.env.GITSEMA_SSO_PROVIDERS = 'google'
+    const alice = getUserByUsername(getRawDb(), 'alice')
+    linkSsoIdentity(getRawDb(), { provider: 'google', externalId: 'sub-1', userId: alice!.id })
+    const sessionToken = await loginAsAlice()
+
+    const res = await request(app)
+      .delete('/api/v1/auth/sso/google/sub-1')
+      .set('Authorization', `Bearer ${sessionToken}`)
+    expect(res.status).toBe(200)
+    expect(res.body.removed).toBe(1)
+
+    const listRes = await request(app)
+      .get('/api/v1/auth/sso')
+      .set('Authorization', `Bearer ${sessionToken}`)
+    expect(listRes.body.identities).toHaveLength(0)
+  })
+
+  it('returns 404 when unlinking an identity not linked to the calling user', async () => {
+    process.env.GITSEMA_SSO_PROVIDERS = 'google'
+    const bob = createUser(getRawDb(), 'bob', 'bobs-password')
+    linkSsoIdentity(getRawDb(), { provider: 'google', externalId: 'sub-bob', userId: bob.id })
+    const sessionToken = await loginAsAlice()
+
+    const res = await request(app)
+      .delete('/api/v1/auth/sso/google/sub-bob')
       .set('Authorization', `Bearer ${sessionToken}`)
     expect(res.status).toBe(404)
   })

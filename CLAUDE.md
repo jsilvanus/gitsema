@@ -460,7 +460,7 @@ gitsema index
 
 **Pluggable storage backends (Phase 101–103):** all reads/writes go through async `MetadataStore` / `VectorStore` / `FtsStore` interfaces (`src/core/storage/types.ts`). The default `sqlite` backend wraps the schema below; `postgres` routes metadata + FTS through Postgres (pgvector for vectors), and `qdrant` uses Qdrant for vectors with Postgres for metadata/FTS. Select via `storage.*` config or `GITSEMA_STORAGE_*` env vars (see Configuration), inspect with `gitsema storage info`, and copy between backends with `gitsema storage migrate`.
 
-**Schema overview (current schema v28):**
+**Schema overview (current schema v29):**
 
 | Table | Purpose |
 |---|---|
@@ -494,6 +494,7 @@ gitsema index
 | `orgs` | Org registry — `kind` is `personal` (one user, auto-created) or `team`; added in v28 (Phase 123, multi-tenant-auth §5 Phase B) |
 | `org_members` | Org membership with `org_admin`/`member` roles; added in v28 (Phase 123, multi-tenant-auth §5 Phase B) |
 | `repo_grants` | Per-user repo access grants (`read`/`write`/`owner`, optional branch-glob pattern); replaces the binary `repo_tokens` model for new deployments; added in v28 (Phase 123, multi-tenant-auth §5 Phase B) |
+| `sso_identities` | Linked external OIDC/SSO identities (`provider` + `external_id` → `user_id`, unique per identity); added in v29 (Phase 124, multi-tenant-auth §5 Phase C) |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
@@ -515,7 +516,8 @@ gitsema index
 - v25 → v26: Added `graph_nodes` and `edges` tables (+ indexes) for the structural linking pass (Phase 107 / knowledge-graph §3.3), truncate-and-rebuilt by `gitsema graph build`
 - v26 → v27: Added `users`, `sessions`, and `api_keys` tables (+ indexes) for the identity & credentials core (Phase 122 / multi-tenant-auth §5 Phase A)
 - v27 → v28: Added `orgs`, `org_members`, `repo_grants` tables (+ indexes) and a `repos.org_id` column for org/grant authorization (Phase 123 / multi-tenant-auth §5 Phase B)
-- **Current version: 28**
+- v28 → v29: Added `sso_identities` table (+ indexes) for linked external OIDC/SSO identities (Phase 124 / multi-tenant-auth §5 Phase C)
+- **Current version: 29**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

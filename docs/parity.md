@@ -136,6 +136,7 @@ This table shows which tools/commands are available in which interface. A checkm
 | `auth` (login/logout/whoami/token */create-user) | ✓ | — | — | — | — | ✓ | — | — |
 | `orgs` (create/list/members */`users` create/list) | ✓ | — | — | — | — | ✓ | — | — |
 | `repos grant/grants/revoke/move-to-org` | ✓ | — | — | — | — | ✓ | ✓ | — |
+| `auth sso link/unlink/list` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `quickstart` / `setup` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Visualization** |
 | `map` | ✓ | — | — | — | — | ✓ | ✓ | — |

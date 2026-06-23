@@ -65,6 +65,8 @@ export const ENV_KEY_MAP: Record<string, string> = {
   'storage.fts.url':      'GITSEMA_STORAGE_FTS_URL',
   // Multi-tenant auth (Phase 123)
   'auth.personalGroups': 'GITSEMA_PERSONAL_GROUPS',
+  // Multi-tenant auth — SSO linking (Phase 124)
+  'auth.ssoProviders': 'GITSEMA_SSO_PROVIDERS',
 }
 
 /**
@@ -128,6 +130,8 @@ export const ALL_KEYS: ReadonlyArray<string> = [
   'vscode.lsp',
   // Multi-tenant auth (Phase 123)
   'auth.personalGroups',
+  // Multi-tenant auth — SSO linking (Phase 124)
+  'auth.ssoProviders',
 ]
 
 // ---------------------------------------------------------------------------

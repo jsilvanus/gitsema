@@ -498,3 +498,20 @@ export const repoGrants = sqliteTable('repo_grants', {
 }, (table) => ({
   uniqGrant: uniqueIndex('idx_repo_grants_user_repo_branch').on(table.userId, table.repoId, table.branchPattern),
 }))
+
+/**
+ * Linked external identity from an SSO/OIDC provider (Phase 124 /
+ * multi-tenant-auth §5 Phase C). Linking, not replacing — a user keeps their
+ * password/API keys alongside any linked SSO identity; all resolve to the
+ * same `userId`. `(provider, externalId)` is unique — one external subject
+ * links to exactly one user. Added in schema v29.
+ */
+export const ssoIdentities = sqliteTable('sso_identities', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  provider: text('provider').notNull(),
+  externalId: text('external_id').notNull(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  linkedAt: integer('linked_at').notNull(),
+}, (table) => ({
+  uniqIdentity: uniqueIndex('idx_sso_identities_provider_external').on(table.provider, table.externalId),
+}))

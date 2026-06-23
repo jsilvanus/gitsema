@@ -4708,7 +4708,7 @@ that deprecated it, and its removal status.
 | **124** | §5 Phase C | SSO/OIDC linking | New `sso_identities` table; `gitsema auth login <server-url> --sso <provider>` device-code-style flow; provider allowlist config; first new third-party dependency (an OIDC client library) — flagged against CLAUDE.md's minimal-deps preference. |
 | **125** | §5 Phase D | Audit log | New `audit_log` table (actor, action, target, timestamp); `gitsema audit log [--org][--repo]` CLI; records `org.repo.moved` and other Phase B/C actions. Lowest priority of the track, no hard dependents. |
 
-**Status:** Phase 122 ✅ complete (version pending). Phase 123 ✅ complete (version pending). Phases 124–125 not started.
+**Status:** Phase 122 ✅ complete (version pending). Phase 123 ✅ complete (version pending). Phase 124 ✅ complete (version pending). Phase 125 not started.
 
 **Phase 122 implementation notes:**
 - Schema v27 adds `users`/`sessions`/`api_keys` (migration `027_auth_identity.ts`).
@@ -4776,6 +4776,43 @@ that deprecated it, and its removal status.
   `tests/orgsRoutes.test.ts` (HTTP integration — org creation/listing, member
   add/remove authorization, personal-org 403 rejection, grant creation/listing/
   revocation authorization, move-to-org).
+
+**Phase 124 implementation notes:**
+- Schema v29 adds `sso_identities` (`provider`, `external_id`, `user_id`, `linked_at`;
+  unique on `(provider, external_id)`) (migration `029_sso_identities.ts`).
+- `src/core/auth/sso.ts` is the core module: `getAllowedSsoProviders`/
+  `isSsoProviderAllowed` read `auth.ssoProviders`/`GITSEMA_SSO_PROVIDERS` (comma-
+  separated, empty by default — no provider allowed until configured);
+  `linkSsoIdentity` (throws `SsoProviderNotAllowedError` for a non-allowlisted
+  provider, `SsoIdentityTakenError` if the `(provider, externalId)` pair is already
+  linked to a — possibly different — user); `unlinkSsoIdentity`, `resolveSsoIdentity`,
+  `listSsoIdentitiesForUser`.
+- CLI: `gitsema auth sso link/unlink/list` (new `ssoCmd` subcommand group in
+  `src/cli/commands/auth.ts`) — operator-only, reading/writing the local server DB
+  directly via `getRawDb()`, the same pattern as `gitsema auth create-user` (Phase 122)
+  and `gitsema orgs create` (Phase 123).
+- HTTP: two new routes added to the existing `authRouter()` in
+  `src/server/routes/auth.ts` — `GET /api/v1/auth/sso` (list the calling user's own
+  linked identities) and `DELETE /api/v1/auth/sso/:provider/:externalId` (unlink one
+  of the calling user's own identities, with an explicit ownership check returning 404
+  if the identity isn't linked to them). Linking a new identity is **not** exposed over
+  HTTP at all — only via the CLI `gitsema auth sso link` operator command.
+- **Deviation from spec:** this phase ships only the linking data model, provider
+  allowlist gate, and CRUD (CLI link/unlink/list + HTTP self-service list/unlink) — it
+  does **not** implement the device-code browser-based OIDC flow
+  (`gitsema auth login <server-url> --sso <provider>`) described in the design doc.
+  That flow requires choosing and integrating an actual OIDC client library — a new
+  third-party dependency the design doc itself flags as needing a deliberate decision
+  against CLAUDE.md's minimal-deps preference — and a live identity provider to test
+  against, neither of which is available here. Linking an external identity to a user
+  today is an operator action (`gitsema auth sso link`), the same precedent as
+  `gitsema auth create-user` (Phase 122): a user resolves via a linked identity exactly
+  as the design intends, just provisioned out-of-band instead of via a live OIDC
+  exchange.
+- Tests: `tests/sso.test.ts` (unit — provider allowlist gating, link/unlink/resolve/
+  list CRUD, `SsoIdentityTakenError` collision case) and HTTP integration tests added
+  to `tests/authRoutes.test.ts` (list own identities, unlink own identity, 404 on
+  unlinking an identity not owned by the calling user).
 
 ---
 

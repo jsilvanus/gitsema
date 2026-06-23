@@ -27,6 +27,7 @@ import {
   revokeApiKeyByPrefix,
   getUserById,
 } from '../../core/auth/identity.js'
+import { listSsoIdentitiesForUser, unlinkSsoIdentity } from '../../core/auth/sso.js'
 
 const LoginSchema = z.object({
   username: z.string().min(1),
@@ -123,6 +124,31 @@ export function authRouter(): Router {
       return
     }
     res.json({ revoked })
+  })
+
+  // SSO identity self-service (Phase 124 / multi-tenant-auth §5 Phase C). Linking
+  // a new identity is operator-only via `gitsema auth sso link` (see sso.ts's
+  // header for why) — these routes only let a logged-in user view or unlink
+  // identities already linked to their own account.
+  router.get('/sso', authMiddleware, (req, res) => {
+    const userId = requireUserId(req, res)
+    if (userId === undefined) return
+    res.json({ identities: listSsoIdentitiesForUser(getRawDb(), userId) })
+  })
+
+  router.delete('/sso/:provider/:externalId', authMiddleware, (req, res) => {
+    const userId = requireUserId(req, res)
+    if (userId === undefined) return
+    const provider = String(req.params.provider)
+    const externalId = String(req.params.externalId)
+    const identities = listSsoIdentitiesForUser(getRawDb(), userId)
+    const owns = identities.some((i) => i.provider === provider && i.externalId === externalId)
+    if (!owns) {
+      res.status(404).json({ error: 'No matching SSO identity linked to this account' })
+      return
+    }
+    const removed = unlinkSsoIdentity(getRawDb(), provider, externalId)
+    res.json({ removed })
   })
 
   return router

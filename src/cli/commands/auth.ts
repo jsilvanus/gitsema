@@ -8,8 +8,9 @@
 import { Command } from 'commander'
 import { createInterface } from 'node:readline'
 import { readCredentials, writeCredentials, clearCredentials } from '../../core/config/credentials.js'
-import { createUser } from '../../core/auth/identity.js'
+import { createUser, getUserByUsername } from '../../core/auth/identity.js'
 import { maybeProvisionPersonalOrg } from '../../core/auth/orgs.js'
+import { linkSsoIdentity, unlinkSsoIdentity, listSsoIdentitiesForUser } from '../../core/auth/sso.js'
 import { getRawDb } from '../../core/db/sqlite.js'
 
 function prompt(question: string): Promise<string> {
@@ -230,6 +231,58 @@ export function authCommand(): Command {
         process.exit(1)
       }
     })
+
+  const ssoCmd = new Command('sso').description(
+    'Manage linked SSO/OIDC identities (Phase 124; operator-only, requires local DB access — links a user manually, no live OIDC exchange yet)',
+  )
+
+  ssoCmd
+    .command('link <provider> <external-id> <username>')
+    .description('Link an external (provider, external-id) identity to an existing user; provider must be in GITSEMA_SSO_PROVIDERS')
+    .action((provider: string, externalId: string, username: string) => {
+      const rawDb = getRawDb()
+      const user = getUserByUsername(rawDb, username)
+      if (!user) {
+        console.error(`Error: user '${username}' not found`)
+        process.exit(1)
+      }
+      try {
+        linkSsoIdentity(rawDb, { provider, externalId, userId: user.id })
+        console.log(`Linked '${provider}:${externalId}' to user '${username}'.`)
+      } catch (e) {
+        console.error(`Error: ${e instanceof Error ? e.message : String(e)}`)
+        process.exit(1)
+      }
+    })
+
+  ssoCmd
+    .command('unlink <provider> <external-id>')
+    .description('Unlink an external identity')
+    .action((provider: string, externalId: string) => {
+      const removed = unlinkSsoIdentity(getRawDb(), provider, externalId)
+      console.log(`Unlinked ${removed} identity/identities for '${provider}:${externalId}'.`)
+    })
+
+  ssoCmd
+    .command('list <username>')
+    .description('List SSO identities linked to a user')
+    .action((username: string) => {
+      const rawDb = getRawDb()
+      const user = getUserByUsername(rawDb, username)
+      if (!user) {
+        console.error(`Error: user '${username}' not found`)
+        process.exit(1)
+      }
+      const identities = listSsoIdentitiesForUser(rawDb, user.id)
+      if (identities.length === 0) {
+        console.log(`No SSO identities linked to '${username}'.`)
+        return
+      }
+      console.log(`${'Provider'.padEnd(20)}  External ID`)
+      for (const i of identities) console.log(`${i.provider.padEnd(20)}  ${i.externalId}`)
+    })
+
+  cmd.addCommand(ssoCmd)
 
   return cmd
 }

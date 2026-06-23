@@ -62,8 +62,10 @@ export interface DbSession {
  *       (Phase 122 / multi-tenant-auth §5 Phase A)
  * 28 — Added orgs, org_members, repo_grants tables and repos.org_id column for
  *       org/grant authorization (Phase 123 / multi-tenant-auth §5 Phase B)
+ * 29 — Added sso_identities table for linked external OIDC/SSO identities
+ *       (Phase 124 / multi-tenant-auth §5 Phase C)
  */
-export const CURRENT_SCHEMA_VERSION = 28
+export const CURRENT_SCHEMA_VERSION = 29
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -436,6 +438,18 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_repo_grants_user_repo_branch
       ON repo_grants(user_id, repo_id, branch_pattern);
     CREATE INDEX IF NOT EXISTS idx_repo_grants_repo ON repo_grants(repo_id);
+
+    -- Linked SSO/OIDC identities (Phase 124 / multi-tenant-auth §5 Phase C)
+    CREATE TABLE IF NOT EXISTS sso_identities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      linked_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sso_identities_provider_external
+      ON sso_identities(provider, external_id);
+    CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id);
   `)
 
   if (isFresh) {
