@@ -27,6 +27,15 @@ When implementing a new feature or phase:
 
 ---
 
+## Simplify passes
+
+When running a `/simplify` pass, any finding that gets **skipped** (out of scope,
+too large a refactor, judged not worth doing now) must be written up as an entry
+in **`docs/feature-ideas.md`** rather than just mentioned in the chat summary —
+otherwise the finding is lost once the session ends.
+
+---
+
 ## Releases & changesets
 
 This repo uses [changesets](https://github.com/changesets/changesets) for versioning, `CHANGELOG.md` generation, and npm publishing (OIDC trusted publishing — no npm token).

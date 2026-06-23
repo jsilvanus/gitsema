@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-06-23 (added audit log coverage enforcement idea, found during the Phase 125 `/simplify` review; refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md` and the superadmin-locked model set idea into `docs/locked-model-set-plan.md`; kept cross-repo blob dedup as an open idea)
+**Last updated:** 2026-06-23 (added the public-repo-sharing throttle/policy-extraction idea, found during the Phase 126/127 `/simplify` review; added audit log coverage enforcement idea, found during the Phase 125 `/simplify` review; refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md` and the superadmin-locked model set idea into `docs/locked-model-set-plan.md`; kept cross-repo blob dedup as an open idea)
 **Audience:** Developers considering next phases; product planning
 
 > **Note:** As of this update, the LSP/MCP remote-delegation foundation this
@@ -470,6 +470,51 @@ shapes (none chosen yet):
 ### Prerequisites
 - None — `audit_log` (Phase 125) is already shipped; this only needs a
   decision on which enforcement mechanism to pursue.
+
+---
+
+## Public Repo Sharing: Throttle/Rate-Limit Unification & Policy Extraction
+
+### Problem
+- Found during the `/simplify` review of Phase 126/127 (public-repo-sharing).
+  `checkAndRecordReindexThrottle()` (`src/server/routes/remote.ts`) is a
+  bespoke per-`(repoId, userId)` cooldown map, separate from the generic
+  abuse-prevention rate limiter in `src/server/middleware/rateLimiter.ts`
+  (`express-rate-limit`, keyed by Bearer token/IP, fixed window). They serve
+  different concerns today — one is a global RPM cap, the other a
+  business-rule re-index cooldown — but having two independent
+  rate-limiting mechanisms in the same route module is worth revisiting if
+  a third throttle-shaped requirement shows up.
+- The same review flagged that the 2c/2d/2e public-repo gate/throttle/grant
+  logic in the `POST /api/v1/remote/index` handler (first-index gate,
+  refresh throttle, attach-as-reader auto-grant) could be extracted into a
+  single `applyPublicRepoPolicy()` function for readability, but that was
+  judged too large a restructuring for a cleanup pass on already-shipped
+  code.
+
+### Intended Behavior
+No design committed yet. Two independent, optional follow-ups:
+- If a third per-key throttle need appears, consider whether a shared
+  generic "keyed cooldown" utility (used by both `rateLimiter.ts` and
+  `checkAndRecordReindexThrottle`) is worth building, vs. keeping them
+  separate as distinct concerns.
+- Extract the public-repo gate/throttle/grant sequence in
+  `src/server/routes/remote.ts` into a named `applyPublicRepoPolicy()` (or
+  similar) function once it grows another condition or gets touched again,
+  rather than as a standalone refactor now.
+
+### Design Gaps
+- [ ] Whether a generic keyed-cooldown abstraction is worth the indirection
+      given only one current caller (`checkAndRecordReindexThrottle`).
+- [ ] Where the line is for "policy extraction" — at what point does the
+      2c/2d/2e sequence justify its own function vs. staying inline.
+
+### Effort Estimate
+- Small either way — both are isolated, mechanical refactors with existing
+  test coverage to verify against.
+
+### Prerequisites
+- None — both are optional cleanups on already-shipped Phase 126/127 code.
 
 ---
 
