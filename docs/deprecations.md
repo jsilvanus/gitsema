@@ -4,7 +4,7 @@ Canonical list of every deprecated command, flag, and transport in gitsema:
 what replaced it, when it was deprecated, and whether (and when) it's
 scheduled for removal.
 
-**Last updated:** 2026-06-22
+**Last updated:** 2026-06-23
 
 **Removal policy:** gitsema has never set a removal date for anything in this
 file. Every hard deprecation below has been kept indefinitely since it was
@@ -30,13 +30,22 @@ functional — the warning is the only behavior change.
 | `gitsema doctor` | `gitsema index doctor` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:251-258` |
 | `gitsema vacuum` | `gitsema index vacuum` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:264-266` |
 | `gitsema rebuild-fts` | `gitsema index rebuild-fts` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:272-275` |
-| `gitsema backfill-fts` | `gitsema index backfill-fts` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:281-283` |
+| `gitsema backfill-fts` | `gitsema index rebuild-fts` | Phase 71 (v0.71.0); retargeted Phase 128 | Not scheduled | `src/cli/register/indexing.ts:280-285` |
+| `gitsema index backfill-fts` | `gitsema index rebuild-fts` | Phase 128 | Not scheduled | `src/cli/register/indexing.ts:193-199` |
 | `gitsema update-modules` | `gitsema index update-modules` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:289-292` |
 | `gitsema gc` | `gitsema index gc` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:298-302` |
 | `gitsema clear-model` | `gitsema index clear-model` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:315-318` |
 | `gitsema build-vss` | `gitsema index build-vss` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:324-329` |
 | `gitsema policy check` (two-word) | `gitsema policy-check` (kebab-case) | Phase 94 (v0.91.0) | Not scheduled | `src/cli/register/analysis.ts:63-75` |
 | `gitsema tools lsp --tcp <port>` | `gitsema tools lsp --websocket <bind-address> --key <token>` | Phase 120 | Not scheduled (raw TCP has no header to carry a Bearer token in — see §3) | `src/cli/commands/tools.ts:92,126-133` |
+
+`backfill-fts` re-fetched blob content from Git for blobs indexed before
+Phase 11, which never got an FTS5 row at all — `rebuild-fts` only re-syncs
+`blob_fts` from content already present and cannot recover those rows. The
+two commands are not strictly interchangeable, but no index database
+predating Phase 11 is still in active use, so the gap `backfill-fts` closed
+no longer applies in practice; `rebuild-fts` is the recommended command for
+all current FTS maintenance.
 
 ---
 

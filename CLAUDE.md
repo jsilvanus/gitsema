@@ -208,7 +208,7 @@ Find when a concept first appeared — same as `search` but sorted chronological
 |---|---|---|
 | `-k, --top <n>` | `10` | Number of results to return |
 | `--branch <name>` | — | Restrict results to blobs seen on this branch |
-| `--hybrid` | off | Blend vector similarity with BM25 keyword matching (requires prior `backfill-fts`) |
+| `--hybrid` | off | Blend vector similarity with BM25 keyword matching (requires prior `rebuild-fts`) |
 | `--bm25-weight <n>` | `0.3` | BM25 weight in hybrid score |
 | `--include-commits` | off | Also search commit messages and show chronological commit results |
 | `--dump [file]` | — | Output structured JSON; writes to `<file>` or stdout |
@@ -267,8 +267,8 @@ Manage persistent configuration (set/get/list/unset). Stored in `.gitsema/config
 
 Supported dot-notation keys for command defaults (see `src/core/config/configManager.ts`): `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `verbose`, `logMaxBytes`, `servePort`, `serveKey`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, and more. Use `gitsema config list` to see all active values and their sources.
 
-### `gitsema index backfill-fts`
-Populate FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added). Required to use `--hybrid` search on older index entries. The top-level `gitsema backfill-fts` is a hidden backward-compat alias.
+### `gitsema index backfill-fts` *(deprecated, use `gitsema index rebuild-fts`)*
+Previously populated FTS5 content for blobs indexed before Phase 11 (when FTS5 support was added) by re-fetching their content from Git. Deprecated in Phase 128 — no pre-Phase-11 index databases remain in active use, so `gitsema index rebuild-fts` (which re-syncs `blob_fts` from already-stored content) covers all current FTS maintenance. The top-level `gitsema backfill-fts` is a hidden backward-compat alias that now also points to `index rebuild-fts`.
 
 ### `gitsema index <maintenance subcommand>`
 Maintenance operations on the active index, grouped under `gitsema index`:
@@ -279,12 +279,12 @@ Maintenance operations on the active index, grouped under `gitsema index`:
 | `gitsema index vacuum` | `VACUUM`/`ANALYZE` the SQLite database |
 | `gitsema index gc [--dry-run]` | Garbage-collect unreachable blob records |
 | `gitsema index rebuild-fts [-y]` | Rebuild the FTS5 index from stored data |
-| `gitsema index backfill-fts` | Populate FTS5 content for pre-Phase-11 entries |
+| `gitsema index backfill-fts` *(deprecated, use `rebuild-fts`)* | Populate FTS5 content for pre-Phase-11 entries |
 | `gitsema index update-modules` | Recalculate directory centroid embeddings |
 | `gitsema index clear-model <model> [-y]` | Delete stored embeddings/cache for a model |
 | `gitsema index build-vss [--model] [--ef-construction] [--M]` | Build a usearch HNSW ANN index for fast approximate search |
 
-Older top-level forms (`gitsema doctor`, `vacuum`, `gc`, `rebuild-fts`, `update-modules`, `clear-model`, `build-vss`) remain as hidden, deprecated aliases.
+Older top-level forms (`gitsema doctor`, `vacuum`, `gc`, `rebuild-fts`, `backfill-fts`, `update-modules`, `clear-model`, `build-vss`) remain as hidden, deprecated aliases.
 
 ### `gitsema storage <subcommand>`
 Manage the pluggable storage backend (Phase 101–103). Backends: `sqlite` (default), `postgres` (+ pgvector), `qdrant` (vectors) + Postgres metadata. Selected via `storage.*` config keys / `GITSEMA_STORAGE_*` env vars (see Configuration).
@@ -524,7 +524,7 @@ gitsema index
 | `repo_grants.source` | Provenance of an auto-issued grant, e.g. `auto-public` for attach-as-reader grants; added in v31 (Phase 126, public-repo-sharing) |
 | `repos.profile_name` | Embedding profile pinned at first index; null = legacy single-profile repo, never overwritten once set; added in v32 (Phase 128, locked-model-set-plan.md §5 Phase 1) |
 
-**FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
+**FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema index rebuild-fts` to populate/refresh FTS5 content (`index backfill-fts` is deprecated, Phase 128 — no pre-Phase-11 databases remain in use).
 
 **Schema migrations:** `sqlite.ts` runs versioned migrations on startup (idempotent):
 - v0 → v1: Added `file_type` column to `embeddings` (Phase 8)

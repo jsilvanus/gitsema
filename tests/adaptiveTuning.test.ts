@@ -122,9 +122,9 @@ describe('postRunRecommendations', () => {
     expect(recs.some((r) => r.includes('vacuum'))).toBe(true)
   })
 
-  it('recommends backfill-fts when hasFtsGap is true', () => {
+  it('recommends rebuild-fts when hasFtsGap is true', () => {
     const recs = postRunRecommendations({ indexed: 100, existingBlobCount: 100, hasFtsGap: true })
-    expect(recs.some((r) => r.includes('backfill-fts'))).toBe(true)
+    expect(recs.some((r) => r.includes('rebuild-fts'))).toBe(true)
   })
 
   it('returns empty array for small indexes', () => {

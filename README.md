@@ -185,7 +185,7 @@ Copies the active index into another storage backend (sqlite/postgres/qdrant) vi
 | `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) — `--tcp` is deprecated, use `--websocket` |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
-The old top-level `gitsema mcp`, `gitsema lsp`, `gitsema serve`, and `gitsema backfill-fts` still work as hidden backward-compat aliases.
+The old top-level `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work as hidden backward-compat aliases.
 
 **Remote delegation (Phase 113):** `--remote <url>` makes `tools mcp`/`tools lsp`
 delegate every data-access call to a running `gitsema tools serve` instance instead
@@ -290,7 +290,7 @@ public repo are throttled to one per `auth.minReindexIntervalSeconds` /
 | `--weight-path <n>` | `0.1` | Path-relevance weight |
 | `--group <mode>` | — | Collapse results by `file` \| `module` \| `commit` |
 | `--chunks` | off | Include chunk-level embeddings |
-| `--hybrid` | off | Combine vector + BM25 (FTS5); requires prior `gitsema backfill-fts` for older data |
+| `--hybrid` | off | Combine vector + BM25 (FTS5); requires prior `gitsema index rebuild-fts` for older data |
 | `--bm25-weight <n>` | `0.3` | BM25 weight in hybrid score |
 | `--branch <name>` | — | Restrict results to blobs seen on this branch |
 | `--vss` | off | Use the HNSW ANN index (requires prior `gitsema index build-vss`) |

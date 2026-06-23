@@ -193,8 +193,9 @@ export function registerIndexing(program: Command) {
   // ── `gitsema index backfill-fts` ──────────────────────────────────────────
   indexSub
     .command('backfill-fts')
-    .description('Populate FTS5 content for blobs indexed before Phase 11 (enables hybrid search)')
+    .description('[deprecated] use `gitsema index rebuild-fts` — populated FTS5 content for blobs indexed before Phase 11')
     .action(async () => {
+      console.warn('Deprecation notice: `gitsema index backfill-fts` is deprecated — use `gitsema index rebuild-fts` instead.')
       await backfillFtsCommand()
     })
 
@@ -278,9 +279,9 @@ export function registerIndexing(program: Command) {
 
   program
     .command('backfill-fts', { hidden: true })
-    .description('[deprecated] use `gitsema index backfill-fts`')
+    .description('[deprecated] use `gitsema index rebuild-fts`')
     .action(async () => {
-      console.warn('Deprecation notice: `gitsema backfill-fts` is deprecated — use `gitsema index backfill-fts` instead.')
+      console.warn('Deprecation notice: `gitsema backfill-fts` is deprecated — use `gitsema index rebuild-fts` instead.')
       await backfillFtsCommand()
     })
 
