@@ -82,6 +82,19 @@ away?" questions; **do not** read these as deprecated.
 
 ---
 
+## 4. Superseded mechanisms (no warning, no removal plan)
+
+Not deprecated — both the old and new mechanism remain fully supported and
+print no warning — but the newer mechanism is the recommended path for new
+integrations. Listed here so "is there a better way to do this now?"
+questions have an answer.
+
+| Superseded mechanism | Modern replacement | Since | Notes |
+|---|---|---|---|
+| `gitsema repos token add/list/revoke` (per-repo scoped tokens, `repo_tokens` table) | `gitsema repos grant/grants/revoke` (`repo_grants` table, Phase 123) | Phase 123 (multi-tenant-auth §5 Phase B) | `repo_tokens` grants a single bearer-token credential scoped to one repo with no user identity attached; `repo_grants` ties a role (`read`\|`write`\|`owner`), optionally branch-scoped, to an actual `users` row created via Phase 122's identity core, and integrates with orgs/membership. Both tables and their CLI/HTTP surfaces continue to work side by side — no removal planned for `repo_tokens`. |
+
+---
+
 ## How to use this document
 
 - **"Will my script break?"** — check §1 first. If your command/flag is

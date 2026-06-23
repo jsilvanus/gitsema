@@ -9,6 +9,7 @@ import { Command } from 'commander'
 import { createInterface } from 'node:readline'
 import { readCredentials, writeCredentials, clearCredentials } from '../../core/config/credentials.js'
 import { createUser } from '../../core/auth/identity.js'
+import { maybeProvisionPersonalOrg } from '../../core/auth/orgs.js'
 import { getRawDb } from '../../core/db/sqlite.js'
 
 function prompt(question: string): Promise<string> {
@@ -222,6 +223,7 @@ export function authCommand(): Command {
       }
       try {
         const user = createUser(getRawDb(), username, password)
+        maybeProvisionPersonalOrg(getRawDb(), user.id, user.username)
         console.log(`Created user '${user.username}' (id ${user.id}).`)
       } catch (e) {
         console.error(`Error: ${e instanceof Error ? e.message : String(e)}`)

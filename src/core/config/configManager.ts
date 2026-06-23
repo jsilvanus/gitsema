@@ -63,6 +63,8 @@ export const ENV_KEY_MAP: Record<string, string> = {
   'storage.vectors.apiKey': 'GITSEMA_STORAGE_VECTORS_API_KEY',
   'storage.fts.backend':  'GITSEMA_STORAGE_FTS_BACKEND',
   'storage.fts.url':      'GITSEMA_STORAGE_FTS_URL',
+  // Multi-tenant auth (Phase 123)
+  'auth.personalGroups': 'GITSEMA_PERSONAL_GROUPS',
 }
 
 /**
@@ -124,6 +126,8 @@ export const ALL_KEYS: ReadonlyArray<string> = [
   // VS Code integration
   'vscode.mcp',
   'vscode.lsp',
+  // Multi-tenant auth (Phase 123)
+  'auth.personalGroups',
 ]
 
 // ---------------------------------------------------------------------------

@@ -60,8 +60,10 @@ export interface DbSession {
  *       knowledge-graph §3.3), rebuilt wholesale by `gitsema graph build`
  * 27 — Added users, sessions, api_keys tables for identity & credentials core
  *       (Phase 122 / multi-tenant-auth §5 Phase A)
+ * 28 — Added orgs, org_members, repo_grants tables and repos.org_id column for
+ *       org/grant authorization (Phase 123 / multi-tenant-auth §5 Phase B)
  */
-export const CURRENT_SCHEMA_VERSION = 27
+export const CURRENT_SCHEMA_VERSION = 28
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -291,7 +293,7 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 
     -- Multi-repo registry (Phase 41 / v14); db_path added in v15;
     -- normalized_url, clone_path, last_indexed_at, ephemeral added in v23
-    -- (persistent server-side repo storage)
+    -- (persistent server-side repo storage); org_id added in v28 (Phase 123)
     CREATE TABLE IF NOT EXISTS repos (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -301,7 +303,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       normalized_url TEXT,
       clone_path TEXT,
       last_indexed_at INTEGER,
-      ephemeral INTEGER NOT NULL DEFAULT 0
+      ephemeral INTEGER NOT NULL DEFAULT 0,
+      org_id INTEGER REFERENCES orgs(id)
     );
 
     -- Per-repo access control tokens (review7 §4.1 / v21): token is stored as SHA-256 hash.
@@ -403,6 +406,36 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       revoked_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+
+    -- Orgs, personal groups, repo/branch grants (Phase 123 / multi-tenant-auth §5 Phase B)
+    CREATE TABLE IF NOT EXISTS orgs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS org_members (
+      org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      joined_at INTEGER NOT NULL,
+      PRIMARY KEY (org_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
+
+    CREATE TABLE IF NOT EXISTS repo_grants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      branch_pattern TEXT,
+      granted_by INTEGER NOT NULL REFERENCES users(id),
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_repo_grants_user_repo_branch
+      ON repo_grants(user_id, repo_id, branch_pattern);
+    CREATE INDEX IF NOT EXISTS idx_repo_grants_repo ON repo_grants(repo_id);
   `)
 
   if (isFresh) {

@@ -3,6 +3,7 @@ import { searchCommand } from '../commands/search.js'
 import { codeSearchCommand } from '../commands/codeSearch.js'
 import { reposCommand } from '../commands/repos.js'
 import { authCommand } from '../commands/auth.js'
+import { orgsCommand, usersCommand } from '../commands/orgs.js'
 import { lspCommand } from '../commands/lsp.js'
 import { watchCommand } from '../commands/watch.js'
 import { securityScanCommand } from '../commands/securityScan.js'
@@ -79,6 +80,8 @@ export function registerSearch(program: Command) {
   program.addCommand(codeSearchCommand())
   program.addCommand(reposCommand())
   program.addCommand(authCommand())
+  program.addCommand(orgsCommand())
+  program.addCommand(usersCommand())
   // Keep top-level lsp as hidden alias; preferred form is `gitsema tools lsp`
   program.addCommand(lspCommand(), { hidden: true })
   program.addCommand(watchCommand())

@@ -6,6 +6,9 @@ import { addRepo, listRepos, multiRepoSearch, getRegistrySession, getRepo, getRe
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { parsePositiveInt } from '../../utils/parse.js'
+import { getUserByUsername } from '../../core/auth/identity.js'
+import { getOrgByName } from '../../core/auth/orgs.js'
+import { createGrant, revokeGrant, listGrants, moveRepoToOrg } from '../../core/auth/grants.js'
 
 export function reposCommand(): Command {
   const cmd = new Command('repos')
@@ -194,6 +197,90 @@ export function reposCommand(): Command {
     })
 
   cmd.addCommand(tokenCmd)
+
+  // ── grant subcommands for repo/branch access control (Phase 123) ─────────
+
+  cmd
+    .command('grant <repo-id> <username>')
+    .description('Grant a user a role on a repo, optionally scoped to a branch pattern (Phase 123)')
+    .requiredOption('--role <role>', 'read | write | owner')
+    .option('--branch <pattern>', 'glob pattern restricting the grant to matching branches (default: all branches)')
+    .option('--granted-by <username>', 'username to record as the granting user (defaults to the target user themself if omitted)')
+    .action((repoId: string, username: string, opts: { role: string; branch?: string; grantedBy?: string }) => {
+      if (!['read', 'write', 'owner'].includes(opts.role)) {
+        console.error("Error: --role must be 'read', 'write', or 'owner'")
+        process.exit(1)
+      }
+      const rawDb = getRawDb()
+      const repo = rawDb.prepare('SELECT id FROM repos WHERE id = ?').get(repoId)
+      if (!repo) {
+        console.error(`Error: repo '${repoId}' not found. Use: gitsema repos add`)
+        process.exit(1)
+      }
+      const target = getUserByUsername(rawDb, username)
+      if (!target) {
+        console.error(`Error: user '${username}' not found`)
+        process.exit(1)
+      }
+      const granter = opts.grantedBy ? getUserByUsername(rawDb, opts.grantedBy) : target
+      if (!granter) {
+        console.error(`Error: user '${opts.grantedBy}' not found`)
+        process.exit(1)
+      }
+      const grant = createGrant(rawDb, {
+        userId: target.id,
+        repoId,
+        role: opts.role as 'read' | 'write' | 'owner',
+        branchPattern: opts.branch ?? null,
+        grantedBy: granter.id,
+      })
+      console.log(`Granted '${username}' ${grant.role} on repo '${repoId}'${grant.branchPattern ? ` (branch: ${grant.branchPattern})` : ''}.`)
+    })
+
+  cmd
+    .command('grants <repo-id>')
+    .description('List grants on a repo (Phase 123)')
+    .action((repoId: string) => {
+      const grants = listGrants(getRawDb(), repoId)
+      if (grants.length === 0) {
+        console.log(`No grants on repo '${repoId}'. Use: gitsema repos grant <repo-id> <username> --role <role>`)
+        return
+      }
+      console.log(`${'User ID'.padEnd(10)}  ${'Role'.padEnd(8)}  Branch`)
+      for (const g of grants) console.log(`${String(g.userId).padEnd(10)}  ${g.role.padEnd(8)}  ${g.branchPattern ?? '(all)'}`)
+    })
+
+  cmd
+    .command('revoke <repo-id> <username>')
+    .description('Revoke all of a user\'s grants on a repo (Phase 123)')
+    .action((repoId: string, username: string) => {
+      const target = getUserByUsername(getRawDb(), username)
+      if (!target) {
+        console.error(`Error: user '${username}' not found`)
+        process.exit(1)
+      }
+      const revoked = revokeGrant(getRawDb(), target.id, repoId)
+      console.log(`Revoked ${revoked} grant(s) for '${username}' on repo '${repoId}'.`)
+    })
+
+  cmd
+    .command('move-to-org <repo-id> <org>')
+    .description('Move a repo to a different org; existing grants survive the move (Phase 123)')
+    .action((repoId: string, orgName: string) => {
+      const rawDb = getRawDb()
+      const repo = rawDb.prepare('SELECT id FROM repos WHERE id = ?').get(repoId)
+      if (!repo) {
+        console.error(`Error: repo '${repoId}' not found. Use: gitsema repos add`)
+        process.exit(1)
+      }
+      const org = getOrgByName(rawDb, orgName)
+      if (!org) {
+        console.error(`Error: org '${orgName}' not found`)
+        process.exit(1)
+      }
+      moveRepoToOrg(rawDb, repoId, org.id)
+      console.log(`Moved repo '${repoId}' to org '${orgName}'.`)
+    })
 
   return cmd
 }

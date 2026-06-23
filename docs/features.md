@@ -274,6 +274,11 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/auth/logout` | Revoke the session token used to call it (Phase 122) |
 | `POST /api/v1/auth/tokens`, `GET /api/v1/auth/tokens`, `DELETE /api/v1/auth/tokens/:prefix` | Mint/list/revoke the calling user's API keys (Phase 122) |
 | `GET /api/v1/auth/whoami` | Resolve the calling user's identity (Phase 122) |
+| `POST /api/v1/orgs`, `GET /api/v1/orgs` | Create a team org / list the calling user's orgs (Phase 123) |
+| `POST /api/v1/orgs/:orgId/members`, `DELETE /api/v1/orgs/:orgId/members/:userId` | Add/remove an org member; `org_admin`-only, rejected with 403 on personal orgs (Phase 123) |
+| `GET /api/v1/repos/:repoId/grants`, `POST /api/v1/repos/:repoId/grants` | List/create a repo or branch-scoped grant; create requires `owner` role on the repo (Phase 123) |
+| `DELETE /api/v1/repos/:repoId/grants/:userId` | Revoke a user's grants on a repo; requires `owner` role (Phase 123) |
+| `POST /api/v1/repos/:repoId/move-to-org` | Move a repo to a different org (or back to none); requires `owner` role, grants survive untouched (Phase 123) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
 | `GET /openapi.json` | OpenAPI 3.1 JSON specification (P2) |
@@ -284,7 +289,7 @@ Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`.
 ### Identity & credentials core (Phase 122)
 
 User accounts (`gitsema auth create-user <username>`, local DB bootstrap; org/role-gated
-self-service creation lands in Phase 123) authenticate against `/api/v1/auth/*` via
+self-service creation ships in Phase 123) authenticate against `/api/v1/auth/*` via
 either a password-derived **session token** (`gitsema auth login <server-url>`, 30-day
 idle-window TTL by default, configurable via `GITSEMA_SESSION_TTL_DAYS`) or a long-lived
 **API key** (`gitsema auth token create/list/revoke`). Passwords are hashed with
@@ -292,9 +297,37 @@ idle-window TTL by default, configurable via `GITSEMA_SESSION_TTL_DAYS`) or a lo
 SHA-256 hashes at rest, the same precedent as `repo_tokens` (review7 §4.1) — only an
 8-character prefix is kept in the clear for display/revoke-by-prefix lookups. Both
 credential kinds resolve to a `userId` in `authMiddleware`, checked **before** the
-legacy `GITSEMA_SERVE_KEY` and `repo_tokens` paths on every request — no authorization
-changes yet (orgs, grants, roles ship in Phase 123). The local credential file
-(`~/.config/gitsema/credentials.json`, `0o600`) tracks one active login at a time.
+legacy `GITSEMA_SERVE_KEY` and `repo_tokens` paths on every request. Phase 122 itself
+added no authorization changes — orgs, grants, and roles are added in Phase 123 below.
+The local credential file (`~/.config/gitsema/credentials.json`, `0o600`) tracks one
+active login at a time.
+
+### Orgs & repo grants (Phase 123)
+
+Three-axis authorization model: Axis A is identity (Phase 122's `users`); Axis B is
+**membership** — every user belongs to one or more `orgs`, each either `kind: 'personal'`
+(auto-provisioned on user creation, exactly one member forever, immutable —
+`addOrgMember`/`removeOrgMember` throw `PersonalOrgImmutableError` for personal orgs) or
+`kind: 'team'` (explicit, created via `gitsema orgs create <name>` / `POST /api/v1/orgs`,
+any membership size, members are `org_admin` or `member`); Axis C is the **grant** — a
+`(user_id, repo_id, role, branch_pattern)` row in `repo_grants` giving a user `read` |
+`write` | `owner` access to a repo, optionally scoped to a branch glob (`minimatch`,
+matching the existing `--include-glob` convention) with `branch_pattern: null` meaning
+all branches. `resolveUserRepoAccess` resolves the highest applicable role across a
+user's grants for a repo (and optional branch); `roleSatisfies` ranks `owner > write >
+read`. Repos carry an optional `org_id`; `gitsema repos move-to-org <repo-id> <org-id>`
+(`POST /api/v1/repos/:repoId/grants` sibling route `move-to-org`) reassigns it — grants
+are keyed by `(user_id, repo_id)`, not org, so they survive a move untouched. Personal
+groups are gated by `auth.personalGroups` / `GITSEMA_PERSONAL_GROUPS` (default `true`).
+CLI surface: `gitsema orgs create/list/members add/remove/list`, `gitsema users
+create/list`, `gitsema repos grant/grants/revoke/move-to-org` — all operator-tooling
+commands that read/write the local server DB directly (`getRawDb()`), the same pattern
+as `gitsema auth create-user` and `gitsema repos token *`, not the remote-HTTP-client
+pattern used by `gitsema auth login/logout/whoami/token`. Deliberate scope limits (see
+`docs/PLAN.md` Phase 123 for the full list): the ~16 pre-existing analysis/search/
+evolution/graph HTTP routes are not yet retrofitted to enforce `resolveUserRepoAccess`;
+newly created repos do not default into the creator's personal org; and there is no
+backfill migration granting pre-existing users a personal org retroactively.
 
 ### Persistent server-side repo storage
 

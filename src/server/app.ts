@@ -55,6 +55,7 @@ import { requestTimingMiddleware, metricsRegistry, refreshIndexGauges, syncProce
 import { buildRateLimiter } from './middleware/rateLimiter.js'
 import { statusRouter } from './routes/status.js'
 import { authRouter } from './routes/auth.js'
+import { orgsRouter, repoGrantsRouter } from './routes/orgs.js'
 import { blobsRouter } from './routes/blobs.js'
 import { commitsRouter } from './routes/commits.js'
 import { searchRouter } from './routes/search.js'
@@ -159,6 +160,11 @@ export function createApp(options: AppOptions): Express {
   const base = '/api/v1'
 
   app.use(`${base}/status`, statusRouter())
+
+  // Phase 123: orgs & repo-grant management. Requires a resolved req.userId
+  // (set by authMiddleware above), enforced per-route in orgsRouter/repoGrantsRouter.
+  app.use(`${base}/orgs`, orgsRouter())
+  app.use(`${base}/repos`, repoGrantsRouter())
 
   app.use(
     `${base}/blobs`,

@@ -134,6 +134,8 @@ This table shows which tools/commands are available in which interface. A checkm
 | `models` | ✓ | — | — | — | — | ✓ | — | — |
 | `repos` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `auth` (login/logout/whoami/token */create-user) | ✓ | — | — | — | — | ✓ | — | — |
+| `orgs` (create/list/members */`users` create/list) | ✓ | — | — | — | — | ✓ | — | — |
+| `repos grant/grants/revoke/move-to-org` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `quickstart` / `setup` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Visualization** |
 | `map` | ✓ | — | — | — | — | ✓ | ✓ | — |

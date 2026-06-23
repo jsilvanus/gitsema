@@ -460,7 +460,7 @@ gitsema index
 
 **Pluggable storage backends (Phase 101–103):** all reads/writes go through async `MetadataStore` / `VectorStore` / `FtsStore` interfaces (`src/core/storage/types.ts`). The default `sqlite` backend wraps the schema below; `postgres` routes metadata + FTS through Postgres (pgvector for vectors), and `qdrant` uses Qdrant for vectors with Postgres for metadata/FTS. Select via `storage.*` config or `GITSEMA_STORAGE_*` env vars (see Configuration), inspect with `gitsema storage info`, and copy between backends with `gitsema storage migrate`.
 
-**Schema overview (current schema v26):**
+**Schema overview (current schema v28):**
 
 | Table | Purpose |
 |---|---|
@@ -474,7 +474,7 @@ gitsema index
 | `indexed_commits` | Tracks which commits have been fully processed (incremental resume) |
 | `blob_fts` | FTS5 virtual table for BM25 hybrid search |
 | `blob_branches` | Maps blobs to branch names |
-| `repos` | Multi-repo registry (Phase 41); persistent server-side repo storage columns (normalized_url, clone_path, last_indexed_at, ephemeral) added in v23 |
+| `repos` | Multi-repo registry (Phase 41); persistent server-side repo storage columns (normalized_url, clone_path, last_indexed_at, ephemeral) added in v23; `org_id` added in v28 |
 | `query_embeddings` | Query embedding cache (avoids re-embedding identical queries) |
 | `symbols` | Symbol-level index entries (function/class boundaries); path-free `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` columns added in v24 (Phase 105, TS/TSX/JS/Python only) |
 | `symbol_embeddings` | Per-symbol embedding |
@@ -491,6 +491,9 @@ gitsema index
 | `users` | User accounts (username, scrypt password hash); added in v27 (Phase 122, multi-tenant-auth §5 Phase A) |
 | `sessions` | Login session tokens (SHA-256 hash-at-rest, expiry); added in v27 (Phase 122, multi-tenant-auth §5 Phase A) |
 | `api_keys` | Per-user API keys (SHA-256 hash-at-rest, prefix, label, optional expiry); added in v27 (Phase 122, multi-tenant-auth §5 Phase A) |
+| `orgs` | Org registry — `kind` is `personal` (one user, auto-created) or `team`; added in v28 (Phase 123, multi-tenant-auth §5 Phase B) |
+| `org_members` | Org membership with `org_admin`/`member` roles; added in v28 (Phase 123, multi-tenant-auth §5 Phase B) |
+| `repo_grants` | Per-user repo access grants (`read`/`write`/`owner`, optional branch-glob pattern); replaces the binary `repo_tokens` model for new deployments; added in v28 (Phase 123, multi-tenant-auth §5 Phase B) |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
@@ -511,7 +514,8 @@ gitsema index
 - v24 → v25: Added `structural_refs` table (+ indexes) for per-blob structural extraction — imports/calls/extends/implements sites (Phase 106 / knowledge-graph §3.2), populated by `index --graph`
 - v25 → v26: Added `graph_nodes` and `edges` tables (+ indexes) for the structural linking pass (Phase 107 / knowledge-graph §3.3), truncate-and-rebuilt by `gitsema graph build`
 - v26 → v27: Added `users`, `sessions`, and `api_keys` tables (+ indexes) for the identity & credentials core (Phase 122 / multi-tenant-auth §5 Phase A)
-- **Current version: 27**
+- v27 → v28: Added `orgs`, `org_members`, `repo_grants` tables (+ indexes) and a `repos.org_id` column for org/grant authorization (Phase 123 / multi-tenant-auth §5 Phase B)
+- **Current version: 28**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

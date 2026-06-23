@@ -47,6 +47,8 @@ export const repos = sqliteTable('repos', {
   lastIndexedAt: integer('last_indexed_at'),
   /** 1 if this repo was registered as ephemeral (not reused across requests) (v23). */
   ephemeral: integer('ephemeral').notNull().default(0),
+  /** Owning org (Phase 123 / multi-tenant-auth §5 Phase B); NULL = legacy unscoped repo (v28). */
+  orgId: integer('org_id').references(() => orgs.id),
 }, (table) => ({
   uniqNormalizedUrl: uniqueIndex('idx_repos_normalized_url').on(table.normalizedUrl),
 }))
@@ -450,3 +452,49 @@ export const apiKeys = sqliteTable('api_keys', {
   expiresAt: integer('expires_at'),
   revokedAt: integer('revoked_at'),
 })
+
+/**
+ * Org — the unit of self-service grant authority (Phase 123 /
+ * multi-tenant-auth §5 Phase B, Axis B). `kind: 'personal'` orgs are
+ * auto-created with their owning user and forever have exactly one member;
+ * `kind: 'team'` orgs are created explicitly and can have any number of
+ * members. Added in schema v28.
+ */
+export const orgs = sqliteTable('orgs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(), // 'personal' | 'team'
+  createdAt: integer('created_at').notNull(),
+})
+
+/**
+ * Membership of a user in an org, with a role (`org_admin` | `member`).
+ * Added in schema v28.
+ */
+export const orgMembers = sqliteTable('org_members', {
+  orgId: integer('org_id').notNull().references(() => orgs.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'org_admin' | 'member'
+  joinedAt: integer('joined_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.orgId, table.userId] }),
+}))
+
+/**
+ * Per-user, per-repo, per-branch access grant (Phase 123 /
+ * multi-tenant-auth §5 Phase B, Axis C) — replaces `repoTokens`' binary
+ * 1-token-=-1-repo model with N independently-scoped grants per user.
+ * `branchPattern: null` means all branches; otherwise an exact branch name
+ * or a minimatch glob (e.g. `feature/*`). Added in schema v28.
+ */
+export const repoGrants = sqliteTable('repo_grants', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  repoId: text('repo_id').notNull().references(() => repos.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'read' | 'write' | 'owner'
+  branchPattern: text('branch_pattern'),
+  grantedBy: integer('granted_by').notNull().references(() => users.id),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  uniqGrant: uniqueIndex('idx_repo_grants_user_repo_branch').on(table.userId, table.repoId, table.branchPattern),
+}))
