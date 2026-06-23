@@ -22,6 +22,7 @@ import { getRawDb } from '../src/core/db/sqlite.js'
 import { createUser, createSession } from '../src/core/auth/identity.js'
 import { createOrg, addOrgMember, provisionPersonalOrg } from '../src/core/auth/orgs.js'
 import { createGrant } from '../src/core/auth/grants.js'
+import { listAuditLog } from '../src/core/auth/auditLog.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
 const mockProvider: EmbeddingProvider = {
@@ -50,7 +51,7 @@ function loginToken(userId: number): string {
 afterEach(() => {
   const rawDb = getRawDb()
   rawDb.exec(
-    'DELETE FROM repo_grants; DELETE FROM repos; DELETE FROM org_members; DELETE FROM orgs; DELETE FROM sessions; DELETE FROM api_keys; DELETE FROM users;',
+    'DELETE FROM repo_grants; DELETE FROM repos; DELETE FROM org_members; DELETE FROM orgs; DELETE FROM sessions; DELETE FROM api_keys; DELETE FROM users; DELETE FROM audit_log;',
   )
 })
 
@@ -165,5 +166,42 @@ describe('repo grant routes', () => {
 
     const grants = await request(app).get('/api/v1/repos/repo1/grants').set('Authorization', `Bearer ${aliceToken}`)
     expect(grants.body.grants).toHaveLength(1)
+  })
+})
+
+describe('audit log recording (Phase 125)', () => {
+  it('records org.member.add/remove, grant.create/revoke, and org.repo.moved', async () => {
+    const rawDb = getRawDb()
+    addRepoRow('repo1')
+    const alice = createUser(rawDb, 'alice', 'pw')
+    const bob = createUser(rawDb, 'bob', 'pw')
+    const org = createOrg(rawDb, 'acme', 'team')
+    addOrgMember(rawDb, org.id, alice.id, 'org_admin')
+    createGrant(rawDb, { userId: alice.id, repoId: 'repo1', role: 'owner', grantedBy: alice.id })
+
+    const aliceToken = loginToken(alice.id)
+
+    await request(app)
+      .post(`/api/v1/orgs/${org.id}/members`)
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({ username: 'bob', role: 'member' })
+    await request(app).delete(`/api/v1/orgs/${org.id}/members/${bob.id}`).set('Authorization', `Bearer ${aliceToken}`)
+    await request(app)
+      .post('/api/v1/repos/repo1/grants')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({ username: 'bob', role: 'read' })
+    await request(app).delete(`/api/v1/repos/repo1/grants/${bob.id}`).set('Authorization', `Bearer ${aliceToken}`)
+    await request(app)
+      .post('/api/v1/repos/repo1/move-to-org')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({ orgId: null })
+
+    const entries = listAuditLog(rawDb, { limit: 10 })
+    const actions = entries.map((e) => e.action)
+    expect(actions).toContain('org.member.add')
+    expect(actions).toContain('org.member.remove')
+    expect(actions).toContain('grant.create')
+    expect(actions).toContain('grant.revoke')
+    expect(actions).toContain('org.repo.moved')
   })
 })

@@ -25,6 +25,7 @@ import { createApp } from '../src/server/app.js'
 import { getRawDb } from '../src/core/db/sqlite.js'
 import { createUser, getUserByUsername } from '../src/core/auth/identity.js'
 import { linkSsoIdentity } from '../src/core/auth/sso.js'
+import { listAuditLog } from '../src/core/auth/auditLog.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
 const mockProvider: EmbeddingProvider = {
@@ -48,7 +49,9 @@ afterEach(() => {
   delete process.env.GITSEMA_SERVE_KEY
   delete process.env.GITSEMA_SSO_PROVIDERS
   const rawDb = getRawDb()
-  rawDb.exec('DELETE FROM users; DELETE FROM sessions; DELETE FROM api_keys; DELETE FROM sso_identities;')
+  rawDb.exec(
+    'DELETE FROM users; DELETE FROM sessions; DELETE FROM api_keys; DELETE FROM sso_identities; DELETE FROM audit_log;',
+  )
 })
 
 describe('POST /api/v1/auth/login', () => {
@@ -74,6 +77,15 @@ describe('POST /api/v1/auth/login', () => {
       .post('/api/v1/auth/login')
       .send({ username: 'nobody', password: 'whatever' })
     expect(res.status).toBe(401)
+  })
+
+  it('records login.success and login.failure audit events', async () => {
+    await request(app).post('/api/v1/auth/login').send({ username: 'alice', password: 'correct-password' })
+    await request(app).post('/api/v1/auth/login').send({ username: 'alice', password: 'wrong-password' })
+    const entries = listAuditLog(getRawDb())
+    const actions = entries.map((e) => e.action)
+    expect(actions).toContain('login.success')
+    expect(actions).toContain('login.failure')
   })
 
   it('returns 400 for a malformed body', async () => {
@@ -173,6 +185,11 @@ describe('API key routes', () => {
       .get('/api/v1/auth/whoami')
       .set('Authorization', `Bearer ${apiKeyToken}`)
     expect(afterRevoke.status).toBe(401)
+
+    const auditEntries = listAuditLog(getRawDb())
+    const actions = auditEntries.map((e) => e.action)
+    expect(actions).toContain('token.create')
+    expect(actions).toContain('token.revoke')
   })
 
   it('returns 400 for a too-short prefix on revoke', async () => {

@@ -28,6 +28,7 @@ import {
   getUserById,
 } from '../../core/auth/identity.js'
 import { listSsoIdentitiesForUser, unlinkSsoIdentity } from '../../core/auth/sso.js'
+import { recordAuditEvent } from '../../core/auth/auditLog.js'
 
 const LoginSchema = z.object({
   username: z.string().min(1),
@@ -59,10 +60,12 @@ export function authRouter(): Router {
     const rawDb = getRawDb()
     const user = verifyPassword(rawDb, parsed.data.username, parsed.data.password)
     if (!user) {
+      recordAuditEvent(rawDb, { action: 'login.failure', target: parsed.data.username })
       res.status(401).json({ error: 'Invalid username or password' })
       return
     }
     const { token, expiresAt } = createSession(rawDb, user.id)
+    recordAuditEvent(rawDb, { actorUserId: user.id, action: 'login.success', target: user.username })
     res.json({ token, expiresAt, username: user.username })
   })
 
@@ -96,10 +99,12 @@ export function authRouter(): Router {
       res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
       return
     }
-    const { token, prefix, expiresAt } = createApiKey(getRawDb(), userId, {
+    const rawDb = getRawDb()
+    const { token, prefix, expiresAt } = createApiKey(rawDb, userId, {
       label: parsed.data.label,
       expiresInSeconds: parsed.data.expiresInSeconds,
     })
+    recordAuditEvent(rawDb, { actorUserId: userId, action: 'token.create', target: prefix })
     res.json({ token, prefix, expiresAt })
   })
 
@@ -118,11 +123,13 @@ export function authRouter(): Router {
       res.status(400).json({ error: 'Token prefix must be at least 8 characters' })
       return
     }
-    const revoked = revokeApiKeyByPrefix(getRawDb(), userId, prefix)
+    const rawDb = getRawDb()
+    const revoked = revokeApiKeyByPrefix(rawDb, userId, prefix)
     if (revoked === 0) {
       res.status(404).json({ error: 'No matching API key found' })
       return
     }
+    recordAuditEvent(rawDb, { actorUserId: userId, action: 'token.revoke', target: prefix })
     res.json({ revoked })
   })
 

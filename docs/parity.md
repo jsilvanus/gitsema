@@ -2,7 +2,7 @@
 
 This document tracks the availability of gitsema tools and commands across all interfaces, and the implementation of common flags across the CLI. It serves as the single source of truth for interface parity and helps identify gaps, inconsistencies, and opportunities for unification.
 
-**Last updated:** 2026-06-22 (the only date in this document — see §4 for why)  
+**Last updated:** 2026-06-23 (the only date in this document — see §4 for why)  
 **Maintainer note:** Any tool change, interface change, or flag addition must be reflected in the tables below and in the canonical sections of `CLAUDE.md` / `docs/features.md` / `README.md`.
 
 ---
@@ -137,6 +137,7 @@ This table shows which tools/commands are available in which interface. A checkm
 | `orgs` (create/list/members */`users` create/list) | ✓ | — | — | — | — | ✓ | — | — |
 | `repos grant/grants/revoke/move-to-org` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `auth sso link/unlink/list` | ✓ | — | — | — | — | ✓ | ✓ | — |
+| `audit log` | ✓ | — | — | — | — | — | — | — |
 | `quickstart` / `setup` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Visualization** |
 | `map` | ✓ | — | — | — | — | ✓ | ✓ | — |

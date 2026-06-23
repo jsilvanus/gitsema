@@ -127,6 +127,7 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema auth sso link <provider> <external-id> <username>` | Link an external SSO/OIDC identity to an existing user; provider must be in `GITSEMA_SSO_PROVIDERS` (operator-only) |
 | `gitsema auth sso unlink <provider> <external-id>` | Unlink an external identity (operator-only) |
 | `gitsema auth sso list <username>` | List SSO identities linked to a user (operator-only) |
+| `gitsema audit log [--org <org>] [--repo <repo-id>] [--limit <n>]` | Query the identity/authorization audit trail (grant/token/login/org-membership/repo-move events), newest first (operator-only) |
 
 #### `gitsema index start [options]`
 

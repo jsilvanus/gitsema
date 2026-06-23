@@ -64,8 +64,10 @@ export interface DbSession {
  *       org/grant authorization (Phase 123 / multi-tenant-auth §5 Phase B)
  * 29 — Added sso_identities table for linked external OIDC/SSO identities
  *       (Phase 124 / multi-tenant-auth §5 Phase C)
+ * 30 — Added audit_log table for the identity/authorization audit trail
+ *       (Phase 125 / multi-tenant-auth §5 Phase D)
  */
-export const CURRENT_SCHEMA_VERSION = 29
+export const CURRENT_SCHEMA_VERSION = 30
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -450,6 +452,21 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_sso_identities_provider_external
       ON sso_identities(provider, external_id);
     CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id);
+
+    -- Identity/authorization audit trail (Phase 125 / multi-tenant-auth §5 Phase D).
+    -- No FK constraints: a historical record should outlive the rows it references.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_user_id INTEGER,
+      action TEXT NOT NULL,
+      target TEXT,
+      org_id INTEGER,
+      repo_id TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_log_org ON audit_log(org_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_repo ON audit_log(repo_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
   `)
 
   if (isFresh) {

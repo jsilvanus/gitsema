@@ -515,3 +515,22 @@ export const ssoIdentities = sqliteTable('sso_identities', {
 }, (table) => ({
   uniqIdentity: uniqueIndex('idx_sso_identities_provider_external').on(table.provider, table.externalId),
 }))
+
+/**
+ * Audit trail of sensitive identity/authorization actions (Phase 125 /
+ * multi-tenant-auth §5 Phase D) — grant create/revoke, token create/revoke,
+ * login success/failure, org membership changes, repo org moves. No FK
+ * constraints on `actorUserId`/`orgId`/`repoId`: this is a historical record
+ * that should outlive the rows it references (e.g. a revoked grant or a
+ * later-deleted org shouldn't erase the audit trail of having created it).
+ * Added in schema v30.
+ */
+export const auditLog = sqliteTable('audit_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  actorUserId: integer('actor_user_id'),
+  action: text('action').notNull(),
+  target: text('target'),
+  orgId: integer('org_id'),
+  repoId: text('repo_id'),
+  createdAt: integer('created_at').notNull(),
+})

@@ -353,6 +353,22 @@ CRUD only — it does **not** implement the device-code browser-based OIDC flow
 requires choosing and integrating an OIDC client library (a new dependency against
 CLAUDE.md's minimal-deps preference) and a live identity provider to test against.
 
+### Audit log (Phase 125)
+
+`audit_log` records sensitive identity/authorization actions — grant create/revoke,
+token create/revoke, login success/failure, org membership changes, repo org moves —
+so they can later be queried by org or repo. The table has **no foreign-key
+constraints** on `actor_user_id`/`org_id`/`repo_id`: an audit trail is meant to outlive
+the rows it documents (a later-deleted org or revoked grant shouldn't erase the
+historical record of having created it). Query via `gitsema audit log [--org <org>]
+[--repo <repo-id>] [--limit <n>]`, an operator-only CLI command reading directly from
+the local server DB (same precedent as `gitsema orgs *`). Deliberate scope deviation:
+only the HTTP routes (`src/server/routes/auth.ts`, `src/server/routes/orgs.ts`) record
+audit events — the equivalent operator-only CLI-direct paths (`gitsema repos grant`,
+`gitsema orgs members add`, `gitsema auth create-user`, etc.) do **not** get logged in
+v1, since those paths already require local DB access, a stronger trust boundary than
+the network surface this audit trail is primarily meant to cover.
+
 ### Persistent server-side repo storage
 
 `POST /api/v1/remote/index` **persists** the clone + index by default (`persist: true`),

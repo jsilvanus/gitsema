@@ -4708,7 +4708,7 @@ that deprecated it, and its removal status.
 | **124** | §5 Phase C | SSO/OIDC linking | New `sso_identities` table; `gitsema auth login <server-url> --sso <provider>` device-code-style flow; provider allowlist config; first new third-party dependency (an OIDC client library) — flagged against CLAUDE.md's minimal-deps preference. |
 | **125** | §5 Phase D | Audit log | New `audit_log` table (actor, action, target, timestamp); `gitsema audit log [--org][--repo]` CLI; records `org.repo.moved` and other Phase B/C actions. Lowest priority of the track, no hard dependents. |
 
-**Status:** Phase 122 ✅ complete (version pending). Phase 123 ✅ complete (version pending). Phase 124 ✅ complete (version pending). Phase 125 not started.
+**Status:** Phase 122 ✅ complete (version pending). Phase 123 ✅ complete (version pending). Phase 124 ✅ complete (version pending). Phase 125 ✅ complete (version pending). **Multi-Tenant Auth Track (Phases 122–125) complete.**
 
 **Phase 122 implementation notes:**
 - Schema v27 adds `users`/`sessions`/`api_keys` (migration `027_auth_identity.ts`).
@@ -4813,6 +4813,38 @@ that deprecated it, and its removal status.
   list CRUD, `SsoIdentityTakenError` collision case) and HTTP integration tests added
   to `tests/authRoutes.test.ts` (list own identities, unlink own identity, 404 on
   unlinking an identity not owned by the calling user).
+
+**Phase 125 implementation notes:**
+- Schema v30 adds `audit_log` (`actor_user_id`, `action`, `target`, `org_id`, `repo_id`,
+  `created_at`; indexed on `org_id`/`repo_id`/`created_at`) (migration
+  `030_audit_log.ts`). **Deliberately no FK constraints** on `actor_user_id`/`org_id`/
+  `repo_id` — an audit trail should outlive the rows it references (e.g. a later-deleted
+  org or revoked grant shouldn't erase the historical record of having created it).
+- `src/core/auth/auditLog.ts` is the core module: `recordAuditEvent` (never throws —
+  callers' primary action should not fail because logging failed) and `listAuditLog`
+  (filterable by `orgId`/`repoId`, newest first, default limit 100).
+- `AuditAction` covers `grant.create`/`grant.revoke`, `token.create`/`token.revoke`,
+  `login.success`/`login.failure`, `org.member.add`/`org.member.remove`,
+  `org.repo.moved`.
+- CLI: `gitsema audit log [--org <org>] [--repo <repo-id>] [--limit <n>]` (new
+  `src/cli/commands/audit.ts`, registered alongside `authCommand()`/`orgsCommand()`/
+  `usersCommand()`) — operator-only, reading the local server DB directly via
+  `getRawDb()`, the same pattern as `gitsema orgs *`.
+- **Deviation from spec (documented per the Phase 122/123/124 precedent):** only the
+  HTTP routes record audit events — `src/server/routes/auth.ts` (`login.success`/
+  `login.failure` in `POST /login`, `token.create` in `POST /tokens`, `token.revoke` in
+  `DELETE /tokens/:prefix`) and `src/server/routes/orgs.ts` (`org.member.add`/
+  `org.member.remove` in the members routes, `grant.create`/`grant.revoke` in the grant
+  routes, `org.repo.moved` in `move-to-org`). The equivalent operator-only CLI-direct
+  paths (`gitsema repos grant`, `gitsema orgs members add`, `gitsema auth create-user`,
+  etc.) do **not** get logged in v1 — those paths already require local DB access, a
+  stronger trust boundary than the network surface this audit trail is primarily meant
+  to cover.
+- Tests: `tests/auditLog.test.ts` (unit — record/list, org/repo filtering, limit,
+  null-field defaults, surviving a deleted org/repo reference) and HTTP integration
+  tests added to `tests/authRoutes.test.ts` (login.success/login.failure, token.create/
+  token.revoke) and `tests/orgsRoutes.test.ts` (org.member.add/remove, grant.create/
+  revoke, org.repo.moved).
 
 ---
 

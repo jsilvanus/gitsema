@@ -40,6 +40,7 @@ import {
   getRepoOrgId,
   roleSatisfies,
 } from '../../core/auth/grants.js'
+import { recordAuditEvent } from '../../core/auth/auditLog.js'
 
 function requireUserId(req: import('express').Request, res: import('express').Response): number | undefined {
   if (req.userId === undefined) {
@@ -120,6 +121,12 @@ export function orgsRouter(): Router {
     }
     try {
       const membership = addOrgMember(rawDb, orgId, target.id, parsed.data.role ?? 'member')
+      recordAuditEvent(rawDb, {
+        actorUserId: userId,
+        action: 'org.member.add',
+        target: parsed.data.username,
+        orgId,
+      })
       res.json(membership)
     } catch (e) {
       if (e instanceof PersonalOrgImmutableError) {
@@ -140,7 +147,14 @@ export function orgsRouter(): Router {
     }
     const targetUserId = Number(req.params.userId)
     try {
-      removeOrgMember(getRawDb(), orgId, targetUserId)
+      const rawDb = getRawDb()
+      removeOrgMember(rawDb, orgId, targetUserId)
+      recordAuditEvent(rawDb, {
+        actorUserId: userId,
+        action: 'org.member.remove',
+        target: String(targetUserId),
+        orgId,
+      })
       res.json({ ok: true })
     } catch (e) {
       if (e instanceof PersonalOrgImmutableError) {
@@ -195,6 +209,12 @@ export function repoGrantsRouter(): Router {
       branchPattern: parsed.data.branchPattern ?? null,
       grantedBy: userId,
     })
+    recordAuditEvent(rawDb, {
+      actorUserId: userId,
+      action: 'grant.create',
+      target: parsed.data.username,
+      repoId,
+    })
     res.json(grant)
   })
 
@@ -207,7 +227,14 @@ export function repoGrantsRouter(): Router {
       return
     }
     const targetUserId = Number(req.params.userId)
-    const revoked = revokeGrant(getRawDb(), targetUserId, repoId)
+    const rawDb = getRawDb()
+    const revoked = revokeGrant(rawDb, targetUserId, repoId)
+    recordAuditEvent(rawDb, {
+      actorUserId: userId,
+      action: 'grant.revoke',
+      target: String(targetUserId),
+      repoId,
+    })
     res.json({ revoked })
   })
 
@@ -231,7 +258,15 @@ export function repoGrantsRouter(): Router {
         return
       }
     }
-    moveRepoToOrg(getRawDb(), repoId, parsed.data.orgId)
+    const rawDb = getRawDb()
+    moveRepoToOrg(rawDb, repoId, parsed.data.orgId)
+    recordAuditEvent(rawDb, {
+      actorUserId: userId,
+      action: 'org.repo.moved',
+      target: parsed.data.orgId !== null ? String(parsed.data.orgId) : 'null',
+      repoId,
+      orgId: parsed.data.orgId,
+    })
     res.json({ ok: true })
   })
 
