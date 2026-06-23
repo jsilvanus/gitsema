@@ -488,6 +488,9 @@ gitsema index
 | `structural_refs` | Raw, unresolved structural references (imports/calls/extends/implements) per blob, dedup'd by `blob_hash`; added in v25 (Phase 106, knowledge-graph §3.2), populated by `index --graph` for TS/TSX/JS/Python only |
 | `graph_nodes` | Structural graph nodes (`file:<path>`, `symbol:<path>#<qname>#<sighash>`, `external:<name>`); added in v26 (Phase 107, knowledge-graph §3.3), truncate-and-rebuilt by `gitsema graph build` |
 | `edges` | Typed edges between graph nodes (contains/defines/imports/calls/extends/implements/references/co_change); added in v26 (Phase 107, knowledge-graph §3.3), truncate-and-rebuilt by `gitsema graph build` |
+| `users` | User accounts (username, scrypt password hash); added in v27 (Phase 122, multi-tenant-auth §5 Phase A) |
+| `sessions` | Login session tokens (SHA-256 hash-at-rest, expiry); added in v27 (Phase 122, multi-tenant-auth §5 Phase A) |
+| `api_keys` | Per-user API keys (SHA-256 hash-at-rest, prefix, label, optional expiry); added in v27 (Phase 122, multi-tenant-auth §5 Phase A) |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
@@ -507,7 +510,8 @@ gitsema index
 - v23 → v24: Added `qualified_name`, `signature`, `signature_hash`, `parent_qualified_name` columns (+ indexes) to `symbols` table for path-free stable symbol identity (Phase 105 / knowledge-graph §3.1)
 - v24 → v25: Added `structural_refs` table (+ indexes) for per-blob structural extraction — imports/calls/extends/implements sites (Phase 106 / knowledge-graph §3.2), populated by `index --graph`
 - v25 → v26: Added `graph_nodes` and `edges` tables (+ indexes) for the structural linking pass (Phase 107 / knowledge-graph §3.3), truncate-and-rebuilt by `gitsema graph build`
-- **Current version: 26**
+- v26 → v27: Added `users`, `sessions`, and `api_keys` tables (+ indexes) for the identity & credentials core (Phase 122 / multi-tenant-auth §5 Phase A)
+- **Current version: 27**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

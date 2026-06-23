@@ -108,6 +108,11 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema index start [options]` | Perform indexing — walk Git history and embed all blobs |
 | `gitsema setup` (alias: `gitsema quickstart`) | Guided onboarding wizard: detect provider, configure embedding model, select storage backend (sqlite/postgres/qdrant), index HEAD, and optionally configure a narrator/guide model |
 | `gitsema remote-index <repoUrl>` | Ask a remote gitsema server to clone and index a Git repository |
+| `gitsema auth login <server-url>` | Log in to a `gitsema tools serve` server (prompts for username/password); stores credentials locally |
+| `gitsema auth logout` | Log out and clear stored credentials |
+| `gitsema auth whoami` | Show the currently logged-in user |
+| `gitsema auth token create/list/revoke` | Manage your own API keys on the logged-in server |
+| `gitsema auth create-user <username>` | Bootstrap a new user directly against the local server DB (operator-only) |
 
 #### `gitsema index start [options]`
 

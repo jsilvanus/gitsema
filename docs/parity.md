@@ -133,6 +133,7 @@ This table shows which tools/commands are available in which interface. A checkm
 | `config` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `models` | ✓ | — | — | — | — | ✓ | — | — |
 | `repos` | ✓ | — | — | — | — | ✓ | ✓ | — |
+| `auth` (login/logout/whoami/token */create-user) | ✓ | — | — | — | — | ✓ | — | — |
 | `quickstart` / `setup` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Visualization** |
 | `map` | ✓ | — | — | — | — | ✓ | ✓ | — |

@@ -1,12 +1,15 @@
 import { timingSafeEqual, createHash } from 'node:crypto'
 import type { Request, Response, NextFunction } from 'express'
 import { getRawDb } from '../../core/db/sqlite.js'
+import { resolveSessionToken, resolveApiKey } from '../../core/auth/identity.js'
 
-// Extend Express Request with optional repoId scope injected by scoped token auth
+// Extend Express Request with optional repoId scope injected by scoped token auth,
+// and optional userId injected by user-credential auth (Phase 122).
 declare global {
   namespace Express {
     interface Request {
       repoId?: string
+      userId?: number
     }
   }
 }
@@ -21,28 +24,58 @@ function hashToken(token: string): string {
 
 /**
  * Optional Bearer-token auth middleware.
- * When GITSEMA_SERVE_KEY is set, every request must carry
- * `Authorization: Bearer <key>` or the request is rejected with 401.
- * When the env var is unset the middleware is a no-op.
  *
- * Per-repo scoped tokens: if the supplied token is not the global
- * GITSEMA_SERVE_KEY, the middleware computes its SHA-256 hash and looks it up
- * in the `repo_tokens` table (review7 §4.1 — tokens are stored hashed).
- * When a match is found, `req.repoId` is set to the scoped repo ID and the
- * request proceeds.
+ * Resolution order (Phase 122 — multi-tenant-auth §5 Phase A):
+ *   1. User credential: a session token or API key minted via `gitsema auth`
+ *      (`POST /api/v1/auth/login` / `/auth/tokens`). On match, sets
+ *      `req.userId` and proceeds — this path is checked regardless of
+ *      whether GITSEMA_SERVE_KEY is set, since user accounts are independent
+ *      of the legacy global-key deployment model.
+ *   2. Legacy global key: when GITSEMA_SERVE_KEY is set, every request must
+ *      carry `Authorization: Bearer <key>` or the request is rejected with
+ *      401. When the env var is unset and no user credential matched, the
+ *      middleware is a no-op (today's default-open local-dev behavior).
+ *   3. Legacy per-repo scoped token: if the supplied token is not the global
+ *      key, the middleware computes its SHA-256 hash and looks it up in the
+ *      `repo_tokens` table (review7 §4.1 — tokens are stored hashed). When a
+ *      match is found, `req.repoId` is set to the scoped repo ID.
+ *
+ * No authorization decisions are made here yet — a resolved `req.userId`
+ * with no grants can do nothing beyond `whoami` until Phase 123 ships.
  *
  * Token comparison uses `crypto.timingSafeEqual` to prevent timing-oracle attacks.
  */
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const auth = req.headers.authorization ?? ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+
+  if (token) {
+    try {
+      const rawDb = getRawDb()
+      const session = resolveSessionToken(rawDb, token)
+      if (session) {
+        req.userId = session.userId
+        next()
+        return
+      }
+      const apiKeyUserId = resolveApiKey(rawDb, token)
+      if (apiKeyUserId !== undefined) {
+        req.userId = apiKeyUserId
+        next()
+        return
+      }
+    } catch {
+      // DB not open yet or tables missing — fall through to legacy auth
+    }
+  }
+
   const globalKey = process.env.GITSEMA_SERVE_KEY
   if (!globalKey) {
     next()
     return
   }
-  const auth = req.headers.authorization ?? ''
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
 
-  // Check global key first (constant-time comparison)
+  // Check global key (constant-time comparison)
   const expectedBuf = Buffer.from(globalKey)
   const actualBuf = Buffer.from(token)
   const isGlobal =

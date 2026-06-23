@@ -4708,7 +4708,29 @@ that deprecated it, and its removal status.
 | **124** | §5 Phase C | SSO/OIDC linking | New `sso_identities` table; `gitsema auth login <server-url> --sso <provider>` device-code-style flow; provider allowlist config; first new third-party dependency (an OIDC client library) — flagged against CLAUDE.md's minimal-deps preference. |
 | **125** | §5 Phase D | Audit log | New `audit_log` table (actor, action, target, timestamp); `gitsema audit log [--org][--repo]` CLI; records `org.repo.moved` and other Phase B/C actions. Lowest priority of the track, no hard dependents. |
 
-**Status:** not started — draft design, scheduled here per `/phase-plan`.
+**Status:** Phase 122 ✅ complete (version pending). Phases 123–125 not started.
+
+**Phase 122 implementation notes:**
+- Schema v27 adds `users`/`sessions`/`api_keys` (migration `027_auth_identity.ts`).
+- `src/core/auth/identity.ts` is the core module: scrypt password hashing, SHA-256
+  hash-at-rest for session tokens and API keys (8-char prefix kept in the clear for
+  revoke-by-prefix UX), idle-window session TTL (`GITSEMA_SESSION_TTL_DAYS`, default
+  30 days, refreshed on each successful resolution).
+- `authMiddleware` resolution order: user session/API key → legacy `GITSEMA_SERVE_KEY`
+  → legacy `repo_tokens` → 401.
+- `POST /api/v1/auth/login` is mounted before the global `authMiddleware` in `app.ts`
+  so it's reachable with no bearer token; the other `/auth/*` routes apply
+  `authMiddleware` themselves at the route level.
+- **Deviation from spec:** added `gitsema auth create-user <username>` — a local-DB-only
+  bootstrap command (no network route) — since the design doc's CLI surface for Phase A
+  has no way to create the first user; self-service/admin user creation via a network
+  route (`gitsema users create`) is explicitly Phase B's deliverable. This mirrors the
+  existing `repos token add` local-DB-access pattern and makes Phase A usable
+  end-to-end without Phase B's org/role model.
+- Tests: `tests/identity.test.ts` (unit — password round-trip, session expiry/refresh,
+  API key creation/revocation/expiry, username collision) and `tests/authRoutes.test.ts`
+  (HTTP integration — login/logout/whoami, token create/list/revoke, dual-auth-path
+  precedence vs. `GITSEMA_SERVE_KEY`).
 
 ---
 

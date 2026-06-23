@@ -62,6 +62,7 @@ export const COMMAND_GROUPS: Record<string, string> = {
   'cherry-pick-suggest':   'Workflow & CI',
   repos:                   'Workflow & CI',
   watch:                   'Workflow & CI',
+  auth:                    'Setup & Infrastructure',
   triage:                  'Analysis',
   'policy-check':          'Analysis',
   ownership:               'Analysis',

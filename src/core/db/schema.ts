@@ -408,3 +408,45 @@ export const repoTokens = sqliteTable('repo_tokens', {
   label: text('label'),
   createdAt: integer('created_at').notNull(),
 })
+
+/**
+ * User identity (Phase 122 / multi-tenant-auth §5 Phase A). A user
+ * authenticates via password+session (this table + sessions) or an API key
+ * (apiKeys) — both resolve to the same userId before any authorization check.
+ * Added in schema v27.
+ */
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  username: text('username').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  passwordSalt: text('password_salt').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+/**
+ * Bearer session tokens minted by POST /auth/login. Stored as a SHA-256 hash
+ * (same precedent as repoTokens/review7 §4.1) — never plaintext at rest.
+ * Added in schema v27.
+ */
+export const sessions = sqliteTable('sessions', {
+  sessionTokenHash: text('session_token_hash').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  lastSeenAt: integer('last_seen_at').notNull(),
+})
+
+/**
+ * Long-lived, independently revocable API keys bound to a user identity
+ * (the repoTokens mechanism's spiritual successor — repo scoping moves to
+ * repo_grants in Phase 123). Added in schema v27.
+ */
+export const apiKeys = sqliteTable('api_keys', {
+  keyHash: text('key_hash').primaryKey(),
+  keyPrefix: text('key_prefix').notNull(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  label: text('label'),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at'),
+  revokedAt: integer('revoked_at'),
+})

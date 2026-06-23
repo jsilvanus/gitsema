@@ -58,8 +58,10 @@ export interface DbSession {
  *       knowledge-graph §3.2), populated during `index --graph` for TS/TSX/JS/Python
  * 26 — Added graph_nodes and edges tables for the structural linking pass (Phase 107 /
  *       knowledge-graph §3.3), rebuilt wholesale by `gitsema graph build`
+ * 27 — Added users, sessions, api_keys tables for identity & credentials core
+ *       (Phase 122 / multi-tenant-auth §5 Phase A)
  */
-export const CURRENT_SCHEMA_VERSION = 26
+export const CURRENT_SCHEMA_VERSION = 27
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -369,6 +371,38 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     CREATE INDEX IF NOT EXISTS idx_edges_src_type ON edges(src_key, edge_type);
     CREATE INDEX IF NOT EXISTS idx_edges_dst_type ON edges(dst_key, edge_type);
     CREATE INDEX IF NOT EXISTS idx_graph_nodes_display_name ON graph_nodes(display_name);
+
+    -- Identity & credentials core (Phase 122 / multi-tenant-auth §5 Phase A / v27).
+    -- A user authenticates via password+session, an API key, or (Phase 124) a
+    -- linked SSO identity — all resolve to the same users.id before any
+    -- authorization check runs. No authorization model yet (Phase 123).
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    CREATE TABLE IF NOT EXISTS api_keys (
+      key_hash TEXT PRIMARY KEY,
+      key_prefix TEXT NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      label TEXT,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      revoked_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
   `)
 
   if (isFresh) {

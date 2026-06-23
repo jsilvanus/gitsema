@@ -270,12 +270,31 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
 | `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
+| `POST /api/v1/auth/login` | Username/password → session token (Phase 122) |
+| `POST /api/v1/auth/logout` | Revoke the session token used to call it (Phase 122) |
+| `POST /api/v1/auth/tokens`, `GET /api/v1/auth/tokens`, `DELETE /api/v1/auth/tokens/:prefix` | Mint/list/revoke the calling user's API keys (Phase 122) |
+| `GET /api/v1/auth/whoami` | Resolve the calling user's identity (Phase 122) |
 | `GET /ui` | Embedded 2D codebase map UI (requires `--ui`) |
 | `GET /metrics` | Prometheus metrics scrape endpoint (P2) |
 | `GET /openapi.json` | OpenAPI 3.1 JSON specification (P2) |
 | `GET /docs` | Swagger UI (P2) |
 
 Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`. Per-repo scoped tokens can be minted with `gitsema repos token add <repo-id>` and are stored as **SHA-256 hashes** at rest (review7 §4.1) — the plaintext is never persisted in the database.
+
+### Identity & credentials core (Phase 122)
+
+User accounts (`gitsema auth create-user <username>`, local DB bootstrap; org/role-gated
+self-service creation lands in Phase 123) authenticate against `/api/v1/auth/*` via
+either a password-derived **session token** (`gitsema auth login <server-url>`, 30-day
+idle-window TTL by default, configurable via `GITSEMA_SESSION_TTL_DAYS`) or a long-lived
+**API key** (`gitsema auth token create/list/revoke`). Passwords are hashed with
+`node:crypto`'s scrypt (no new dependency); session tokens and API keys are stored as
+SHA-256 hashes at rest, the same precedent as `repo_tokens` (review7 §4.1) — only an
+8-character prefix is kept in the clear for display/revoke-by-prefix lookups. Both
+credential kinds resolve to a `userId` in `authMiddleware`, checked **before** the
+legacy `GITSEMA_SERVE_KEY` and `repo_tokens` paths on every request — no authorization
+changes yet (orgs, grants, roles ship in Phase 123). The local credential file
+(`~/.config/gitsema/credentials.json`, `0o600`) tracks one active login at a time.
 
 ### Persistent server-side repo storage
 
