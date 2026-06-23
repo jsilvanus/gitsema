@@ -102,4 +102,14 @@ describe('recordAuditEvent / listAuditLog', () => {
       session.rawDb.close()
     }
   })
+
+  it('never throws, even if the underlying write fails', () => {
+    const session = setupDb()
+    try {
+      session.rawDb.close()
+      expect(() => recordAuditEvent(session.rawDb, { action: 'login.success', target: 'alice' })).not.toThrow()
+    } finally {
+      // already closed above
+    }
+  })
 })

@@ -19,7 +19,7 @@ import {
   PersonalOrgImmutableError,
 } from '../../core/auth/orgs.js'
 
-function resolveOrgOrExit(name: string) {
+export function resolveOrgOrExit(name: string) {
   const org = getOrgByName(getRawDb(), name)
   if (!org) {
     console.error(`Error: org '${name}' not found`)

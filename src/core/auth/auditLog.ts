@@ -15,6 +15,7 @@
  */
 
 import type Database from 'better-sqlite3'
+import { logger } from '../../utils/logger.js'
 
 export type AuditAction =
   | 'grant.create'
@@ -68,12 +69,16 @@ function rowToEntry(row: {
 /** Records an audit event. Never throws — callers should not have their primary action fail because logging failed. */
 export function recordAuditEvent(rawDb: InstanceType<typeof Database>, opts: RecordAuditEventOptions): void {
   const createdAt = Math.floor(Date.now() / 1000)
-  rawDb
-    .prepare(
-      `INSERT INTO audit_log (actor_user_id, action, target, org_id, repo_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(opts.actorUserId ?? null, opts.action, opts.target ?? null, opts.orgId ?? null, opts.repoId ?? null, createdAt)
+  try {
+    rawDb
+      .prepare(
+        `INSERT INTO audit_log (actor_user_id, action, target, org_id, repo_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(opts.actorUserId ?? null, opts.action, opts.target ?? null, opts.orgId ?? null, opts.repoId ?? null, createdAt)
+  } catch (err) {
+    logger.warn(`recordAuditEvent failed for action '${opts.action}': ${err instanceof Error ? err.message : String(err)}`)
+  }
 }
 
 export interface ListAuditLogOptions {
