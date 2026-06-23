@@ -36,6 +36,21 @@ otherwise the finding is lost once the session ends.
 
 ---
 
+## PR babysitting in this environment
+
+The `send_later` tool (claude-code-remote MCP server) is **not available** in
+this environment. CI turning green also does **not** trigger a webhook event —
+only CI failures, new review comments, and similar activity do. This means a
+subscribed PR can sit at "CI passed" indefinitely with no event to notice it.
+
+When babysitting/watching a PR here, compensate by running a short polling
+wait (e.g. a backgrounded `sleep ~7m` via Bash `run_in_background`, repeated as
+needed) and re-checking CI status (`pull_request_read` → `get_status` /
+`get_check_runs`) after each wait, instead of relying on `send_later` or
+webhook delivery alone.
+
+---
+
 ## Releases & changesets
 
 This repo uses [changesets](https://github.com/changesets/changesets) for versioning, `CHANGELOG.md` generation, and npm publishing (OIDC trusted publishing — no npm token).
