@@ -59,6 +59,28 @@ const mockProvider: EmbeddingProvider = {
   dimensions: 4,
 }
 
+/**
+ * Registers an existing public repo in both the registry DB and the active DB,
+ * mirroring the dual-write the route handler performs (ownerUserId only lands
+ * in the active DB — see CLAUDE.md's two-database note).
+ */
+function registerPublicRepoFixture(repoUrl: string, name: string, ownerUserId: number) {
+  const normalizedUrl = normalizeRepoUrl(repoUrl)
+  const repoId = deriveRepoId(normalizedUrl)
+  const base = {
+    id: repoId,
+    name,
+    url: repoUrl,
+    normalizedUrl,
+    clonePath: getRepoClonePath(repoId),
+    dbPath: getRepoDbPath(repoId),
+    visibility: 'public' as const,
+  }
+  registerPersistedRepo(getRegistrySession(), base)
+  registerPersistedRepo(getActiveSession(), { ...base, ownerUserId })
+  return repoId
+}
+
 let app: ReturnType<typeof createApp>
 
 beforeAll(() => {
@@ -251,27 +273,7 @@ describe('POST /api/v1/remote/index — public repo sharing (Phase 126)', () => 
     const rawDb = getRawDb()
     const owner = createUser(rawDb, 'owner-attach', 'pw')
     const repoUrl = 'https://github.com/example/public-attach-repo.git'
-    const normalizedUrl = normalizeRepoUrl(repoUrl)
-    const repoId = deriveRepoId(normalizedUrl)
-    registerPersistedRepo(getRegistrySession(), {
-      id: repoId,
-      name: 'public-attach-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-    })
-    registerPersistedRepo(getActiveSession(), {
-      id: repoId,
-      name: 'public-attach-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-      ownerUserId: owner.id,
-    })
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-attach-repo', owner.id)
 
     const reader = createUser(rawDb, 'reader-attach', 'pw')
     const readerToken = createSession(rawDb, reader.id).token
@@ -294,27 +296,7 @@ describe('POST /api/v1/remote/index — public repo sharing (Phase 126)', () => 
     const rawDb = getRawDb()
     const owner = createUser(rawDb, 'owner-nodowngrade', 'pw')
     const repoUrl = 'https://github.com/example/public-nodowngrade-repo.git'
-    const normalizedUrl = normalizeRepoUrl(repoUrl)
-    const repoId = deriveRepoId(normalizedUrl)
-    registerPersistedRepo(getRegistrySession(), {
-      id: repoId,
-      name: 'public-nodowngrade-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-    })
-    registerPersistedRepo(getActiveSession(), {
-      id: repoId,
-      name: 'public-nodowngrade-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-      ownerUserId: owner.id,
-    })
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-nodowngrade-repo', owner.id)
 
     const writer = createUser(rawDb, 'writer-nodowngrade', 'pw')
     const writerToken = createSession(rawDb, writer.id).token
@@ -335,27 +317,7 @@ describe('POST /api/v1/remote/index — public repo sharing (Phase 126)', () => 
     const rawDb = getRawDb()
     const owner = createUser(rawDb, 'owner-throttle', 'pw')
     const repoUrl = 'https://github.com/example/public-throttle-repo.git'
-    const normalizedUrl = normalizeRepoUrl(repoUrl)
-    const repoId = deriveRepoId(normalizedUrl)
-    registerPersistedRepo(getRegistrySession(), {
-      id: repoId,
-      name: 'public-throttle-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-    })
-    registerPersistedRepo(getActiveSession(), {
-      id: repoId,
-      name: 'public-throttle-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-      ownerUserId: owner.id,
-    })
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-throttle-repo', owner.id)
 
     const caller = createUser(rawDb, 'caller-throttle', 'pw')
     const callerToken = createSession(rawDb, caller.id).token
@@ -382,27 +344,7 @@ describe('POST /api/v1/remote/index — public repo sharing (Phase 126)', () => 
     const owner = createUser(rawDb, 'owner-no-throttle', 'pw')
     const ownerToken = createSession(rawDb, owner.id).token
     const repoUrl = 'https://github.com/example/public-owner-no-throttle-repo.git'
-    const normalizedUrl = normalizeRepoUrl(repoUrl)
-    const repoId = deriveRepoId(normalizedUrl)
-    registerPersistedRepo(getRegistrySession(), {
-      id: repoId,
-      name: 'public-owner-no-throttle-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-    })
-    registerPersistedRepo(getActiveSession(), {
-      id: repoId,
-      name: 'public-owner-no-throttle-repo',
-      url: repoUrl,
-      normalizedUrl,
-      clonePath: getRepoClonePath(repoId),
-      dbPath: getRepoDbPath(repoId),
-      visibility: 'public',
-      ownerUserId: owner.id,
-    })
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-owner-no-throttle-repo', owner.id)
 
     await request(app)
       .post('/api/v1/remote/index')

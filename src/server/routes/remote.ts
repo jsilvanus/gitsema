@@ -342,6 +342,9 @@ function checkAndRecordReindexThrottle(repoId: string, userId: number, cwd?: str
     }
   }
   _lastReindexTriggerAt.set(key, now)
+  // Once the throttle window elapses the entry is dead weight — same TTL-cleanup
+  // pattern as the `_jobs` map above, sized to this call's own interval.
+  setTimeout(() => { _lastReindexTriggerAt.delete(key) }, minIntervalMs).unref()
   return 0
 }
 
@@ -616,10 +619,16 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
         return
       }
 
+      // 2d and 2e share this precondition: an authenticated caller who is
+      // not the owner, acting on an already-registered public repo.
+      const isNonOwnerOnExistingPublicRepo = Boolean(
+        existing && existingAuth?.visibility === 'public' && req.userId !== undefined && req.userId !== existingAuth.ownerUserId,
+      )
+
       // --- 2d. Refresh throttle for re-indexing an existing public repo
       // by a non-owner caller (Phase 126 §4.4) -------------------------------
-      if (existing && existingAuth?.visibility === 'public' && req.userId !== undefined && req.userId !== existingAuth.ownerUserId) {
-        const retryAfter = checkAndRecordReindexThrottle(existing.id, req.userId)
+      if (isNonOwnerOnExistingPublicRepo) {
+        const retryAfter = checkAndRecordReindexThrottle(existing!.id, req.userId!)
         if (retryAfter > 0) {
           res.setHeader('Retry-After', String(retryAfter))
           res.status(429).json({ error: 'Re-index triggered too recently for this repo', retryAfter })
@@ -632,17 +641,17 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       // (Phase 126 §4.3 / public-repo-sharing — "auto-public" provenance) ---
       const activeRawDb = getActiveSession().rawDb
       if (
-        existing && existingAuth?.visibility === 'public' && req.userId !== undefined && req.userId !== existingAuth.ownerUserId &&
-        resolveUserRepoAccess(activeRawDb, req.userId, existing.id) === undefined
+        isNonOwnerOnExistingPublicRepo &&
+        resolveUserRepoAccess(activeRawDb, req.userId!, existing!.id) === undefined
       ) {
         // Only issue the auto-grant when the user holds no applicable grant
         // yet — createGrant() would otherwise overwrite a pre-existing
         // higher-role (write/owner) all-branches grant with 'read'.
         createGrant(activeRawDb, {
-          userId: req.userId,
-          repoId: existing.id,
+          userId: req.userId!,
+          repoId: existing!.id,
           role: 'read',
-          grantedBy: existingAuth.ownerUserId ?? req.userId,
+          grantedBy: existingAuth!.ownerUserId ?? req.userId!,
           source: 'auto-public',
         })
       }
