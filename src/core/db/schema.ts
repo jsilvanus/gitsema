@@ -53,6 +53,8 @@ export const repos = sqliteTable('repos', {
   visibility: text('visibility').notNull().default('private'),
   /** The user whose registration request first created this repo (Phase 126, v31). NULL for repos created before this column existed. */
   ownerUserId: integer('owner_user_id').references(() => users.id),
+  /** Embedding profile pinned at first index (Phase 128 / locked-model-set-plan.md §4.1.3, v32). NULL = legacy single-profile repo; never overwritten once set. */
+  profileName: text('profile_name'),
 }, (table) => ({
   uniqNormalizedUrl: uniqueIndex('idx_repos_normalized_url').on(table.normalizedUrl),
   idxNormalizedUrlVisibility: index('idx_repos_normalized_url_visibility').on(table.normalizedUrl, table.visibility),

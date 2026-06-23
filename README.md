@@ -109,7 +109,7 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema index` | Show index coverage (blob counts per model) |
 | `gitsema index start [options]` | Perform indexing — walk Git history and embed all blobs |
 | `gitsema setup` (alias: `gitsema quickstart`) | Guided onboarding wizard: detect provider, configure embedding model, select storage backend (sqlite/postgres/qdrant), index HEAD, and optionally configure a narrator/guide model |
-| `gitsema remote-index <repoUrl>` | Ask a remote gitsema server to clone and index a Git repository |
+| `gitsema remote-index <repoUrl> [--profile <name>]` | Ask a remote gitsema server to clone and index a Git repository; `--profile` selects a named embedding profile when the server has more than one configured (pinned forever on that repo's first index) |
 | `gitsema auth login <server-url>` | Log in to a `gitsema tools serve` server (prompts for username/password); stores credentials locally |
 | `gitsema auth logout` | Log out and clear stored credentials |
 | `gitsema auth whoami` | Show the currently logged-in user |
@@ -125,6 +125,7 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema repos revoke <repo-id> <username>` | Revoke a user's grants on a repo (operator-only) |
 | `gitsema repos move-to-org <repo-id> <org>` | Move a repo to a different org; grants survive untouched (operator-only) |
 | `gitsema repos visibility <repo-id> public\|private` | Set a persisted repo's visibility flag, gating attach-as-reader auto-grants (operator-only) |
+| `gitsema repos info <repo-id>` | Show full registry details for a persisted repo, including its pinned embedding profile (operator-only) |
 | `gitsema auth sso link <provider> <external-id> <username>` | Link an external SSO/OIDC identity to an existing user; provider must be in `GITSEMA_SSO_PROVIDERS` (operator-only) |
 | `gitsema auth sso unlink <provider> <external-id>` | Unlink an external identity (operator-only) |
 | `gitsema auth sso list <username>` | List SSO identities linked to a user (operator-only) |

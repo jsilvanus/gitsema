@@ -484,7 +484,7 @@ gitsema index
 
 **Pluggable storage backends (Phase 101–103):** all reads/writes go through async `MetadataStore` / `VectorStore` / `FtsStore` interfaces (`src/core/storage/types.ts`). The default `sqlite` backend wraps the schema below; `postgres` routes metadata + FTS through Postgres (pgvector for vectors), and `qdrant` uses Qdrant for vectors with Postgres for metadata/FTS. Select via `storage.*` config or `GITSEMA_STORAGE_*` env vars (see Configuration), inspect with `gitsema storage info`, and copy between backends with `gitsema storage migrate`.
 
-**Schema overview (current schema v31):**
+**Schema overview (current schema v32):**
 
 | Table | Purpose |
 |---|---|
@@ -522,6 +522,7 @@ gitsema index
 | `audit_log` | Identity/authorization audit trail — grant create/revoke, token create/revoke, login success/failure, org membership changes, repo org moves; no FK constraints (historical record outlives referenced rows); added in v30 (Phase 125, multi-tenant-auth §5 Phase D) |
 | `repos.visibility` / `repos.owner_user_id` | Repo visibility flag (`private`/`public`) and first-claimer owner; added in v31 (Phase 126, public-repo-sharing) |
 | `repo_grants.source` | Provenance of an auto-issued grant, e.g. `auto-public` for attach-as-reader grants; added in v31 (Phase 126, public-repo-sharing) |
+| `repos.profile_name` | Embedding profile pinned at first index; null = legacy single-profile repo, never overwritten once set; added in v32 (Phase 128, locked-model-set-plan.md §5 Phase 1) |
 
 **FTS5 note:** Blobs indexed before Phase 11 have no FTS5 content. `--hybrid` search only applies to blobs with FTS5 entries. `--include-content` in evolution dumps also depends on FTS5 content. Use `gitsema backfill-fts` to populate FTS5 content for older index entries.
 
@@ -546,7 +547,8 @@ gitsema index
 - v28 → v29: Added `sso_identities` table (+ indexes) for linked external OIDC/SSO identities (Phase 124 / multi-tenant-auth §5 Phase C)
 - v29 → v30: Added `audit_log` table (+ indexes) for the identity/authorization audit trail (Phase 125 / multi-tenant-auth §5 Phase D)
 - v30 → v31: Added `visibility` and `owner_user_id` columns (+ index) to `repos`, and a `source` column to `repo_grants`, for public repo sharing (Phase 126 / public-repo-sharing)
-- **Current version: 31**
+- v31 → v32: Added `profile_name` column to `repos` for multi-profile embedding serving (Phase 128 / locked-model-set-plan.md §5 Phase 1)
+- **Current version: 32**
 
 Schema changes require updating both `src/core/db/schema.ts` and the migration logic in `src/core/db/sqlite.ts`.
 

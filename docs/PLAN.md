@@ -4923,11 +4923,16 @@ Deviations from the design doc, discovered during implementation:
 
 | Phase | Spec section | Title | Deliverable |
 |---|---|---|---|
-| **128** | §5 Phase 1 | Multi-profile embedding serving | Server config shape for N named embedding profiles; `gitsema tools serve` builds a `Map<profileName, {textProvider, codeProvider}>` instead of one global pair; `repos.profileName` column pinned at first index and immutable after; CLI `gitsema index start --profile <name>`, `gitsema repos info` surfacing the pinned profile. |
+| **128** | §5 Phase 1 | Multi-profile embedding serving | Server config shape for N named embedding profiles; `gitsema tools serve` builds a `Map<profileName, {textProvider, codeProvider}>` instead of one global pair; `repos.profileName` column pinned at first index and immutable after; CLI `gitsema index start --profile <name>`, `gitsema repos info` surfacing the pinned profile. ✅ complete |
 | **129** | §5 Phase 2 | Admin-gated enabled sets | Superadmin admin CLI/route enabling/disabling defined profiles and narrator/guide configs server-wide; org-level narrowing (never widening) reusing the Multi-Tenant Auth Track's org/role model; picker UX (pre-selected/disabled when exactly one profile is allowed, real picker otherwise). |
 | **130** | §5 Phase 3 | BYOK for narrator/guide | Request-scoped credential field on `narrate`/`explain`/`guide` CLI/HTTP/MCP entry points; one-off provider construction via `createNarratorProviderFor()` with no persistence path; "lock to none" support (empty allow-list as a valid, tested state). |
 
-**Status:** not started — draft design, scheduled here per `/phase-plan`.
+**Status:** Phase 128 complete *(completed vX.Y.Z)*; Phases 129–130 not started.
+
+**Phase 128 deviations from spec:**
+- The `--profile <name>` flag landed on `gitsema remote-index` (not `gitsema index start`) — `remote-index` is the command backed by the persistent repo registry and first-index profile-pinning concept the design doc describes; a local-only `index start` has no registry row to pin a profile to.
+- Query-time profile-aware embedding (search/evolution routes using the *pinned* profile's text provider instead of the process-wide default) is out of scope for this pass — search still embeds queries with the server's default text provider regardless of which profile a result's source repo was indexed with.
+- Testing "a profile disabled but the repo keeps working" is deferred to Phase 129, since the enable/disable admin mechanism doesn't exist yet.
 
 ---
 

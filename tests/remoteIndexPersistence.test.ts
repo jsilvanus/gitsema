@@ -47,7 +47,7 @@ vi.mock('../src/core/indexing/indexer.js', () => ({
 
 import { createApp } from '../src/server/app.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
-import { getRegistrySession, closeRegistrySession, normalizeRepoUrl, deriveRepoId, registerPersistedRepo, getRepoClonePath, getRepoDbPath } from '../src/core/indexing/repoRegistry.js'
+import { getRegistrySession, closeRegistrySession, normalizeRepoUrl, deriveRepoId, registerPersistedRepo, getRepoClonePath, getRepoDbPath, getRepo } from '../src/core/indexing/repoRegistry.js'
 import { createUser, createSession } from '../src/core/auth/identity.js'
 import { resolveUserRepoAccess, listGrants } from '../src/core/auth/grants.js'
 import { getRawDb, getActiveSession } from '../src/core/db/sqlite.js'
@@ -359,5 +359,120 @@ describe('POST /api/v1/remote/index — public repo sharing (Phase 126)', () => 
       .expect(202)
 
     delete process.env.GITSEMA_MIN_REINDEX_INTERVAL_SECONDS
+  })
+})
+
+describe('POST /api/v1/remote/index — multi-profile embedding serving (Phase 128)', () => {
+  const profileA: EmbeddingProvider = { ...mockProvider, model: 'profile-a-model' }
+  const profileB: EmbeddingProvider = { ...mockProvider, model: 'profile-b-model' }
+
+  it('auto-selects the sole configured profile for a new repo when none is requested', async () => {
+    const singleProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([['solo', { textProvider: profileA }]]),
+    })
+    const repoUrl = 'https://github.com/example/profile-auto-select.git'
+    const res = await request(singleProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl })
+      .expect(202)
+
+    const repo = getRepo(getRegistrySession(), res.body.repoId)
+    expect(repo?.profileName).toBe('solo')
+  })
+
+  it('returns 400 for a new repo with no profileName when multiple profiles are configured', async () => {
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const res = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl: 'https://github.com/example/profile-ambiguous.git' })
+      .expect(400)
+
+    expect(res.body.error).toMatch(/profileName is required/)
+  })
+
+  it('returns 400 for an unknown requested profileName', async () => {
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const res = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl: 'https://github.com/example/profile-unknown.git', profileName: 'nope' })
+      .expect(400)
+
+    expect(res.body.error).toMatch(/Unknown embedding profile/)
+  })
+
+  it('pins a new repo to the explicitly requested profile', async () => {
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const repoUrl = 'https://github.com/example/profile-pin.git'
+    const res = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl, profileName: 'b' })
+      .expect(202)
+
+    const repo = getRepo(getRegistrySession(), res.body.repoId)
+    expect(repo?.profileName).toBe('b')
+  })
+
+  it('returns 409 when reindexing a pinned repo with a different profileName', async () => {
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const repoUrl = 'https://github.com/example/profile-pinned-mismatch.git'
+    await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl, profileName: 'a' })
+      .expect(202)
+
+    const res = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl, profileName: 'b' })
+      .expect(409)
+
+    expect(res.body.error).toMatch(/pinned to embedding profile 'a'/)
+  })
+
+  it('reindexes a pinned repo without a requested profileName using the pinned profile', async () => {
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const repoUrl = 'https://github.com/example/profile-pinned-reuse.git'
+    const first = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl, profileName: 'a' })
+      .expect(202)
+
+    await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl })
+      .expect(202)
+
+    const repo = getRepo(getRegistrySession(), first.body.repoId)
+    expect(repo?.profileName).toBe('a')
   })
 })

@@ -3,6 +3,7 @@ import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { createApp } from '../../server/app.js'
 import { logger } from '../../utils/logger.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { loadEmbeddingProfileConfigs, buildProfileProviderMap, type EmbeddingProviderPair } from '../../core/embedding/profiles.js'
 
 export interface ServeCommandOptions {
   port?: string
@@ -47,7 +48,22 @@ export async function serveCommand(options: ServeCommandOptions): Promise<void> 
   const textProvider = buildProviderOrExit(providerType, textModel)
   const codeProvider = codeModel !== textModel ? buildProviderOrExit(providerType, codeModel) : undefined
 
-  const app = createApp({ textProvider, codeProvider, chunkerStrategy, concurrency, ui: options.ui })
+  // Multi-profile embedding serving (Phase 128 / locked-model-set-plan.md §4.1):
+  // operator-defined named profiles, each with its own provider pair. Falls
+  // back to undefined (single process-wide pair, today's behavior) when none
+  // are configured.
+  let profiles: Map<string, EmbeddingProviderPair> | undefined
+  try {
+    const profileConfigs = loadEmbeddingProfileConfigs()
+    if (profileConfigs.length > 0) {
+      profiles = buildProfileProviderMap(profileConfigs)
+    }
+  } catch (err) {
+    console.error(`Error loading embeddingProfiles config: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+
+  const app = createApp({ textProvider, codeProvider, chunkerStrategy, concurrency, ui: options.ui, profiles })
   const server = createServer(app)
 
   await new Promise<void>((resolve, reject) => {
@@ -61,6 +77,9 @@ export async function serveCommand(options: ServeCommandOptions): Promise<void> 
         console.log(`  Code model: ${codeModel}`)
       } else {
         console.log(`  Model: ${textModel}`)
+      }
+      if (profiles) {
+        console.log(`  Embedding profiles: ${Array.from(profiles.keys()).join(', ')}`)
       }
       console.log(`  Chunker: ${chunkerStrategy}`)
       console.log(`  Concurrency: ${concurrency}`)

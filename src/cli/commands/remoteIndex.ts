@@ -29,6 +29,7 @@ export interface RemoteIndexCommandOptions {
   windowSize?: string
   overlap?: string
   dbLabel?: string
+  profile?: string
 }
 
 export async function remoteIndexCommand(
@@ -112,6 +113,12 @@ export async function remoteIndexCommand(
     process.exit(1)
   }
 
+  // Validate profile format (must match the server-side regex)
+  if (options.profile !== undefined && !/^[a-zA-Z0-9_-]{1,64}$/.test(options.profile)) {
+    console.error('Error: --profile must be 1–64 alphanumeric/hyphen/underscore characters')
+    process.exit(1)
+  }
+
   // Build credentials
   let credentials: RemoteIndexRequest['credentials']
   if (options.token) {
@@ -185,6 +192,7 @@ export async function remoteIndexCommand(
         cloneDepth: cloneDepth ?? null,
         indexOptions,
         dbLabel: options.dbLabel,
+        profileName: options.profile,
       },
       renderProgress,
     )
@@ -207,6 +215,9 @@ export async function remoteIndexCommand(
     console.log(`  Elapsed:   ${(stats.elapsed / 1000).toFixed(1)}s`)
     if (options.dbLabel) {
       console.log(`  DB label:  ${options.dbLabel}`)
+    }
+    if (options.profile) {
+      console.log(`  Profile:   ${options.profile}`)
     }
   } catch (err: unknown) {
     if (progressLine) {

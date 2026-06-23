@@ -210,6 +210,11 @@ export interface RemoteIndexRequest {
   indexOptions?: RemoteIndexOptions
   /** Routes indexing to .gitsema/<dbLabel>.db instead of the default DB. */
   dbLabel?: string
+  /**
+   * Embedding profile to index with (Phase 128 / locked-model-set-plan.md
+   * §4.1.3). Pinned forever on first index of a repo.
+   */
+  profileName?: string
 }
 
 export interface RemoteIndexStats {

@@ -301,6 +301,7 @@ export function registerAll(program: Command) {
     .option('--window-size <n>', 'chunk size in characters for the fixed chunker (default 1500)')
     .option('--overlap <n>', 'character overlap between adjacent fixed chunks (default 200)')
     .option('--db-label <label>', 'route indexing to .gitsema/<label>.db on the server (1–64 alphanumeric chars or hyphens)')
+    .option('--profile <name>', 'embedding profile to index with, when the server has multiple configured (pinned forever on first index of this repo)')
     .action(remoteIndexCommand)
 
   program
