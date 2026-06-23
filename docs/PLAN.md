@@ -4691,6 +4691,67 @@ that deprecated it, and its removal status.
 
 ---
 
+## Multi-Tenant Auth Track (Phases 122–125)
+
+> **Full design:** [`docs/multi-tenant-auth-plan.md`](multi-tenant-auth-plan.md)
+> is the single design reference for this track (current-state assessment,
+> the identity/membership/grant axis model, personal groups, and Phases
+> A–D). Phase A has no dependents blocking it; Phase B hard-depends on
+> Phase A; Phase C depends only on Phase A; Phase D can slip independently
+> of all three. Phase entries below use the next free top-level phase
+> numbers after 121.
+
+| Phase | Spec section | Title | Deliverable |
+|---|---|---|---|
+| **122** | §5 Phase A | Identity & credentials core | New `users`/`sessions`/`api_keys` tables; `POST /api/v1/auth/login`/`logout`/`tokens` routes; `authMiddleware` extended to try user-credential resolution first, falling back to today's legacy `GITSEMA_SERVE_KEY`/`repo_tokens` path; CLI `gitsema auth login/logout/token */whoami`. No authorization changes yet — identity only. |
+| **123** | §5 Phase B | Orgs, personal groups, repo/branch grants, self-service | New `orgs` (`kind: personal\|team`)/`org_members`/`repo_grants` tables; nullable `repos.org_id`; `auth.personalGroups`/`GITSEMA_PERSONAL_GROUPS` config gate (default `true`) auto-provisioning a one-member personal org per new user; `gitsema repos move-to-org`; branch-pattern grants requiring `branch: string` → `string \| string[]` across ~16 routes; CLI `gitsema orgs */repos grant/grants list/revoke/move-to-org`, `gitsema users create/list`; `docs/deprecations.md` row for `repo_tokens`. |
+| **124** | §5 Phase C | SSO/OIDC linking | New `sso_identities` table; `gitsema auth login <server-url> --sso <provider>` device-code-style flow; provider allowlist config; first new third-party dependency (an OIDC client library) — flagged against CLAUDE.md's minimal-deps preference. |
+| **125** | §5 Phase D | Audit log | New `audit_log` table (actor, action, target, timestamp); `gitsema audit log [--org][--repo]` CLI; records `org.repo.moved` and other Phase B/C actions. Lowest priority of the track, no hard dependents. |
+
+**Status:** not started — draft design, scheduled here per `/phase-plan`.
+
+---
+
+## Public Repo Sharing Track (Phases 126–127)
+
+> **Full design:** [`docs/public-repo-sharing-plan.md`](public-repo-sharing-plan.md)
+> is the single design reference for this track (visibility flag,
+> attach-as-reader auto-grants, first-index gate, refresh throttle). Both
+> phases hard-depend on the Multi-Tenant Auth Track's Phase A (122) and
+> Phase B (123) landing first — there is no `users`/`repo_grants` model to
+> attach a reader grant to otherwise.
+
+| Phase | Spec section | Title | Deliverable |
+|---|---|---|---|
+| **126** | §5 Phase 1 | Visibility flag + attach-as-reader | `repos.visibility` (`'private'\|'public'`, default `'private'`) + `ownerUserId` columns; `gitsema repos visibility <repoId> public\|private` CLI (owner/superadmin only); registration-flow change in `src/server/routes/remote.ts` auto-issuing a `repo_grants` reader row when a second user attaches to an existing public repo's shared index. |
+| **127** | §5 Phase 2 | First-index gate + refresh throttle | `auth.allowPublicAutoIndex`/`GITSEMA_PUBLIC_AUTO_INDEX` config gate (default `false`) restricting who may register a brand-new public-flagged repo; `auth.minReindexIntervalSeconds` per-`(user, repoId)` refresh throttle returning `429`/`Retry-After`. No hard dependency on Phase 126 beyond the `visibility` column existing. |
+
+**Status:** not started — draft design, scheduled here per `/phase-plan`.
+Explicitly out of scope (per the design doc §6): cross-repo blob-level dedup
+for forks with different URLs ("shape 2") remains undesigned and unscheduled.
+
+---
+
+## Superadmin-Locked Model Set Track (Phases 128–130)
+
+> **Full design:** [`docs/locked-model-set-plan.md`](locked-model-set-plan.md)
+> is the single design reference for this track (multi-profile embedding
+> serving, admin-gated enabled sets, never-persisted per-request BYOK).
+> Phase 128 has no hard dependency on the role model and could ship before
+> the Multi-Tenant Auth Track lands; Phase 129 hard-depends on that track's
+> Phase A (122) and Phase B (123); Phase 130 has no hard dependency on
+> Phase 128 but benefits from Phase 129's allow-list existing.
+
+| Phase | Spec section | Title | Deliverable |
+|---|---|---|---|
+| **128** | §5 Phase 1 | Multi-profile embedding serving | Server config shape for N named embedding profiles; `gitsema tools serve` builds a `Map<profileName, {textProvider, codeProvider}>` instead of one global pair; `repos.profileName` column pinned at first index and immutable after; CLI `gitsema index start --profile <name>`, `gitsema repos info` surfacing the pinned profile. |
+| **129** | §5 Phase 2 | Admin-gated enabled sets | Superadmin admin CLI/route enabling/disabling defined profiles and narrator/guide configs server-wide; org-level narrowing (never widening) reusing the Multi-Tenant Auth Track's org/role model; picker UX (pre-selected/disabled when exactly one profile is allowed, real picker otherwise). |
+| **130** | §5 Phase 3 | BYOK for narrator/guide | Request-scoped credential field on `narrate`/`explain`/`guide` CLI/HTTP/MCP entry points; one-off provider construction via `createNarratorProviderFor()` with no persistence path; "lock to none" support (empty allow-list as a valid, tested state). |
+
+**Status:** not started — draft design, scheduled here per `/phase-plan`.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.
