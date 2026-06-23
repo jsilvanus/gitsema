@@ -47,6 +47,8 @@ export const repos = sqliteTable('repos', {
   lastIndexedAt: integer('last_indexed_at'),
   /** 1 if this repo was registered as ephemeral (not reused across requests) (v23). */
   ephemeral: integer('ephemeral').notNull().default(0),
+  /** Owning org (Phase 123 / multi-tenant-auth §5 Phase B); NULL = legacy unscoped repo (v28). */
+  orgId: integer('org_id').references(() => orgs.id),
 }, (table) => ({
   uniqNormalizedUrl: uniqueIndex('idx_repos_normalized_url').on(table.normalizedUrl),
 }))
@@ -406,5 +408,129 @@ export const repoTokens = sqliteTable('repo_tokens', {
   tokenPrefix: text('token_prefix').notNull(),
   repoId: text('repo_id').notNull().references(() => repos.id, { onDelete: 'cascade' }),
   label: text('label'),
+  createdAt: integer('created_at').notNull(),
+})
+
+/**
+ * User identity (Phase 122 / multi-tenant-auth §5 Phase A). A user
+ * authenticates via password+session (this table + sessions) or an API key
+ * (apiKeys) — both resolve to the same userId before any authorization check.
+ * Added in schema v27.
+ */
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  username: text('username').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  passwordSalt: text('password_salt').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+/**
+ * Bearer session tokens minted by POST /auth/login. Stored as a SHA-256 hash
+ * (same precedent as repoTokens/review7 §4.1) — never plaintext at rest.
+ * Added in schema v27.
+ */
+export const sessions = sqliteTable('sessions', {
+  sessionTokenHash: text('session_token_hash').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  lastSeenAt: integer('last_seen_at').notNull(),
+})
+
+/**
+ * Long-lived, independently revocable API keys bound to a user identity
+ * (the repoTokens mechanism's spiritual successor — repo scoping moves to
+ * repo_grants in Phase 123). Added in schema v27.
+ */
+export const apiKeys = sqliteTable('api_keys', {
+  keyHash: text('key_hash').primaryKey(),
+  keyPrefix: text('key_prefix').notNull(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  label: text('label'),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at'),
+  revokedAt: integer('revoked_at'),
+})
+
+/**
+ * Org — the unit of self-service grant authority (Phase 123 /
+ * multi-tenant-auth §5 Phase B, Axis B). `kind: 'personal'` orgs are
+ * auto-created with their owning user and forever have exactly one member;
+ * `kind: 'team'` orgs are created explicitly and can have any number of
+ * members. Added in schema v28.
+ */
+export const orgs = sqliteTable('orgs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(), // 'personal' | 'team'
+  createdAt: integer('created_at').notNull(),
+})
+
+/**
+ * Membership of a user in an org, with a role (`org_admin` | `member`).
+ * Added in schema v28.
+ */
+export const orgMembers = sqliteTable('org_members', {
+  orgId: integer('org_id').notNull().references(() => orgs.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'org_admin' | 'member'
+  joinedAt: integer('joined_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.orgId, table.userId] }),
+}))
+
+/**
+ * Per-user, per-repo, per-branch access grant (Phase 123 /
+ * multi-tenant-auth §5 Phase B, Axis C) — replaces `repoTokens`' binary
+ * 1-token-=-1-repo model with N independently-scoped grants per user.
+ * `branchPattern: null` means all branches; otherwise an exact branch name
+ * or a minimatch glob (e.g. `feature/*`). Added in schema v28.
+ */
+export const repoGrants = sqliteTable('repo_grants', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  repoId: text('repo_id').notNull().references(() => repos.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'read' | 'write' | 'owner'
+  branchPattern: text('branch_pattern'),
+  grantedBy: integer('granted_by').notNull().references(() => users.id),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  uniqGrant: uniqueIndex('idx_repo_grants_user_repo_branch').on(table.userId, table.repoId, table.branchPattern),
+}))
+
+/**
+ * Linked external identity from an SSO/OIDC provider (Phase 124 /
+ * multi-tenant-auth §5 Phase C). Linking, not replacing — a user keeps their
+ * password/API keys alongside any linked SSO identity; all resolve to the
+ * same `userId`. `(provider, externalId)` is unique — one external subject
+ * links to exactly one user. Added in schema v29.
+ */
+export const ssoIdentities = sqliteTable('sso_identities', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  provider: text('provider').notNull(),
+  externalId: text('external_id').notNull(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  linkedAt: integer('linked_at').notNull(),
+}, (table) => ({
+  uniqIdentity: uniqueIndex('idx_sso_identities_provider_external').on(table.provider, table.externalId),
+}))
+
+/**
+ * Audit trail of sensitive identity/authorization actions (Phase 125 /
+ * multi-tenant-auth §5 Phase D) — grant create/revoke, token create/revoke,
+ * login success/failure, org membership changes, repo org moves. No FK
+ * constraints on `actorUserId`/`orgId`/`repoId`: this is a historical record
+ * that should outlive the rows it references (e.g. a revoked grant or a
+ * later-deleted org shouldn't erase the audit trail of having created it).
+ * Added in schema v30.
+ */
+export const auditLog = sqliteTable('audit_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  actorUserId: integer('actor_user_id'),
+  action: text('action').notNull(),
+  target: text('target'),
+  orgId: integer('org_id'),
+  repoId: text('repo_id'),
   createdAt: integer('created_at').notNull(),
 })

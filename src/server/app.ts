@@ -39,6 +39,10 @@
  *   GET  /metrics                 (P2 — Prometheus exposition)
  *   GET  /openapi.json            (P2 — OpenAPI 3.1 spec)
  *   GET  /docs                    (P2 — Swagger UI)
+ *   POST /auth/login              (Phase 122 — identity & credentials core)
+ *   POST /auth/logout
+ *   POST /auth/tokens, GET /auth/tokens, DELETE /auth/tokens/:prefix
+ *   GET  /auth/whoami
  */
 
 import express from 'express'
@@ -50,6 +54,8 @@ import { repoSessionMiddleware } from './middleware/repoSession.js'
 import { requestTimingMiddleware, metricsRegistry, refreshIndexGauges, syncProcessCounters } from './middleware/metrics.js'
 import { buildRateLimiter } from './middleware/rateLimiter.js'
 import { statusRouter } from './routes/status.js'
+import { authRouter } from './routes/auth.js'
+import { orgsRouter, repoGrantsRouter } from './routes/orgs.js'
 import { blobsRouter } from './routes/blobs.js'
 import { commitsRouter } from './routes/commits.js'
 import { searchRouter } from './routes/search.js'
@@ -111,6 +117,12 @@ export function createApp(options: AppOptions): Express {
   // P2: OpenAPI spec + Swagger UI — public, registered before auth middleware
   app.use('/', openapiRouter())
 
+  // Phase 122: identity & credentials routes. Registered before the global
+  // authMiddleware below since POST /login must be reachable with no bearer
+  // token; the other sub-routes (logout/whoami/tokens) apply authMiddleware
+  // themselves at the route level to resolve req.userId.
+  app.use('/api/v1/auth', authRouter())
+
   // P2: Shared /metrics handler (used in both public and auth-gated paths below)
   async function serveMetrics(_req: import('express').Request, res: import('express').Response): Promise<void> {
     try {
@@ -148,6 +160,11 @@ export function createApp(options: AppOptions): Express {
   const base = '/api/v1'
 
   app.use(`${base}/status`, statusRouter())
+
+  // Phase 123: orgs & repo-grant management. Requires a resolved req.userId
+  // (set by authMiddleware above), enforced per-route in orgsRouter/repoGrantsRouter.
+  app.use(`${base}/orgs`, orgsRouter())
+  app.use(`${base}/repos`, repoGrantsRouter())
 
   app.use(
     `${base}/blobs`,

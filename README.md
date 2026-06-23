@@ -83,8 +83,10 @@ Configuration is read from environment variables or persisted via `gitsema confi
 | `GITSEMA_MAX_BODY_SIZE` | `1mb` | Body-size cap for `tools serve` and `tools mcp --http` (e.g. `5mb`) |
 | `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
 | `GITSEMA_DATA_DIR` | `~/.gitsema/data` | Root directory where `gitsema tools serve` persists cloned repos + index DBs (`repos/<repoId>/{repo,index.db}`, `registry.db`) |
+| `GITSEMA_PERSONAL_GROUPS` | `true` | Set to `false` to disable auto-provisioning a personal org for new users (Phase 123) |
+| `GITSEMA_SSO_PROVIDERS` | *(empty)* | Comma-separated allowlist of SSO/OIDC provider names that may be linked via `gitsema auth sso link` (Phase 124); no provider is allowed until set |
 
-Run `gitsema config list` to see every active key and where its value came from (env, repo config, global config, or default). Supported dot-notation keys include `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, `storage.backend`, `storage.scope`, `storage.name`, `storage.metadata.url`, `storage.vectors.url`, `storage.vectors.apiKey`, `storage.fts.backend`, and more.
+Run `gitsema config list` to see every active key and where its value came from (env, repo config, global config, or default). Supported dot-notation keys include `provider`, `model`, `textModel`, `codeModel`, `httpUrl`, `apiKey`, `llmUrl`, `llmModel`, `remoteUrl`, `remoteKey`, `index.concurrency`, `index.maxCommits`, `index.ext`, `index.maxSize`, `index.exclude`, `index.chunker`, `index.windowSize`, `index.overlap`, `search.top`, `search.hybrid`, `search.recent`, `search.weightVector`, `search.weightRecency`, `search.weightPath`, `evolution.threshold`, `clusters.k`, `hooks.enabled`, `vscode.mcp`, `vscode.lsp`, `storage.backend`, `storage.scope`, `storage.name`, `storage.metadata.url`, `storage.vectors.url`, `storage.vectors.apiKey`, `storage.fts.backend`, `auth.personalGroups`, `auth.ssoProviders`, and more.
 
 > **Storage backends (experimental, Phases 101–103):** `storage.backend` selects where the index lives — `sqlite` (the default), `postgres` (+ pgvector), and `qdrant` are all implemented. For postgres, set `storage.metadata.url=postgres://user:pass@host:5432/dbname` (see `docker-compose.postgres.yml` for a local pgvector instance) and optionally `storage.fts.backend=tsvector|pg_search|none`. For qdrant, set `storage.vectors.url=http://host:6333` (see `docker-compose.qdrant.yml`) plus `storage.metadata.url=postgres://...` (a Postgres companion for paths/commits/branches/FTS) and optionally `storage.vectors.apiKey`. `gitsema index` and all read-path commands (search, history, evolution, etc.) work against postgres and qdrant. `storage.scope` chooses which index a command resolves to: `project` (per-repo `.gitsema/`, default), `user` (`~/.gitsema/`), or `named` (an explicitly addressed index via `storage.name`). Use `gitsema storage migrate --to <backend> [...]` to copy an existing sqlite index into postgres/qdrant/sqlite, and `gitsema doctor`/`gitsema status` to inspect any backend. See [`docs/storage-backends-plan.md`](docs/storage-backends-plan.md).
 
@@ -108,6 +110,24 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema index start [options]` | Perform indexing — walk Git history and embed all blobs |
 | `gitsema setup` (alias: `gitsema quickstart`) | Guided onboarding wizard: detect provider, configure embedding model, select storage backend (sqlite/postgres/qdrant), index HEAD, and optionally configure a narrator/guide model |
 | `gitsema remote-index <repoUrl>` | Ask a remote gitsema server to clone and index a Git repository |
+| `gitsema auth login <server-url>` | Log in to a `gitsema tools serve` server (prompts for username/password); stores credentials locally |
+| `gitsema auth logout` | Log out and clear stored credentials |
+| `gitsema auth whoami` | Show the currently logged-in user |
+| `gitsema auth token create/list/revoke` | Manage your own API keys on the logged-in server |
+| `gitsema auth create-user <username>` | Bootstrap a new user directly against the local server DB (operator-only) |
+| `gitsema orgs create <name>` | Create a team org (operator-only, local server DB) |
+| `gitsema orgs list <username>` | List orgs a user belongs to, with their role in each (operator-only) |
+| `gitsema orgs members add/remove/list <org> [username] [--role <role>]` | Manage team org membership; rejected with an error on personal orgs (operator-only) |
+| `gitsema users create <username> --password <pw> [--org <org>] [--role <role>]` | Bootstrap a new user directly against the local server DB, auto-provisioning a personal org (operator-only) |
+| `gitsema users list` | List all users (operator-only) |
+| `gitsema repos grant <repo-id> <username> --role <role> [--branch <glob>]` | Grant a user read/write/owner access to a repo, optionally scoped to a branch glob (operator-only) |
+| `gitsema repos grants <repo-id>` | List grants on a repo (operator-only) |
+| `gitsema repos revoke <repo-id> <username>` | Revoke a user's grants on a repo (operator-only) |
+| `gitsema repos move-to-org <repo-id> <org>` | Move a repo to a different org; grants survive untouched (operator-only) |
+| `gitsema auth sso link <provider> <external-id> <username>` | Link an external SSO/OIDC identity to an existing user; provider must be in `GITSEMA_SSO_PROVIDERS` (operator-only) |
+| `gitsema auth sso unlink <provider> <external-id>` | Unlink an external identity (operator-only) |
+| `gitsema auth sso list <username>` | List SSO identities linked to a user (operator-only) |
+| `gitsema audit log [--org <org>] [--repo <repo-id>] [--limit <n>]` | Query the identity/authorization audit trail (grant/token/login/org-membership/repo-move events), newest first (operator-only) |
 
 #### `gitsema index start [options]`
 

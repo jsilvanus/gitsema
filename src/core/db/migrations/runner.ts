@@ -25,6 +25,10 @@ import { migration as m023 } from './023_repos_persistent_storage.js'
 import { migration as m024 } from './024_symbol_identity.js'
 import { migration as m025 } from './025_structural_refs.js'
 import { migration as m026 } from './026_graph_nodes_edges.js'
+import { migration as m027 } from './027_auth_identity.js'
+import { migration as m028 } from './028_orgs_grants.js'
+import { migration as m029 } from './029_sso_identities.js'
+import { migration as m030 } from './030_audit_log.js'
 
 export type Migration = {
   version: number
@@ -59,6 +63,10 @@ export const migrations: Migration[] = [
   m024,
   m025,
   m026,
+  m027,
+  m028,
+  m029,
+  m030,
 ]
 
 migrations.sort((a, b) => a.version - b.version)

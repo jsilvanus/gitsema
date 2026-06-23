@@ -4708,7 +4708,143 @@ that deprecated it, and its removal status.
 | **124** | §5 Phase C | SSO/OIDC linking | New `sso_identities` table; `gitsema auth login <server-url> --sso <provider>` device-code-style flow; provider allowlist config; first new third-party dependency (an OIDC client library) — flagged against CLAUDE.md's minimal-deps preference. |
 | **125** | §5 Phase D | Audit log | New `audit_log` table (actor, action, target, timestamp); `gitsema audit log [--org][--repo]` CLI; records `org.repo.moved` and other Phase B/C actions. Lowest priority of the track, no hard dependents. |
 
-**Status:** not started — draft design, scheduled here per `/phase-plan`.
+**Status:** Phase 122 ✅ complete (version pending). Phase 123 ✅ complete (version pending). Phase 124 ✅ complete (version pending). Phase 125 ✅ complete (version pending). **Multi-Tenant Auth Track (Phases 122–125) complete.**
+
+**Phase 122 implementation notes:**
+- Schema v27 adds `users`/`sessions`/`api_keys` (migration `027_auth_identity.ts`).
+- `src/core/auth/identity.ts` is the core module: scrypt password hashing, SHA-256
+  hash-at-rest for session tokens and API keys (8-char prefix kept in the clear for
+  revoke-by-prefix UX), idle-window session TTL (`GITSEMA_SESSION_TTL_DAYS`, default
+  30 days, refreshed on each successful resolution).
+- `authMiddleware` resolution order: user session/API key → legacy `GITSEMA_SERVE_KEY`
+  → legacy `repo_tokens` → 401.
+- `POST /api/v1/auth/login` is mounted before the global `authMiddleware` in `app.ts`
+  so it's reachable with no bearer token; the other `/auth/*` routes apply
+  `authMiddleware` themselves at the route level.
+- **Deviation from spec:** added `gitsema auth create-user <username>` — a local-DB-only
+  bootstrap command (no network route) — since the design doc's CLI surface for Phase A
+  has no way to create the first user; self-service/admin user creation via a network
+  route (`gitsema users create`) is explicitly Phase B's deliverable. This mirrors the
+  existing `repos token add` local-DB-access pattern and makes Phase A usable
+  end-to-end without Phase B's org/role model.
+- Tests: `tests/identity.test.ts` (unit — password round-trip, session expiry/refresh,
+  API key creation/revocation/expiry, username collision) and `tests/authRoutes.test.ts`
+  (HTTP integration — login/logout/whoami, token create/list/revoke, dual-auth-path
+  precedence vs. `GITSEMA_SERVE_KEY`).
+
+**Phase 123 implementation notes:**
+- Schema v28 adds `orgs`/`org_members`/`repo_grants` and a nullable `repos.org_id`
+  column (migration `028_orgs_grants.ts`, guarded for fixtures with no `repos` table).
+- `src/core/auth/orgs.ts` is the membership module: `createOrg`, `provisionPersonalOrg`/
+  `maybeProvisionPersonalOrg` (gated by `auth.personalGroups`/`GITSEMA_PERSONAL_GROUPS`,
+  default `true`), `addOrgMember`/`removeOrgMember` (throw `PersonalOrgImmutableError`
+  for `kind: 'personal'` orgs — exactly one member, forever), `isOrgAdmin`,
+  `listOrgsForUser`/`listOrgMembers`.
+- `src/core/auth/grants.ts` is the grant module: `createGrant` (manual upsert on
+  `(user_id, repo_id, branch_pattern)` since SQLite's UNIQUE index treats every NULL
+  `branch_pattern` as distinct, so `ON CONFLICT` can't dedupe all-branches grants),
+  `revokeGrant`, `listGrants`/`listGrantsForUser`, `resolveUserRepoAccess` (minimatch
+  glob match against `branch_pattern`, returns the highest-ranked applicable role),
+  `roleSatisfies` (`owner > write > read`), `moveRepoToOrg`/`getRepoOrgId`.
+- HTTP: `src/server/routes/orgs.ts` adds `orgsRouter()` (`/api/v1/orgs`,
+  `/api/v1/orgs/:orgId/members`) and `repoGrantsRouter()` (`/api/v1/repos/:repoId/grants`,
+  `/api/v1/repos/:repoId/move-to-org`), both mounted in `app.ts` behind the existing
+  global `authMiddleware`.
+- CLI: `gitsema orgs create/list/members add/remove/list`, `gitsema users create/list`
+  (new `src/cli/commands/orgs.ts`), plus `gitsema repos grant/grants/revoke/move-to-org`
+  added to the existing `repos` command — all operator-only, reading/writing the local
+  server DB directly via `getRawDb()`, the same pattern as `gitsema auth create-user`
+  and `gitsema repos token *` (not the remote-HTTP-client pattern used by
+  `gitsema auth login/logout/whoami/token`).
+- **Deviations from spec** (documented here per the Phase 122 precedent):
+  1. The ~16 pre-existing analysis/search/evolution/graph HTTP routes were **not**
+     retrofitted to call `resolveUserRepoAccess`/grant-based authorization — only the
+     new `orgsRouter`/`repoGrantsRouter` routes enforce grants. `resolveUserRepoAccess`
+     exists and is unit-tested, but isn't wired into the broader request pipeline yet;
+     the `branch: string → string | string[]` plumbing across those routes did not
+     happen either, since it's only needed once those routes are grant-gated.
+  2. Repos created with no explicit org do **not** default to the creator's personal
+     org — `repoRegistry.ts`'s `addRepo`/`registerPersistedRepo` were left untouched
+     (no `userId` parameter); a repo's `org_id` stays `null` until an explicit
+     `move-to-org` call.
+  3. No backfill migration was written to retroactively grant pre-existing users a
+     personal org — `maybeProvisionPersonalOrg` is only invoked from new-user-creation
+     paths (`auth create-user`, `users create`).
+- Tests: `tests/orgsGrants.test.ts` (unit — org creation/membership, personal-org
+  immutability, personal-groups config gate, grant creation/listing/revocation,
+  branch-pattern glob matching, highest-role resolution, repo↔org moves) and
+  `tests/orgsRoutes.test.ts` (HTTP integration — org creation/listing, member
+  add/remove authorization, personal-org 403 rejection, grant creation/listing/
+  revocation authorization, move-to-org).
+
+**Phase 124 implementation notes:**
+- Schema v29 adds `sso_identities` (`provider`, `external_id`, `user_id`, `linked_at`;
+  unique on `(provider, external_id)`) (migration `029_sso_identities.ts`).
+- `src/core/auth/sso.ts` is the core module: `getAllowedSsoProviders`/
+  `isSsoProviderAllowed` read `auth.ssoProviders`/`GITSEMA_SSO_PROVIDERS` (comma-
+  separated, empty by default — no provider allowed until configured);
+  `linkSsoIdentity` (throws `SsoProviderNotAllowedError` for a non-allowlisted
+  provider, `SsoIdentityTakenError` if the `(provider, externalId)` pair is already
+  linked to a — possibly different — user); `unlinkSsoIdentity`, `resolveSsoIdentity`,
+  `listSsoIdentitiesForUser`.
+- CLI: `gitsema auth sso link/unlink/list` (new `ssoCmd` subcommand group in
+  `src/cli/commands/auth.ts`) — operator-only, reading/writing the local server DB
+  directly via `getRawDb()`, the same pattern as `gitsema auth create-user` (Phase 122)
+  and `gitsema orgs create` (Phase 123).
+- HTTP: two new routes added to the existing `authRouter()` in
+  `src/server/routes/auth.ts` — `GET /api/v1/auth/sso` (list the calling user's own
+  linked identities) and `DELETE /api/v1/auth/sso/:provider/:externalId` (unlink one
+  of the calling user's own identities, with an explicit ownership check returning 404
+  if the identity isn't linked to them). Linking a new identity is **not** exposed over
+  HTTP at all — only via the CLI `gitsema auth sso link` operator command.
+- **Deviation from spec:** this phase ships only the linking data model, provider
+  allowlist gate, and CRUD (CLI link/unlink/list + HTTP self-service list/unlink) — it
+  does **not** implement the device-code browser-based OIDC flow
+  (`gitsema auth login <server-url> --sso <provider>`) described in the design doc.
+  That flow requires choosing and integrating an actual OIDC client library — a new
+  third-party dependency the design doc itself flags as needing a deliberate decision
+  against CLAUDE.md's minimal-deps preference — and a live identity provider to test
+  against, neither of which is available here. Linking an external identity to a user
+  today is an operator action (`gitsema auth sso link`), the same precedent as
+  `gitsema auth create-user` (Phase 122): a user resolves via a linked identity exactly
+  as the design intends, just provisioned out-of-band instead of via a live OIDC
+  exchange.
+- Tests: `tests/sso.test.ts` (unit — provider allowlist gating, link/unlink/resolve/
+  list CRUD, `SsoIdentityTakenError` collision case) and HTTP integration tests added
+  to `tests/authRoutes.test.ts` (list own identities, unlink own identity, 404 on
+  unlinking an identity not owned by the calling user).
+
+**Phase 125 implementation notes:**
+- Schema v30 adds `audit_log` (`actor_user_id`, `action`, `target`, `org_id`, `repo_id`,
+  `created_at`; indexed on `org_id`/`repo_id`/`created_at`) (migration
+  `030_audit_log.ts`). **Deliberately no FK constraints** on `actor_user_id`/`org_id`/
+  `repo_id` — an audit trail should outlive the rows it references (e.g. a later-deleted
+  org or revoked grant shouldn't erase the historical record of having created it).
+- `src/core/auth/auditLog.ts` is the core module: `recordAuditEvent` (never throws —
+  callers' primary action should not fail because logging failed) and `listAuditLog`
+  (filterable by `orgId`/`repoId`, newest first, default limit 100).
+- `AuditAction` covers `grant.create`/`grant.revoke`, `token.create`/`token.revoke`,
+  `login.success`/`login.failure`, `org.member.add`/`org.member.remove`,
+  `org.repo.moved`.
+- CLI: `gitsema audit log [--org <org>] [--repo <repo-id>] [--limit <n>]` (new
+  `src/cli/commands/audit.ts`, registered alongside `authCommand()`/`orgsCommand()`/
+  `usersCommand()`) — operator-only, reading the local server DB directly via
+  `getRawDb()`, the same pattern as `gitsema orgs *`.
+- **Deviation from spec (documented per the Phase 122/123/124 precedent):** only the
+  HTTP routes record audit events — `src/server/routes/auth.ts` (`login.success`/
+  `login.failure` in `POST /login`, `token.create` in `POST /tokens`, `token.revoke` in
+  `DELETE /tokens/:prefix`) and `src/server/routes/orgs.ts` (`org.member.add`/
+  `org.member.remove` in the members routes, `grant.create`/`grant.revoke` in the grant
+  routes, `org.repo.moved` in `move-to-org`). The equivalent operator-only CLI-direct
+  paths (`gitsema repos grant`, `gitsema orgs members add`, `gitsema auth create-user`,
+  etc.) do **not** get logged in v1 — those paths already require local DB access, a
+  stronger trust boundary than the network surface this audit trail is primarily meant
+  to cover.
+- Tests: `tests/auditLog.test.ts` (unit — record/list, org/repo filtering, limit,
+  null-field defaults, surviving a deleted org/repo reference) and HTTP integration
+  tests added to `tests/authRoutes.test.ts` (login.success/login.failure, token.create/
+  token.revoke) and `tests/orgsRoutes.test.ts` (org.member.add/remove, grant.create/
+  revoke, org.repo.moved).
 
 ---
 

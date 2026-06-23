@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-06-22 (refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md` and the superadmin-locked model set idea into `docs/locked-model-set-plan.md`; kept cross-repo blob dedup as an open idea)
+**Last updated:** 2026-06-23 (added audit log coverage enforcement idea, found during the Phase 125 `/simplify` review; refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md` and the superadmin-locked model set idea into `docs/locked-model-set-plan.md`; kept cross-repo blob dedup as an open idea)
 **Audience:** Developers considering next phases; product planning
 
 > **Note:** As of this update, the LSP/MCP remote-delegation foundation this
@@ -396,6 +396,80 @@ users:
   `docs/multi-tenant-auth-plan.md` landing (at least Phase A's user/session
   model, likely Phase B's org/role model for the org-level narrowing
   behavior). Not actionable before that.
+
+---
+
+## Audit Log Coverage Enforcement (Prevent Scope-Rot on New Sensitive Routes)
+
+### Problem
+- Phase 125 (`docs/PLAN.md`, multi-tenant-auth §5 Phase D) added
+  `recordAuditEvent()` (`src/core/auth/auditLog.ts`) and wired it into the
+  HTTP routes that exist *today* (`src/server/routes/auth.ts`,
+  `src/server/routes/orgs.ts`) for sensitive actions — login, token
+  create/revoke, org membership changes, grant create/revoke, repo org
+  moves.
+- There is **no structural enforcement** requiring a *future* sensitive HTTP
+  route to call `recordAuditEvent()`. The only safeguard today is a doc
+  comment at the top of `auditLog.ts` and developer memory. A new mutating
+  route added later (e.g. a hypothetical `src/server/routes/repos.ts`
+  delete/rename endpoint) could silently ship without an audit entry, and
+  nothing in CI or code review would catch the gap mechanically.
+- Found during the `/simplify` review of Phase 125 (Altitude finding): the
+  per-call-site wiring is at the right depth for the actions that exist now
+  (each action has different `target`/`orgId`/`repoId` semantics, so a
+  generic middleware wrapper would likely just relocate complexity), but the
+  *coverage* of "which routes call this" has no enforcement mechanism at
+  all.
+
+### Intended Behavior
+Some lightweight mechanism that fails loudly (test or lint, not silent docs)
+when a sensitive/mutating route is added or changed without a corresponding
+`recordAuditEvent()` call — without forcing a generic middleware
+abstraction that would hide the per-action metadata differences. Candidate
+shapes (none chosen yet):
+- A test that enumerates a known, explicit list of "sensitive route" handler
+  names/paths and asserts each one's source (or its compiled behavior in an
+  integration test, à la `tests/authRoutes.test.ts`'s and
+  `tests/orgsRoutes.test.ts`'s existing audit-event assertions) actually
+  records an audit event — but needs a way to flag *new* sensitive routes
+  for inclusion, not just check existing ones.
+- A lint rule / custom ESLint plugin that flags route handlers performing a
+  write (`INSERT`/`UPDATE`/`DELETE` via `getRawDb()`) with no
+  `recordAuditEvent` call in the same function body — heuristic, may have
+  false positives/negatives.
+- A thin "sensitive action" wrapper/decorator that route handlers opt into
+  explicitly (so the call site stays explicit and self-documenting, but the
+  wrapper enforces that *some* audit call happens) — closer to a convention
+  than to enforcement, but at least makes "did I opt in?" a single visible
+  decision per handler instead of a buried `recordAuditEvent()` call easy to
+  forget.
+
+### Design Gaps
+- [ ] Which mechanism (test enumeration vs. lint rule vs. wrapper
+      convention) — each has a different false-positive/false-negative
+      profile and maintenance cost; no decision made yet.
+- [ ] How to define "sensitive route" precisely enough to enumerate or lint
+      against — by HTTP method (any non-GET)? By an explicit allowlist
+      maintained alongside `auditLog.ts`'s `AuditAction` union? By touching
+      specific tables (`users`, `org_members`, `repo_grants`, `sessions`,
+      `api_keys`)?
+- [ ] Whether this should also eventually cover the CLI-direct operator
+      paths that Phase 125 deliberately excluded (`gitsema repos grant`,
+      `gitsema orgs members add`, `gitsema auth create-user`, etc.) — Phase
+      125's docstring argues those already require local DB access (a
+      stronger trust boundary), but if that reasoning is ever revisited,
+      this enforcement mechanism would need to extend to CLI command
+      handlers too, not just HTTP routes.
+
+### Effort Estimate
+- Small if scoped to a test-enumeration approach (a few hours: one new test
+  file plus a maintained allowlist constant). Larger if a real lint rule is
+  pursued (custom ESLint rule authoring + AST matching is a different skill
+  surface than the rest of this codebase's tooling).
+
+### Prerequisites
+- None — `audit_log` (Phase 125) is already shipped; this only needs a
+  decision on which enforcement mechanism to pursue.
 
 ---
 

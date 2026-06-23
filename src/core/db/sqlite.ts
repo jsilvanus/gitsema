@@ -58,8 +58,16 @@ export interface DbSession {
  *       knowledge-graph §3.2), populated during `index --graph` for TS/TSX/JS/Python
  * 26 — Added graph_nodes and edges tables for the structural linking pass (Phase 107 /
  *       knowledge-graph §3.3), rebuilt wholesale by `gitsema graph build`
+ * 27 — Added users, sessions, api_keys tables for identity & credentials core
+ *       (Phase 122 / multi-tenant-auth §5 Phase A)
+ * 28 — Added orgs, org_members, repo_grants tables and repos.org_id column for
+ *       org/grant authorization (Phase 123 / multi-tenant-auth §5 Phase B)
+ * 29 — Added sso_identities table for linked external OIDC/SSO identities
+ *       (Phase 124 / multi-tenant-auth §5 Phase C)
+ * 30 — Added audit_log table for the identity/authorization audit trail
+ *       (Phase 125 / multi-tenant-auth §5 Phase D)
  */
-export const CURRENT_SCHEMA_VERSION = 26
+export const CURRENT_SCHEMA_VERSION = 30
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -289,7 +297,7 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
 
     -- Multi-repo registry (Phase 41 / v14); db_path added in v15;
     -- normalized_url, clone_path, last_indexed_at, ephemeral added in v23
-    -- (persistent server-side repo storage)
+    -- (persistent server-side repo storage); org_id added in v28 (Phase 123)
     CREATE TABLE IF NOT EXISTS repos (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -299,7 +307,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       normalized_url TEXT,
       clone_path TEXT,
       last_indexed_at INTEGER,
-      ephemeral INTEGER NOT NULL DEFAULT 0
+      ephemeral INTEGER NOT NULL DEFAULT 0,
+      org_id INTEGER REFERENCES orgs(id)
     );
 
     -- Per-repo access control tokens (review7 §4.1 / v21): token is stored as SHA-256 hash.
@@ -369,6 +378,95 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     CREATE INDEX IF NOT EXISTS idx_edges_src_type ON edges(src_key, edge_type);
     CREATE INDEX IF NOT EXISTS idx_edges_dst_type ON edges(dst_key, edge_type);
     CREATE INDEX IF NOT EXISTS idx_graph_nodes_display_name ON graph_nodes(display_name);
+
+    -- Identity & credentials core (Phase 122 / multi-tenant-auth §5 Phase A / v27).
+    -- A user authenticates via password+session, an API key, or (Phase 124) a
+    -- linked SSO identity — all resolve to the same users.id before any
+    -- authorization check runs. No authorization model yet (Phase 123).
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    CREATE TABLE IF NOT EXISTS api_keys (
+      key_hash TEXT PRIMARY KEY,
+      key_prefix TEXT NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      label TEXT,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      revoked_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+
+    -- Orgs, personal groups, repo/branch grants (Phase 123 / multi-tenant-auth §5 Phase B)
+    CREATE TABLE IF NOT EXISTS orgs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS org_members (
+      org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      joined_at INTEGER NOT NULL,
+      PRIMARY KEY (org_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
+
+    CREATE TABLE IF NOT EXISTS repo_grants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      branch_pattern TEXT,
+      granted_by INTEGER NOT NULL REFERENCES users(id),
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_repo_grants_user_repo_branch
+      ON repo_grants(user_id, repo_id, branch_pattern);
+    CREATE INDEX IF NOT EXISTS idx_repo_grants_repo ON repo_grants(repo_id);
+
+    -- Linked SSO/OIDC identities (Phase 124 / multi-tenant-auth §5 Phase C)
+    CREATE TABLE IF NOT EXISTS sso_identities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      linked_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sso_identities_provider_external
+      ON sso_identities(provider, external_id);
+    CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id);
+
+    -- Identity/authorization audit trail (Phase 125 / multi-tenant-auth §5 Phase D).
+    -- No FK constraints: a historical record should outlive the rows it references.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_user_id INTEGER,
+      action TEXT NOT NULL,
+      target TEXT,
+      org_id INTEGER,
+      repo_id TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_log_org ON audit_log(org_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_repo ON audit_log(repo_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
   `)
 
   if (isFresh) {
