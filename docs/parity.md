@@ -45,7 +45,7 @@ process. A single `tools mcp` invocation could simultaneously be reached over
 This table shows which tools/commands are available in which interface. A checkmark (✓) means the tool is fully available; a dash (—) means it's not available in that interface.
 
 ### Legend
-- **CLI**: Command-line interface (85 commands)
+- **CLI**: Command-line interface (86 commands)
 - **REPL**: Lightweight interactive search REPL (search only)
 - **LSP**: Language Server Protocol for IDE integration (9 protocol methods: hover, definition, references, document/workspace symbol, call hierarchy, code lens) — available over stdio, `--tcp` (deprecated, Phase 120), or `--websocket` (see §0); tool availability is identical across all three, since they're just transports onto the same dispatcher
 - **Guide**: Agentic tool-calling loop in `gitsema guide` (49 tools, max 5 roundtrips)
