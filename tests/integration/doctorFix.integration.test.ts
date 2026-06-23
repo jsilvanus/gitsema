@@ -56,7 +56,12 @@ beforeAll(() => {
 
 afterAll(() => {
   process.chdir(origCwd)
-  rmSync(repoDir, { recursive: true, force: true })
+  // Windows CI occasionally hits EBUSY here from a transient lock left by the
+  // git subprocesses spawned in beforeAll (see profileFirstRun.test.ts for
+  // the same pattern) — cleanup best-effort, not test-critical.
+  try {
+    rmSync(repoDir, { recursive: true, force: true })
+  } catch {}
 })
 
 describe('doctorCommand — --fix', () => {
