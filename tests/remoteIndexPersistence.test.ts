@@ -48,12 +48,37 @@ vi.mock('../src/core/indexing/indexer.js', () => ({
 import { createApp } from '../src/server/app.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 import { getRegistrySession, closeRegistrySession, normalizeRepoUrl, deriveRepoId, registerPersistedRepo, getRepoClonePath, getRepoDbPath } from '../src/core/indexing/repoRegistry.js'
+import { createUser, createSession } from '../src/core/auth/identity.js'
+import { resolveUserRepoAccess, listGrants } from '../src/core/auth/grants.js'
+import { getRawDb, getActiveSession } from '../src/core/db/sqlite.js'
 
 const mockProvider: EmbeddingProvider = {
   model: 'mock',
   embed: async () => [0.1, 0.2, 0.3, 0.4],
   embedBatch: async (texts: string[]) => texts.map(() => [0.1, 0.2, 0.3, 0.4]),
   dimensions: 4,
+}
+
+/**
+ * Registers an existing public repo in both the registry DB and the active DB,
+ * mirroring the dual-write the route handler performs (ownerUserId only lands
+ * in the active DB — see CLAUDE.md's two-database note).
+ */
+function registerPublicRepoFixture(repoUrl: string, name: string, ownerUserId: number) {
+  const normalizedUrl = normalizeRepoUrl(repoUrl)
+  const repoId = deriveRepoId(normalizedUrl)
+  const base = {
+    id: repoId,
+    name,
+    url: repoUrl,
+    normalizedUrl,
+    clonePath: getRepoClonePath(repoId),
+    dbPath: getRepoDbPath(repoId),
+    visibility: 'public' as const,
+  }
+  registerPersistedRepo(getRegistrySession(), base)
+  registerPersistedRepo(getActiveSession(), { ...base, ownerUserId })
+  return repoId
 }
 
 let app: ReturnType<typeof createApp>
@@ -196,5 +221,143 @@ describe('POST /api/v1/remote/index — token scoping', () => {
 
     expect(res.body.error).toMatch(/not authorized|cannot register/i)
     expect(repoId).toBeTruthy() // sanity: repoId derivation didn't throw
+  })
+})
+
+describe('POST /api/v1/remote/index — public repo sharing (Phase 126)', () => {
+  afterEach(() => {
+    delete process.env.GITSEMA_PUBLIC_AUTO_INDEX
+  })
+
+  it('rejects a regular user registering a brand-new public repo when the gate is off', async () => {
+    delete process.env.GITSEMA_PUBLIC_AUTO_INDEX
+    const rawDb = getRawDb()
+    const alice = createUser(rawDb, 'alice-gate-off', 'pw')
+    const token = createSession(rawDb, alice.id).token
+
+    const res = await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ repoUrl: 'https://github.com/example/gate-off-new-public.git', visibility: 'public' })
+      .expect(403)
+
+    expect(res.body.error).toMatch(/allowPublicAutoIndex/)
+  })
+
+  it('allows a regular user to register a brand-new public repo when the gate is on', async () => {
+    process.env.GITSEMA_PUBLIC_AUTO_INDEX = 'true'
+    const rawDb = getRawDb()
+    const alice = createUser(rawDb, 'alice-gate-on', 'pw')
+    const token = createSession(rawDb, alice.id).token
+
+    const res = await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ repoUrl: 'https://github.com/example/gate-on-new-public.git', visibility: 'public' })
+      .expect(202)
+
+    expect(res.body.repoId).toBeTruthy()
+  })
+
+  it('an operator (no req.userId) bypasses the first-index gate for a new public repo', async () => {
+    delete process.env.GITSEMA_PUBLIC_AUTO_INDEX
+    const res = await request(app)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl: 'https://github.com/example/operator-new-public.git', visibility: 'public' })
+      .expect(202)
+
+    expect(res.body.repoId).toBeTruthy()
+  })
+
+  it('auto-grants read access (attach-as-reader) to a non-owner user on an existing public repo', async () => {
+    const rawDb = getRawDb()
+    const owner = createUser(rawDb, 'owner-attach', 'pw')
+    const repoUrl = 'https://github.com/example/public-attach-repo.git'
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-attach-repo', owner.id)
+
+    const reader = createUser(rawDb, 'reader-attach', 'pw')
+    const readerToken = createSession(rawDb, reader.id).token
+
+    expect(resolveUserRepoAccess(rawDb, reader.id, repoId)).toBeUndefined()
+
+    await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${readerToken}`)
+      .send({ repoUrl, repoId })
+      .expect(202)
+
+    expect(resolveUserRepoAccess(rawDb, reader.id, repoId)).toBe('read')
+    const grants = listGrants(rawDb, repoId)
+    const autoGrant = grants.find((g) => g.userId === reader.id)
+    expect(autoGrant?.source).toBe('auto-public')
+  })
+
+  it('does not downgrade an existing higher-role grant when attaching as reader', async () => {
+    const rawDb = getRawDb()
+    const owner = createUser(rawDb, 'owner-nodowngrade', 'pw')
+    const repoUrl = 'https://github.com/example/public-nodowngrade-repo.git'
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-nodowngrade-repo', owner.id)
+
+    const writer = createUser(rawDb, 'writer-nodowngrade', 'pw')
+    const writerToken = createSession(rawDb, writer.id).token
+    const { createGrant } = await import('../src/core/auth/grants.js')
+    createGrant(rawDb, { userId: writer.id, repoId, role: 'write', grantedBy: owner.id })
+
+    await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${writerToken}`)
+      .send({ repoUrl, repoId })
+      .expect(202)
+
+    expect(resolveUserRepoAccess(rawDb, writer.id, repoId)).toBe('write')
+  })
+
+  it('throttles a non-owner re-index trigger on a public repo within the configured interval', async () => {
+    process.env.GITSEMA_MIN_REINDEX_INTERVAL_SECONDS = '3600'
+    const rawDb = getRawDb()
+    const owner = createUser(rawDb, 'owner-throttle', 'pw')
+    const repoUrl = 'https://github.com/example/public-throttle-repo.git'
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-throttle-repo', owner.id)
+
+    const caller = createUser(rawDb, 'caller-throttle', 'pw')
+    const callerToken = createSession(rawDb, caller.id).token
+
+    await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${callerToken}`)
+      .send({ repoUrl, repoId })
+      .expect(202)
+
+    const res = await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${callerToken}`)
+      .send({ repoUrl, repoId })
+      .expect(429)
+
+    expect(res.headers['retry-after']).toBeTruthy()
+    delete process.env.GITSEMA_MIN_REINDEX_INTERVAL_SECONDS
+  })
+
+  it('does not throttle the repo owner re-indexing their own public repo', async () => {
+    process.env.GITSEMA_MIN_REINDEX_INTERVAL_SECONDS = '3600'
+    const rawDb = getRawDb()
+    const owner = createUser(rawDb, 'owner-no-throttle', 'pw')
+    const ownerToken = createSession(rawDb, owner.id).token
+    const repoUrl = 'https://github.com/example/public-owner-no-throttle-repo.git'
+    const repoId = registerPublicRepoFixture(repoUrl, 'public-owner-no-throttle-repo', owner.id)
+
+    await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ repoUrl, repoId })
+      .expect(202)
+
+    await request(app)
+      .post('/api/v1/remote/index')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ repoUrl, repoId })
+      .expect(202)
+
+    delete process.env.GITSEMA_MIN_REINDEX_INTERVAL_SECONDS
   })
 })

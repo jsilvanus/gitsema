@@ -4862,9 +4862,52 @@ that deprecated it, and its removal status.
 | **126** | §5 Phase 1 | Visibility flag + attach-as-reader | `repos.visibility` (`'private'\|'public'`, default `'private'`) + `ownerUserId` columns; `gitsema repos visibility <repoId> public\|private` CLI (owner/superadmin only); registration-flow change in `src/server/routes/remote.ts` auto-issuing a `repo_grants` reader row when a second user attaches to an existing public repo's shared index. |
 | **127** | §5 Phase 2 | First-index gate + refresh throttle | `auth.allowPublicAutoIndex`/`GITSEMA_PUBLIC_AUTO_INDEX` config gate (default `false`) restricting who may register a brand-new public-flagged repo; `auth.minReindexIntervalSeconds` per-`(user, repoId)` refresh throttle returning `429`/`Retry-After`. No hard dependency on Phase 126 beyond the `visibility` column existing. |
 
-**Status:** not started — draft design, scheduled here per `/phase-plan`.
+**Status:** ✅ complete *(completed vNEXT)*. Implemented in
+`src/server/routes/remote.ts` (registration-flow gate/throttle/attach-as-reader
+logic), `src/core/indexing/repoRegistry.ts` (`visibility`/`ownerUserId` columns,
+`setRepoVisibility`, `isPublicAutoIndexAllowed`, `getMinReindexIntervalSeconds`),
+and `src/cli/commands/repos.ts` (`gitsema repos visibility <repoId> public|private`).
 Explicitly out of scope (per the design doc §6): cross-repo blob-level dedup
 for forks with different URLs ("shape 2") remains undesigned and unscheduled.
+
+Deviations from the design doc, discovered during implementation:
+- **Two independent SQLite databases in a `gitsema tools serve` deployment.**
+  `getActiveSession()` (cwd-relative `.gitsema/index.db`, used by the entire
+  Phase 122-125 auth/orgs/grants system and by `authMiddleware`'s
+  `req.userId` resolution) and `getRegistrySession()`
+  (`${GITSEMA_DATA_DIR}/registry.db`, cwd-independent, used for persisted
+  repo clone/index-path bookkeeping since Phase 41) are two separate DB
+  files, each running the full schema with its own independent `users`/
+  `repos`/`repo_grants` tables and per-file FK enforcement. The design doc
+  speaks of "the `repos` table" and "the `users` table" as if unified; this
+  split predates Phase 126 and was not anticipated by the spec. Resolution:
+  `registry.db` keeps its original sole purpose (clone/index-path
+  bookkeeping) and never stores `ownerUserId`; the active DB becomes the
+  canonical store for `visibility`/`ownerUserId`/`repo_grants`, with
+  `runIndexJob` performing a dual-write to mirror the repo's `id`/`name`/
+  `url`/`normalizedUrl`/`clonePath`/`dbPath`/`visibility` row into both DBs
+  after each successful persisted index, and `ownerUserId` written only to
+  the active DB's copy. All visibility/ownership/grant reads in the route
+  handler resolve against the active DB's mirrored row, never `registry.db`'s.
+  This is a server-deployment-internal data-plumbing detail with no surfaced
+  CLI/API change; the broader question of whether the active session's
+  cwd-relative default is the right long-term identity-store location for
+  `gitsema tools serve` specifically (vs. tying it to `GITSEMA_DATA_DIR`) is
+  deferred — fixing it would be a breaking change to already-shipped Phase
+  122-125 behavior, well beyond this track's scope.
+- Grant role naming uses the existing `'read'|'write'|'owner'` enum (Phase
+  123) rather than the design doc's `'reader'` wording — no new role was
+  introduced.
+- "Superadmin" in the design doc's first-index gate is resolved via the
+  existing "operator" trust boundary (`req.userId === undefined` — local
+  CLI/global-key/no-auth-required callers), consistent with the Phase
+  122-125 precedent that operator-equivalent access is a stronger trust
+  tier than any network role, rather than introducing a new superadmin flag.
+- Flipping a repo back to `private` does not auto-revoke previously
+  auto-issued `repo_grants` rows (per the design doc's own open question in
+  §7) — they remain until explicitly revoked via `gitsema repos revoke`.
+- `repo_grants.source` (`'auto-public'` vs. manual) was added to distinguish
+  attach-as-reader auto-grants from explicit `gitsema repos grant` grants.
 
 ---
 

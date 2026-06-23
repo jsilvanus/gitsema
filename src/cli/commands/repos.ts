@@ -2,7 +2,7 @@ import { Command } from 'commander'
 import { createHash, randomBytes } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import { getActiveSession, getRawDb } from '../../core/db/sqlite.js'
-import { addRepo, listRepos, multiRepoSearch, getRegistrySession, getRepo, getRepoDir, removeRepo } from '../../core/indexing/repoRegistry.js'
+import { addRepo, listRepos, multiRepoSearch, getRegistrySession, getRepo, getRepoDir, removeRepo, setRepoVisibility } from '../../core/indexing/repoRegistry.js'
 import { buildProvider } from '../../core/embedding/providerFactory.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { parsePositiveInt } from '../../utils/parse.js'
@@ -261,6 +261,24 @@ export function reposCommand(): Command {
       }
       const revoked = revokeGrant(getRawDb(), target.id, repoId)
       console.log(`Revoked ${revoked} grant(s) for '${username}' on repo '${repoId}'.`)
+    })
+
+  cmd
+    .command('visibility <repo-id> <state>')
+    .description('Set a repo\'s visibility to public or private (Phase 126) — operator-only, no network auth boundary')
+    .action((repoId: string, state: string) => {
+      if (state !== 'public' && state !== 'private') {
+        console.error("Error: state must be 'public' or 'private'")
+        process.exit(1)
+      }
+      const session = getRegistrySession()
+      const repo = getRepo(session, repoId)
+      if (!repo) {
+        console.error(`Error: repo '${repoId}' not found in registry`)
+        process.exit(1)
+      }
+      setRepoVisibility(session, repoId, state)
+      console.log(`Repo '${repoId}' visibility set to '${state}'.`)
     })
 
   cmd

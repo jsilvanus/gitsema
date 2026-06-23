@@ -5,6 +5,9 @@ import { getActiveSession, openDatabaseAt, getOrOpenSessionAtPath, closeSessionA
 import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import type { SearchResult, Embedding } from '../models/types.js'
 import { mergeSearchResults } from '../search/analysis/vectorSearch.js'
+import { getConfigValue } from '../config/configManager.js'
+
+export type RepoVisibility = 'private' | 'public'
 
 export interface RepoEntry {
   id: string
@@ -16,6 +19,10 @@ export interface RepoEntry {
   clonePath?: string | null
   lastIndexedAt?: number | null
   ephemeral?: boolean
+  /** 'private' (default) | 'public' — gates attach-as-reader auto-grants (Phase 126). */
+  visibility?: RepoVisibility
+  /** The user whose registration request first created this repo (Phase 126). */
+  ownerUserId?: number | null
 }
 
 export function addRepo(dbSession: ReturnType<typeof getActiveSession>, id: string, name: string, url?: string | null, dbPath?: string | null): void {
@@ -34,9 +41,11 @@ interface RepoRow {
   clone_path: string | null
   last_indexed_at: number | null
   ephemeral: number
+  visibility?: string | null
+  owner_user_id?: number | null
 }
 
-const REPO_COLUMNS = 'id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral'
+const REPO_COLUMNS = 'id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral, visibility, owner_user_id'
 
 function rowToRepoEntry(r: RepoRow): RepoEntry {
   return {
@@ -49,6 +58,8 @@ function rowToRepoEntry(r: RepoRow): RepoEntry {
     clonePath: r.clone_path ?? undefined,
     lastIndexedAt: r.last_indexed_at ?? undefined,
     ephemeral: r.ephemeral === 1,
+    visibility: (r.visibility as RepoVisibility | null | undefined) ?? 'private',
+    ownerUserId: r.owner_user_id ?? undefined,
   }
 }
 
@@ -231,13 +242,23 @@ export function registerPersistedRepo(
     clonePath: string
     dbPath: string
     ephemeral?: boolean
+    /** Only honored on first creation — see Phase 126 note below. */
+    visibility?: RepoVisibility
+    /** Only honored on first creation — see Phase 126 note below. */
+    ownerUserId?: number | null
   },
 ): void {
   const { rawDb } = session
   const now = Math.floor(Date.now() / 1000)
+  // visibility/owner_user_id are deliberately omitted from the ON CONFLICT
+  // UPDATE clause below: this upsert runs on every (re-)index of an
+  // already-registered repo, and those two columns are first-claimer
+  // properties that must not be overwritten by a later touch (Phase 126 /
+  // public-repo-sharing §4.5 — ownership semantics stay exactly as today's
+  // existing dedup mechanism decides).
   rawDb.prepare(`
-    INSERT INTO repos (id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+    INSERT INTO repos (id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral, visibility, owner_user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       url = excluded.url,
@@ -245,7 +266,54 @@ export function registerPersistedRepo(
       normalized_url = excluded.normalized_url,
       clone_path = excluded.clone_path,
       ephemeral = excluded.ephemeral
-  `).run(entry.id, entry.name, entry.url, entry.dbPath, now, entry.normalizedUrl, entry.clonePath, entry.ephemeral ? 1 : 0)
+  `).run(
+    entry.id, entry.name, entry.url, entry.dbPath, now, entry.normalizedUrl, entry.clonePath, entry.ephemeral ? 1 : 0,
+    entry.visibility ?? 'private', entry.ownerUserId ?? null,
+  )
+}
+
+/**
+ * Updates a repo's visibility flag. Only the repo's owner or a superadmin
+ * (in this codebase: anyone with local DB/CLI access — see
+ * `gitsema repos visibility`) may call this (Phase 126 / public-repo-sharing
+ * §4.1). Per the design doc's open revocation question (§7), flipping a
+ * repo back to private does not strip previously auto-issued `repo_grants`
+ * rows — they're left in place until explicitly revoked.
+ */
+export function setRepoVisibility(
+  session: ReturnType<typeof getOrOpenSessionAtPath> | ReturnType<typeof getActiveSession>,
+  repoId: string,
+  visibility: RepoVisibility,
+): void {
+  const { rawDb } = session
+  rawDb.prepare('UPDATE repos SET visibility = ? WHERE id = ?').run(visibility, repoId)
+}
+
+/**
+ * Whether an unauthenticated/scoped caller may trigger first-time indexing
+ * of a brand-new repo registered as public (Phase 126 / public-repo-sharing
+ * §4.2). Default false; overridden by GITSEMA_PUBLIC_AUTO_INDEX or the
+ * `auth.allowPublicAutoIndex` config key.
+ */
+export function isPublicAutoIndexAllowed(cwd?: string): boolean {
+  const { value } = getConfigValue('auth.allowPublicAutoIndex', cwd)
+  if (value === undefined) return false
+  if (typeof value === 'boolean') return value
+  return String(value) === 'true'
+}
+
+/**
+ * Minimum seconds between re-index triggers for the same public repo from
+ * non-owner callers (Phase 126 / public-repo-sharing §4.4 throttle). Default
+ * 300s — the design doc flags this as a placeholder guess, kept here so it's
+ * the single place to retune. Overridden by GITSEMA_MIN_REINDEX_INTERVAL_SECONDS
+ * or the `auth.minReindexIntervalSeconds` config key.
+ */
+export function getMinReindexIntervalSeconds(cwd?: string): number {
+  const { value } = getConfigValue('auth.minReindexIntervalSeconds', cwd)
+  if (value === undefined) return 300
+  const n = typeof value === 'number' ? value : parseInt(String(value), 10)
+  return Number.isFinite(n) && n >= 0 ? n : 300
 }
 
 /** Updates `last_indexed_at` to now for the given repo id. */
