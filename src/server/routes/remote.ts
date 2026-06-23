@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import { PROFILE_NAME_RE } from '../../core/embedding/profiles.js'
 import type { EmbeddingProviderPair } from '../../core/embedding/profiles.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { runIndex } from '../../core/indexing/indexer.js'
@@ -98,7 +99,7 @@ const RepoIdSchema = z.string().regex(/^[a-f0-9]{16}$/, {
 })
 
 /** Same shape as EmbeddingProfileSchema's name field in profiles.ts. */
-const ProfileNameSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/, {
+const ProfileNameSchema = z.string().regex(PROFILE_NAME_RE, {
   message: 'profileName must be 1-64 alphanumeric/hyphen/underscore characters',
 })
 

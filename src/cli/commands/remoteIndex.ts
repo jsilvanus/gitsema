@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises'
 import { remoteIndexRepo } from '../../client/remoteClient.js'
 import type { RemoteIndexOptions, RemoteIndexRequest } from '../../client/remoteClient.js'
 import type { IndexStats } from '../../core/indexing/indexer.js'
+import { PROFILE_NAME_RE } from '../../core/embedding/profiles.js'
 
 export interface RemoteIndexCommandOptions {
   remote?: string
@@ -114,7 +115,7 @@ export async function remoteIndexCommand(
   }
 
   // Validate profile format (must match the server-side regex)
-  if (options.profile !== undefined && !/^[a-zA-Z0-9_-]{1,64}$/.test(options.profile)) {
+  if (options.profile !== undefined && !PROFILE_NAME_RE.test(options.profile)) {
     console.error('Error: --profile must be 1–64 alphanumeric/hyphen/underscore characters')
     process.exit(1)
   }

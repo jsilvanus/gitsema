@@ -5,8 +5,18 @@ import { runStorageDoctor } from '../../core/storage/doctor.js'
 import { verifyLspStartup } from '../../core/lsp/server.js'
 import { execSync } from 'node:child_process'
 import { backfillFts } from '../../core/indexing/backfillFts.js'
-import { rebuildFts } from '../../core/db/rebuildFts.js'
 import { runGarbageCollection } from '../../core/indexing/gc.js'
+import type { DoctorReport } from '../../core/db/doctor.js'
+
+function printFtsAndOrphanCounts(report: DoctorReport): void {
+  console.log(`FTS rows:          ${report.ftsCount}`)
+  if (report.ftsMissingCount > 0) {
+    console.log(`FTS missing:       ${report.ftsMissingCount} (run: gitsema index rebuild-fts)`)
+  }
+  if (report.orphanEmbeddings > 0) {
+    console.log(`Orphan embeddings: ${report.orphanEmbeddings} (run: gitsema index gc)`)
+  }
+}
 
 export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; fix?: boolean } = {}): Promise<void> {
   if (opts.lsp) {
@@ -54,13 +64,7 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; f
   console.log(`Schema version:    ${report.schemaVersion} (expected: ${report.expectedVersion}) ${report.schemaOk ? '✓' : '✗'}`)
   console.log(`Blobs indexed:     ${report.blobCount}`)
   console.log(`Embeddings stored: ${report.embeddingCount}`)
-  console.log(`FTS rows:          ${report.ftsCount}`)
-  if (report.ftsMissingCount > 0) {
-    console.log(`FTS missing:       ${report.ftsMissingCount} (run: gitsema index rebuild-fts)`)
-  }
-  if (report.orphanEmbeddings > 0) {
-    console.log(`Orphan embeddings: ${report.orphanEmbeddings} (run: gitsema index gc)`)
-  }
+  printFtsAndOrphanCounts(report)
   console.log(`Integrity check:   ${report.integrityCheckPassed ? 'passed ✓' : 'FAILED ✗'}`)
   if (report.integrityErrors.length > 0) {
     for (const err of report.integrityErrors) {
@@ -101,8 +105,6 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; f
       console.log(`Backfilling FTS content for ${report.ftsMissingCount} blob(s)...`)
       const backfillStats = await backfillFts()
       console.log(`  Backfilled: ${backfillStats.backfilled}  Oversized: ${backfillStats.oversized}  Failed: ${backfillStats.failed}`)
-      const rebuildResult = rebuildFts(rawDb)
-      console.log(`  FTS5 rebuild complete. ${rebuildResult.rebuilt} rows indexed.`)
     }
 
     if (report.orphanEmbeddings > 0) {
@@ -114,9 +116,7 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; f
     report = runDoctor(rawDb)
     console.log('')
     console.log('=== Post-fix report ===')
-    console.log(`FTS rows:          ${report.ftsCount}`)
-    console.log(`FTS missing:       ${report.ftsMissingCount}`)
-    console.log(`Orphan embeddings: ${report.orphanEmbeddings}`)
+    printFtsAndOrphanCounts(report)
   }
 
   // Also run LSP check

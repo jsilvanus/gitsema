@@ -28,7 +28,7 @@ export interface EmbeddingProviderPair {
 }
 
 /** Alphanumeric + hyphens/underscores, 1–64 chars — same shape as other server-side name fields (e.g. dbLabel). */
-const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/
+export const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/
 
 export const EmbeddingProfileSchema = z.object({
   name: z.string().regex(PROFILE_NAME_RE, 'profile name must be 1-64 alphanumeric/hyphen/underscore characters'),
