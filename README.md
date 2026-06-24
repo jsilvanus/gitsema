@@ -130,6 +130,9 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema auth sso unlink <provider> <external-id>` | Unlink an external identity (operator-only) |
 | `gitsema auth sso list <username>` | List SSO identities linked to a user (operator-only) |
 | `gitsema audit log [--org <org>] [--repo <repo-id>] [--limit <n>]` | Query the identity/authorization audit trail (grant/token/login/org-membership/repo-move events), newest first (operator-only) |
+| `gitsema admin models list --kind <embedding\|narrator\|guide> [--org <name>]` | Show the effective allowed set for a model kind, server-wide or for an org (Phase 129, operator-only) |
+| `gitsema admin models allow\|deny <identifier> --kind <kind> [--org <name>]` | Enable/disable a defined embedding profile or narrator/guide model config, server-wide or narrowed for an org (never widening past the server-wide set; operator-only) |
+| `gitsema admin models reset --kind <kind> [--org <name>]` | Revert a model kind's policy to default-allow-all, server-wide or for an org (operator-only) |
 
 #### `gitsema index start [options]`
 
@@ -340,8 +343,13 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--model <name>` | — | Narrator model name to use (overrides active selection) |
 | `--narrate` | off | Call the configured LLM narrator and return prose (default: return evidence only) |
 | `--evidence-only` | on | Return raw commit evidence without calling the LLM (this is the default) |
+| `--byok-http-url <url>` | — | Request-scoped narrator LLM endpoint (bring-your-own-key, Phase 130); bypasses configured/allow-listed models and the DB entirely, never persisted |
+| `--byok-api-key <key>` | — | Bearer token for `--byok-http-url` |
+| `--byok-model <name>` | — | Model id sent to `--byok-http-url` (defaults to the endpoint default) |
+| `--byok-max-tokens <n>` | — | Max tokens per BYOK call |
+| `--byok-temperature <n>` | — | Temperature for BYOK calls |
 
-Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, with a local Ollama model (`gitsema models add <name> --narrator --provider ollama [--global-name <tag>] --activate`, see "Ollama" below), or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below).
+Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, with a local Ollama model (`gitsema models add <name> --narrator --provider ollama [--global-name <tag>] --activate`, see "Ollama" below), or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below). Alternatively, pass `--byok-http-url` (and optionally `--byok-api-key`/`--byok-model`) for a one-off, never-persisted request-scoped model — it bypasses the configured/allow-listed model selection entirely (Phase 130).
 
 #### `--narrate` on other commands
 
@@ -378,8 +386,13 @@ All outbound content (prompts, tool results) is passed through the same secret/P
 | `--model <name>` | Guide/narrator model name to use |
 | `--no-context` | Skip gathering git context (faster but less accurate) |
 | `-i, --interactive` | Start an interactive REPL session (one question per line, multi-turn — the agent session is reused across turns) |
+| `--byok-http-url <url>` | Request-scoped guide LLM endpoint (bring-your-own-key, Phase 130); bypasses configured/allow-listed models and the DB entirely, never persisted |
+| `--byok-api-key <key>` | Bearer token for `--byok-http-url` |
+| `--byok-model <name>` | Model id sent to `--byok-http-url` (defaults to the endpoint default) |
+| `--byok-max-tokens <n>` | Max tokens per BYOK call |
+| `--byok-temperature <n>` | Temperature for BYOK calls |
 
-Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`, or with a local CLI AI tool: `gitsema models add <name> --guide --provider cli --cli-command <tool> [--use-mcp] --activate` (see "CLI-based AI tool backends" below).
+Configure a guide model with `gitsema models add <name> --guide --http-url <url> [--key <token>] --activate`, or with a local CLI AI tool: `gitsema models add <name> --guide --provider cli --cli-command <tool> [--use-mcp] --activate` (see "CLI-based AI tool backends" below). Alternatively, pass `--byok-http-url` (and optionally `--byok-api-key`/`--byok-model`) for a one-off, never-persisted request-scoped model (Phase 130).
 
 **Ollama:** `--provider ollama` configures `narrate`/`explain`/`guide` against a local Ollama
 server with no API key. It defaults `--http-url` to `http://localhost:11434` (no trailing

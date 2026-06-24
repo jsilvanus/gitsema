@@ -4924,15 +4924,25 @@ Deviations from the design doc, discovered during implementation:
 | Phase | Spec section | Title | Deliverable |
 |---|---|---|---|
 | **128** | §5 Phase 1 | Multi-profile embedding serving | Server config shape for N named embedding profiles; `gitsema tools serve` builds a `Map<profileName, {textProvider, codeProvider}>` instead of one global pair; `repos.profileName` column pinned at first index and immutable after; CLI `gitsema index start --profile <name>`, `gitsema repos info` surfacing the pinned profile. ✅ complete |
-| **129** | §5 Phase 2 | Admin-gated enabled sets | Superadmin admin CLI/route enabling/disabling defined profiles and narrator/guide configs server-wide; org-level narrowing (never widening) reusing the Multi-Tenant Auth Track's org/role model; picker UX (pre-selected/disabled when exactly one profile is allowed, real picker otherwise). |
-| **130** | §5 Phase 3 | BYOK for narrator/guide | Request-scoped credential field on `narrate`/`explain`/`guide` CLI/HTTP/MCP entry points; one-off provider construction via `createNarratorProviderFor()` with no persistence path; "lock to none" support (empty allow-list as a valid, tested state). |
+| **129** | §5 Phase 2 | Admin-gated enabled sets | Superadmin admin CLI/route enabling/disabling defined profiles and narrator/guide configs server-wide; org-level narrowing (never widening) reusing the Multi-Tenant Auth Track's org/role model; picker UX (pre-selected/disabled when exactly one profile is allowed, real picker otherwise). ✅ complete |
+| **130** | §5 Phase 3 | BYOK for narrator/guide | Request-scoped credential field on `narrate`/`explain`/`guide` CLI/HTTP/MCP entry points; one-off provider construction via `createNarratorProviderFor()` with no persistence path; "lock to none" support (empty allow-list as a valid, tested state). ✅ complete |
 
-**Status:** Phase 128 complete *(completed vX.Y.Z)*; Phases 129–130 not started.
+**Status:** Phases 128–130 complete *(completed vX.Y.Z)*.
 
 **Phase 128 deviations from spec:**
 - The `--profile <name>` flag landed on `gitsema remote-index` (not `gitsema index start`) — `remote-index` is the command backed by the persistent repo registry and first-index profile-pinning concept the design doc describes; a local-only `index start` has no registry row to pin a profile to.
 - Query-time profile-aware embedding (search/evolution routes using the *pinned* profile's text provider instead of the process-wide default) is out of scope for this pass — search still embeds queries with the server's default text provider regardless of which profile a result's source repo was indexed with.
 - Testing "a profile disabled but the repo keeps working" is deferred to Phase 129, since the enable/disable admin mechanism doesn't exist yet.
+
+**Phase 129 deviations from spec:**
+- Policy storage reuses the existing `settings` key-value table (JSON blobs keyed `model_allowlist:server:<kind>` / `model_allowlist:org:<orgId>:<kind>`) instead of a new schema table — no migration, schema stays at v32.
+- Admin surface is CLI-only (`gitsema admin models list|allow|deny|reset --kind <embedding|narrator|guide> [--org <name>]`); no HTTP/MCP route was added in this pass (no `docs/parity.md` entry to add since the command has no other-interface counterpart to compare against — see parity note below).
+- Org-level narrowing is fully wired for `embedding` profiles (the `gitsema tools serve` HTTP route has org context via `getRepoOrgId`), but **not** for `narrator`/`guide` configs — `gitsema models activate` enforces the server-wide allow-list only, since there is no HTTP entry point for narrator/guide activation to attach org context to. Org narrowing for narrator/guide remains a CLI-side-only allow-list (server-wide) until such a route exists.
+- The Phase 128-deferred regression case — a repo already pinned to an embedding profile keeps working even after that profile is later `denyServer`'d — is implemented as an explicit guard in `src/server/routes/remote.ts`'s profile-resolution block (the new 403 check is skipped whenever `pinnedProfileName` is set) and covered by a dedicated test.
+
+**Phase 130 deviations from spec:**
+- BYOK credentials are always resolved to `provider: 'chattydeer'` (HTTP backend) — a CLI-subprocess-backed BYOK variant was judged out of scope; HTTP/OpenAI-compatible is the realistic BYOK case the design doc anticipates.
+- Implemented as an opt-in `byok` field threaded through the *existing* `resolveNarratorProvider`/`resolveGuideConfig`/`resolveGuideProvider` functions (short-circuits before any DB access or allow-list check) rather than a separate code path, so every existing call site (CLI `narrate`/`explain`/`guide`, HTTP `/api/v1/narrate`/`/explain`/`/guide/chat`, MCP `narrate_repo`/`explain_issue_or_error`) gained BYOK support by construction. CLI flags: `--byok-http-url`/`--byok-api-key`/`--byok-model`/`--byok-max-tokens`/`--byok-temperature`; HTTP body: nested `byok: {httpUrl, apiKey, model, maxTokens, temperature}` (narrator routes) or snake_case `byok: {http_url, api_key, model, max_tokens, temperature}` (guide route, matching its existing snake_case body convention); MCP: flattened `byok_http_url`/`byok_api_key`/`byok_model`/`byok_max_tokens`/`byok_temperature` fields.
 
 ---
 

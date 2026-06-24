@@ -12,7 +12,7 @@ import type { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
 import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
-import type { NarrateFocus, NarrateFormat, NarrationResult } from '../../core/narrator/types.js'
+import type { ByokCredentials, NarrateFocus, NarrateFormat, NarrationResult } from '../../core/narrator/types.js'
 import { resolveOutputs, getSink, collectOut, type OutputSpec } from '../../utils/outputSink.js'
 import { addLensOption, parseLens } from '../lib/lens.js'
 
@@ -106,6 +106,28 @@ function resolveNarrateOutput(opts: { out?: string[]; format?: string }): {
   return { format: (opts.format as NarrateFormat) ?? 'md' }
 }
 
+/**
+ * Build request-scoped BYOK credentials from CLI flags (Phase 130 /
+ * locked-model-set-plan.md §5 Phase 3). Returns undefined unless
+ * `--byok-http-url` is set, leaving normal DB-backed resolution untouched.
+ */
+function parseByok(opts: {
+  byokHttpUrl?: string
+  byokApiKey?: string
+  byokModel?: string
+  byokMaxTokens?: string
+  byokTemperature?: string
+}): ByokCredentials | undefined {
+  if (!opts.byokHttpUrl) return undefined
+  return {
+    httpUrl: opts.byokHttpUrl,
+    ...(opts.byokApiKey ? { apiKey: opts.byokApiKey } : {}),
+    ...(opts.byokModel ? { model: opts.byokModel } : {}),
+    ...(opts.byokMaxTokens ? { maxTokens: parseInt(opts.byokMaxTokens, 10) } : {}),
+    ...(opts.byokTemperature ? { temperature: parseFloat(opts.byokTemperature) } : {}),
+  }
+}
+
 /** Emit a formatted narration result to its resolved sink (file or stdout). */
 function emitNarrateResult(result: NarrationResult, sink: OutputSpec | undefined): void {
   const text = formatResult(result)
@@ -134,6 +156,11 @@ export async function narrateCommand(
     narrate?: boolean
     evidenceOnly?: boolean
     out?: string[]
+    byokHttpUrl?: string
+    byokApiKey?: string
+    byokModel?: string
+    byokMaxTokens?: string
+    byokTemperature?: string
   },
 ): Promise<void> {
   // --narrate is shorthand for --no-evidence-only; default is evidence-only
@@ -142,6 +169,7 @@ export async function narrateCommand(
   const provider = resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
+    byok: parseByok(opts),
   })
 
   const { format, sink } = resolveNarrateOutput(opts)
@@ -181,6 +209,11 @@ export async function explainCommand(
     narrate?: boolean
     evidenceOnly?: boolean
     out?: string[]
+    byokHttpUrl?: string
+    byokApiKey?: string
+    byokModel?: string
+    byokMaxTokens?: string
+    byokTemperature?: string
     /** Phase 111 lens toggle. Default `semantic` keeps output byte-identical. */
     lens?: string
   },
@@ -191,6 +224,7 @@ export async function explainCommand(
   const provider = resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
+    byok: parseByok(opts),
   })
 
   const { format, sink } = resolveNarrateOutput(opts)
@@ -256,6 +290,11 @@ export function registerNarratorCommands(program: Command): void {
     .option('--model <name>', 'narrator model name to use (overrides active selection)')
     .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
     .option('--evidence-only', 'return raw commit evidence without calling the LLM (this is the default)')
+    .option('--byok-http-url <url>', 'request-scoped narrator LLM endpoint (bring-your-own-key; bypasses configured/allow-listed models, never persisted)')
+    .option('--byok-api-key <key>', 'bearer token for --byok-http-url')
+    .option('--byok-model <name>', 'model id sent to --byok-http-url (defaults to the endpoint default)')
+    .option('--byok-max-tokens <n>', 'max tokens per BYOK call')
+    .option('--byok-temperature <n>', 'temperature for BYOK calls')
     .action(narrateCommand)
 
   addLensOption(
@@ -271,7 +310,12 @@ export function registerNarratorCommands(program: Command): void {
       .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
       .option('--model <name>', 'narrator model name to use (overrides active selection)')
       .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
-      .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)'),
+      .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)')
+      .option('--byok-http-url <url>', 'request-scoped narrator LLM endpoint (bring-your-own-key; bypasses configured/allow-listed models, never persisted)')
+      .option('--byok-api-key <key>', 'bearer token for --byok-http-url')
+      .option('--byok-model <name>', 'model id sent to --byok-http-url (defaults to the endpoint default)')
+      .option('--byok-max-tokens <n>', 'max tokens per BYOK call')
+      .option('--byok-temperature <n>', 'temperature for BYOK calls'),
     'semantic',
   ).action(explainCommand)
 }

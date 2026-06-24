@@ -17,11 +17,25 @@ import { runGuide } from '../../cli/commands/guide.js'
 
 const router = Router()
 
+/**
+ * Request-scoped BYOK credentials (Phase 130 / locked-model-set-plan.md §5
+ * Phase 3). Never persisted, never allow-list checked — bypasses the DB
+ * entirely via `runGuide({ byok })` -> `resolveGuideConfig({ byok })`.
+ */
+const ByokSchema = z.object({
+  http_url: z.string().min(1).describe('OpenAI-compatible base URL for the LLM endpoint'),
+  api_key: z.string().optional().describe('Bearer token / API key'),
+  model: z.string().optional().describe('Model id sent to the chat-completions API'),
+  max_tokens: z.number().int().positive().optional(),
+  temperature: z.number().optional(),
+})
+
 const GuideChatBodySchema = z.object({
   question: z.string().min(1).max(4000).describe('The question to ask the guide'),
   model: z.string().optional().describe('Guide/narrator model name to use (overrides active selection)'),
   guide_model_id: z.number().int().positive().optional().describe('embed_config.id of the guide model'),
   include_context: z.boolean().optional().default(true).describe('Whether to gather git context before answering (default: true)'),
+  byok: ByokSchema.optional().describe('Request-scoped bring-your-own-key credentials, bypasses configured/allow-listed models, never persisted'),
 })
 
 /**
@@ -38,13 +52,20 @@ router.post('/chat', async (req: Request, res: Response) => {
     return
   }
 
-  const { question, model, guide_model_id, include_context } = parsed.data
+  const { question, model, guide_model_id, include_context, byok } = parsed.data
 
   try {
     const result = await runGuide(question, {
       guideModelId: guide_model_id,
       model,
       includeContext: include_context,
+      byok: byok ? {
+        httpUrl: byok.http_url,
+        ...(byok.api_key ? { apiKey: byok.api_key } : {}),
+        ...(byok.model ? { model: byok.model } : {}),
+        ...(byok.max_tokens !== undefined ? { maxTokens: byok.max_tokens } : {}),
+        ...(byok.temperature !== undefined ? { temperature: byok.temperature } : {}),
+      } : undefined,
     })
 
     res.json({

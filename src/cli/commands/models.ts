@@ -768,10 +768,22 @@ export async function modelsKindActivateCommand(name: string, kind: NarratorKind
   const { rawDb, resolver } = await getNarratorDb()
   const getByName = kind === 'narrator' ? resolver.getNarratorConfigByName : resolver.getGuideConfigByName
   const activateFn = kind === 'narrator' ? resolver.setActiveNarratorConfig : resolver.setActiveGuideConfig
+  const listFn = kind === 'narrator' ? resolver.listNarratorConfigs : resolver.listGuideConfigs
   const config = getByName(rawDb, name.trim())
   if (!config) {
     console.error(`Error: no ${kind} model config found for '${name}'.`)
     console.error(`Run: gitsema models list --${kind}`)
+    process.exit(1)
+  }
+  // Phase 129: server-wide superadmin allow-list (gitsema admin models allow/deny --kind narrator|guide).
+  // Org-narrowing doesn't apply here — there's no HTTP entry point to attach org
+  // context to this CLI-only activation path.
+  const { getEffectiveAllowedSet } = await import('../../core/admin/modelPolicy.js')
+  const universe = listFn(rawDb).map((c) => c.name)
+  const allowed = getEffectiveAllowedSet(rawDb, kind, undefined, universe)
+  if (!allowed.includes(config.name)) {
+    console.error(`Error: ${kind} model '${name}' is disabled by server policy.`)
+    console.error(`Run: gitsema admin models allow ${name} --kind ${kind}`)
     process.exit(1)
   }
   activateFn(rawDb, config.id)

@@ -20,6 +20,19 @@ export const narratorRouter = Router()
 // Schema
 // ---------------------------------------------------------------------------
 
+/**
+ * Request-scoped BYOK credentials (Phase 130 / locked-model-set-plan.md §5
+ * Phase 3). Never persisted, never allow-list checked — bypasses the DB
+ * entirely via `resolveNarratorProvider({ byok })`.
+ */
+const ByokSchema = z.object({
+  httpUrl: z.string().min(1),
+  apiKey: z.string().optional(),
+  model: z.string().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  temperature: z.number().optional(),
+})
+
 const NarrateBodySchema = z.object({
   since: z.string().optional(),
   until: z.string().optional(),
@@ -29,6 +42,7 @@ const NarrateBodySchema = z.object({
   maxCommits: z.number().int().positive().optional(),
   narratorModelId: z.number().int().positive().optional(),
   model: z.string().optional(),
+  byok: ByokSchema.optional(),
 })
 
 const ExplainBodySchema = z.object({
@@ -38,6 +52,7 @@ const ExplainBodySchema = z.object({
   format: z.enum(['md', 'text', 'json']).optional().default('md'),
   narratorModelId: z.number().int().positive().optional(),
   model: z.string().optional(),
+  byok: ByokSchema.optional(),
 })
 
 // ---------------------------------------------------------------------------
@@ -55,6 +70,7 @@ narratorRouter.post('/narrate', async (req, res) => {
   const provider = resolveNarratorProvider({
     narratorModelId: body.narratorModelId,
     modelName: body.model,
+    byok: body.byok,
   })
 
   try {
@@ -97,6 +113,7 @@ narratorRouter.post('/explain', async (req, res) => {
   const provider = resolveNarratorProvider({
     narratorModelId: body.narratorModelId,
     modelName: body.model,
+    byok: body.byok,
   })
 
   try {

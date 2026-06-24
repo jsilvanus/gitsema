@@ -9,7 +9,7 @@
  */
 
 import type Database from 'better-sqlite3'
-import type { NarratorModelConfig, NarratorModelParams, NarratorProvider } from './types.js'
+import type { ByokCredentials, NarratorModelConfig, NarratorModelParams, NarratorProvider } from './types.js'
 import { isCliParams } from './types.js'
 import { createHash } from 'node:crypto'
 import { createChattydeerProvider, createDisabledProvider } from './chattydeerProvider.js'
@@ -180,6 +180,27 @@ export function getActiveNarratorConfig(rawDb: InstanceType<typeof Database>): N
  *   - HTTP params with `httpUrl` set      → ChattydeerNarratorProvider
  *   - otherwise (no config, or disabled)   → disabled placeholder provider
  */
+/**
+ * Builds a one-off, never-persisted `NarratorModelConfig` from request-scoped
+ * BYOK credentials (Phase 130 / locked-model-set-plan.md §5 Phase 3). `id: -1`
+ * is a sentinel — this config is never written to or read from `embed_config`.
+ */
+export function byokConfig(byok: ByokCredentials): NarratorModelConfig {
+  return {
+    id: -1,
+    name: byok.model ?? 'byok',
+    provider: 'chattydeer',
+    params: {
+      httpUrl: byok.httpUrl,
+      ...(byok.apiKey ? { apiKey: byok.apiKey } : {}),
+      ...(byok.model ? { model: byok.model } : {}),
+      ...(byok.maxTokens !== undefined ? { maxTokens: byok.maxTokens } : {}),
+      ...(byok.temperature !== undefined ? { temperature: byok.temperature } : {}),
+    },
+    createdAt: Math.floor(Date.now() / 1000),
+  }
+}
+
 export function createNarratorProviderFor(config: NarratorModelConfig | null): NarratorProvider {
   if (!config) {
     return createDisabledProvider()
@@ -197,6 +218,8 @@ export function createNarratorProviderFor(config: NarratorModelConfig | null): N
  * Resolve the active NarratorProvider from the DB session.
  *
  * Resolution order:
+ *   0. `byok` request-scoped credentials (Phase 130) — one-off provider,
+ *      bypasses the DB entirely (no allow-list check, no persistence)
  *   1. `narratorModelId` CLI option (explicit embed_config.id)
  *   2. `modelName` CLI option (looks up by name)
  *   3. Active narrator config from settings table
@@ -205,7 +228,12 @@ export function createNarratorProviderFor(config: NarratorModelConfig | null): N
 export function resolveNarratorProvider(opts: {
   narratorModelId?: number
   modelName?: string
+  byok?: ByokCredentials
 } = {}): NarratorProvider {
+  if (opts.byok) {
+    return createNarratorProviderFor(byokConfig(opts.byok))
+  }
+
   const { rawDb } = getActiveSession()
 
   let config: NarratorModelConfig | null = null
@@ -315,7 +343,12 @@ export function deleteGuideConfig(rawDb: InstanceType<typeof Database>, name: st
 export function resolveGuideConfig(opts: {
   guideModelId?: number
   modelName?: string
+  byok?: ByokCredentials
 } = {}): NarratorModelConfig | null {
+  if (opts.byok) {
+    return byokConfig(opts.byok)
+  }
+
   const { rawDb } = getActiveSession()
 
   if (opts.guideModelId !== undefined) {
@@ -332,6 +365,7 @@ export function resolveGuideConfig(opts: {
 export function resolveGuideProvider(opts: {
   guideModelId?: number
   modelName?: string
+  byok?: ByokCredentials
 } = {}): NarratorProvider {
   const config = resolveGuideConfig(opts)
   return createNarratorProviderFor(config)

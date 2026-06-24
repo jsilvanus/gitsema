@@ -2,7 +2,7 @@
 
 This document tracks the availability of gitsema tools and commands across all interfaces, and the implementation of common flags across the CLI. It serves as the single source of truth for interface parity and helps identify gaps, inconsistencies, and opportunities for unification.
 
-**Last updated:** 2026-06-23 (the only date in this document — see §4 for why)  
+**Last updated:** 2026-06-24 (the only date in this document — see §4 for why)  
 **Maintainer note:** Any tool change, interface change, or flag addition must be reflected in the tables below and in the canonical sections of `CLAUDE.md` / `docs/features.md` / `README.md`.
 
 ---
@@ -139,6 +139,7 @@ This table shows which tools/commands are available in which interface. A checkm
 | `repos visibility` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `auth sso link/unlink/list` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `audit log` | ✓ | — | — | — | — | — | — | — |
+| `admin models` (list/allow/deny/reset) | ✓ | — | — | — | — | — | — | — |
 | `quickstart` / `setup` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Visualization** |
 | `map` | ✓ | — | — | — | — | ✓ | ✓ | — |
@@ -487,6 +488,8 @@ If you find a discrepancy, **update this file first**, then propagate the change
 | Phase 117 | MCP Streamable HTTP transport | `tools mcp --http` — MCP's standard network transport, supersedes `--websocket` for MCP clients; no change to tool availability (§0) |
 | Phase 119 (review10 close-out) | Network-transport resource bounds | Payload/connection/session caps and non-loopback-without-key warnings added to all `--websocket`/`--http`/`--tcp` modes; no parity impact (security hardening, internal) |
 | Phase 120 | `tools lsp --tcp` deprecated | No tool/method availability change — `--tcp` still works identically, now prints a deprecation notice on every invocation steering callers to `--websocket --key` (§0); not yet scheduled for removal |
+| Phase 129 | Admin-gated enabled sets | New `gitsema admin models list\|allow\|deny\|reset` CLI command (operator-only, no other interface — see Tool Matrix); no flag changes to existing tools |
+| Phase 130 | BYOK for narrator/guide | `--byok-http-url`/`--byok-api-key`/`--byok-model`/`--byok-max-tokens`/`--byok-temperature` flags added to `narrate`/`explain`/`guide` (CLI), nested `byok` body field on the matching HTTP routes, flattened `byok_*` fields on the matching MCP tools; no Tool Matrix changes (additive flags on already-listed tools) |
 | Future | CLI Interactive | Full CLI with autocomplete, history, interactive UI |
 | Future | Web UI | Browser-based dashboard with visualization |
 

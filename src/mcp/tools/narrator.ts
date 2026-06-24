@@ -10,7 +10,38 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
 import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
+import type { ByokCredentials } from '../../core/narrator/types.js'
 import { registerTool } from '../registerTool.js'
+
+/**
+ * Flattened BYOK input fields shared by `narrate_repo`/`explain_issue_or_error`
+ * (Phase 130 / locked-model-set-plan.md §5 Phase 3). Request-scoped, never
+ * persisted, never allow-list checked.
+ */
+const BYOK_FIELDS = {
+  byok_http_url: z.string().optional().describe('Request-scoped narrator LLM endpoint (bring-your-own-key; bypasses configured/allow-listed models, never persisted)'),
+  byok_api_key: z.string().optional().describe('Bearer token for byok_http_url'),
+  byok_model: z.string().optional().describe('Model id sent to byok_http_url (defaults to the endpoint default)'),
+  byok_max_tokens: z.number().int().positive().optional().describe('Max tokens per BYOK call'),
+  byok_temperature: z.number().optional().describe('Temperature for BYOK calls'),
+} as const
+
+function parseByok(args: {
+  byok_http_url?: string
+  byok_api_key?: string
+  byok_model?: string
+  byok_max_tokens?: number
+  byok_temperature?: number
+}): ByokCredentials | undefined {
+  if (!args.byok_http_url) return undefined
+  return {
+    httpUrl: args.byok_http_url,
+    ...(args.byok_api_key ? { apiKey: args.byok_api_key } : {}),
+    ...(args.byok_model ? { model: args.byok_model } : {}),
+    ...(args.byok_max_tokens !== undefined ? { maxTokens: args.byok_max_tokens } : {}),
+    ...(args.byok_temperature !== undefined ? { temperature: args.byok_temperature } : {}),
+  }
+}
 
 export function registerNarratorTools(server: McpServer) {
   // narrate_repo
@@ -30,11 +61,13 @@ export function registerNarratorTools(server: McpServer) {
       evidence_only: z.boolean().optional().default(true).describe('Return raw commit evidence instead of calling LLM (default: true). Set false to narrate via LLM.'),
       narrator_model_id: z.number().int().positive().optional().describe('embed_config.id of the narrator model to use (only used when evidence_only=false)'),
       model: z.string().optional().describe('Narrator model name to use (only used when evidence_only=false)'),
+      ...BYOK_FIELDS,
     },
-    async ({ since, until, range, focus, format, max_commits, evidence_only, narrator_model_id, model }) => {
+    async ({ since, until, range, focus, format, max_commits, evidence_only, narrator_model_id, model, ...byokArgs }) => {
       const provider = resolveNarratorProvider({
         narratorModelId: narrator_model_id,
         modelName: model,
+        byok: parseByok(byokArgs),
       })
 
       try {
@@ -96,11 +129,13 @@ export function registerNarratorTools(server: McpServer) {
       evidence_only: z.boolean().optional().default(true).describe('Return raw matching commits instead of calling LLM (default: true). Set false to explain via LLM.'),
       narrator_model_id: z.number().int().positive().optional().describe('embed_config.id of the narrator model to use (only used when evidence_only=false)'),
       model: z.string().optional().describe('Narrator model name to use (only used when evidence_only=false)'),
+      ...BYOK_FIELDS,
     },
-    async ({ topic, since, until, format, evidence_only, narrator_model_id, model }) => {
+    async ({ topic, since, until, format, evidence_only, narrator_model_id, model, ...byokArgs }) => {
       const provider = resolveNarratorProvider({
         narratorModelId: narrator_model_id,
         modelName: model,
+        byok: parseByok(byokArgs),
       })
 
       try {
