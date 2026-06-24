@@ -5,6 +5,8 @@ tmp/
 *.log
 .claude/*
 !.claude/skills/
+!.claude/hooks/
+!.claude/settings.json
 modelserver/models/
 
 # Hugging Face cache
