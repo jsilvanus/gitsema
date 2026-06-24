@@ -102,14 +102,14 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 |---|---|
 | `gitsema config <action> [key] [value]` | Manage persistent configuration (`set`, `get`, `list`, `unset`) |
 | `gitsema status [file]` | Show index status and database info, or status for a specific file |
-| `gitsema doctor [options]` | Run index health checks (integrity, schema version, FTS backfill, scale warnings; `--extended` for model reachability/freshness) |
+| `gitsema doctor [options]` | Run index health checks (integrity, schema version, FTS backfill, scale warnings; `--extended` for model reachability/freshness; `--fix` to auto-repair missing FTS content and orphan embeddings, then re-report) |
 | `gitsema storage [info]` | Show the resolved storage backend/scope/location/FTS config (no connections opened) |
 | `gitsema storage migrate --to <backend> [options]` | Copy the active index into another storage backend (sqlite/postgres/qdrant) |
 | `gitsema models` | Manage embedding model configurations (list, add, remove, info); also manages LLM narrator/guide model configs via `--narrator`/`--guide` |
 | `gitsema index` | Show index coverage (blob counts per model) |
 | `gitsema index start [options]` | Perform indexing — walk Git history and embed all blobs |
 | `gitsema setup` (alias: `gitsema quickstart`) | Guided onboarding wizard: detect provider, configure embedding model, select storage backend (sqlite/postgres/qdrant), index HEAD, and optionally configure a narrator/guide model |
-| `gitsema remote-index <repoUrl>` | Ask a remote gitsema server to clone and index a Git repository |
+| `gitsema remote-index <repoUrl> [--profile <name>]` | Ask a remote gitsema server to clone and index a Git repository; `--profile` selects a named embedding profile when the server has more than one configured (pinned forever on that repo's first index) |
 | `gitsema auth login <server-url>` | Log in to a `gitsema tools serve` server (prompts for username/password); stores credentials locally |
 | `gitsema auth logout` | Log out and clear stored credentials |
 | `gitsema auth whoami` | Show the currently logged-in user |
@@ -125,6 +125,7 @@ All commands support a top-level `--verbose` flag (or `GITSEMA_VERBOSE=1`) for d
 | `gitsema repos revoke <repo-id> <username>` | Revoke a user's grants on a repo (operator-only) |
 | `gitsema repos move-to-org <repo-id> <org>` | Move a repo to a different org; grants survive untouched (operator-only) |
 | `gitsema repos visibility <repo-id> public\|private` | Set a persisted repo's visibility flag, gating attach-as-reader auto-grants (operator-only) |
+| `gitsema repos info <repo-id>` | Show full registry details for a persisted repo, including its pinned embedding profile (operator-only) |
 | `gitsema auth sso link <provider> <external-id> <username>` | Link an external SSO/OIDC identity to an existing user; provider must be in `GITSEMA_SSO_PROVIDERS` (operator-only) |
 | `gitsema auth sso unlink <provider> <external-id>` | Unlink an external identity (operator-only) |
 | `gitsema auth sso list <username>` | List SSO identities linked to a user (operator-only) |
@@ -184,7 +185,7 @@ Copies the active index into another storage backend (sqlite/postgres/qdrant) vi
 | `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | Start the LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) — `--tcp` is deprecated, use `--websocket` |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
-The old top-level `gitsema mcp`, `gitsema lsp`, `gitsema serve`, and `gitsema backfill-fts` still work as hidden backward-compat aliases.
+The old top-level `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work as hidden backward-compat aliases.
 
 **Remote delegation (Phase 113):** `--remote <url>` makes `tools mcp`/`tools lsp`
 delegate every data-access call to a running `gitsema tools serve` instance instead
@@ -289,7 +290,7 @@ public repo are throttled to one per `auth.minReindexIntervalSeconds` /
 | `--weight-path <n>` | `0.1` | Path-relevance weight |
 | `--group <mode>` | — | Collapse results by `file` \| `module` \| `commit` |
 | `--chunks` | off | Include chunk-level embeddings |
-| `--hybrid` | off | Combine vector + BM25 (FTS5); requires prior `gitsema backfill-fts` for older data |
+| `--hybrid` | off | Combine vector + BM25 (FTS5); requires prior `gitsema index rebuild-fts` for older data |
 | `--bm25-weight <n>` | `0.3` | BM25 weight in hybrid score |
 | `--branch <name>` | — | Restrict results to blobs seen on this branch |
 | `--vss` | off | Use the HNSW ANN index (requires prior `gitsema index build-vss`) |

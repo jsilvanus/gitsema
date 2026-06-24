@@ -12,7 +12,7 @@
  *     rates, keeping throughput near-optimal without overloading the backend.
  *   - `postRunRecommendations()`: examines the final IndexStats and prints
  *     actionable maintenance suggestions to the console (e.g. build VSS index,
- *     run backfill-fts, vacuum the DB).
+ *     run rebuild-fts, vacuum the DB).
  */
 
 import type { EmbeddingProvider } from '../embedding/provider.js'
@@ -174,7 +174,7 @@ export interface PostRunContext {
   indexed: number
   /** Total blobs already in the database (seen - indexed - failed). */
   existingBlobCount: number
-  /** True when the user has never run `gitsema index backfill-fts`. */
+  /** True when the user has never run `gitsema index rebuild-fts`. */
   hasFtsGap?: boolean
 }
 
@@ -194,7 +194,7 @@ export function postRunRecommendations(ctx: PostRunContext): string[] {
 
   if (ctx.hasFtsGap) {
     recommendations.push(
-      `ℹ  Some blobs may be missing FTS5 content — run \`gitsema index backfill-fts\` to enable --hybrid search on all blobs.`,
+      `ℹ  Some blobs may be missing FTS5 content — run \`gitsema index rebuild-fts\` to enable --hybrid search on all blobs.`,
     )
   }
 

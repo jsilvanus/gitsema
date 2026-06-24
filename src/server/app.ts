@@ -48,6 +48,7 @@
 import express from 'express'
 import type { Express } from 'express'
 import type { EmbeddingProvider } from '../core/embedding/provider.js'
+import type { EmbeddingProviderPair } from '../core/embedding/profiles.js'
 import type { ChunkStrategy } from '../core/chunking/chunker.js'
 import { authMiddleware } from './middleware/auth.js'
 import { repoSessionMiddleware } from './middleware/repoSession.js'
@@ -81,6 +82,8 @@ export interface AppOptions {
   concurrency?: number
   /** When true, serve the embedding space explorer web UI at /ui */
   ui?: boolean
+  /** Named embedding profiles (Phase 128 / locked-model-set-plan.md §4.1) — see remoteRouter's RemoteRouterOptions.profiles. */
+  profiles?: Map<string, EmbeddingProviderPair>
 }
 
 // Read package version dynamically so the capabilities endpoint always matches package.json
@@ -101,6 +104,7 @@ export function createApp(options: AppOptions): Express {
     chunkerStrategy = 'file',
     concurrency = 4,
     ui = false,
+    profiles,
   } = options
 
   const app = express()
@@ -183,7 +187,7 @@ export function createApp(options: AppOptions): Express {
 
   app.use(
     `${base}/remote`,
-    remoteRouter({ textProvider, codeProvider, chunkerStrategy, concurrency }),
+    remoteRouter({ textProvider, codeProvider, chunkerStrategy, concurrency, profiles }),
   )
 
   app.use(`${base}/analysis`, repoSessionMiddleware, analysisRouter({ textProvider }))

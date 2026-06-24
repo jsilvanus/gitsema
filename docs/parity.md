@@ -285,6 +285,7 @@ This table shows less common flags used by specific commands or command groups.
 | `--auto-build-vss` | `index start` | [int] | — | Build VSS index when blob count exceeds threshold |
 | `--allow-mixed` | `index start` | bool | false | Allow indexing with different embed config |
 | `--profile` | `index start` | enum | balanced | Preset profile: `speed`, `balanced`, or `quality` |
+| `--profile` | `remote-index` | string | — | Named embedding profile to index with on a multi-profile server (Phase 128); pinned forever on that repo's first index — see §2.3 item 7 for the naming collision with `index start`'s `--profile` |
 | `--graph` | `index start` | bool | false | Extract structural references for knowledge-graph |
 | `--ref1` | `pr-report`, `triage` | ref | HEAD~1 | First ref to compare |
 | `--ref2` | `pr-report`, `triage` | ref | HEAD | Second ref to compare |
@@ -298,6 +299,7 @@ This table shows less common flags used by specific commands or command groups.
 | `--diff-file` | `code-review` | path | — | Read diff from patch file instead of git |
 | `--lsp` | `index doctor` | bool | false | Only run LSP startup check |
 | `--extended` | `index doctor` | bool | false | Run extended pre-flight checks |
+| `--fix` | `index doctor` | bool | false | Auto-repair fixable issues (missing FTS content, orphan embeddings) and re-report |
 | `--no-cache` | `search` | bool | false | Skip query embedding cache |
 | `--cache` | `search` | bool | true | Use query embedding cache |
 | `--edge-types` | `deps`, `graph cycles`, `graph neighbors`, `unused` | string | varies | Comma-separated edge types to traverse |
@@ -353,11 +355,16 @@ This table shows less common flags used by specific commands or command groups.
    - **Status:** Context-specific, acceptable
    - **Action:** No change needed
 
+7. **`--profile` naming collision (Phase 128):**
+   - `index start --profile` selects a local indexing speed/balanced/quality preset; `remote-index --profile` selects a named server-side embedding profile (multi-profile embedding serving, Phase 128) — same flag name, unrelated meaning and value space, on two different commands.
+   - **Status:** Acceptable for now — the two commands are never invoked together and each is documented with its own enum/string type, but flag this if a third `--profile` meaning is ever added.
+   - **Action:** No change needed yet; reconsider if a future phase needs both concepts on the same command.
+
 ---
 
 ## 3. Interface-Specific Implementation Notes
 
-### CLI (85 commands)
+### CLI (86 commands)
 - **Status:** Complete command set
 - **Strengths:** Full feature access, all flags available
 - **Gaps:** None by definition

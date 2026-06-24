@@ -25,6 +25,8 @@ import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
+import { PROFILE_NAME_RE } from '../../core/embedding/profiles.js'
+import type { EmbeddingProviderPair } from '../../core/embedding/profiles.js'
 import type { ChunkStrategy } from '../../core/chunking/chunker.js'
 import { runIndex } from '../../core/indexing/indexer.js'
 import type { IndexStats } from '../../core/indexing/indexer.js'
@@ -96,6 +98,11 @@ const RepoIdSchema = z.string().regex(/^[a-f0-9]{16}$/, {
   message: 'repoId must be a 16-character hex string',
 })
 
+/** Same shape as EmbeddingProfileSchema's name field in profiles.ts. */
+const ProfileNameSchema = z.string().regex(PROFILE_NAME_RE, {
+  message: 'profileName must be 1-64 alphanumeric/hyphen/underscore characters',
+})
+
 const RemoteIndexBodySchema = z.object({
   repoUrl: z.string().max(2048),
   credentials: CredentialsSchema.optional(),
@@ -117,6 +124,13 @@ const RemoteIndexBodySchema = z.object({
    * an already-registered repo. Defaults to 'private'.
    */
   visibility: z.enum(['private', 'public']).optional(),
+  /**
+   * Embedding profile to index with (Phase 128 / locked-model-set-plan.md
+   * §4.1.3). Only meaningful when persist=true. Pinned forever on first
+   * index of a repo — has no effect on an already-pinned repo beyond
+   * validating it matches.
+   */
+  profileName: ProfileNameSchema.optional(),
 }).strict()
 
 // ---------------------------------------------------------------------------
@@ -363,6 +377,8 @@ interface PersistentJobContext {
   /** Only meaningful on first creation — see registerPersistedRepo's ON CONFLICT note. */
   visibility: RepoVisibility
   ownerUserId: number | null
+  /** Only meaningful on first creation — pinned forever (Phase 128). Null for legacy single-profile repos. */
+  profileName: string | null
 }
 
 async function runIndexJob(
@@ -461,6 +477,7 @@ async function runIndexJob(
         dbPath: persistent.dbPath,
         ephemeral: false,
         visibility: persistent.visibility,
+        profileName: persistent.profileName,
       }
       // registry.db's own local `users` table is unrelated to whichever DB
       // authMiddleware resolved req.userId against, so ownerUserId is
@@ -528,6 +545,13 @@ export interface RemoteRouterOptions {
   codeProvider?: EmbeddingProvider
   chunkerStrategy?: ChunkStrategy
   concurrency?: number
+  /**
+   * Named embedding profiles (Phase 128 / locked-model-set-plan.md §4.1).
+   * When omitted (or empty), falls back to a synthetic single 'default'
+   * profile wrapping textProvider/codeProvider — today's single-profile
+   * behavior, unchanged.
+   */
+  profiles?: Map<string, EmbeddingProviderPair>
 }
 
 export function remoteRouter(options: RemoteRouterOptions): Router {
@@ -537,6 +561,10 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
     chunkerStrategy: serverChunker = 'file',
     concurrency: serverConcurrency = 4,
   } = options
+
+  const profiles: Map<string, EmbeddingProviderPair> = options.profiles && options.profiles.size > 0
+    ? options.profiles
+    : new Map([['default', { textProvider, codeProvider }]])
 
   const router = Router()
 
@@ -555,7 +583,7 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       return
     }
 
-    const { repoUrl, credentials, cloneDepth, indexOptions = {}, dbLabel, persist, repoId: requestedRepoId, visibility: requestedVisibility } = parsed.data
+    const { repoUrl, credentials, cloneDepth, indexOptions = {}, dbLabel, persist, repoId: requestedRepoId, visibility: requestedVisibility, profileName: requestedProfileName } = parsed.data
 
     // --- 2. SSRF guard -------------------------------------------------------
     try {
@@ -568,6 +596,7 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
 
     // --- 2b. Resolve persistent repo registration (default mode) ------------
     let persistent: PersistentJobContext | undefined
+    let resolvedProviders: EmbeddingProviderPair = { textProvider, codeProvider }
     if (persist) {
       const normalizedUrl = normalizeRepoUrl(repoUrl)
       const registrySession = getRegistrySession()
@@ -656,6 +685,43 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
         })
       }
 
+      // --- 2f. Resolve embedding profile (Phase 128 / locked-model-set-plan.md
+      // §4.1.3). A repo's profile is pinned forever at first index:
+      //   - existing repo + requested profile that doesn't match the pin -> 409
+      //   - new repo + no profile requested + >1 profile configured -> 400
+      //     (caller must disambiguate)
+      //   - new repo + no profile requested + exactly 1 profile configured ->
+      //     auto-select it
+      //   - unknown profile name -> 400
+      const pinnedProfileName = existing?.profileName ?? null
+      let resolvedProfileName: string | null
+      if (pinnedProfileName) {
+        if (requestedProfileName && requestedProfileName !== pinnedProfileName) {
+          res.status(409).json({
+            error: `repo is pinned to embedding profile '${pinnedProfileName}' and cannot be reindexed with profile '${requestedProfileName}'`,
+          })
+          return
+        }
+        resolvedProfileName = pinnedProfileName
+      } else if (requestedProfileName) {
+        resolvedProfileName = requestedProfileName
+      } else if (profiles.size === 1) {
+        resolvedProfileName = Array.from(profiles.keys())[0] ?? null
+      } else {
+        res.status(400).json({
+          error: 'profileName is required: multiple embedding profiles are configured on this server',
+        })
+        return
+      }
+
+      if (resolvedProfileName && !profiles.has(resolvedProfileName)) {
+        res.status(400).json({ error: `Unknown embedding profile '${resolvedProfileName}'` })
+        return
+      }
+      if (resolvedProfileName) {
+        resolvedProviders = profiles.get(resolvedProfileName)!
+      }
+
       const repoId = existing?.id ?? deriveRepoId(normalizedUrl)
       persistent = {
         repoId,
@@ -666,6 +732,7 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
         dbPath: existing?.dbPath ?? getRepoDbPath(repoId),
         visibility: existingAuth?.visibility ?? requestedVisibility ?? 'private',
         ownerUserId: existingAuth?.ownerUserId ?? req.userId ?? null,
+        profileName: resolvedProfileName,
       }
     }
 
@@ -694,8 +761,8 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       indexOptions,
       dbLabel,
       persistent,
-      textProvider,
-      codeProvider,
+      textProvider: resolvedProviders.textProvider,
+      codeProvider: resolvedProviders.codeProvider,
       serverChunker,
       serverConcurrency,
     })

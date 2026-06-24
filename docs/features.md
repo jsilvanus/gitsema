@@ -409,6 +409,35 @@ store for `visibility`/`owner_user_id`/`repo_grants`, kept in sync by a
 dual-write in `runIndexJob` after each successful persisted index. See
 `docs/PLAN.md`'s Phase 126/127 entry for the full deviation note.
 
+### Multi-profile embedding serving (Phase 128)
+
+A `gitsema tools serve` deployment can offer several named embedding profiles
+(provider/model pairs) at once instead of one process-wide model pair.
+Profiles are defined via `GITSEMA_EMBEDDING_PROFILES` (JSON array) or the
+`embeddingProfiles` config key — each entry is `{name, provider, textModel,
+codeModel?, httpUrl?, apiKey?}` — and resolved to their own
+`EmbeddingProvider` pair at server startup (`loadEmbeddingProfileConfigs` /
+`buildProfileProviderMap` in `src/core/embedding/profiles.ts`).
+
+- **Pin-forever semantics.** `POST /api/v1/remote/index` accepts an optional
+  `profileName`. A repo's `repos.profile_name` column is set once, at first
+  index, and never overwritten on subsequent re-indexes (same first-claimer
+  pattern as `owner_user_id`/`visibility` from Phase 126).
+- **Routing rules on `POST /api/v1/remote/index`:** a pinned repo reindexed
+  with a mismatched `profileName` gets `409`; a brand-new repo with no
+  `profileName` auto-selects the sole configured profile if exactly one
+  exists, or `400`s as ambiguous if more than one is configured; an unknown
+  `profileName` always `400`s.
+- **CLI:** `gitsema remote-index <url> --profile <name>` requests a profile
+  by name (pinned forever on that repo's first index). `gitsema repos info
+  <repoId>` surfaces the pinned profile for a persisted repo.
+- **Backward compatible.** A server with no profiles configured behaves
+  exactly as before — a single synthetic `'default'` profile wraps the
+  existing process-wide `textProvider`/`codeProvider`.
+- **Scope note:** query-time embedding (search/evolution) still always uses
+  the server's process-wide text provider, not a per-repo pinned profile's
+  provider — see `docs/PLAN.md`'s Phase 128 entry for the deviation note.
+
 ### Persistent server-side repo storage
 
 `POST /api/v1/remote/index` **persists** the clone + index by default (`persist: true`),
@@ -664,10 +693,11 @@ get `400` — matching the SDK's documented stateful-mode contract. No `EventSto
 |---|---|
 | Index statistics | `gitsema status [file]` |
 | DB integrity check | `gitsema index doctor` |
+| Auto-repair fixable issues (missing FTS content, orphan embeddings) | `gitsema index doctor --fix` |
 | SQLite VACUUM + ANALYZE | `gitsema index vacuum` |
 | Garbage-collect orphan embeddings | `gitsema index gc` |
 | Rebuild FTS5 index | `gitsema index rebuild-fts` |
-| Backfill FTS5 content for pre-Phase-11 blobs | `gitsema index backfill-fts` |
+| Backfill FTS5 content for pre-Phase-11 blobs *(deprecated, Phase 128 — use `index rebuild-fts`)* | `gitsema index backfill-fts` |
 | Build / rebuild HNSW VSS index | `gitsema index build-vss` |
 | Remove embeddings for a specific model | `gitsema index clear-model <model>` |
 | Recalculate module-level embeddings | `gitsema index update-modules` |

@@ -518,6 +518,60 @@ No design committed yet. Two independent, optional follow-ups:
 
 ---
 
+## `index doctor --fix` Generalization & Multi-Profile Ephemeral-Job Parity
+
+### Problem
+- Found during the `/simplify` review of Phase 131 (`index doctor --fix`) and
+  the multi-profile embedding-serving feature (Phase 128).
+- `doctorCommand`'s `--fix` block (`src/cli/commands/doctor.ts`) hardcodes one
+  `if` branch per fixable `DoctorReport` finding (`ftsMissingCount`,
+  `orphanEmbeddings`), each with its own bespoke repair call and print
+  statement. It works for two findings but doesn't generalize — a third
+  repairable finding (e.g. a future schema/provenance issue) means another
+  copy-pasted `if` block rather than slotting into a shared structure.
+- Separately, `src/server/routes/remote.ts`'s multi-profile resolution
+  (Phase 128) only routes *persisted* indexing jobs through the
+  `profiles` map; ephemeral (non-persisted) jobs always use the bare
+  module-level `textProvider`/`codeProvider` pair, bypassing profile
+  resolution entirely even on a server configured with multiple profiles.
+  This is a documented Phase 1 scope cut (see `docs/PLAN.md`'s Phase 128
+  deviations), not a regression, but it's a second code path that could
+  silently diverge from the persisted path's profile semantics later.
+- Both were judged too large a restructuring for a cleanup pass on
+  already-shipped/just-shipped code.
+
+### Intended Behavior
+No design committed yet. Two independent, optional follow-ups:
+- Model each `DoctorReport` finding as `{ check, count, fix?: () => Promise<FixResult> }`
+  so `--fix` becomes "for each finding with a fix, run it," and the
+  post-fix report is generated generically from a second `runDoctor()` diff
+  rather than maintaining parallel `console.log` lines per finding.
+- Route ephemeral (non-persisted) `remote-index` jobs through
+  `profiles.get('default')` too, so there's exactly one source of truth for
+  "which provider pair runs this job" — persistence would only affect
+  profile *pinning*, not provider *selection*.
+
+### Design Gaps
+- [ ] Whether a generic fix-registry is worth the indirection for only two
+      current fixable findings, or whether to wait for a third before
+      generalizing.
+- [ ] Whether unifying the ephemeral/persisted provider-selection path
+      changes observable behavior for any existing `--remote` callers that
+      rely on the bare-pair fallback today.
+
+### Effort Estimate
+- `doctor --fix` generalization: small, isolated refactor with existing test
+  coverage (`tests/integration/doctorFix.integration.test.ts`) to verify
+  against.
+- Ephemeral-job profile routing: medium — touches the hot indexing-request
+  path in `remote.ts` and needs its own test coverage for the ephemeral case.
+
+### Prerequisites
+- None for the `doctor --fix` refactor.
+- None beyond Phase 128 (already shipped) for the ephemeral-job routing fix.
+
+---
+
 ## Related Issues & Documents
 
 - **Parity tracking:** See `docs/parity.md` for tool availability across interfaces

@@ -64,7 +64,7 @@ export function registerSearch(program: Command) {
     .option('-k, --top <n>', 'number of results to return', '10')
     .option('--branch <name>', 'restrict results to blobs seen on this branch')
     .option('--no-headings', "don't print header row")
-    .option('--hybrid', 'blend vector similarity with BM25 keyword matching (requires prior backfill-fts)')
+    .option('--hybrid', 'blend vector similarity with BM25 keyword matching (requires prior rebuild-fts)')
     .option('--bm25-weight <n>', 'BM25 weight in hybrid score (default 0.3)', '0.3')
     .option('--include-commits', 'also search commit messages and show chronological commit results')
     .option('--model <model>', 'override embedding model')

@@ -16,7 +16,7 @@ export function rebuildFts(rawDb: InstanceType<typeof Database>): RebuildFtsResu
   ).get() as { c: number })?.c ?? 0
 
   if (!tableExists) {
-    logger.warn('blob_fts table does not exist. Run: gitsema index backfill-fts')
+    logger.warn('blob_fts table does not exist. Run: gitsema index doctor --extended')
     return { rebuilt: 0 }
   }
 

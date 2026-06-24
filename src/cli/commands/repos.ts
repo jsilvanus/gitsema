@@ -126,6 +126,30 @@ export function reposCommand(): Command {
       }
     })
 
+  cmd
+    .command('info <repoId>')
+    .description('Show full registry details for a persisted repo, including its pinned embedding profile (Phase 128)')
+    .action((repoId: string) => {
+      const session = getRegistrySession()
+      const repo = getRepo(session, repoId)
+      if (!repo) {
+        console.error(`Error: repo '${repoId}' not found in registry`)
+        process.exit(1)
+      }
+      console.log(`ID:             ${repo.id}`)
+      console.log(`Name:           ${repo.name}`)
+      console.log(`URL:            ${repo.url ?? '(no url)'}`)
+      console.log(`Normalized URL: ${repo.normalizedUrl ?? '(none)'}`)
+      console.log(`Clone path:     ${repo.clonePath ?? '(none)'}`)
+      console.log(`DB path:        ${repo.dbPath ?? '(none)'}`)
+      console.log(`Added:          ${new Date(repo.addedAt * 1000).toISOString()}`)
+      console.log(`Last indexed:   ${repo.lastIndexedAt ? new Date(repo.lastIndexedAt * 1000).toISOString() : '(never)'}`)
+      console.log(`Ephemeral:      ${repo.ephemeral ? 'yes' : 'no'}`)
+      console.log(`Visibility:     ${repo.visibility ?? 'private'}`)
+      console.log(`Owner user ID:  ${repo.ownerUserId ?? '(none)'}`)
+      console.log(`Profile:        ${repo.profileName ?? '(default — pinned to no named profile)'}`)
+    })
+
   // ── token subcommands for per-repo access control (Phase 75) ─────────────
 
   const tokenCmd = new Command('token').description('Manage per-repo scoped access tokens')

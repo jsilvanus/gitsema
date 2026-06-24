@@ -4,8 +4,21 @@ import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
 import { runStorageDoctor } from '../../core/storage/doctor.js'
 import { verifyLspStartup } from '../../core/lsp/server.js'
 import { execSync } from 'node:child_process'
+import { backfillFts } from '../../core/indexing/backfillFts.js'
+import { runGarbageCollection } from '../../core/indexing/gc.js'
+import type { DoctorReport } from '../../core/db/doctor.js'
 
-export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } = {}): Promise<void> {
+function printFtsAndOrphanCounts(report: DoctorReport): void {
+  console.log(`FTS rows:          ${report.ftsCount}`)
+  if (report.ftsMissingCount > 0) {
+    console.log(`FTS missing:       ${report.ftsMissingCount} (run: gitsema index rebuild-fts)`)
+  }
+  if (report.orphanEmbeddings > 0) {
+    console.log(`Orphan embeddings: ${report.orphanEmbeddings} (run: gitsema index gc)`)
+  }
+}
+
+export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; fix?: boolean } = {}): Promise<void> {
   if (opts.lsp) {
     const result = verifyLspStartup()
     console.log(`LSP startup check: ${result.ok ? '✓' : '✗'}  ${result.message}`)
@@ -44,20 +57,14 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } 
   }
 
   const rawDb = getRawDb()
-  const report = runDoctor(rawDb)
+  let report = runDoctor(rawDb)
 
   console.log('=== gitsema doctor ===')
   console.log('')
   console.log(`Schema version:    ${report.schemaVersion} (expected: ${report.expectedVersion}) ${report.schemaOk ? '✓' : '✗'}`)
   console.log(`Blobs indexed:     ${report.blobCount}`)
   console.log(`Embeddings stored: ${report.embeddingCount}`)
-  console.log(`FTS rows:          ${report.ftsCount}`)
-  if (report.ftsMissingCount > 0) {
-    console.log(`FTS missing:       ${report.ftsMissingCount} (run: gitsema index backfill-fts)`)
-  }
-  if (report.orphanEmbeddings > 0) {
-    console.log(`Orphan embeddings: ${report.orphanEmbeddings} (run: gitsema index gc)`)
-  }
+  printFtsAndOrphanCounts(report)
   console.log(`Integrity check:   ${report.integrityCheckPassed ? 'passed ✓' : 'FAILED ✗'}`)
   if (report.integrityErrors.length > 0) {
     for (const err of report.integrityErrors) {
@@ -87,6 +94,29 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean } 
   } else {
     console.log('')
     console.log('No issues detected. Index looks healthy.')
+  }
+
+  // ── Auto-fix ─────────────────────────────────────────────────────────────
+  if (opts.fix && (report.ftsMissingCount > 0 || report.orphanEmbeddings > 0)) {
+    console.log('')
+    console.log('=== Applying fixes ===')
+
+    if (report.ftsMissingCount > 0) {
+      console.log(`Backfilling FTS content for ${report.ftsMissingCount} blob(s)...`)
+      const backfillStats = await backfillFts()
+      console.log(`  Backfilled: ${backfillStats.backfilled}  Oversized: ${backfillStats.oversized}  Failed: ${backfillStats.failed}`)
+    }
+
+    if (report.orphanEmbeddings > 0) {
+      console.log(`Garbage-collecting unreachable blob records...`)
+      const gcStats = await runGarbageCollection({ dryRun: false })
+      console.log(`  Removed: ${gcStats.removed}/${gcStats.total}`)
+    }
+
+    report = runDoctor(rawDb)
+    console.log('')
+    console.log('=== Post-fix report ===')
+    printFtsAndOrphanCounts(report)
   }
 
   // Also run LSP check

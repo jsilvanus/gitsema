@@ -588,7 +588,7 @@ Use `--level chunk` or `--level symbol` at search time to query at sub-file gran
 
 - **`security_scan` / `security-scan` results are similarity scores, not confirmed CVEs.** Treat as heuristic triage signals requiring human review.
 - **Re-run `gitsema index start` after major rebases or merges** before analysis. Stale index = stale results.
-- **`--hybrid` requires FTS5 content.** Blobs indexed before Phase 11 need `gitsema index backfill-fts` first.
+- **`--hybrid` requires FTS5 content.** Run `gitsema index rebuild-fts` first if blobs are missing FTS rows (`gitsema index backfill-fts` is deprecated as of Phase 128).
 - **`--vss` requires prior `gitsema index build-vss`.** Without it, falls back to linear cosine scan (correct but slower on large indexes).
 - **`--branch` filters by reachability, not checkout.** All versions of a blob visible from the branch tip are included.
 - **`first-seen` is per blob (content hash), not per path.** A renamed file's first-seen is the date the content first appeared in any path.

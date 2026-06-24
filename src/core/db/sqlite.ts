@@ -69,8 +69,10 @@ export interface DbSession {
  * 31 — Added repos.visibility + repos.owner_user_id columns and a
  *       repo_grants.source column for the public/private repo-sharing layer
  *       (Phase 126 / public-repo-sharing §5 Phase 1)
+ * 32 — Added repos.profile_name column for multi-profile embedding serving
+ *       (Phase 128 / locked-model-set-plan.md §5 Phase 1)
  */
-export const CURRENT_SCHEMA_VERSION = 31
+export const CURRENT_SCHEMA_VERSION = 32
 
 /**
  * Applies pending schema migrations and records the resulting version in the
@@ -301,7 +303,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
     -- Multi-repo registry (Phase 41 / v14); db_path added in v15;
     -- normalized_url, clone_path, last_indexed_at, ephemeral added in v23
     -- (persistent server-side repo storage); org_id added in v28 (Phase 123);
-    -- visibility, owner_user_id added in v31 (Phase 126 / public-repo-sharing)
+    -- visibility, owner_user_id added in v31 (Phase 126 / public-repo-sharing);
+    -- profile_name added in v32 (Phase 128 / locked-model-set-plan.md)
     CREATE TABLE IF NOT EXISTS repos (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -314,7 +317,8 @@ function initTables(sqlite: InstanceType<typeof Database>): void {
       ephemeral INTEGER NOT NULL DEFAULT 0,
       org_id INTEGER REFERENCES orgs(id),
       visibility TEXT NOT NULL DEFAULT 'private',
-      owner_user_id INTEGER REFERENCES users(id)
+      owner_user_id INTEGER REFERENCES users(id),
+      profile_name TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_repos_normalized_url_visibility ON repos(normalized_url, visibility);
 

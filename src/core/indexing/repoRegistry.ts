@@ -23,6 +23,8 @@ export interface RepoEntry {
   visibility?: RepoVisibility
   /** The user whose registration request first created this repo (Phase 126). */
   ownerUserId?: number | null
+  /** Embedding profile pinned at first index (Phase 128); null for legacy single-profile repos. */
+  profileName?: string | null
 }
 
 export function addRepo(dbSession: ReturnType<typeof getActiveSession>, id: string, name: string, url?: string | null, dbPath?: string | null): void {
@@ -43,9 +45,10 @@ interface RepoRow {
   ephemeral: number
   visibility?: string | null
   owner_user_id?: number | null
+  profile_name?: string | null
 }
 
-const REPO_COLUMNS = 'id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral, visibility, owner_user_id'
+const REPO_COLUMNS = 'id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral, visibility, owner_user_id, profile_name'
 
 function rowToRepoEntry(r: RepoRow): RepoEntry {
   return {
@@ -60,6 +63,7 @@ function rowToRepoEntry(r: RepoRow): RepoEntry {
     ephemeral: r.ephemeral === 1,
     visibility: (r.visibility as RepoVisibility | null | undefined) ?? 'private',
     ownerUserId: r.owner_user_id ?? undefined,
+    profileName: r.profile_name ?? undefined,
   }
 }
 
@@ -246,19 +250,22 @@ export function registerPersistedRepo(
     visibility?: RepoVisibility
     /** Only honored on first creation — see Phase 126 note below. */
     ownerUserId?: number | null
+    /** Only honored on first creation — see Phase 128 note below. */
+    profileName?: string | null
   },
 ): void {
   const { rawDb } = session
   const now = Math.floor(Date.now() / 1000)
-  // visibility/owner_user_id are deliberately omitted from the ON CONFLICT
-  // UPDATE clause below: this upsert runs on every (re-)index of an
-  // already-registered repo, and those two columns are first-claimer
+  // visibility/owner_user_id/profile_name are deliberately omitted from the
+  // ON CONFLICT UPDATE clause below: this upsert runs on every (re-)index of
+  // an already-registered repo, and these columns are first-claimer
   // properties that must not be overwritten by a later touch (Phase 126 /
-  // public-repo-sharing §4.5 — ownership semantics stay exactly as today's
-  // existing dedup mechanism decides).
+  // public-repo-sharing §4.5 for visibility/owner; Phase 128 /
+  // locked-model-set-plan.md §4.1.3 for profile_name — a repo's embedding
+  // profile is pinned forever at first index).
   rawDb.prepare(`
-    INSERT INTO repos (id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral, visibility, owner_user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+    INSERT INTO repos (id, name, url, db_path, added_at, normalized_url, clone_path, last_indexed_at, ephemeral, visibility, owner_user_id, profile_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       url = excluded.url,
@@ -268,7 +275,7 @@ export function registerPersistedRepo(
       ephemeral = excluded.ephemeral
   `).run(
     entry.id, entry.name, entry.url, entry.dbPath, now, entry.normalizedUrl, entry.clonePath, entry.ephemeral ? 1 : 0,
-    entry.visibility ?? 'private', entry.ownerUserId ?? null,
+    entry.visibility ?? 'private', entry.ownerUserId ?? null, entry.profileName ?? null,
   )
 }
 
