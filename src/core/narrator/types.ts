@@ -97,6 +97,23 @@ export interface NarratorModelConfig {
   lastUsedAt?: number
 }
 
+/**
+ * Request-scoped, never-persisted LLM credentials supplied by the caller
+ * (Phase 130 / locked-model-set-plan.md §5 Phase 3 — BYOK). Builds a one-off
+ * `NarratorModelConfig` via `createNarratorProviderFor()` without any
+ * `embed_config`/`settings` write — no DB lookup, no allow-list check.
+ */
+export interface ByokCredentials {
+  /** OpenAI-compatible base URL for the LLM endpoint. Required. */
+  httpUrl: string
+  /** Bearer token / API key. Optional. */
+  apiKey?: string
+  /** Actual model id sent to the chat-completions API. */
+  model?: string
+  maxTokens?: number
+  temperature?: number
+}
+
 // ---------------------------------------------------------------------------
 // CLI / route payloads
 // ---------------------------------------------------------------------------

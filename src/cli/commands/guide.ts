@@ -18,12 +18,13 @@
 import type { Command } from 'commander'
 import { createInterface } from 'node:readline'
 import { addLensOption, parseLens } from '../lib/lens.js'
+import { addByokOptions, parseByokCliOpts } from '../lib/byok.js'
 import { resolveGuideConfig } from '../../core/narrator/resolveNarrator.js'
 import { redactAll } from '../../core/narrator/redact.js'
 import { withAudit } from '../../core/narrator/audit.js'
 import { GUIDE_TOOL_DEFINITIONS, executeTool, repoStatsData, recentCommitsData } from '../../core/narrator/guideTools.js'
 import { buildGuideToolCatalog } from '../../core/narrator/interpretations.js'
-import { isCliParams, type NarratorModelConfig } from '../../core/narrator/types.js'
+import { isCliParams, type ByokCredentials, type NarratorModelConfig } from '../../core/narrator/types.js'
 import { getCliAdapter } from '../../core/narrator/cliAdapters.js'
 import { runCli } from '../../core/narrator/cliProvider.js'
 import { writeGitsemaMcpConfig } from '../../core/narrator/cliMcpConfig.js'
@@ -297,6 +298,7 @@ export async function runGuide(question: string, opts: {
   model?: string
   includeContext?: boolean
   session?: GuideSession
+  byok?: ByokCredentials
 }): Promise<RunGuideResult> {
   const includeContext = opts.includeContext !== false
 
@@ -309,7 +311,7 @@ export async function runGuide(question: string, opts: {
   if (session) {
     config = session.config
   } else {
-    config = resolveGuideConfig({ guideModelId: opts.guideModelId, modelName: opts.model })
+    config = resolveGuideConfig({ guideModelId: opts.guideModelId, modelName: opts.model, byok: opts.byok })
   }
 
   // Safe-by-default: no model configured — no network access / subprocess.
@@ -382,10 +384,16 @@ export async function guideCommand(
     interactive?: boolean
     /** Phase 111 lens toggle — biases the agent toward structural tools. */
     lens?: string
+    byokHttpUrl?: string
+    byokApiKey?: string
+    byokModel?: string
+    byokMaxTokens?: string
+    byokTemperature?: string
   },
 ): Promise<void> {
   const guideModelId = opts.guideModelId !== undefined ? parseInt(opts.guideModelId, 10) : undefined
   const includeContext = !opts.noContext
+  const byok = parseByokCliOpts(opts)
   // A structural/hybrid lens hints the agent to reach for the call_graph /
   // blast_radius / hotspots tools; semantic (default) leaves the prompt as-is.
   const lens = parseLens(opts.lens, 'semantic')
@@ -402,7 +410,7 @@ export async function guideCommand(
 
     // Resolve the model config once; build a shared session lazily on first
     // turn if a model is configured (safe-by-default if not).
-    const config = resolveGuideConfig({ guideModelId, modelName: opts.model })
+    const config = resolveGuideConfig({ guideModelId, modelName: opts.model, byok })
     let session: GuideSession | undefined
     if (isGuideConfigEnabled(config)) {
       session = await createGuideSession(config!, buildSystemPrompt())
@@ -412,7 +420,7 @@ export async function guideCommand(
     rl.on('line', async (line) => {
       const q = line.trim()
       if (!q) { rl.close(); return }
-      const { answer, llmEnabled } = await runGuide(withLens(q), { guideModelId, model: opts.model, includeContext, session })
+      const { answer, llmEnabled } = await runGuide(withLens(q), { guideModelId, model: opts.model, includeContext, session, byok })
       console.log(`\n${answer}\n`)
       if (!llmEnabled) {
         console.log('(No LLM model configured — showing context only.)\n')
@@ -436,7 +444,7 @@ export async function guideCommand(
     process.exit(1)
   }
 
-  const { answer, llmEnabled } = await runGuide(withLens(q), { guideModelId, model: opts.model, includeContext })
+  const { answer, llmEnabled } = await runGuide(withLens(q), { guideModelId, model: opts.model, includeContext, byok })
   console.log(answer)
   if (!llmEnabled) {
     console.error('\n(No LLM model configured — run `gitsema models add <name> --guide --http-url <url> --activate`')
@@ -463,5 +471,6 @@ export function registerGuideCommand(program: Command): void {
     .option('--model <name>', 'guide/narrator model name to use')
     .option('--no-context', 'skip gathering git context (faster but less accurate)')
     .option('-i, --interactive', 'start an interactive REPL session (one question per line)')
+  addByokOptions(cmd, 'guide')
   addLensOption(cmd, 'semantic').action(guideCommand)
 }

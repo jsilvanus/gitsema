@@ -572,6 +572,60 @@ No design committed yet. Two independent, optional follow-ups:
 
 ---
 
+## Pinned-Profile Exemption Generalization & Guide HTTP BYOK Mapping Cleanup
+
+### Problem
+- Found during the `/simplify` review of Phases 129–130 (admin-gated model
+  allow-lists, BYOK for narrator/guide).
+- `src/server/routes/remote.ts`'s "a pinned profile that was later disabled
+  keeps working for its own repo" exemption (PLAN.md Phase 128 deviation) is
+  a flat `if (resolvedProfileName && !pinnedProfileName && ...)` condition
+  bolted directly onto this one route handler, rather than being a parameter
+  on `modelPolicy.ts`'s allow-list resolution itself (e.g. an
+  `isAllowed(..., { pinnedIdentifier })` shape). It works correctly today
+  but could silently drift out of sync if a second enforcement point for
+  this exemption is ever added elsewhere.
+- `src/server/routes/guide.ts`'s HTTP route does an inline snake_case→camelCase
+  mapping of the request body's `byok` fields (`byok_http_url` →
+  `httpUrl`, etc.) rather than sharing a helper with the CLI's
+  `parseByokCliOpts` (`src/cli/lib/byok.ts`) or the MCP tool's equivalent
+  mapping in `src/mcp/tools/narrator.ts`. All three shapes differ slightly
+  (string-typed CLI opts vs. typed-number HTTP body vs. flat snake_case MCP
+  fields), so unifying them isn't a drop-in win.
+- Both were judged single-occurrence, low-duplication-cost issues — not
+  worth restructuring on a cleanup pass over code that just shipped.
+
+### Intended Behavior
+No design committed yet. Two independent, optional follow-ups:
+- Move the pinned-profile exemption into `modelPolicy.ts`'s effective-set
+  resolution (or a new `isAllowed()` helper) so any future second
+  enforcement point inherits the same exemption automatically instead of
+  re-implementing the `if` check.
+- Decide whether a shared `byok` body-shape normalizer (CLI/HTTP/MCP) is
+  worth introducing, or whether the three call sites should stay
+  independently shaped since they're parsing genuinely different wire
+  formats (CLI strings, JSON body, MCP flat fields).
+
+### Design Gaps
+- [ ] Whether a second enforcement point for the pinned-profile exemption is
+      ever likely enough to justify generalizing now vs. waiting until one
+      actually appears.
+- [ ] Whether a shared BYOK body-shape normalizer would reduce real
+      duplication or just add an abstraction layer over three already-small,
+      already-distinct mapping functions.
+
+### Effort Estimate
+- Pinned-profile exemption push-down: small — one new optional parameter on
+  an existing `modelPolicy.ts` function, plus updating the single call site
+  in `remote.ts`.
+- BYOK body-shape normalizer: small, but low value given only three
+  call sites with differing shapes.
+
+### Prerequisites
+- None — both are isolated, optional refactors of already-shipped code.
+
+---
+
 ## Related Issues & Documents
 
 - **Parity tracking:** See `docs/parity.md` for tool availability across interfaces

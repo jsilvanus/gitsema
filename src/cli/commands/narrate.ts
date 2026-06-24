@@ -15,6 +15,7 @@ import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
 import type { NarrateFocus, NarrateFormat, NarrationResult } from '../../core/narrator/types.js'
 import { resolveOutputs, getSink, collectOut, type OutputSpec } from '../../utils/outputSink.js'
 import { addLensOption, parseLens } from '../lib/lens.js'
+import { addByokOptions, parseByokCliOpts } from '../lib/byok.js'
 
 // ---------------------------------------------------------------------------
 // Output formatting
@@ -134,6 +135,11 @@ export async function narrateCommand(
     narrate?: boolean
     evidenceOnly?: boolean
     out?: string[]
+    byokHttpUrl?: string
+    byokApiKey?: string
+    byokModel?: string
+    byokMaxTokens?: string
+    byokTemperature?: string
   },
 ): Promise<void> {
   // --narrate is shorthand for --no-evidence-only; default is evidence-only
@@ -142,6 +148,7 @@ export async function narrateCommand(
   const provider = resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
+    byok: parseByokCliOpts(opts),
   })
 
   const { format, sink } = resolveNarrateOutput(opts)
@@ -181,6 +188,11 @@ export async function explainCommand(
     narrate?: boolean
     evidenceOnly?: boolean
     out?: string[]
+    byokHttpUrl?: string
+    byokApiKey?: string
+    byokModel?: string
+    byokMaxTokens?: string
+    byokTemperature?: string
     /** Phase 111 lens toggle. Default `semantic` keeps output byte-identical. */
     lens?: string
   },
@@ -191,6 +203,7 @@ export async function explainCommand(
   const provider = resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
+    byok: parseByokCliOpts(opts),
   })
 
   const { format, sink } = resolveNarrateOutput(opts)
@@ -238,40 +251,45 @@ export async function explainCommand(
 // ---------------------------------------------------------------------------
 
 export function registerNarratorCommands(program: Command): void {
-  program
-    .command('narrate')
-    .description('Return commit evidence (default) or an LLM-generated narrative of repository development history.')
-    .option('--since <ref|date>', 'only include commits after this ref or date')
-    .option('--until <ref|date>', 'only include commits before this ref or date')
-    .option('--range <rev-range>', 'git revision range (e.g. v1.0..HEAD)')
-    .option(
-      '--focus <area>',
-      'filter commits by area: bugs, features, ops, security, deps, performance, all (default: all)',
-      'all',
-    )
-    .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
-    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
-    .option('--max-commits <n>', 'maximum commits to analyse (default: 500)')
-    .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
-    .option('--model <name>', 'narrator model name to use (overrides active selection)')
-    .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
-    .option('--evidence-only', 'return raw commit evidence without calling the LLM (this is the default)')
-    .action(narrateCommand)
-
-  addLensOption(
+  addByokOptions(
     program
-      .command('explain <topic>')
-      .description('Return matching commits (default) or an LLM-generated timeline for a bug, error, or topic.')
+      .command('narrate')
+      .description('Return commit evidence (default) or an LLM-generated narrative of repository development history.')
       .option('--since <ref|date>', 'only include commits after this ref or date')
       .option('--until <ref|date>', 'only include commits before this ref or date')
-      .option('--log <path>', 'path to an error log or stack trace file to include as context')
-      .option('--files <glob>', 'restrict search to files matching this glob')
+      .option('--range <rev-range>', 'git revision range (e.g. v1.0..HEAD)')
+      .option(
+        '--focus <area>',
+        'filter commits by area: bugs, features, ops, security, deps, performance, all (default: all)',
+        'all',
+      )
       .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
       .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
+      .option('--max-commits <n>', 'maximum commits to analyse (default: 500)')
       .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
       .option('--model <name>', 'narrator model name to use (overrides active selection)')
       .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
-      .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)'),
+      .option('--evidence-only', 'return raw commit evidence without calling the LLM (this is the default)'),
+    'narrator',
+  ).action(narrateCommand)
+
+  addLensOption(
+    addByokOptions(
+      program
+        .command('explain <topic>')
+        .description('Return matching commits (default) or an LLM-generated timeline for a bug, error, or topic.')
+        .option('--since <ref|date>', 'only include commits after this ref or date')
+        .option('--until <ref|date>', 'only include commits before this ref or date')
+        .option('--log <path>', 'path to an error log or stack trace file to include as context')
+        .option('--files <glob>', 'restrict search to files matching this glob')
+        .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
+        .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
+        .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
+        .option('--model <name>', 'narrator model name to use (overrides active selection)')
+        .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
+        .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)'),
+      'narrator',
+    ),
     'semantic',
   ).action(explainCommand)
 }

@@ -438,6 +438,63 @@ codeModel?, httpUrl?, apiKey?}` — and resolved to their own
   the server's process-wide text provider, not a per-repo pinned profile's
   provider — see `docs/PLAN.md`'s Phase 128 entry for the deviation note.
 
+### Admin-gated enabled sets (Phase 129)
+
+A superadmin/operator can restrict which defined embedding profiles and
+narrator/guide model configs are actually selectable, server-wide and
+(for embedding profiles) per-org.
+
+- **CLI:** `gitsema admin models list --kind <embedding|narrator|guide>
+  [--org <name>]` shows the effective allowed set; `gitsema admin models
+  allow|deny <identifier> --kind <kind> [--org <name>]` and `gitsema admin
+  models reset --kind <kind> [--org <name>]` manage it.
+- **Policy semantics:** no policy set = default-allow-all (Phase 128
+  behavior unchanged). The first `allow` call seeds an opt-in set
+  containing only that identifier; the first `deny` call seeds an opt-out
+  set containing every other currently-defined item. Denying every defined
+  item reaches "lock to none" — a valid, tested state.
+- **Org narrowing.** An org's effective allowed set is always intersected
+  with the server-wide set — an org can narrow but never widen past what
+  the server allows. Embedding profiles support org narrowing end-to-end
+  (`POST /api/v1/remote/index` resolves the requesting repo's org via
+  `getRepoOrgId` and 403s a disabled profile pick). Narrator/guide
+  enforcement is server-wide only — `gitsema models activate` rejects
+  activating a server-disabled narrator/guide config, but there is no
+  per-org narrowing for them yet (no HTTP entry point carries org context
+  for narrator/guide activation).
+- **Pinned repos are exempt.** A repo already pinned to an embedding
+  profile (Phase 128) keeps reindexing successfully even after that
+  profile is later disabled — disabling only blocks *new* profile
+  selections, never an existing pin.
+- Policy is stored in the existing `settings` table as JSON blobs
+  (`model_allowlist:server:<kind>` / `model_allowlist:org:<orgId>:<kind>`)
+  — no schema change.
+
+### BYOK (bring-your-own-key) for narrator/guide (Phase 130)
+
+`narrate`, `explain`, and `guide` accept request-scoped LLM credentials
+that bypass the DB-backed narrator/guide config system entirely — no
+`embed_config`/`settings` write, and no allow-list check (Phase 129),
+so BYOK still works even when every defined narrator/guide config is
+denied server-wide ("lock to none").
+
+- **CLI:** `--byok-http-url <url>` (required to activate BYOK)
+  `--byok-api-key <key>` `--byok-model <name>` `--byok-max-tokens <n>`
+  `--byok-temperature <n>` on `gitsema narrate`, `gitsema explain`, and
+  `gitsema guide`.
+- **HTTP:** `POST /api/v1/narrate` and `POST /api/v1/explain` accept a
+  `byok: {httpUrl, apiKey?, model?, maxTokens?, temperature?}` body field;
+  `POST /api/v1/guide/chat` accepts the same shape with its existing
+  snake_case convention (`byok: {http_url, api_key?, model?, max_tokens?,
+  temperature?}`).
+- **MCP:** `narrate_repo` and `explain_issue_or_error` accept flattened
+  `byok_http_url`/`byok_api_key`/`byok_model`/`byok_max_tokens`/
+  `byok_temperature` input fields.
+- Resolution order in `resolveNarratorProvider`/`resolveGuideConfig`: BYOK
+  (if supplied) short-circuits before any other lookup — explicit model
+  id, model name, active DB selection, disabled. BYOK always resolves to
+  an HTTP/`chattydeer`-backed provider.
+
 ### Persistent server-side repo storage
 
 `POST /api/v1/remote/index` **persists** the clone + index by default (`persist: true`),

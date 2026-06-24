@@ -476,3 +476,76 @@ describe('POST /api/v1/remote/index — multi-profile embedding serving (Phase 1
     expect(repo?.profileName).toBe('a')
   })
 })
+
+describe('POST /api/v1/remote/index — superadmin-gated profile picker (Phase 129)', () => {
+  const profileA: EmbeddingProvider = { ...mockProvider, model: 'profile-a-model' }
+  const profileB: EmbeddingProvider = { ...mockProvider, model: 'profile-b-model' }
+
+  afterEach(async () => {
+    const { resetServerPolicy } = await import('../src/core/admin/modelPolicy.js')
+    resetServerPolicy(getRawDb(), 'embedding')
+  })
+
+  it('auto-selects the sole server-allowed profile even when multiple are defined', async () => {
+    const { allowServer } = await import('../src/core/admin/modelPolicy.js')
+    allowServer(getRawDb(), 'embedding', 'a')
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const res = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl: 'https://github.com/example/policy-auto-select.git' })
+      .expect(202)
+
+    const repo = getRepo(getRegistrySession(), res.body.repoId)
+    expect(repo?.profileName).toBe('a')
+  })
+
+  it('rejects a new repo requesting a profile disabled by server policy', async () => {
+    const { denyServer } = await import('../src/core/admin/modelPolicy.js')
+    denyServer(getRawDb(), 'embedding', 'b', ['a', 'b'])
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const res = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl: 'https://github.com/example/policy-denied.git', profileName: 'b' })
+      .expect(403)
+
+    expect(res.body.error).toMatch(/disabled by server policy/)
+  })
+
+  it('keeps a repo working on its pinned profile even after that profile is later disabled', async () => {
+    const multiProfileApp = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['a', { textProvider: profileA }],
+        ['b', { textProvider: profileB }],
+      ]),
+    })
+    const repoUrl = 'https://github.com/example/policy-pinned-then-disabled.git'
+    const first = await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl, profileName: 'a' })
+      .expect(202)
+
+    const { denyServer } = await import('../src/core/admin/modelPolicy.js')
+    denyServer(getRawDb(), 'embedding', 'a', ['a', 'b'])
+
+    await request(multiProfileApp)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl })
+      .expect(202)
+
+    const repo = getRepo(getRegistrySession(), first.body.repoId)
+    expect(repo?.profileName).toBe('a')
+  })
+})

@@ -53,7 +53,8 @@ import {
   getMinReindexIntervalSeconds,
   type RepoVisibility,
 } from '../../core/indexing/repoRegistry.js'
-import { createGrant, resolveUserRepoAccess } from '../../core/auth/grants.js'
+import { createGrant, resolveUserRepoAccess, getRepoOrgId } from '../../core/auth/grants.js'
+import { getEffectiveAllowedSet } from '../../core/admin/modelPolicy.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -693,6 +694,14 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       //   - new repo + no profile requested + exactly 1 profile configured ->
       //     auto-select it
       //   - unknown profile name -> 400
+      // Phase 129: superadmin-gated + org-narrowed enabled set (locked-model-set-plan.md
+      // §5 Phase 2). `allowedProfiles` is the picker's universe — server-wide policy
+      // narrowed further by the repo's org (if any), never widened past it. A repo's
+      // existing org-membership only exists for already-registered repos; brand-new
+      // repos (no org yet) see only the server-wide set.
+      const repoOrgId = existing ? getRepoOrgId(activeRawDb, existing.id) : null
+      const allowedProfiles = getEffectiveAllowedSet(activeRawDb, 'embedding', repoOrgId, Array.from(profiles.keys()))
+
       const pinnedProfileName = existing?.profileName ?? null
       let resolvedProfileName: string | null
       if (pinnedProfileName) {
@@ -705,8 +714,8 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
         resolvedProfileName = pinnedProfileName
       } else if (requestedProfileName) {
         resolvedProfileName = requestedProfileName
-      } else if (profiles.size === 1) {
-        resolvedProfileName = Array.from(profiles.keys())[0] ?? null
+      } else if (allowedProfiles.length === 1) {
+        resolvedProfileName = allowedProfiles[0] ?? null
       } else {
         res.status(400).json({
           error: 'profileName is required: multiple embedding profiles are configured on this server',
@@ -716,6 +725,13 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
 
       if (resolvedProfileName && !profiles.has(resolvedProfileName)) {
         res.status(400).json({ error: `Unknown embedding profile '${resolvedProfileName}'` })
+        return
+      }
+      // A pinned profile that was later disabled keeps working for its own repo
+      // (PLAN.md Phase 128 deviation note) — only the *picker* (new selections)
+      // is gated by the allow-list, not a repo's pre-existing pin.
+      if (resolvedProfileName && !pinnedProfileName && !allowedProfiles.includes(resolvedProfileName)) {
+        res.status(403).json({ error: `Embedding profile '${resolvedProfileName}' is disabled by server policy` })
         return
       }
       if (resolvedProfileName) {
