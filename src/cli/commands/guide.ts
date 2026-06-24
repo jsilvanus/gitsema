@@ -18,6 +18,7 @@
 import type { Command } from 'commander'
 import { createInterface } from 'node:readline'
 import { addLensOption, parseLens } from '../lib/lens.js'
+import { addByokOptions, parseByokCliOpts } from '../lib/byok.js'
 import { resolveGuideConfig } from '../../core/narrator/resolveNarrator.js'
 import { redactAll } from '../../core/narrator/redact.js'
 import { withAudit } from '../../core/narrator/audit.js'
@@ -374,28 +375,6 @@ export async function runGuide(question: string, opts: {
 // CLI: single-shot Q&A
 // ---------------------------------------------------------------------------
 
-/**
- * Build request-scoped BYOK credentials from CLI flags (Phase 130 /
- * locked-model-set-plan.md §5 Phase 3). Returns undefined unless
- * `--byok-http-url` is set, leaving normal DB-backed resolution untouched.
- */
-function parseByok(opts: {
-  byokHttpUrl?: string
-  byokApiKey?: string
-  byokModel?: string
-  byokMaxTokens?: string
-  byokTemperature?: string
-}): ByokCredentials | undefined {
-  if (!opts.byokHttpUrl) return undefined
-  return {
-    httpUrl: opts.byokHttpUrl,
-    ...(opts.byokApiKey ? { apiKey: opts.byokApiKey } : {}),
-    ...(opts.byokModel ? { model: opts.byokModel } : {}),
-    ...(opts.byokMaxTokens ? { maxTokens: parseInt(opts.byokMaxTokens, 10) } : {}),
-    ...(opts.byokTemperature ? { temperature: parseFloat(opts.byokTemperature) } : {}),
-  }
-}
-
 export async function guideCommand(
   question: string | undefined,
   opts: {
@@ -414,7 +393,7 @@ export async function guideCommand(
 ): Promise<void> {
   const guideModelId = opts.guideModelId !== undefined ? parseInt(opts.guideModelId, 10) : undefined
   const includeContext = !opts.noContext
-  const byok = parseByok(opts)
+  const byok = parseByokCliOpts(opts)
   // A structural/hybrid lens hints the agent to reach for the call_graph /
   // blast_radius / hotspots tools; semantic (default) leaves the prompt as-is.
   const lens = parseLens(opts.lens, 'semantic')
@@ -492,10 +471,6 @@ export function registerGuideCommand(program: Command): void {
     .option('--model <name>', 'guide/narrator model name to use')
     .option('--no-context', 'skip gathering git context (faster but less accurate)')
     .option('-i, --interactive', 'start an interactive REPL session (one question per line)')
-    .option('--byok-http-url <url>', 'request-scoped guide LLM endpoint (bring-your-own-key; bypasses configured/allow-listed models, never persisted)')
-    .option('--byok-api-key <key>', 'bearer token for --byok-http-url')
-    .option('--byok-model <name>', 'model id sent to --byok-http-url (defaults to the endpoint default)')
-    .option('--byok-max-tokens <n>', 'max tokens per BYOK call')
-    .option('--byok-temperature <n>', 'temperature for BYOK calls')
+  addByokOptions(cmd, 'guide')
   addLensOption(cmd, 'semantic').action(guideCommand)
 }

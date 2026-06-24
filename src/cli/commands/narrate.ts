@@ -12,9 +12,10 @@ import type { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
 import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
-import type { ByokCredentials, NarrateFocus, NarrateFormat, NarrationResult } from '../../core/narrator/types.js'
+import type { NarrateFocus, NarrateFormat, NarrationResult } from '../../core/narrator/types.js'
 import { resolveOutputs, getSink, collectOut, type OutputSpec } from '../../utils/outputSink.js'
 import { addLensOption, parseLens } from '../lib/lens.js'
+import { addByokOptions, parseByokCliOpts } from '../lib/byok.js'
 
 // ---------------------------------------------------------------------------
 // Output formatting
@@ -106,28 +107,6 @@ function resolveNarrateOutput(opts: { out?: string[]; format?: string }): {
   return { format: (opts.format as NarrateFormat) ?? 'md' }
 }
 
-/**
- * Build request-scoped BYOK credentials from CLI flags (Phase 130 /
- * locked-model-set-plan.md §5 Phase 3). Returns undefined unless
- * `--byok-http-url` is set, leaving normal DB-backed resolution untouched.
- */
-function parseByok(opts: {
-  byokHttpUrl?: string
-  byokApiKey?: string
-  byokModel?: string
-  byokMaxTokens?: string
-  byokTemperature?: string
-}): ByokCredentials | undefined {
-  if (!opts.byokHttpUrl) return undefined
-  return {
-    httpUrl: opts.byokHttpUrl,
-    ...(opts.byokApiKey ? { apiKey: opts.byokApiKey } : {}),
-    ...(opts.byokModel ? { model: opts.byokModel } : {}),
-    ...(opts.byokMaxTokens ? { maxTokens: parseInt(opts.byokMaxTokens, 10) } : {}),
-    ...(opts.byokTemperature ? { temperature: parseFloat(opts.byokTemperature) } : {}),
-  }
-}
-
 /** Emit a formatted narration result to its resolved sink (file or stdout). */
 function emitNarrateResult(result: NarrationResult, sink: OutputSpec | undefined): void {
   const text = formatResult(result)
@@ -169,7 +148,7 @@ export async function narrateCommand(
   const provider = resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
-    byok: parseByok(opts),
+    byok: parseByokCliOpts(opts),
   })
 
   const { format, sink } = resolveNarrateOutput(opts)
@@ -224,7 +203,7 @@ export async function explainCommand(
   const provider = resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
-    byok: parseByok(opts),
+    byok: parseByokCliOpts(opts),
   })
 
   const { format, sink } = resolveNarrateOutput(opts)
@@ -272,50 +251,45 @@ export async function explainCommand(
 // ---------------------------------------------------------------------------
 
 export function registerNarratorCommands(program: Command): void {
-  program
-    .command('narrate')
-    .description('Return commit evidence (default) or an LLM-generated narrative of repository development history.')
-    .option('--since <ref|date>', 'only include commits after this ref or date')
-    .option('--until <ref|date>', 'only include commits before this ref or date')
-    .option('--range <rev-range>', 'git revision range (e.g. v1.0..HEAD)')
-    .option(
-      '--focus <area>',
-      'filter commits by area: bugs, features, ops, security, deps, performance, all (default: all)',
-      'all',
-    )
-    .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
-    .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
-    .option('--max-commits <n>', 'maximum commits to analyse (default: 500)')
-    .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
-    .option('--model <name>', 'narrator model name to use (overrides active selection)')
-    .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
-    .option('--evidence-only', 'return raw commit evidence without calling the LLM (this is the default)')
-    .option('--byok-http-url <url>', 'request-scoped narrator LLM endpoint (bring-your-own-key; bypasses configured/allow-listed models, never persisted)')
-    .option('--byok-api-key <key>', 'bearer token for --byok-http-url')
-    .option('--byok-model <name>', 'model id sent to --byok-http-url (defaults to the endpoint default)')
-    .option('--byok-max-tokens <n>', 'max tokens per BYOK call')
-    .option('--byok-temperature <n>', 'temperature for BYOK calls')
-    .action(narrateCommand)
-
-  addLensOption(
+  addByokOptions(
     program
-      .command('explain <topic>')
-      .description('Return matching commits (default) or an LLM-generated timeline for a bug, error, or topic.')
+      .command('narrate')
+      .description('Return commit evidence (default) or an LLM-generated narrative of repository development history.')
       .option('--since <ref|date>', 'only include commits after this ref or date')
       .option('--until <ref|date>', 'only include commits before this ref or date')
-      .option('--log <path>', 'path to an error log or stack trace file to include as context')
-      .option('--files <glob>', 'restrict search to files matching this glob')
+      .option('--range <rev-range>', 'git revision range (e.g. v1.0..HEAD)')
+      .option(
+        '--focus <area>',
+        'filter commits by area: bugs, features, ops, security, deps, performance, all (default: all)',
+        'all',
+      )
       .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
       .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
+      .option('--max-commits <n>', 'maximum commits to analyse (default: 500)')
       .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
       .option('--model <name>', 'narrator model name to use (overrides active selection)')
       .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
-      .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)')
-      .option('--byok-http-url <url>', 'request-scoped narrator LLM endpoint (bring-your-own-key; bypasses configured/allow-listed models, never persisted)')
-      .option('--byok-api-key <key>', 'bearer token for --byok-http-url')
-      .option('--byok-model <name>', 'model id sent to --byok-http-url (defaults to the endpoint default)')
-      .option('--byok-max-tokens <n>', 'max tokens per BYOK call')
-      .option('--byok-temperature <n>', 'temperature for BYOK calls'),
+      .option('--evidence-only', 'return raw commit evidence without calling the LLM (this is the default)'),
+    'narrator',
+  ).action(narrateCommand)
+
+  addLensOption(
+    addByokOptions(
+      program
+        .command('explain <topic>')
+        .description('Return matching commits (default) or an LLM-generated timeline for a bug, error, or topic.')
+        .option('--since <ref|date>', 'only include commits after this ref or date')
+        .option('--until <ref|date>', 'only include commits before this ref or date')
+        .option('--log <path>', 'path to an error log or stack trace file to include as context')
+        .option('--files <glob>', 'restrict search to files matching this glob')
+        .option('--format <fmt>', 'output format when narrating: md, text, json (default: md) (legacy: prefer --out)', 'md')
+        .option('--out <spec>', 'output spec (repeatable): text|json[:file]|markdown[:file] (overrides --format)', collectOut, [] as string[])
+        .option('--narrator-model-id <id>', 'embed_config.id of the narrator model to use (overrides active selection)')
+        .option('--model <name>', 'narrator model name to use (overrides active selection)')
+        .option('--narrate', 'call the LLM narrator and return prose (default: return evidence only)')
+        .option('--evidence-only', 'return raw matching commits without calling the LLM (this is the default)'),
+      'narrator',
+    ),
     'semantic',
   ).action(explainCommand)
 }
