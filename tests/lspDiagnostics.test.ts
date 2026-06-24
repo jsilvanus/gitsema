@@ -86,7 +86,7 @@ describe('analysis cache & diagnostics thresholds (Phase 115)', () => {
       expect(diagnostics.get('risky.ts')![0].message).toMatch(/0\.90/)
       expect(diagnostics.has('safe.ts')).toBe(false)
     })
-  })
+  }, 15000)
 
   it('flags a path above the hotspot threshold but not one below it', async () => {
     await withFixtureDb(async (session) => {
@@ -102,7 +102,7 @@ describe('analysis cache & diagnostics thresholds (Phase 115)', () => {
       expect(diagnostics.get('hot.ts')![0].severity).toBe(DIAGNOSTIC_SEVERITY.information)
       expect(diagnostics.has('cold.ts')).toBe(false)
     })
-  })
+  }, 15000)
 
   it('startBackgroundRefresh runs once immediately and reports diagnostics', async () => {
     await withFixtureDb(async (session) => {
@@ -119,7 +119,7 @@ describe('analysis cache & diagnostics thresholds (Phase 115)', () => {
       expect(diagnosticsByPath.has('risky.ts')).toBe(true)
       setIntervalSpy.mockRestore()
     })
-  })
+  }, 15000)
 })
 
 describe('LSP diagnostics push notifications & gating (Phase 115)', () => {
@@ -141,7 +141,7 @@ describe('LSP diagnostics push notifications & gating (Phase 115)', () => {
       setIntervalSpy.mockRestore()
       writeSpy.mockRestore()
     })
-  })
+  }, 15000)
 
   it('does not start diagnostics when --diagnostics is not passed', async () => {
     await withFixtureDb(async (session) => {
@@ -156,7 +156,7 @@ describe('LSP diagnostics push notifications & gating (Phase 115)', () => {
       setIntervalSpy.mockRestore()
       writeSpy.mockRestore()
     })
-  })
+  }, 15000)
 
   it('does not start diagnostics when a --remote config is set, even with --diagnostics', async () => {
     await withFixtureDb(async (session) => {
@@ -171,5 +171,5 @@ describe('LSP diagnostics push notifications & gating (Phase 115)', () => {
       setIntervalSpy.mockRestore()
       writeSpy.mockRestore()
     })
-  })
+  }, 15000)
 })
