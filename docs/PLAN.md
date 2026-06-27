@@ -4977,7 +4977,7 @@ Deviations from the design doc, discovered during implementation:
 
 **Files touched:** `tests/auditCoverageEnforcement.test.ts` (new).
 
-**Status:** Unstarted.
+**Status:** ✅ Complete. Implemented as a source-text static analysis test (no TS AST dependency): it maps known sensitive-table writer functions (`createUser`, `createSession`/`revokeSession`, `createApiKey`/`revokeApiKeyByPrefix`, `addOrgMember`/`removeOrgMember`, `createGrant`/`revokeGrant`/`moveRepoToOrg`, `linkSsoIdentity`/`unlinkSsoIdentity`) imported from `src/core/auth/*` to the sensitive table each one mutates, extracts every `router.<method>(<path>, ...)` handler body via brace-matching across all of `src/server/routes/`, and asserts each handler that calls a sensitive writer also contains a `recordAuditEvent(` call — unless explicitly exempted. Auditing this against the real codebase surfaced four pre-existing gaps beyond the routes already covered (auth.ts/orgs.ts login, token, grant, and member routes): `auth.ts` `POST /logout` (session revocation, self-service), `auth.ts` `DELETE /sso/:provider/:externalId` (self-service SSO unlink), `orgs.ts` `POST /` (org creation auto-adds the creator as org_admin of their own new org), and `remote.ts` `POST /index`'s Phase 126 "attach-as-reader" auto-grant. All four are recorded as documented `EXEMPTIONS` entries with rationale — the first three are judged not to need audit coverage (self-service or initial self-membership), while the `remote.ts` auto-grant is flagged in its exemption reason as a tracked real gap rather than a deliberate design decision. `pnpm build && pnpm test` green (118 test files / 1362 tests passing, no regressions).
 
 ---
 
