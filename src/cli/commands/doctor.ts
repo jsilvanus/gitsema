@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3'
 import { getRawDb } from '../../core/db/sqlite.js'
 import { runDoctor } from '../../core/db/doctor.js'
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
@@ -16,6 +17,64 @@ function printFtsAndOrphanCounts(report: DoctorReport): void {
   if (report.orphanEmbeddings > 0) {
     console.log(`Orphan embeddings: ${report.orphanEmbeddings} (run: gitsema index gc)`)
   }
+}
+
+/**
+ * A repairable `doctor` finding: a named issue with a `check` that reads its
+ * current count off a `DoctorReport`, and an optional `fix` that repairs it
+ * and prints its own progress/summary output. Findings without a `fix` are
+ * reportable-only (not auto-repairable via `--fix`).
+ *
+ * Adding a new auto-fixable finding means adding one entry to
+ * `DOCTOR_FINDINGS` — the `--fix` loop in `doctorCommand` iterates this
+ * registry generically and does not need a new code path per finding.
+ */
+interface DoctorFinding {
+  name: string
+  /** Reads this finding's current issue count off a DoctorReport. */
+  check: (report: DoctorReport) => number
+  /** Repairs the issue, printing its own announcement + result summary. */
+  fix?: (report: DoctorReport) => Promise<void>
+}
+
+const DOCTOR_FINDINGS: DoctorFinding[] = [
+  {
+    name: 'ftsMissing',
+    check: (report) => report.ftsMissingCount,
+    fix: async (report) => {
+      console.log(`Backfilling FTS content for ${report.ftsMissingCount} blob(s)...`)
+      const stats = await backfillFts()
+      console.log(`  Backfilled: ${stats.backfilled}  Oversized: ${stats.oversized}  Failed: ${stats.failed}`)
+    },
+  },
+  {
+    name: 'orphanEmbeddings',
+    check: (report) => report.orphanEmbeddings,
+    fix: async () => {
+      console.log('Garbage-collecting unreachable blob records...')
+      const stats = await runGarbageCollection({ dryRun: false })
+      console.log(`  Removed: ${stats.removed}/${stats.total}`)
+    },
+  },
+]
+
+/**
+ * Runs `fix()` for every finding in `DOCTOR_FINDINGS` whose `check()` is
+ * currently > 0 against `report`. Returns a fresh post-fix `DoctorReport`
+ * (re-running `runDoctor`) so callers can diff before/after counts generically
+ * rather than hand-crafting per-finding output.
+ */
+async function applyDoctorFixes(rawDb: InstanceType<typeof Database>, report: DoctorReport): Promise<DoctorReport> {
+  for (const finding of DOCTOR_FINDINGS) {
+    if (!finding.fix) continue
+    if (finding.check(report) <= 0) continue
+    await finding.fix(report)
+  }
+  return runDoctor(rawDb)
+}
+
+function hasFixableFindings(report: DoctorReport): boolean {
+  return DOCTOR_FINDINGS.some((f) => f.fix && f.check(report) > 0)
 }
 
 export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; fix?: boolean } = {}): Promise<void> {
@@ -97,23 +156,12 @@ export async function doctorCommand(opts: { lsp?: boolean; extended?: boolean; f
   }
 
   // ── Auto-fix ─────────────────────────────────────────────────────────────
-  if (opts.fix && (report.ftsMissingCount > 0 || report.orphanEmbeddings > 0)) {
+  if (opts.fix && hasFixableFindings(report)) {
     console.log('')
     console.log('=== Applying fixes ===')
 
-    if (report.ftsMissingCount > 0) {
-      console.log(`Backfilling FTS content for ${report.ftsMissingCount} blob(s)...`)
-      const backfillStats = await backfillFts()
-      console.log(`  Backfilled: ${backfillStats.backfilled}  Oversized: ${backfillStats.oversized}  Failed: ${backfillStats.failed}`)
-    }
+    report = await applyDoctorFixes(rawDb, report)
 
-    if (report.orphanEmbeddings > 0) {
-      console.log(`Garbage-collecting unreachable blob records...`)
-      const gcStats = await runGarbageCollection({ dryRun: false })
-      console.log(`  Removed: ${gcStats.removed}/${gcStats.total}`)
-    }
-
-    report = runDoctor(rawDb)
     console.log('')
     console.log('=== Post-fix report ===')
     printFtsAndOrphanCounts(report)
