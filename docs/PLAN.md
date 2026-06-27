@@ -4959,6 +4959,20 @@ Deviations from the design doc, discovered during implementation:
 
 ---
 
+### Phase 135 — Ephemeral-Job Profile Routing *(completed)*
+
+**Goal:** Unify provider selection for remote indexing jobs so both persisted and ephemeral (non-persisted, `persist: false`) jobs use the same multi-profile resolution path (`profiles.get('default')`), instead of ephemeral jobs falling back to a separate bare module-level provider pair that ignored the configured profile map entirely.
+
+**Implemented scope:**
+- `src/server/routes/remote.ts`'s `POST /api/v1/remote/index` handler: `resolvedProviders` now initializes from `profiles.get('default') ?? { textProvider, codeProvider }` instead of always `{ textProvider, codeProvider }`. `remoteRouter()` already seeds a synthetic `'default'` profile key when no `profiles` option is supplied (single-profile servers, unchanged behavior), so this change is a no-op for existing single-profile deployments and only changes behavior when an operator configures multiple named profiles including one literally named `'default'`.
+- The `persist: true` branch's full profile-resolution logic (pinning, allow-list enforcement, 403/409/400 gates) is untouched — it still overwrites `resolvedProviders` via `profiles.get(resolvedProfileName)!` after resolving the pinned/requested/auto-selected profile name.
+- The `persist: false` branch does not run through the pinning/allow-list gate at all (that gate lives entirely inside the `if (persist)` block, since ephemeral jobs have no registry row to pin) — only the *provider-selection mechanism* is unified, not the policy-enforcement path, which remains persisted-job-only by design (ephemeral jobs are not registered anywhere and have no `profileName` to enforce against).
+- New test file additions in `tests/remoteIndexPersistence.test.ts` (`describe('POST /api/v1/remote/index — ephemeral-job profile routing (Phase 135)')`): asserts an ephemeral job picks up the `'default'`-keyed profile's provider, that disabling `'default'` via server policy doesn't block the ephemeral path (only the persisted path's explicit gate), and that ephemeral jobs fall back correctly to the bare `textProvider`/`codeProvider` pair when no profile is named `'default'`.
+
+**Status:** ✅ complete.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.

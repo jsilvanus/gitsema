@@ -597,7 +597,12 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
 
     // --- 2b. Resolve persistent repo registration (default mode) ------------
     let persistent: PersistentJobContext | undefined
-    let resolvedProviders: EmbeddingProviderPair = { textProvider, codeProvider }
+    // Both persisted and ephemeral jobs resolve providers through the same
+    // multi-profile map (Phase 135) — `'default'` is always present, either
+    // because the operator configured a profile named 'default' or because
+    // remoteRouter() seeds the synthetic single-profile fallback under that
+    // key when no `profiles` option is given.
+    let resolvedProviders: EmbeddingProviderPair = profiles.get('default') ?? { textProvider, codeProvider }
     if (persist) {
       const normalizedUrl = normalizeRepoUrl(repoUrl)
       const registrySession = getRegistrySession()
