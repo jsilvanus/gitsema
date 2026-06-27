@@ -447,6 +447,13 @@ codeModel?, httpUrl?, apiKey?}` — and resolved to their own
 - **Scope note:** query-time embedding (search/evolution) still always uses
   the server's process-wide text provider, not a per-repo pinned profile's
   provider — see `docs/PLAN.md`'s Phase 128 entry for the deviation note.
+- **Ephemeral jobs (Phase 135).** `persist: false` (non-persisted) indexing
+  jobs resolve their embedding provider through the same `profiles.get('default')`
+  path as persisted jobs, instead of a separate bare provider pair — a
+  multi-profile server's `'default'`-named profile (if any) now applies to
+  ephemeral jobs too. The pin/allow-list *enforcement* gate itself remains
+  persisted-job-only (ephemeral jobs have no registry row to pin a profile
+  against).
 
 ### Admin-gated enabled sets (Phase 129)
 

@@ -5047,9 +5047,9 @@ Deviations from the design doc, discovered during implementation:
 - New test exercises the ephemeral path and asserts profile-resolution equivalence.
 - `pnpm test` green; no regressions in `tests/remoteIndex*.test.ts`.
 
-**Files touched:** `src/server/routes/remote.ts`, `tests/remoteIndex*.test.ts` (new ephemeral-profile test).
+**Files touched:** `src/server/routes/remote.ts`, `tests/remoteIndexPersistence.test.ts` (new ephemeral-profile tests).
 
-**Status:** Unstarted.
+**Status:** ✅ complete. `resolvedProviders` in `POST /api/v1/remote/index` now initializes from `profiles.get('default') ?? { textProvider, codeProvider }` instead of always `{ textProvider, codeProvider }`. `remoteRouter()` already seeds a synthetic `'default'` profile key when no `profiles` option is supplied (single-profile servers, unchanged behavior), so this change is a no-op for existing single-profile deployments and only changes behavior when an operator configures multiple named profiles including one literally named `'default'`. The `persist: true` branch's full profile-resolution logic (pinning, allow-list enforcement, 403/409/400 gates) is untouched — it still overwrites `resolvedProviders` via `profiles.get(resolvedProfileName)!` after resolving the pinned/requested/auto-selected profile name. The `persist: false` branch does not run through the pinning/allow-list gate at all (that gate lives entirely inside the `if (persist)` block, since ephemeral jobs have no registry row to pin) — only the *provider-selection mechanism* is unified, not the policy-enforcement path, which remains persisted-job-only by design. New tests added to `tests/remoteIndexPersistence.test.ts` (`describe('POST /api/v1/remote/index — ephemeral-job profile routing (Phase 135)')`) assert an ephemeral job picks up the `'default'`-keyed profile's provider, that disabling `'default'` doesn't block the ephemeral path, and that ephemeral jobs fall back to the bare provider pair when no profile is named `'default'`. `pnpm build && pnpm test` green (1362 passed). Changeset added (`ephemeral-job-profile-routing.md`, patch) since this is a narrow real behavior change for multi-profile operators.
 
 ---
 

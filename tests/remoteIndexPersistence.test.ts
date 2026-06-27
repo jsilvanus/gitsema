@@ -477,6 +477,96 @@ describe('POST /api/v1/remote/index — multi-profile embedding serving (Phase 1
   })
 })
 
+describe('POST /api/v1/remote/index — ephemeral-job profile routing (Phase 135)', () => {
+  const defaultProfileProvider: EmbeddingProvider = { ...mockProvider, model: 'default-profile-model' }
+  const otherProfileProvider: EmbeddingProvider = { ...mockProvider, model: 'other-profile-model' }
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('resolves an ephemeral (persist: false) job through profiles.get(\'default\'), same as a persisted job', async () => {
+    const { runIndex } = await import('../src/core/indexing/indexer.js')
+    const app = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['default', { textProvider: defaultProfileProvider }],
+        ['other', { textProvider: otherProfileProvider }],
+      ]),
+    })
+
+    await request(app)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl: 'https://github.com/example/ephemeral-profile-routing.git', persist: false })
+      .expect(202)
+
+    // Give the fire-and-forget async job a tick to call runIndex.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(runIndex).toHaveBeenCalled()
+    const callArgs = (runIndex as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+    expect(callArgs.provider.model).toBe('default-profile-model')
+  })
+
+  it('disabling the \'default\' profile via server policy affects an ephemeral job exactly like a persisted job', async () => {
+    const { runIndex } = await import('../src/core/indexing/indexer.js')
+    const { denyServer, resetServerPolicy } = await import('../src/core/admin/modelPolicy.js')
+    const app = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['default', { textProvider: defaultProfileProvider }],
+        ['other', { textProvider: otherProfileProvider }],
+      ]),
+    })
+
+    try {
+      denyServer(getRawDb(), 'embedding', 'default', ['default', 'other'])
+
+      // Persisted job requesting the disabled profile -> 403.
+      const persistedRes = await request(app)
+        .post('/api/v1/remote/index')
+        .send({ repoUrl: 'https://github.com/example/ephemeral-policy-persisted.git', profileName: 'default' })
+        .expect(403)
+      expect(persistedRes.body.error).toMatch(/disabled by server policy/)
+
+      // Ephemeral job is not gated by the profile allow-list at all today —
+      // persist:false skips the §2f gate entirely, so it still resolves and
+      // runs using the 'default' profile's provider (parity with the
+      // persisted path's *resolution mechanism*, not its policy gate, which
+      // only applies inside the persist:true branch).
+      await request(app)
+        .post('/api/v1/remote/index')
+        .send({ repoUrl: 'https://github.com/example/ephemeral-policy-ephemeral.git', persist: false })
+        .expect(202)
+
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const callArgs = (runIndex as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+      expect(callArgs.provider.model).toBe('default-profile-model')
+    } finally {
+      resetServerPolicy(getRawDb(), 'embedding')
+    }
+  })
+
+  it('falls back to the bare textProvider/codeProvider pair for an ephemeral job when no \'default\' profile is configured', async () => {
+    const { runIndex } = await import('../src/core/indexing/indexer.js')
+    const app = createApp({
+      textProvider: mockProvider,
+      profiles: new Map([
+        ['only-named', { textProvider: otherProfileProvider }],
+      ]),
+    })
+
+    await request(app)
+      .post('/api/v1/remote/index')
+      .send({ repoUrl: 'https://github.com/example/ephemeral-no-default-profile.git', persist: false })
+      .expect(202)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const callArgs = (runIndex as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+    expect(callArgs.provider.model).toBe(mockProvider.model)
+  })
+})
+
 describe('POST /api/v1/remote/index — superadmin-gated profile picker (Phase 129)', () => {
   const profileA: EmbeddingProvider = { ...mockProvider, model: 'profile-a-model' }
   const profileB: EmbeddingProvider = { ...mockProvider, model: 'profile-b-model' }
