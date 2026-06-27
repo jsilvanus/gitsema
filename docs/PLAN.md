@@ -5000,7 +5000,16 @@ Deviations from the design doc, discovered during implementation:
 
 **Files touched:** `src/server/routes/remote.ts`.
 
-**Status:** Unstarted.
+**Status:** ✅ complete. Implemented as specified: `applyPublicRepoPolicy()` now
+encapsulates the first-index gate (§4.2), refresh throttle (§4.4), and
+attach-as-reader auto-grant (§4.3) checks, taking `{ existing, existingAuth,
+requestedVisibility, userId, activeRawDb }` and returning either `null`
+(proceed) or `{ status, body, retryAfterHeader? }` for the route handler to
+send as the HTTP response — same 403/429 status codes and same auto-grant
+behavior as before. The route handler's inline sequence (previously inline
+comments "2c"/"2d"/"2e") was replaced with a single call to this function.
+No other logic in the file was touched. Existing `tests/remoteIndexPersistence.test.ts`
+public-repo cases pass unmodified; full `pnpm test` suite green (1359 passed).
 
 ---
 
