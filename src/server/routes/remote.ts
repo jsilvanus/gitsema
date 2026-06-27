@@ -364,6 +364,98 @@ function checkAndRecordReindexThrottle(repoId: string, userId: number, cwd?: str
 }
 
 // ---------------------------------------------------------------------------
+// Public repo policy (Phase 126 §4.2-4.4 gate/throttle/grant; extracted as a
+// named function in Phase 133 for readability — behavior unchanged).
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies the three public-repo access-control checks for an already-resolved
+ * (or about-to-be-created) repo, in order:
+ *
+ *   1. First-index gate (Phase 126 §4.2): a brand-new repo being registered as
+ *      public requires `auth.allowPublicAutoIndex` unless the caller is an
+ *      "operator" (no req.userId — local CLI/global-key/no-auth-required).
+ *   2. Refresh throttle (Phase 126 §4.4): a non-owner authenticated caller
+ *      re-indexing an existing public repo is rate-limited via
+ *      `checkAndRecordReindexThrottle`.
+ *   3. Attach-as-reader auto-grant (Phase 126 §4.3): a non-owner authenticated
+ *      caller who has no applicable grant yet on an existing public repo is
+ *      automatically granted 'read' access (provenance 'auto-public').
+ *
+ * Returns an error descriptor (status + body + optional Retry-After header)
+ * the caller should send as the HTTP response, or `null` if all checks pass
+ * and the request may proceed.
+ */
+function applyPublicRepoPolicy(params: {
+  /** Existing repo registry row, or null/undefined if this would be a brand-new repo. */
+  existing: { id: string } | null | undefined
+  /** Visibility/ownerUserId of the existing repo's mirrored row in the active (auth) DB, if any. */
+  existingAuth: { visibility?: RepoVisibility; ownerUserId?: number | null } | null | undefined
+  /** Visibility requested for a brand-new repo registration (only meaningful when `existing` is undefined). */
+  requestedVisibility: RepoVisibility | undefined
+  /** The authenticated caller's user id, or undefined for an operator caller. */
+  userId: number | undefined
+  /** better-sqlite3 handle for the active (auth) DB, used for grant lookups/creation. */
+  activeRawDb: ReturnType<typeof getActiveSession>['rawDb']
+}): { status: number; body: Record<string, unknown>; retryAfterHeader?: string } | null {
+  const { existing, existingAuth, requestedVisibility, userId, activeRawDb } = params
+
+  // --- First-index gate for brand-new public repos (Phase 126 §4.2) --------
+  // "Operator" callers (no req.userId — local CLI/global-key/no-auth-
+  // required requests) bypass the gate, mirroring the Phase 122-125
+  // precedent that operator-equivalent access is a stronger trust tier
+  // than any network role.
+  const isOperator = userId === undefined
+  if (!existing && requestedVisibility === 'public' && !isOperator && !isPublicAutoIndexAllowed()) {
+    return {
+      status: 403,
+      body: { error: 'Registering new repos as public requires auth.allowPublicAutoIndex to be enabled' },
+    }
+  }
+
+  // The throttle and auto-grant checks share this precondition: an
+  // authenticated caller who is not the owner, acting on an already-
+  // registered public repo.
+  const isNonOwnerOnExistingPublicRepo = Boolean(
+    existing && existingAuth?.visibility === 'public' && userId !== undefined && userId !== existingAuth.ownerUserId,
+  )
+
+  // --- Refresh throttle for re-indexing an existing public repo by a
+  // non-owner caller (Phase 126 §4.4) ---------------------------------------
+  if (isNonOwnerOnExistingPublicRepo) {
+    const retryAfter = checkAndRecordReindexThrottle(existing!.id, userId!)
+    if (retryAfter > 0) {
+      return {
+        status: 429,
+        body: { error: 'Re-index triggered too recently for this repo', retryAfter },
+        retryAfterHeader: String(retryAfter),
+      }
+    }
+  }
+
+  // --- Attach-as-reader: auto-grant read access to a non-owner caller on
+  // an existing public repo they don't already have access to (Phase 126
+  // §4.3 / public-repo-sharing — "auto-public" provenance) ------------------
+  if (
+    isNonOwnerOnExistingPublicRepo &&
+    resolveUserRepoAccess(activeRawDb, userId!, existing!.id) === undefined
+  ) {
+    // Only issue the auto-grant when the user holds no applicable grant
+    // yet — createGrant() would otherwise overwrite a pre-existing
+    // higher-role (write/owner) all-branches grant with 'read'.
+    createGrant(activeRawDb, {
+      userId: userId!,
+      repoId: existing!.id,
+      role: 'read',
+      grantedBy: existingAuth!.ownerUserId ?? userId!,
+      source: 'auto-public',
+    })
+  }
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Core job runner
 // ---------------------------------------------------------------------------
 
@@ -636,54 +728,23 @@ export function remoteRouter(options: RemoteRouterOptions): Router {
       // index of a repo (Phase 126 / public-repo-sharing §4).
       const existingAuth = existing ? getRepo(getActiveSession(), existing.id) : null
 
-      // --- 2c. First-index gate for brand-new public repos (Phase 126 §4.2) --
-      // "Operator" callers (no req.userId — local CLI/global-key/no-auth-
-      // required requests) bypass the gate, mirroring the Phase 122-125
-      // precedent that operator-equivalent access is a stronger trust tier
-      // than any network role.
-      const isOperator = req.userId === undefined
-      if (!existing && requestedVisibility === 'public' && !isOperator && !isPublicAutoIndexAllowed()) {
-        res.status(403).json({
-          error: 'Registering new repos as public requires auth.allowPublicAutoIndex to be enabled',
-        })
-        return
-      }
-
-      // 2d and 2e share this precondition: an authenticated caller who is
-      // not the owner, acting on an already-registered public repo.
-      const isNonOwnerOnExistingPublicRepo = Boolean(
-        existing && existingAuth?.visibility === 'public' && req.userId !== undefined && req.userId !== existingAuth.ownerUserId,
-      )
-
-      // --- 2d. Refresh throttle for re-indexing an existing public repo
-      // by a non-owner caller (Phase 126 §4.4) -------------------------------
-      if (isNonOwnerOnExistingPublicRepo) {
-        const retryAfter = checkAndRecordReindexThrottle(existing!.id, req.userId!)
-        if (retryAfter > 0) {
-          res.setHeader('Retry-After', String(retryAfter))
-          res.status(429).json({ error: 'Re-index triggered too recently for this repo', retryAfter })
-          return
-        }
-      }
-
-      // --- 2e. Attach-as-reader: auto-grant read access to a non-owner
-      // caller on an existing public repo they don't already have access to
-      // (Phase 126 §4.3 / public-repo-sharing — "auto-public" provenance) ---
+      // --- 2c/2d/2e. First-index gate, refresh throttle, and attach-as-reader
+      // auto-grant for public repos (Phase 126 §4.2-4.4) — extracted into
+      // applyPublicRepoPolicy() (Phase 133) for readability; behavior unchanged.
       const activeRawDb = getActiveSession().rawDb
-      if (
-        isNonOwnerOnExistingPublicRepo &&
-        resolveUserRepoAccess(activeRawDb, req.userId!, existing!.id) === undefined
-      ) {
-        // Only issue the auto-grant when the user holds no applicable grant
-        // yet — createGrant() would otherwise overwrite a pre-existing
-        // higher-role (write/owner) all-branches grant with 'read'.
-        createGrant(activeRawDb, {
-          userId: req.userId!,
-          repoId: existing!.id,
-          role: 'read',
-          grantedBy: existingAuth!.ownerUserId ?? req.userId!,
-          source: 'auto-public',
-        })
+      const policyError = applyPublicRepoPolicy({
+        existing,
+        existingAuth,
+        requestedVisibility,
+        userId: req.userId,
+        activeRawDb,
+      })
+      if (policyError) {
+        if (policyError.retryAfterHeader) {
+          res.setHeader('Retry-After', policyError.retryAfterHeader)
+        }
+        res.status(policyError.status).json(policyError.body)
+        return
       }
 
       // --- 2f. Resolve embedding profile (Phase 128 / locked-model-set-plan.md
