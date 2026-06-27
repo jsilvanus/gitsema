@@ -369,6 +369,16 @@ audit events — the equivalent operator-only CLI-direct paths (`gitsema repos g
 v1, since those paths already require local DB access, a stronger trust boundary than
 the network surface this audit trail is primarily meant to cover.
 
+**Coverage enforcement (Phase 132):** `tests/auditCoverageEnforcement.test.ts`
+statically scans every route handler in `src/server/routes/` for calls to known
+sensitive-table writer functions (`createUser`, `createSession`/`revokeSession`,
+`createApiKey`/`revokeApiKeyByPrefix`, `addOrgMember`/`removeOrgMember`,
+`createGrant`/`revokeGrant`/`moveRepoToOrg`, `linkSsoIdentity`/`unlinkSsoIdentity`) and
+fails the build if a handler writes to `users`/`sessions`/`api_keys`/`org_members`/
+`repo_grants`/`sso_identities` without a `recordAuditEvent()` call in the same handler
+body and no documented exemption — so a future sensitive route can no longer silently
+ship without audit coverage.
+
 ### Public repo sharing (Phases 126–127)
 
 Registration-flow extension layered on top of Phases 122-123's `repo_grants`
@@ -437,6 +447,13 @@ codeModel?, httpUrl?, apiKey?}` — and resolved to their own
 - **Scope note:** query-time embedding (search/evolution) still always uses
   the server's process-wide text provider, not a per-repo pinned profile's
   provider — see `docs/PLAN.md`'s Phase 128 entry for the deviation note.
+- **Ephemeral jobs (Phase 135).** `persist: false` (non-persisted) indexing
+  jobs resolve their embedding provider through the same `profiles.get('default')`
+  path as persisted jobs, instead of a separate bare provider pair — a
+  multi-profile server's `'default'`-named profile (if any) now applies to
+  ephemeral jobs too. The pin/allow-list *enforcement* gate itself remains
+  persisted-job-only (ephemeral jobs have no registry row to pin a profile
+  against).
 
 ### Admin-gated enabled sets (Phase 129)
 

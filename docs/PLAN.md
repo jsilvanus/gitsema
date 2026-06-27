@@ -3168,7 +3168,7 @@ as concrete, user-accessible features with CLI commands, documentation, and smok
 
 **Status:** ✅ complete.
 
-### Phase 93 — Time filter semantics & pagination stability
+### Phase 93 — Time filter semantics & pagination stability ✅ complete
 
 **Goal:** Fix temporal filter semantics and stabilize `search_after` pagination to ensure correct, deterministic temporal filtering and robust paginated search results.
 
@@ -4956,6 +4956,109 @@ Deviations from the design doc, discovered during implementation:
 - Standalone `index rebuild-fts`, `index backfill-fts`, and `index gc` commands are unchanged and still work for users who want to run one fix in isolation or who use them in non-interactive scripts.
 
 **Status:** ✅ complete.
+
+---
+
+### Phase 132 — Audit Log Coverage Enforcement
+
+**Goal:** Prevent future sensitive HTTP routes from shipping without an audit call. Today `recordAuditEvent()` is wired into the routes that exist now (auth, orgs, repos), but there's no structural enforcement requiring a *new* sensitive route to call it — a future endpoint could silently skip the audit entry, and CI wouldn't catch the gap.
+
+**Design:** No separate design doc — scoped directly from `docs/feature-ideas.md` (Audit Log Coverage Enforcement idea). Approach: add a test that enumerates sensitive route handlers by path/method and asserts each one's source contains a `recordAuditEvent()` call, with a clear failure mode when a new sensitive route is added without audit coverage.
+
+**Implemented scope:**
+- New test file `tests/auditCoverageEnforcement.test.ts`: enumerates routes that write to sensitive tables (`users`, `org_members`, `repo_grants`, `sessions`, `api_keys`, `sso_identities`) via static analysis of source, and asserts each handler calls `recordAuditEvent` or has an explicit exemption.
+- Exemption list for routes that don't need audit coverage (e.g. read-only routes, internal helpers) with rationale documented in the test.
+- Fails loudly when a new mutating route is added without explicit exemption or audit call — preventing the coverage gap from expanding silently.
+
+**Acceptance criteria:**
+- Test passes against all current audit routes (auth.ts, orgs.ts routes recording login/grant/member changes).
+- Test fails with a clear message if a new write path is added without `recordAuditEvent` or exemption.
+- `pnpm test` green.
+
+**Files touched:** `tests/auditCoverageEnforcement.test.ts` (new).
+
+**Status:** ✅ Complete. Implemented as a source-text static analysis test (no TS AST dependency): it maps known sensitive-table writer functions (`createUser`, `createSession`/`revokeSession`, `createApiKey`/`revokeApiKeyByPrefix`, `addOrgMember`/`removeOrgMember`, `createGrant`/`revokeGrant`/`moveRepoToOrg`, `linkSsoIdentity`/`unlinkSsoIdentity`) imported from `src/core/auth/*` to the sensitive table each one mutates, extracts every `router.<method>(<path>, ...)` handler body via brace-matching across all of `src/server/routes/`, and asserts each handler that calls a sensitive writer also contains a `recordAuditEvent(` call — unless explicitly exempted. Auditing this against the real codebase surfaced four pre-existing gaps beyond the routes already covered (auth.ts/orgs.ts login, token, grant, and member routes): `auth.ts` `POST /logout` (session revocation, self-service), `auth.ts` `DELETE /sso/:provider/:externalId` (self-service SSO unlink), `orgs.ts` `POST /` (org creation auto-adds the creator as org_admin of their own new org), and `remote.ts` `POST /index`'s Phase 126 "attach-as-reader" auto-grant. All four are recorded as documented `EXEMPTIONS` entries with rationale — the first three are judged not to need audit coverage (self-service or initial self-membership), while the `remote.ts` auto-grant is flagged in its exemption reason as a tracked real gap rather than a deliberate design decision. `pnpm build && pnpm test` green (118 test files / 1362 tests passing, no regressions).
+
+---
+
+### Phase 133 — Public Repo Throttle/Policy Extraction
+
+**Goal:** Improve readability and maintainability of public-repo access control logic in `src/server/routes/remote.ts` by extracting the gate/throttle/grant sequence into a named function, preparing for future throttle-mechanism unification if a third rate-limiting requirement arises.
+
+**Design:** No separate design doc — scoped directly from `docs/feature-ideas.md` (Public Repo Sharing: Throttle/Rate-Limit Unification idea). Approach: extract lines 2c/2d/2e (first-index gate, refresh throttle, attach-as-reader auto-grant logic) from `POST /api/v1/remote/index` into a named `applyPublicRepoPolicy()` function; defer generic keyed-cooldown unification until a second throttle-shaped requirement surfaces.
+
+**Implemented scope:**
+- New function `applyPublicRepoPolicy(...)` in `src/server/routes/remote.ts` encapsulating the three gate checks (first-index gate for new public repos, `minReindexIntervalSeconds` throttle, attach-as-reader auto-grant when a second user attaches).
+- Route handler calls `applyPublicRepoPolicy(...)` in place of the inline conditional sequence; behavior unchanged.
+- Existing test coverage (`tests/remoteIndexPersistence.test.ts` public-repo cases) verifies unchanged semantics.
+
+**Acceptance criteria:**
+- `applyPublicRepoPolicy(...)` is a named, documented function clearly separating gate/throttle/grant logic.
+- Route handler behavior identical before/after (e.g. same 403/429 responses, same auto-grant grants).
+- Existing test suite passes without modification.
+- `pnpm test` green.
+
+**Files touched:** `src/server/routes/remote.ts`.
+
+**Status:** ✅ complete. Implemented as specified: `applyPublicRepoPolicy()` now
+encapsulates the first-index gate (§4.2), refresh throttle (§4.4), and
+attach-as-reader auto-grant (§4.3) checks, taking `{ existing, existingAuth,
+requestedVisibility, userId, activeRawDb }` and returning either `null`
+(proceed) or `{ status, body, retryAfterHeader? }` for the route handler to
+send as the HTTP response — same 403/429 status codes and same auto-grant
+behavior as before. The route handler's inline sequence (previously inline
+comments "2c"/"2d"/"2e") was replaced with a single call to this function.
+No other logic in the file was touched. Existing `tests/remoteIndexPersistence.test.ts`
+public-repo cases pass unmodified; full `pnpm test` suite green (1359 passed).
+
+---
+
+### Phase 134 — `index doctor --fix` Generalization
+
+**Goal:** Refactor `index doctor --fix` to use a generic fix-registry pattern, making it easier to add a third repairable finding without duplicating the `if` block / repair call / console output pattern that currently repeats per finding.
+
+**Design:** No separate design doc — scoped directly from `docs/feature-ideas.md` (`index doctor --fix` Generalization idea). Approach: model each repairable finding as `{ check: () => number, fix: () => Promise<FixResult> }`, so the `--fix` loop becomes "for each finding, run its fix if the check returns > 0" and the post-fix report is generated by re-running `runDoctor()` and diffing results, rather than maintaining per-finding console output.
+
+**Implemented scope:**
+- New `DoctorFinding` type with optional `fix` method.
+- Refactored `doctorCommand`'s `--fix` block to iterate findings generically and run `fix()` for each, collecting results.
+- Post-fix report generated via a second `runDoctor()` call and diff, not hand-crafted console lines.
+- Existing repair logic (`backfillFts()`, `runGarbageCollection()`) unchanged.
+- Existing test `tests/integration/doctorFix.integration.test.ts` still passes.
+
+**Acceptance criteria:**
+- `--fix` loop is generic; a hypothetical third repairable finding slots in by adding a `fix` method to `DoctorFinding` with no new code paths.
+- Post-fix report is identical in content to the current implementation (ftsMissingCount, orphanEmbeddings, etc.).
+- `gitsema index doctor --fix` behavior unchanged on any index (same repairs, same output).
+- `pnpm test` green.
+
+**Files touched:** `src/cli/commands/doctor.ts`. (The `src/core/index/doctor.ts` path in the original scope was a guess at the report-generation module's location; the actual module is `src/core/db/doctor.ts`, which already exposed `runDoctor()`/`DoctorReport` and needed no changes — `DoctorReport`'s shape was already exactly what the registry needed.)
+
+**Status:** ✅ complete. Added a `DoctorFinding` registry (`{ name, check, fix? }`) in `doctor.ts` with one entry each for `ftsMissing` (wraps `backfillFts()`) and `orphanEmbeddings` (wraps `runGarbageCollection()`); each `fix()` prints its own announcement + result summary, preserving existing console output verbatim. `doctorCommand`'s `--fix` block now calls a generic `applyDoctorFixes(rawDb, report)` helper that iterates `DOCTOR_FINDINGS`, runs `fix()` for any finding whose `check(report) > 0`, and returns a fresh post-fix `runDoctor()` report — replacing the two hand-written sequential `if` blocks. A `hasFixableFindings()` helper replaces the inline `report.ftsMissingCount > 0 || report.orphanEmbeddings > 0` gate. Output text and `DoctorReport` shape are unchanged; `tests/integration/doctorFix.integration.test.ts` and `tests/doctor.test.ts` pass unmodified. Full `pnpm test` green (1359 passed). No changeset — internal refactor, no user-facing behavior change.
+
+---
+
+### Phase 135 — Ephemeral-Job Profile Routing
+
+**Goal:** Unify provider selection for remote indexing jobs so both persisted and ephemeral (non-persisted) jobs use the same multi-profile resolution path. Currently, only persisted jobs route through `profiles.get()`, while ephemeral jobs always use the bare module-level `textProvider`/`codeProvider` pair, creating two diverging code paths that could silently fall out of sync.
+
+**Design:** No separate design doc — scoped directly from `docs/feature-ideas.md` (`index doctor --fix` Generalization & Multi-Profile Ephemeral-Job Parity idea). Approach: route ephemeral (non-persisted) `remote-index` jobs through `profiles.get('default')` so there's exactly one source of truth for "which provider pair runs this job" — persistence only affects profile pinning/enforcement, not provider selection.
+
+**Implemented scope:**
+- `POST /api/v1/remote/index` with `persist: false` now resolves providers via `profiles.get('default')` instead of using the bare module-level pair.
+- Profile resolution logic (checking allowed-lists, pinning, enforcement) remains the same; only the provider-selection step is unified.
+- New integration test for ephemeral jobs verifying they use the same profile-resolution path as persisted jobs.
+- Existing persisted-job tests unchanged.
+
+**Acceptance criteria:**
+- Ephemeral jobs (`persist: false`) get providers from `profiles.get('default')`, matching persisted jobs' profile resolution.
+- Profile enforcement (e.g. a disabled profile) affects both ephemeral and persisted jobs identically.
+- New test exercises the ephemeral path and asserts profile-resolution equivalence.
+- `pnpm test` green; no regressions in `tests/remoteIndex*.test.ts`.
+
+**Files touched:** `src/server/routes/remote.ts`, `tests/remoteIndexPersistence.test.ts` (new ephemeral-profile tests).
+
+**Status:** ✅ complete. `resolvedProviders` in `POST /api/v1/remote/index` now initializes from `profiles.get('default') ?? { textProvider, codeProvider }` instead of always `{ textProvider, codeProvider }`. `remoteRouter()` already seeds a synthetic `'default'` profile key when no `profiles` option is supplied (single-profile servers, unchanged behavior), so this change is a no-op for existing single-profile deployments and only changes behavior when an operator configures multiple named profiles including one literally named `'default'`. The `persist: true` branch's full profile-resolution logic (pinning, allow-list enforcement, 403/409/400 gates) is untouched — it still overwrites `resolvedProviders` via `profiles.get(resolvedProfileName)!` after resolving the pinned/requested/auto-selected profile name. The `persist: false` branch does not run through the pinning/allow-list gate at all (that gate lives entirely inside the `if (persist)` block, since ephemeral jobs have no registry row to pin) — only the *provider-selection mechanism* is unified, not the policy-enforcement path, which remains persisted-job-only by design. New tests added to `tests/remoteIndexPersistence.test.ts` (`describe('POST /api/v1/remote/index — ephemeral-job profile routing (Phase 135)')`) assert an ephemeral job picks up the `'default'`-keyed profile's provider, that disabling `'default'` doesn't block the ephemeral path, and that ephemeral jobs fall back to the bare provider pair when no profile is named `'default'`. `pnpm build && pnpm test` green (1362 passed). Changeset added (`ephemeral-job-profile-routing.md`, patch) since this is a narrow real behavior change for multi-profile operators.
 
 ---
 
