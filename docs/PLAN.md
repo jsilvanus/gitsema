@@ -5023,9 +5023,9 @@ Deviations from the design doc, discovered during implementation:
 - `gitsema index doctor --fix` behavior unchanged on any index (same repairs, same output).
 - `pnpm test` green.
 
-**Files touched:** `src/cli/commands/doctor.ts`, `src/core/index/doctor.ts`.
+**Files touched:** `src/cli/commands/doctor.ts`. (The `src/core/index/doctor.ts` path in the original scope was a guess at the report-generation module's location; the actual module is `src/core/db/doctor.ts`, which already exposed `runDoctor()`/`DoctorReport` and needed no changes — `DoctorReport`'s shape was already exactly what the registry needed.)
 
-**Status:** Unstarted.
+**Status:** ✅ complete. Added a `DoctorFinding` registry (`{ name, check, fix? }`) in `doctor.ts` with one entry each for `ftsMissing` (wraps `backfillFts()`) and `orphanEmbeddings` (wraps `runGarbageCollection()`); each `fix()` prints its own announcement + result summary, preserving existing console output verbatim. `doctorCommand`'s `--fix` block now calls a generic `applyDoctorFixes(rawDb, report)` helper that iterates `DOCTOR_FINDINGS`, runs `fix()` for any finding whose `check(report) > 0`, and returns a fresh post-fix `runDoctor()` report — replacing the two hand-written sequential `if` blocks. A `hasFixableFindings()` helper replaces the inline `report.ftsMissingCount > 0 || report.orphanEmbeddings > 0` gate. Output text and `DoctorReport` shape are unchanged; `tests/integration/doctorFix.integration.test.ts` and `tests/doctor.test.ts` pass unmodified. Full `pnpm test` green (1359 passed). No changeset — internal refactor, no user-facing behavior change.
 
 ---
 
