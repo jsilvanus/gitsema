@@ -5581,7 +5581,21 @@ Update `docs/parity.md`, `docs/features.md`, `README.md`.
 `src/core/search/authorSearch.ts` (or wherever author attribution lives),
 `docs/parity.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete. `AuthorBodySchema` in `src/server/routes/analysis.ts`
+gained `since`, `detail`, `includeCommits`, `hybrid`, `bm25Weight` (all
+threaded through to `computeAuthorContributions`/`hybridSearch`/
+`searchCommits`, mirroring `src/cli/commands/author.ts` exactly) plus
+`chunks`/`level`/`vss` for flag-surface parity — these three are accepted
+but deliberately not wired to anything, matching the CLI's own dead-flag
+behavior (`computeAuthorContributions` is blob-level only; the CLI's
+`--vss` on `author` is itself just a warn-and-ignore no-op). Model-override
+triplet (`model`/`textModel`/`codeModel`) intentionally excluded — tracked
+separately in Phase 140. **Deviation from spec:** response shape changed
+from a bare `AuthorContribution[]` array to `{ authors, commits? }` (the
+`commits` key populated only when `includeCommits` is set) — a breaking
+change, taken deliberately per `docs/parity.md` §4's "parity over API
+response stability" rule, since a bare array had no room for
+`includeCommits`'s second result set.
 
 ---
 

@@ -857,12 +857,70 @@ describe('POST /api/v1/analysis/author', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 200 with contributions structure (empty DB)', async () => {
+  it('returns 200 with { authors } structure (empty DB)', async () => {
     const res = await request(app)
       .post('/api/v1/analysis/author')
       .send({ query: 'authentication' })
     expect(res.status).toBe(200)
     expect(typeof res.body).toBe('object')
+    expect(Array.isArray(res.body.authors)).toBe(true)
+    expect(res.body.authors.length).toBe(0)
+    expect(res.body.commits).toBeUndefined()
+  })
+
+  it('accepts --since (Phase 141) and returns 200 with a valid date', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', since: '2020-01-01' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('returns 400 for an unparseable --since value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', since: 'not-a-date-at-all-!!' })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts --detail (Phase 141) without error', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', detail: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('accepts --hybrid + --bm25-weight (Phase 141) without error', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', hybrid: true, bm25Weight: 0.5 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('accepts --include-commits (Phase 141) and returns a commits array', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', includeCommits: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+    expect(Array.isArray(res.body.commits)).toBe(true)
+  })
+
+  it('accepts chunks/level/vss (Phase 141 flag-surface parity, no-op like the CLI)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', chunks: true, level: 'symbol', vss: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('returns 400 for an invalid level enum value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', level: 'not-a-real-level' })
+    expect(res.status).toBe(400)
   })
 })
 

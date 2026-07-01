@@ -336,6 +336,11 @@ This table shows less common flags used by specific commands or command groups.
 | `--include-content` | `evolution`, `concept-evolution` | bool | false | Add stored file text in JSON output |
 | `--include-commits` | `first-seen` | bool | false | Also search commit messages |
 | `--alerts` | `file-evolution` | [int] | `5` | Top-N largest semantic jumps with author/commit-URL enrichment; `true`/flag-only → default 5. Also `alerts: <n>` (required, no implicit default) on `POST /evolution/file` since Phase 139 |
+| `--since` | `author` | date | — | Only consider contributions since this date (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
+| `--detail` | `author` | bool | false | Include per-blob contribution detail (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
+| `--hybrid` | `author` | bool | false | Use hybrid (vector + BM25) candidate selection (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
+| `--bm25-weight` | `author` | float | 0.3 | BM25 weight when `--hybrid` is set (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
+| `--chunks` / `--level` / `--vss` | `author` | bool/enum/bool | false/—/false | Declared on the CLI but not wired to anything in `computeAuthorContributions` (blob-level only); `--vss` prints a warning and is ignored. HTTP's `POST /analysis/author` accepts all three for flag-surface parity with the same no-op behavior (Phase 141) — not a gap, a documented CLI limitation mirrored intentionally. |
 
 ### 2.3 Flag Coherence Issues
 
@@ -569,7 +574,15 @@ this section's prior open-ended bullets into concrete, numbered
 - **Phase 140:** systemic `--model`/`--text-model`/`--code-model` gap
   across `analysis.ts` HTTP routes (one shared fix, not 8 per-route ones).
 - **Phase 141:** `author` HTTP route full parity (largest single-command
-  gap found).
+  gap found). ✅ done — `POST /analysis/author` now accepts `since`,
+  `detail`, `includeCommits`, `hybrid`, `bm25Weight` (all wired to
+  `computeAuthorContributions`/`hybridSearch`/`searchCommits`, mirroring the
+  CLI `author` command exactly) plus `chunks`/`level`/`vss` for flag-surface
+  parity (accepted, no-op — matching the CLI's own dead-flag behavior for
+  these three). Response shape changed from a bare array to `{ authors,
+  commits? }` (breaking change, per §4's parity-over-stability rule) to
+  carry `includeCommits` results. Model-override triplet intentionally
+  excluded — tracked separately in Phase 140.
 - **Phase 142:** `workflow` HTTP route parity — 3/8 templates exposed
   today, all 8 on CLI.
 - **Phase 143:** analysis-route small-fixes bundle (merge-audit,

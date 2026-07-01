@@ -253,7 +253,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
 | `POST /api/v1/analysis/clusters` | Clustering — accepts `{model, textModel, codeModel}` overrides for CLI/HTTP flag parity (Phase 140), though `computeClusters()` doesn't filter by model so behavior is unchanged today |
 | `POST /api/v1/analysis/change-points` | Change-point detection — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
-| `POST /api/v1/analysis/author` | Author attribution — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/author` | Author attribution — full CLI flag parity (Phase 141): `since`, `detail`, `includeCommits`, `hybrid`, `bm25Weight` all wired through, plus `{model, textModel, codeModel}` embedding overrides (Phase 140); response is `{ authors, commits? }` |
 | `POST /api/v1/analysis/impact` | Impact analysis — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/semantic-diff` | Semantic diff — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/semantic-blame` | Semantic blame — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
