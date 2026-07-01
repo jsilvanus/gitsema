@@ -300,6 +300,212 @@ describe('POST /api/v1/search/first-seen', () => {
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
   })
+
+  it('accepts vss option', async () => {
+    const res = await request(app)
+      .post('/api/v1/search/first-seen')
+      .send({ query: 'auth', vss: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts repos option (multi-repo, no repos registered)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search/first-seen')
+      .send({ query: 'auth', repos: ['repo-a', 'repo-b'] })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('honors a model override by routing away from the default provider (502 for an unreachable model proves the override was applied, not ignored)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search/first-seen')
+      .send({ query: 'auth', model: 'some-unreachable-override-model' })
+    expect(res.status).toBe(502)
+    expect(res.body).toHaveProperty('error')
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/search — Phase 138 restored query-shaping flags
+// ===========================================================================
+describe('POST /api/v1/search — Phase 138 flag parity', () => {
+  it('accepts notLike/lambda (negative example scoring)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', notLike: 'legacy code', lambda: 0.3 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts or/and boolean composition', async () => {
+    const resOr = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', or: 'login' })
+    expect(resOr.status).toBe(200)
+    expect(Array.isArray(resOr.body)).toBe(true)
+
+    const resAnd = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', and: 'session' })
+    expect(resAnd.status).toBe(200)
+    expect(Array.isArray(resAnd.body)).toBe(true)
+  })
+
+  it('accepts explain flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', explain: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts explainLlm flag with rendered output', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', explainLlm: true, rendered: true })
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toMatch(/text\/plain/)
+  })
+
+  it('accepts expandQuery flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', expandQuery: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts annotateClusters flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', annotateClusters: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts vss flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', vss: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts earlyCut flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', earlyCut: 100 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts noCache flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', noCache: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts repos option (multi-repo, no repos registered)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', repos: ['repo-a', 'repo-b'] })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('honors a model override by routing away from the default provider (502 for an unreachable model proves the override was applied, not ignored)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', model: 'some-unreachable-override-model' })
+    expect(res.status).toBe(502)
+    expect(res.body).toHaveProperty('error')
+  })
+
+  it('accepts level=module', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'module' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns resultsByLevel when 2+ levels are active (level=symbol + chunks=true)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('resultsByLevel')
+    expect(res.body.resultsByLevel).toHaveProperty('file')
+    expect(res.body.resultsByLevel).toHaveProperty('chunk')
+    expect(res.body.resultsByLevel).toHaveProperty('symbol')
+  })
+
+  it('returns a flat array when mergeLevels=true even with 2+ levels active', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true, mergeLevels: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns resultsByLevel + commitResults when multi-level + includeCommits', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true, includeCommits: true })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('resultsByLevel')
+    expect(res.body).toHaveProperty('commitResults')
+  })
+
+  it('renders per-level text sections when multi-level + rendered=true', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true, rendered: true })
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toMatch(/text\/plain/)
+  })
+
+  it('returns 400 for invalid model override causing an http provider error', async () => {
+    const prevProvider = process.env.GITSEMA_PROVIDER
+    const prevUrl = process.env.GITSEMA_HTTP_URL
+    process.env.GITSEMA_PROVIDER = 'http'
+    delete process.env.GITSEMA_HTTP_URL
+    try {
+      const res = await request(app)
+        .post('/api/v1/search')
+        .send({ query: 'auth', textModel: 'some-http-model' })
+      expect(res.status).toBe(400)
+      expect(res.body).toHaveProperty('error')
+    } finally {
+      if (prevProvider === undefined) delete process.env.GITSEMA_PROVIDER
+      else process.env.GITSEMA_PROVIDER = prevProvider
+      if (prevUrl === undefined) delete process.env.GITSEMA_HTTP_URL
+      else process.env.GITSEMA_HTTP_URL = prevUrl
+    }
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/multi-repo-search — deprecated alias (Phase 138)
+// ===========================================================================
+describe('POST /api/v1/analysis/multi-repo-search — deprecated alias', () => {
+  it('still returns 200 with an array and sets a Deprecation header', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/multi-repo-search')
+      .send({ query: 'auth' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+    expect(res.headers['deprecation']).toBe('true')
+    expect(res.headers['link']).toMatch(/\/api\/v1\/search/)
+  })
+
+  it('returns 400 for missing query', async () => {
+    const res = await request(app).post('/api/v1/analysis/multi-repo-search').send({})
+    expect(res.status).toBe(400)
+  })
 })
 
 // ===========================================================================

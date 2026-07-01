@@ -150,7 +150,7 @@ This table shows which tools/commands are available in which interface. A checkm
 | `tools mcp` | ✓ | — | — | — | — | ✓ | — | — |
 | `tools lsp` | ✓ | — | — | — | — | ✓ | — | — |
 | **Multi-Repo** |
-| `multi-repo-search` | — | — | ✓ | ✓ | ✓ | — | — | ✓ |
+| `multi-repo-search` | — | — | ✓ | ✓ | ✓ | ✓ (deprecated route, see below) | — | ✓ |
 | `cross-repo-similarity` | ✓ | — | — | — | — | ✓ | ✓ | — |
 
 ### LSP Interface Details
@@ -192,12 +192,23 @@ This table shows which tools/commands are available in which interface. A checkm
 
 **CLI-only gaps (not in Guide/MCP):**
 - `index doctor`, `graph path`, `graph relate`, `graph similar`, `graph unused`, `blast-radius`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`, `co-change`, `deps`, `cycles`, and all maintenance subcommands
-- `search --merge-levels` / distinct per-level result lists (Phase 136): the CLI's `search` command is the only interface where combining 2+ of `--chunks`/`--level symbol`/`--level module` at once (or a Phase 77 model-level-fallback union) returns separate labeled per-level lists by default, with `--merge-levels` opting back into one shared-cutoff list. The MCP `semantic_search` tool and the HTTP `search` route can still hit the same multi-level-active condition (e.g. `level: 'symbol', chunks: true`) but only expose the pre-Phase-136 single merged-list behavior — no equivalent flag/param was added to either, since both have their own independent, simpler result-shape (MCP returns a rendered text blob; HTTP returns a flat JSON array) that would need a compatible-breaking shape change to carry labeled per-level lists. Deferred rather than done partially; see `docs/PLAN.md` Phase 136.
-- **`code-search` never received Phase 136's per-level-list treatment at all, in any interface** (found during the Phase 136 parity audit). CLI `code-search` (`src/cli/commands/codeSearch.ts`), MCP `code_search` (`src/mcp/tools/search.ts`), and Guide's `code_search` tool (`src/core/narrator/guideTools.ts`) each call `vectorSearch()` with `searchChunks`/`searchSymbols` set from a `level` argument the same way `search` used to pre-Phase-136 — one shared-cutoff merged call, no isolation, no `--merge-levels`-equivalent. This is more exposed than `search`'s gap: CLI `code-search`'s and MCP/Guide `code_search`'s **default** `level`/parameter value is `'symbol'`, which sets `searchChunks: true` *and* `searchSymbols: true` simultaneously — so every default, no-flags invocation of `code-search` hits the exact crowding-out condition Phase 136 fixed for `search`, not just an opt-in flag combination. Not fixed here; added to §6 roadmap.
+- ~~`search --merge-levels` / distinct per-level result lists (Phase 136)~~ — **closed by Phase 138.** MCP `semantic_search` now accepts `level: 'module'` (previously `file|chunk|symbol` only) and, when 2+ of {chunk, symbol, module} are active at once, returns a rendered text blob with one labeled `== <level> ==` section per level (mirroring CLI's per-level text output) instead of one merged list; a `merge_levels` param opts back into the pre-Phase-136-equivalent single list. The HTTP `POST /search` route gained the identical `level: 'module'` option, a `mergeLevels` body param, and — when 2+ levels are active and `mergeLevels` is not set — returns `{ resultsByLevel: { file: [...], chunk: [...], ... } }` instead of a flat array (breaking response-shape change, accepted per §4's parity-over-stability principle). See `docs/PLAN.md` Phase 138.
+- **`code-search` never received Phase 136/138's per-level-list treatment** (found during the Phase 136 parity audit; explicitly out of scope for Phase 138, which only widened `search`/`first-seen`/`multi-repo-search`). CLI `code-search` (`src/cli/commands/codeSearch.ts`), MCP `code_search` (`src/mcp/tools/search.ts`), and Guide's `code_search` tool (`src/core/narrator/guideTools.ts`) each call `vectorSearch()` with `searchChunks`/`searchSymbols` set from a `level` argument the same way `search` used to pre-Phase-136 — one shared-cutoff merged call, no isolation, no `--merge-levels`-equivalent. This is more exposed than `search`'s gap: CLI `code-search`'s and MCP/Guide `code_search`'s **default** `level`/parameter value is `'symbol'`, which sets `searchChunks: true` *and* `searchSymbols: true` simultaneously — so every default, no-flags invocation of `code-search` hits the exact crowding-out condition Phase 136 fixed for `search`, not just an opt-in flag combination. Scheduled as Phase 137 (see `docs/PLAN.md`).
 
 **HTTP gaps:**
 - Most graph commands (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`)
 - `code-search`, `file-change-points`, `cluster-diff`, `cluster-timeline`, `branch-summary`, `contributor-profile`, `eval`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`
+
+**`multi-repo-search` HTTP route consolidated (Phase 138):** `POST /search`
+now accepts a `repos: string[]` body param that merges multi-repo results
+into its full flag surface (levels, hybrid, boolean composition, model
+overrides, etc.) — the same feature CLI `search --repos` already exposed.
+`POST /analysis/multi-repo-search`'s bare 4-param shape (`query`, `repoIds`,
+`topK`, `model`) can't express any of that, so rather than duplicate the
+feature with two divergent implementations, it was kept as a thin
+**deprecated** alias over the same `multiRepoSearch()` core call (unchanged
+response shape, a `Deprecation: true` header points callers at
+`POST /search`) — see `docs/deprecations.md`.
 
 **LSP gaps (expected — LSP is for IDE navigation only):**
 - All analysis commands, workflow/CI, maintenance, visualization, configuration
@@ -214,9 +225,9 @@ This section documents all flags used across CLI commands, their consistency, an
 | Flag | Short | Type | Default | Used By | Notes |
 |---|:---:|---|:---:|---|---|
 | `--top` | `-k` | int | varies | `search`, `first-seen`, `code-search`, `triage`, `eval`, `pr-report`, `experts`, `etc.` | Result limit; should be standardized to default=10 across all |
-| `--model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override embedding model for current command |
-| `--text-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override text/prose embedding model |
-| `--code-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override source-code embedding model |
+| `--model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override embedding model for current command; MCP `semantic_search`/`first_seen` (`model`) and HTTP `POST /search`/`POST /search/first-seen` (`model`) mirror this as a per-request override since Phase 138 — resolved without mutating server process env, so concurrent requests don't race |
+| `--text-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override text/prose embedding model; MCP (`text_model`) / HTTP (`textModel`) since Phase 138 |
+| `--code-model` | — | string | env | `search`, `first-seen`, `code-search`, `index start` | Override source-code embedding model; MCP (`code_model`) / HTTP (`codeModel`) since Phase 138 |
 | `--remote` | — | string | env | `search`, `first-seen`, `index start`, `tools mcp`, `tools lsp` | Proxy to remote gitsema server; for `tools mcp`/`tools lsp` (Phase 113) this delegates every data-access call via `POST /api/v1/protocol/:operation` instead of indexing/searching against a remote DB directly |
 | `--remote-key` | — | string | env (`GITSEMA_REMOTE_KEY`) | `tools mcp`, `tools lsp` | Bearer token for `--remote` |
 | `--remote-timeout` | — | int (ms) | `10000` | `tools mcp`, `tools lsp` | Abort a remote-delegated call after this many ms |
@@ -235,19 +246,19 @@ This section documents all flags used across CLI commands, their consistency, an
 | `--out` | — | string[] | — | `search`, `first-seen`, `triage`, `policy-check`, `code-review`, etc. | Modern unified output spec: `text\|json[:file]\|html[:file]\|markdown[:file]` |
 | `--html` | — | [string] | — | `search`, `first-seen`, `eval` | Legacy interactive HTML output; prefer `--out html` |
 | `--narrate` | — | bool | false | `triage`, `ownership`, `narrate`, `guide` | Generate LLM narrative summary (requires `GITSEMA_LLM_URL`) |
-| `--vss` | — | bool | false | `search`, `first-seen` | Use usearch HNSW ANN index for approximate search |
+| `--vss` | — | bool | false | `search`, `first-seen` | Use usearch HNSW ANN index for approximate search; MCP/HTTP `search`+`first-seen` mirror this (`vss`) since Phase 138, switching the route to `vectorSearchWithAnn()` |
 | `--format` | — | enum | text | `regression-gate`, `cross-repo-similarity`, `code-review` | Output format: `text` or `json` (legacy; prefer `--out`) |
 | `--dry-run` | — | bool | false | `index gc`, `storage migrate` | Preview changes without applying them |
 | `--verbose` | — | bool | false | top-level flag, `index update-modules`, `index gc` | Enable verbose debug logging |
 | `--yes` | `-y` | bool | false | `index rebuild-fts`, `index clear-model` | Skip confirmation prompts |
 | `--no-headings` | — | bool | false | `search`, `first-seen` | Don't print column header row |
-| `--explain` | — | bool | false | `search`, `repl` | Show score component breakdown for each result |
+| `--explain` | — | bool | false | `search`, `repl` | Show score component breakdown for each result; MCP `semantic_search` (`explain`) / HTTP `POST /search` (`explain`) since Phase 138 |
 | `--vss` | — | bool | false | `search`, `first-seen` | Use vector search index for approximate search |
-| `--level` | — | enum | file | `search`, `code-search`, `repl` | Search/index granularity: `file`, `chunk`, `symbol`, or `module` |
+| `--level` | — | enum | file | `search`, `code-search`, `repl` | Search/index granularity: `file`, `chunk`, `symbol`, or `module`; MCP `semantic_search`'s `level` param gained `module` (previously `file\|chunk\|symbol`) in Phase 138, matching HTTP `POST /search`'s `level` |
 | `--chunker` | — | enum | file | `index start` | Chunking strategy: `file`, `function`, or `fixed` |
 | `--lens` | — | enum | hybrid | `blast-radius`, `relate`, `similar`, `hotspots` | Structural/semantic lens toggle: `structural`, `semantic`, `hybrid` |
 | `--depth` | — | int | varies | `deps`, `graph callers`, `graph callees`, `graph neighbors`, `graph path`, `blast-radius` | Traversal depth for graph commands |
-| `--repos` | — | string | — | `search`, `first-seen` | Comma-separated repo IDs for multi-repo mode |
+| `--repos` | — | string | — | `search`, `first-seen` | Comma-separated repo IDs for multi-repo mode; MCP `semantic_search`/`first_seen` (`repos: string[]`) and HTTP `POST /search`/`POST /search/first-seen` (`repos: string[]`) mirror this since Phase 138 — results are merged into the primary-DB result list rather than returned separately, matching CLI's `--repos` behavior. `POST /analysis/multi-repo-search` remains as a thin deprecated alias (see `docs/deprecations.md`) |
 | `--threshold` | — | float | varies | `code-review`, `cross-repo-similarity`, `policy-check` | Similarity/distance threshold for matching |
 | `--base` | — | ref | varies | `regression-gate`, `code-review`, `ci-diff` | Base git ref to compare from |
 | `--head` | — | ref | varies | `regression-gate`, `code-review`, `ci-diff` | Head git ref to compare to |
@@ -266,15 +277,15 @@ This table shows less common flags used by specific commands or command groups.
 | `--group` | `search`, `semantic-diff` | enum | — | Collapse results by: `file`, `module`, or `commit` |
 | `--chunks` | `search`, `code-search`, `first-seen` | bool | false | Include chunk-level embeddings in results |
 | `--include-commits` | `search`, `first-seen` | bool | false | Also search commit message embeddings |
-| `--annotate-clusters` | `search` | bool | false | Annotate each result with cluster label |
-| `--merge-levels` | `search` | bool | false | Merge active search levels into one shared-cutoff ranked list (pre-Phase-136 behavior) instead of separate per-level lists; only meaningful when 2+ of {chunk, symbol, module} are active at once (Phase 136) |
-| `--not-like` | `search` | string | — | Negative example query (subtract from score) |
-| `--lambda` | `search` | float | 0.5 | Weight for negative example subtraction |
-| `--early-cut` | `search` | int | 0 | Limit candidate pool to n random samples |
-| `--explain-llm` | `search` | bool | false | Output LLM-ready provenance citation block |
-| `--or` | `search` | string | — | Combine results with another query via OR |
-| `--and` | `search` | string | — | Combine results with another query via AND |
-| `--expand-query` | `search` | bool | false | Expand query with top BM25 keywords before embedding |
+| `--annotate-clusters` | `search` | bool | false | Annotate each result with cluster label; MCP `semantic_search` (`annotate_clusters`) / HTTP `POST /search` (`annotateClusters`) since Phase 138 |
+| `--merge-levels` | `search` | bool | false | Merge active search levels into one shared-cutoff ranked list (pre-Phase-136 behavior) instead of separate per-level lists; only meaningful when 2+ of {chunk, symbol, module} are active at once (Phase 136); MCP `semantic_search` (`merge_levels`) / HTTP `POST /search` (`mergeLevels`) since Phase 138 |
+| `--not-like` | `search` | string | — | Negative example query (subtract from score); MCP `semantic_search` (`not_like`) / HTTP `POST /search` (`notLike`) since Phase 138 |
+| `--lambda` | `search` | float | 0.5 | Weight for negative example subtraction; MCP/HTTP `search` (`lambda`) since Phase 138 |
+| `--early-cut` | `search` | int | 0 | Limit candidate pool to n random samples; MCP `semantic_search` (`early_cut`) / HTTP `POST /search` (`earlyCut`) since Phase 138 |
+| `--explain-llm` | `search` | bool | false | Output LLM-ready provenance citation block; MCP `semantic_search` (`explain_llm`) / HTTP `POST /search` (`explainLlm`) since Phase 138 |
+| `--or` | `search` | string | — | Combine results with another query via OR; MCP/HTTP `search` (`or`) since Phase 138 |
+| `--and` | `search` | string | — | Combine results with another query via AND; MCP/HTTP `search` (`and`) since Phase 138 |
+| `--expand-query` | `search` | bool | false | Expand query with top BM25 keywords before embedding; MCP `semantic_search` (`expand_query`) / HTTP `POST /search` (`expandQuery`) since Phase 138 |
 | `--concurrency` | `index start` | int | 4 | Parallel embedding calls |
 | `--ext` | `index start` | string | — | Only index files with these comma-separated extensions |
 | `--max-size` | `index start` | size | 200kb | Skip blobs larger than this |
@@ -304,7 +315,7 @@ This table shows less common flags used by specific commands or command groups.
 | `--lsp` | `index doctor` | bool | false | Only run LSP startup check |
 | `--extended` | `index doctor` | bool | false | Run extended pre-flight checks |
 | `--fix` | `index doctor` | bool | false | Auto-repair fixable issues (missing FTS content, orphan embeddings) and re-report |
-| `--no-cache` | `search` | bool | false | Skip query embedding cache |
+| `--no-cache` | `search` | bool | false | Skip query embedding cache; MCP `semantic_search` (`no_cache`) / HTTP `POST /search` (`noCache`) since Phase 138 |
 | `--cache` | `search` | bool | true | Use query embedding cache |
 | `--edge-types` | `deps`, `graph cycles`, `graph neighbors`, `unused` | string | varies | Comma-separated edge types to traverse |
 | `--reverse` | `deps` | bool | false | Show dependents instead of dependencies |
@@ -528,9 +539,22 @@ this section's prior open-ended bullets into concrete, numbered
 `docs/PLAN.md` phases. See `docs/PLAN.md`'s "Interface Parity Track (Phases
 138–148)" section for the full breakdown; summary:
 
-- **Phase 138** (widened): `search`/`first-seen`/`multi-repo-search` full
-  MCP+HTTP parity, including the Phase 136 per-level-list separation this
-  phase originally covered narrowly.
+- **Phase 138** (widened) — ✅ **shipped:** `search`/`first-seen`/
+  `multi-repo-search` full MCP+HTTP parity, including the Phase 136
+  per-level-list separation this phase originally covered narrowly. MCP
+  `semantic_search` gained `module` as a `level` option and, when 2+ of
+  {chunk, symbol, module} are active, returns labeled per-level text
+  sections (`merge_levels` opts back into one list); HTTP `POST /search`
+  gained the same plus a breaking-but-accepted `resultsByLevel` JSON shape
+  and a `mergeLevels` body param. Both gained the full remaining
+  query-shaping flag set (`notLike`/`lambda`, `or`/`and`, `explain`,
+  `explainLlm`, `expandQuery`, `annotateClusters`, `vss`, `repos`,
+  `model`/`textModel`/`codeModel` per-request overrides, `earlyCut`,
+  `noCache`). `first-seen` gained `vss`, `repos`, and model overrides on
+  both interfaces. `POST /analysis/multi-repo-search` was kept as a thin,
+  unchanged-shape **deprecated** alias over the same `multiRepoSearch()`
+  core call (see `docs/deprecations.md`) rather than duplicated — `repos` on
+  `POST /search` is the parity-complete replacement.
 - **Phase 139:** `evolution` (file/concept) + `hotspots` HTTP/MCP parity.
 - **Phase 140:** systemic `--model`/`--text-model`/`--code-model` gap
   across `analysis.ts` HTTP routes (one shared fix, not 8 per-route ones).
