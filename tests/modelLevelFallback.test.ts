@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { resolveModelLevelChunker } from '../src/cli/commands/index.js'
-import { mapModelLevelToSearchLevel, resolveAgreedLevel } from '../src/cli/commands/search.js'
+import { mapModelLevelToSearchLevel, unionModelLevels } from '../src/cli/commands/search.js'
 
 describe('resolveModelLevelChunker (index start)', () => {
   it('returns undefined when neither model has a saved level', () => {
@@ -64,31 +64,48 @@ describe('mapModelLevelToSearchLevel (search)', () => {
   })
 })
 
-describe('resolveAgreedLevel (search, dual-model)', () => {
-  // Dual-model search embeds the query with both the text and code models
-  // and merges results (see the `dualModel` branch in searchCommand) — the
-  // resulting --level flags apply identically to both passes, so this must
-  // refuse to guess when the two models' saved levels disagree, exactly
-  // like resolveModelLevelChunker does on the indexing side.
-  it('returns undefined when neither model has a level', () => {
-    expect(resolveAgreedLevel(undefined, undefined)).toEqual({ level: undefined })
+describe('unionModelLevels (search, dual-model)', () => {
+  // vectorSearch()'s searchChunks/searchSymbols/searchModules flags are
+  // additive (one call merges file + chunk + symbol + module candidates
+  // into a single ranked pool) — so unlike the indexing side (one chunker
+  // per run, no choice but to pick a winner), search can and should honor
+  // both models' saved levels at once rather than treating a disagreement
+  // as a conflict to give up on.
+  it('resolves nothing when neither model has a level', () => {
+    expect(unionModelLevels(undefined, undefined)).toEqual({
+      searchChunks: false, searchSymbols: false, searchModules: false, resolved: false,
+    })
   })
 
   it('uses the text level when only it is set', () => {
-    expect(resolveAgreedLevel('chunk', undefined)).toEqual({ level: 'chunk' })
+    expect(unionModelLevels('chunk', undefined)).toEqual({
+      searchChunks: true, searchSymbols: false, searchModules: false, resolved: true,
+    })
   })
 
   it('uses the code level when only it is set', () => {
-    expect(resolveAgreedLevel(undefined, 'symbol')).toEqual({ level: 'symbol' })
+    expect(unionModelLevels(undefined, 'symbol')).toEqual({
+      searchChunks: false, searchSymbols: true, searchModules: false, resolved: true,
+    })
   })
 
-  it('uses the agreed level when both models match', () => {
-    expect(resolveAgreedLevel('chunk', 'chunk')).toEqual({ level: 'chunk' })
+  it('unions both levels when the two models disagree, instead of picking one', () => {
+    expect(unionModelLevels('chunk', 'symbol')).toEqual({
+      searchChunks: true, searchSymbols: true, searchModules: false, resolved: true,
+    })
   })
 
-  it('returns a conflict descriptor instead of guessing when the two models disagree', () => {
-    const result = resolveAgreedLevel('file', 'symbol')
-    expect(result.level).toBeUndefined()
-    expect(result.conflict).toEqual({ textLevel: 'file', codeLevel: 'symbol' })
+  it('marks resolved without setting any flag when a model wants plain file-level', () => {
+    // 'file' needs no flag — it's always included in vectorSearch()'s base pool —
+    // but this must still short-circuit the embed_config auto-recall fallback.
+    expect(unionModelLevels('file', undefined)).toEqual({
+      searchChunks: false, searchSymbols: false, searchModules: false, resolved: true,
+    })
+  })
+
+  it('unions all three flags when both models plus a base level are all distinct', () => {
+    expect(unionModelLevels('chunk', 'module')).toEqual({
+      searchChunks: true, searchSymbols: false, searchModules: true, resolved: true,
+    })
   })
 })
