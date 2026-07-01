@@ -2,7 +2,7 @@
 
 This document tracks the availability of gitsema tools and commands across all interfaces, and the implementation of common flags across the CLI. It serves as the single source of truth for interface parity and helps identify gaps, inconsistencies, and opportunities for unification.
 
-**Last updated:** 2026-06-24 (the only date in this document — see §4 for why)  
+**Last updated:** 2026-07-01 (the only date in this document — see §4 for why)  
 **Maintainer note:** Any tool change, interface change, or flag addition must be reflected in the tables below and in the canonical sections of `CLAUDE.md` / `docs/features.md` / `README.md`.
 
 ---
@@ -61,7 +61,7 @@ This table shows which tools/commands are available in which interface. A checkm
 | **Search & Discovery** |
 | `search` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `first-seen` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `code-search` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `code-search` | ✓ | — | ✓ | ✓ | ✓ | — | ✓ | ✓ |
 | `dead-concepts` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Analysis & Trends** |
 | `evolution` / `concept-evolution` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -193,6 +193,7 @@ This table shows which tools/commands are available in which interface. A checkm
 **CLI-only gaps (not in Guide/MCP):**
 - `index doctor`, `graph path`, `graph relate`, `graph similar`, `graph unused`, `blast-radius`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`, `co-change`, `deps`, `cycles`, and all maintenance subcommands
 - `search --merge-levels` / distinct per-level result lists (Phase 136): the CLI's `search` command is the only interface where combining 2+ of `--chunks`/`--level symbol`/`--level module` at once (or a Phase 77 model-level-fallback union) returns separate labeled per-level lists by default, with `--merge-levels` opting back into one shared-cutoff list. The MCP `semantic_search` tool and the HTTP `search` route can still hit the same multi-level-active condition (e.g. `level: 'symbol', chunks: true`) but only expose the pre-Phase-136 single merged-list behavior — no equivalent flag/param was added to either, since both have their own independent, simpler result-shape (MCP returns a rendered text blob; HTTP returns a flat JSON array) that would need a compatible-breaking shape change to carry labeled per-level lists. Deferred rather than done partially; see `docs/PLAN.md` Phase 136.
+- **`code-search` never received Phase 136's per-level-list treatment at all, in any interface** (found during the Phase 136 parity audit). CLI `code-search` (`src/cli/commands/codeSearch.ts`), MCP `code_search` (`src/mcp/tools/search.ts`), and Guide's `code_search` tool (`src/core/narrator/guideTools.ts`) each call `vectorSearch()` with `searchChunks`/`searchSymbols` set from a `level` argument the same way `search` used to pre-Phase-136 — one shared-cutoff merged call, no isolation, no `--merge-levels`-equivalent. This is more exposed than `search`'s gap: CLI `code-search`'s and MCP/Guide `code_search`'s **default** `level`/parameter value is `'symbol'`, which sets `searchChunks: true` *and* `searchSymbols: true` simultaneously — so every default, no-flags invocation of `code-search` hits the exact crowding-out condition Phase 136 fixed for `search`, not just an opt-in flag combination. Not fixed here; added to §6 roadmap.
 
 **HTTP gaps:**
 - Most graph commands (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`)
@@ -505,6 +506,7 @@ If you find a discrepancy, **update this file first**, then propagate the change
 - [ ] Add MCP tool for `cluster-change-points`
 - [ ] Standardize `--out` format across all commands (hide legacy flags)
 - [ ] Add `--narrate` to `evolution`, `semantic-diff`, `branch-summary`
+- [ ] **Apply Phase 136's per-level-list separation to `code-search` (CLI/MCP/Guide)** — its default `level: 'symbol'` unconditionally merges chunk + symbol candidates into one shared-cutoff call today (see §1 Parity Observations, "CLI-only gaps"), the same crowding-out bug Phase 136 fixed for `search`, but hit on every default `code-search` invocation rather than only an explicit flag combination
 
 ### Medium-Term (Phase 112+)
 
