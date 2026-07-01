@@ -5472,7 +5472,33 @@ Parity Track (see Phase 138's track table).
 wherever `computeEvolution`/`computeConceptEvolution` live), `docs/parity.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from spec:**
+- Scoped to **HTTP** parity, as the title's actual scope bullets describe
+  (all three bullets say "HTTP route"/route body schemas); MCP's `evolution`/
+  `concept_evolution`/`hotspots` tools were left untouched — they have their
+  own pre-existing branch/model-override gaps shared with several other MCP
+  tools, which is a wider, separately-scoped MCP audit, not folded in here.
+- `hotspots`'s `weightStructural` is accepted on `POST /graph/hotspots` for
+  CLI flag-surface parity but is a **no-op**, exactly like the CLI's own
+  `hotspotsCommand` (`src/cli/commands/hotspots.ts` even says so in a
+  comment): `computeHotspots()`'s risk score is an unweighted geometric mean
+  over the active lens's signals with no weighting parameter anywhere in the
+  scoring function. Adding real weighting would be a `computeHotspots()`
+  behavior change beyond this phase's route-parity scope — documented as a
+  known no-op rather than silently pretended to work.
+- `--narrate` on all three routes was **deferred**, not resolved in-scope:
+  it's LLM/infra-adjacent (needs a configured narrator model + redaction
+  path already used by `narrate`/`explain`) and is better done together with
+  Phase 144's narrator-route work than piecemeal here.
+- The CLI's own `file-evolution --branch` post-filtered timeline entries
+  after calling `computeEvolution()`; this phase moved that filtering into
+  `computeEvolution()` itself (new `branch` option alongside the existing
+  `useSymbolLevel`), so the CLI command now delegates to the same
+  branch-aware core function the HTTP route uses — a small CLI-internal
+  refactor beyond the literal ask, done to avoid maintaining two branch-filter
+  implementations.
 
 ---
 

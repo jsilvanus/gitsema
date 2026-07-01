@@ -3,45 +3,86 @@ import { z } from 'zod'
 import type { EmbeddingProvider } from '../../core/embedding/provider.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeEvolution, computeConceptEvolution } from '../../core/search/temporal/evolution.js'
-import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
-import { formatDate, shortHash } from '../../core/search/ranking.js'
+import { buildAlerts, enrichAlerts } from '../../cli/commands/evolution.js'
+import { buildProviderForModel } from '../../core/embedding/providerFactory.js'
+import { formatDate } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
+
+const ModelOverrideSchema = z.object({
+  model: z.string().optional(),
+  textModel: z.string().optional(),
+  codeModel: z.string().optional(),
+})
 
 const FileEvolutionBodySchema = z.object({
   path: z.string().min(1),
   threshold: z.number().min(0).max(2).optional().default(0.3),
   includeContent: z.boolean().optional().default(false),
-})
+  level: z.enum(['file', 'symbol']).optional().default('file'),
+  branch: z.string().optional(),
+  alerts: z.number().int().positive().optional(),
+}).merge(ModelOverrideSchema)
 
 const ConceptEvolutionBodySchema = z.object({
   query: z.string().min(1),
   top: z.number().int().positive().optional().default(50),
   threshold: z.number().min(0).max(2).optional().default(0.3),
   includeContent: z.boolean().optional().default(false),
-})
+  branch: z.string().optional(),
+}).merge(ModelOverrideSchema)
 
 export interface EvolutionRouterDeps {
   textProvider: EmbeddingProvider
+}
+
+/**
+ * Resolves the effective query-embedding provider for a request, honoring
+ * `model`/`textModel`/`codeModel` body overrides (Phase 139) — mirrors the
+ * CLI's `resolveModels()` precedence (`textModel` first, then bare `model`)
+ * without mutating `process.env`. Falls back to the router's shared
+ * `textProvider` when no override is given.
+ */
+function resolveRequestProvider(
+  base: EmbeddingProvider,
+  overrides: { model?: string; textModel?: string; codeModel?: string },
+): EmbeddingProvider {
+  const modelName = overrides.textModel ?? overrides.model ?? overrides.codeModel
+  if (!modelName) return base
+  return buildProviderForModel(modelName)
 }
 
 export function evolutionRouter(deps: EvolutionRouterDeps): Router {
   const { textProvider } = deps
   const router = Router()
 
-  router.post('/file', (req, res) => {
+  router.post('/file', async (req, res) => {
     const parsed = FileEvolutionBodySchema.safeParse(req.body)
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
       return
     }
 
-    const { path, threshold, includeContent } = parsed.data
-    const entries = computeEvolution(path)
+    const { path, threshold, includeContent, level, branch, alerts: alertsTopN } = parsed.data
 
-    const result = {
+    let entries
+    try {
+      entries = computeEvolution(path, undefined, { useSymbolLevel: level === 'symbol', branch })
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+      return
+    }
+
+    let alerts: unknown
+    if (alertsTopN !== undefined) {
+      const candidates = buildAlerts(entries, threshold, alertsTopN)
+      alerts = await enrichAlerts(candidates)
+    }
+
+    const result: Record<string, unknown> = {
       path,
       versions: entries.length,
       threshold,
+      level,
       timeline: entries.map((e, i) => {
         const item: Record<string, unknown> = {
           index: i,
@@ -65,6 +106,9 @@ export function evolutionRouter(deps: EvolutionRouterDeps): Router {
         totalDrift: entries.length > 0 ? entries[entries.length - 1].distFromOrigin : 0,
       },
     }
+    if (alerts !== undefined) {
+      result.alerts = alerts
+    }
 
     res.json(result)
   })
@@ -76,17 +120,25 @@ export function evolutionRouter(deps: EvolutionRouterDeps): Router {
       return
     }
 
-    const { query, top, threshold, includeContent } = parsed.data
+    const { query, top, threshold, includeContent, branch, model, textModel, codeModel } = parsed.data
+
+    let provider: EmbeddingProvider
+    try {
+      provider = resolveRequestProvider(textProvider, { model, textModel, codeModel })
+    } catch (err) {
+      res.status(400).json({ error: `Could not resolve model override: ${err instanceof Error ? err.message : String(err)}` })
+      return
+    }
 
     let queryEmbedding: Embedding
     try {
-      queryEmbedding = await textProvider.embed(query)
+      queryEmbedding = await provider.embed(query)
     } catch (err) {
       res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
 
-    const entries = computeConceptEvolution(queryEmbedding, top)
+    const entries = computeConceptEvolution(queryEmbedding, top, branch)
 
     const result = {
       query,

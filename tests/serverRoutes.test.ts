@@ -543,6 +543,53 @@ describe('POST /api/v1/evolution/file', () => {
     expect(res.status).toBe(200)
     expect(res.body).toHaveProperty('threshold', 0.5)
   })
+
+  it('accepts level=symbol and echoes it back (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', level: 'symbol' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('level', 'symbol')
+  })
+
+  it('rejects an invalid level value', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', level: 'chunk' })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts a branch filter and returns an empty timeline on an empty DB (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', branch: 'feature/x' })
+    expect(res.status).toBe(200)
+    expect(res.body.versions).toBe(0)
+  })
+
+  it('accepts an alerts count and includes an alerts field (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', alerts: 5 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('alerts')
+    expect(Array.isArray(res.body.alerts)).toBe(true)
+  })
+
+  it('omits the alerts field when alerts is not requested', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts' })
+    expect(res.status).toBe(200)
+    expect(res.body).not.toHaveProperty('alerts')
+  })
+
+  it('rejects a non-positive alerts count', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', alerts: 0 })
+    expect(res.status).toBe(400)
+  })
 })
 
 // ===========================================================================
@@ -563,6 +610,24 @@ describe('POST /api/v1/evolution/concept', () => {
     expect(res.body).toHaveProperty('timeline')
     expect(res.body).toHaveProperty('summary')
     expect(Array.isArray(res.body.timeline)).toBe(true)
+  })
+
+  it('accepts a branch filter (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/concept')
+      .send({ query: 'authentication middleware', branch: 'feature/x' })
+    expect(res.status).toBe(200)
+    expect(res.body.entries).toBe(0)
+  })
+
+  it('accepts textModel/model overrides without erroring on an unconfigured provider (Phase 139)', async () => {
+    // No model profile is configured for 'nonexistent-model', so buildProviderForModel
+    // falls back to the default (ollama) provider type rather than throwing synchronously —
+    // the request should still resolve to a 200 or a 502 (embed failure), never a 400.
+    const res = await request(app)
+      .post('/api/v1/evolution/concept')
+      .send({ query: 'authentication middleware', textModel: 'nonexistent-model' })
+    expect([200, 502]).toContain(res.status)
   })
 })
 
@@ -1048,6 +1113,42 @@ describe('POST /api/v1/analysis/eval', () => {
     const res = await request(app)
       .post('/api/v1/analysis/eval')
       .send({ cases: [] })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/graph/hotspots
+// ===========================================================================
+describe('POST /api/v1/graph/hotspots', () => {
+  it('returns 200 with hotspots structure on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/hotspots').send({})
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'hybrid')
+    expect(res.body).toHaveProperty('hotspots')
+    expect(Array.isArray(res.body.hotspots)).toBe(true)
+  })
+
+  it('accepts a lens override', async () => {
+    const res = await request(app)
+      .post('/api/v1/graph/hotspots')
+      .send({ lens: 'structural' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'structural')
+  })
+
+  it('accepts weightStructural for CLI flag parity (Phase 139), currently a no-op', async () => {
+    const res = await request(app)
+      .post('/api/v1/graph/hotspots')
+      .send({ weightStructural: 0.7 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('hotspots')
+  })
+
+  it('rejects an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/graph/hotspots')
+      .send({ lens: 'nonsense' })
     expect(res.status).toBe(400)
   })
 })

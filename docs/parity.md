@@ -254,9 +254,10 @@ This section documents all flags used across CLI commands, their consistency, an
 | `--no-headings` | — | bool | false | `search`, `first-seen` | Don't print column header row |
 | `--explain` | — | bool | false | `search`, `repl` | Show score component breakdown for each result; MCP `semantic_search` (`explain`) / HTTP `POST /search` (`explain`) since Phase 138 |
 | `--vss` | — | bool | false | `search`, `first-seen` | Use vector search index for approximate search |
-| `--level` | — | enum | file | `search`, `code-search`, `repl` | Search/index granularity: `file`, `chunk`, `symbol`, or `module`; MCP `semantic_search`'s `level` param gained `module` (previously `file\|chunk\|symbol`) in Phase 138, matching HTTP `POST /search`'s `level` |
+| `--level` | — | enum | file | `search`, `code-search`, `repl`, `file-evolution` | Search/index granularity: `file`, `chunk`, `symbol`, or `module` (`file-evolution` only supports `file`\|`symbol` — per-symbol centroid drift; also on `POST /evolution/file` since Phase 139); MCP `semantic_search`'s `level` param gained `module` (previously `file\|chunk\|symbol`) in Phase 138, matching HTTP `POST /search`'s `level` |
 | `--chunker` | — | enum | file | `index start` | Chunking strategy: `file`, `function`, or `fixed` |
 | `--lens` | — | enum | hybrid | `blast-radius`, `relate`, `similar`, `hotspots` | Structural/semantic lens toggle: `structural`, `semantic`, `hybrid` |
+| `--weight-structural` | — | float | lens-dependent | `blast-radius`, `relate`, `similar`, `hotspots` | Structural-signal weight override for the active `--lens` (`addLensOption`); **no-op on `hotspots`** specifically — its risk score is an unweighted geometric mean with no weighting hook, on both CLI and `POST /graph/hotspots` (accepted there for flag-surface parity only, Phase 139) |
 | `--depth` | — | int | varies | `deps`, `graph callers`, `graph callees`, `graph neighbors`, `graph path`, `blast-radius` | Traversal depth for graph commands |
 | `--repos` | — | string | — | `search`, `first-seen` | Comma-separated repo IDs for multi-repo mode; MCP `semantic_search`/`first_seen` (`repos: string[]`) and HTTP `POST /search`/`POST /search/first-seen` (`repos: string[]`) mirror this since Phase 138 — results are merged into the primary-DB result list rather than returned separately, matching CLI's `--repos` behavior. `POST /analysis/multi-repo-search` remains as a thin deprecated alias (see `docs/deprecations.md`) |
 | `--threshold` | — | float | varies | `code-review`, `cross-repo-similarity`, `policy-check` | Similarity/distance threshold for matching |
@@ -334,6 +335,7 @@ This table shows less common flags used by specific commands or command groups.
 | `--sort-by-date` | `search-history` (MCP only) | bool | false | Sort by first-seen date instead of score |
 | `--include-content` | `evolution`, `concept-evolution` | bool | false | Add stored file text in JSON output |
 | `--include-commits` | `first-seen` | bool | false | Also search commit messages |
+| `--alerts` | `file-evolution` | [int] | `5` | Top-N largest semantic jumps with author/commit-URL enrichment; `true`/flag-only → default 5. Also `alerts: <n>` (required, no implicit default) on `POST /evolution/file` since Phase 139 |
 
 ### 2.3 Flag Coherence Issues
 
@@ -524,6 +526,7 @@ If you find a discrepancy, **update this file first**, then propagate the change
 | Phase 120 | `tools lsp --tcp` deprecated | No tool/method availability change — `--tcp` still works identically, now prints a deprecation notice on every invocation steering callers to `--websocket --key` (§0); not yet scheduled for removal |
 | Phase 129 | Admin-gated enabled sets | New `gitsema admin models list\|allow\|deny\|reset` CLI command (operator-only, no other interface — see Tool Matrix); no flag changes to existing tools |
 | Phase 130 | BYOK for narrator/guide | `--byok-http-url`/`--byok-api-key`/`--byok-model`/`--byok-max-tokens`/`--byok-temperature` flags added to `narrate`/`explain`/`guide` (CLI), nested `byok` body field on the matching HTTP routes, flattened `byok_*` fields on the matching MCP tools; no Tool Matrix changes (additive flags on already-listed tools) |
+| Phase 139 | `evolution`/`hotspots` HTTP route parity | `POST /evolution/file` gains `level`, `branch`, `model`/`textModel`/`codeModel`, `alerts`; `POST /evolution/concept` gains `branch`, `model`/`textModel`/`codeModel`; `computeEvolution()` now accepts a `branch` filter directly (previously CLI-only post-filtering) — `computeConceptEvolution()` already did. `POST /graph/hotspots` gains `weightStructural` for flag-surface parity only (no-op, same as CLI — see §2.1's `--weight-structural` row). No Tool Matrix changes (both routes were already listed ✓ HTTP; this closes a flag-level, not tool-level, gap) |
 | Future | CLI Interactive | Full CLI with autocomplete, history, interactive UI |
 | Future | Web UI | Browser-based dashboard with visualization |
 
