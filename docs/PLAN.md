@@ -5170,41 +5170,74 @@ level's candidate pool, and the per-level-list pattern
 MCP, Guide) each run one isolated `vectorSearch()` call per active level and
 return/render separate per-level lists instead of one merged call.
 
+**Why this is the right fix, precisely (resolved during planning
+discussion):** `vectorSearch()`'s final ranking dedups strictly by
+`blobHash` (`bestByBlob` in `vectorSearch.ts`) — every candidate from one
+blob (whole-file, every chunk, every symbol) collapses to a single
+highest-scoring row before `topK` is applied. So the risk is **not** that a
+function shows up twice (once as a chunk hit, once as a symbol hit) — that's
+structurally impossible, the per-blob dedup already prevents it. The real
+risk is a **scale mismatch across pools**: `code-search`'s three candidate
+pools embed systematically different text for a query snippet to match
+against — whole-file raw text, raw chunk excerpts, and symbol text wrapped
+by `buildEnrichedText()` (`// file: <path> lines <a>-<b>` + `// <kind>:
+<name>` + code prepended, in `indexer.ts`). Cosine scores from these three
+framings aren't on a directly comparable scale. Since each file's one
+surviving candidate is "whichever pool happened to score highest for that
+file," and `code-search` then ranks *across files* on that same shared
+scale, a file whose best evidence is chunk-framed can get crowded out of
+`topK` by files whose best evidence is symbol-framed (or vice versa) purely
+from embedding-framing bias, not relevance. That is exactly the class of bug
+Phase 136 built per-level isolation to fix — just operating file-vs-file
+here instead of span-vs-span in `search`'s multi-level case.
+
+**Resolved design decisions (confirmed in conversation, reversing an
+earlier over-narrowed draft of this phase):**
+- **Default to separate per-level lists for `code-search`, matching
+  `search`'s Phase 136 default.** `--level symbol` (the default) isolates
+  the chunk pool and the symbol pool into two independently-ranked,
+  independently-cut lists instead of one merged cross-pool ranking. This is
+  a visible output-shape change for `code-search`'s current default — unlike
+  `search`, where the common single-level case was left byte-for-byte
+  unchanged — because `code-search`'s default already combines two pools
+  unconditionally (`level: 'symbol'` implies `searchChunks: true` *and*
+  `searchSymbols: true`), so there is no single-level "common case" to
+  preserve here the way there was for `search`.
+- **No new `--chunks`-style combinator flag.** `code-search` has only one
+  built-in multi-pool combination (`--level symbol`'s chunk+symbol pair) —
+  not a user-driven ad hoc combination like `search --chunks --level
+  symbol` — so there's nothing to combine. Add a `--merge-levels` flag
+  (same name/semantics as `search`'s, for consistency) to opt back into the
+  pre-Phase-137 single merged ranking, rather than inventing a different
+  combinator surface.
+- **MCP/Guide `code_search` keep their existing flat-array response shape
+  by default.** Both are consumed programmatically by other agents/tool
+  callers, where a breaking shape change is riskier than for CLI text
+  output. Per-level detail is additive only (e.g. an optional
+  `results_by_level` field, or a `merge_levels`/opt-in param defaulting to
+  today's behavior) — the existing `results: [...]` shape is not removed or
+  restructured.
+
 **Scope:**
 - CLI `gitsema code-search <snippet>`: isolate the chunk vs. symbol
-  candidate pools instead of merging them into one call/topK cut when
-  `--level symbol` (the default) is in effect; render as separate labeled
-  lists (reuse `renderResultsByLevel()` from Phase 136).
-- MCP `code_search` tool (`src/mcp/tools/search.ts`): same separation; the
-  JSON result shape needs a `resultsByLevel`-equivalent (or per-level array)
-  instead of one flat `results` array.
+  candidate pools by default; render as separate labeled lists (reuse
+  `renderResultsByLevel()` from Phase 136); add `--merge-levels` to opt back
+  into one merged list.
+- MCP `code_search` tool (`src/mcp/tools/search.ts`): same separation,
+  additive to the existing flat-array response shape (see resolved decision
+  above) — do not break existing callers.
 - Guide `code_search` tool (`src/core/narrator/guideTools.ts`): same
-  separation for the tool's returned result object, consumed by the
-  agentic tool-calling loop.
-- Test coverage: extend/mirror `tests/integration/searchLevelSeparation.test.ts`'s
-  crowding-out proof for the `code-search` code path(s), plus unit tests for
-  any new resolver logic.
+  separation for the tool's returned result object, additive to its
+  existing shape, consumed by the agentic tool-calling loop.
+- Test coverage: a unit test asserting the per-blob dedup claim above (one
+  row per blob survives regardless of originating pool) as a documented
+  invariant, plus integration coverage mirroring
+  `tests/integration/searchLevelSeparation.test.ts`'s crowding-out proof but
+  for cross-file chunk-vs-symbol pool scale mismatch (not cross-span
+  duplication, which cannot occur) in the `code-search` code path(s).
 - Update `docs/parity.md` (resolve the "`code-search` never received Phase
   136's treatment" gap note and its §6 roadmap item once shipped),
   `docs/features.md`, `README.md`.
-
-**Open design questions to resolve during implementation** (not yet
-decided):
-- Whether `code-search`'s default (`--level symbol`, no other flags) should
-  now *default* to separate chunk/symbol lists — a visible behavior/
-  output-shape change for the common case, unlike Phase 136, which kept the
-  common case unchanged — or whether `level: 'symbol'` was originally
-  intended as "search both chunk and symbol pools together to catch either
-  kind of match for a code snippet," in which case forcing separation by
-  default could be undesirable and an opt-in flag (mirroring
-  `--merge-levels`, inverted) might be the better default-preserving choice.
-- Whether the CLI's `code-search` command should gain a `--chunks`-style
-  explicit combinator (matching `search`'s flag surface) or keep just
-  `--level`, given it has no existing `--chunks` flag to combine with.
-- Whether MCP/Guide `code_search` should keep returning a flat array by
-  default for backward compatibility with existing agentic/tool callers,
-  with per-level detail available only via an additional field, rather than
-  changing the existing response shape outright.
 
 **Files likely touched:** `src/cli/commands/codeSearch.ts`,
 `src/mcp/tools/search.ts`, `src/core/narrator/guideTools.ts`,
