@@ -32,6 +32,7 @@ export function registerSearch(program: Command) {
     .option('--group <mode>', 'group results by: file, module, or commit')
     .option('--chunks', 'include chunk-level embeddings in search results')
     .option('--level <level>', 'search level: file, chunk, symbol, or module')
+    .option('--merge-levels', 'merge all active search levels into one shared-cutoff ranked list (pre-Phase-136 behavior) instead of separate per-level lists')
     .option('--hybrid', 'combine vector similarity with BM25 keyword matching (FTS5)')
     .option('--bm25-weight <n>', 'weight for the BM25 signal in hybrid search (0–1, default 0.3)')
     .option('--remote <url>', 'proxy search to a remote gitsema server (overrides GITSEMA_REMOTE)')

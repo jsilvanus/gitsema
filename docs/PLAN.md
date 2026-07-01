@@ -5093,7 +5093,56 @@ public-repo cases pass unmodified; full `pnpm test` suite green (1359 passed).
 
 **Files likely touched:** `src/cli/commands/search.ts` (new default behavior, `--merge-levels` flag parsing, replacing/branching around `unionModelLevels()`), `src/core/search/analysis/vectorSearch.ts` (no core logic change expected — reuses the existing per-flag candidate-pool mechanism via repeated calls), `src/core/search/ranking.ts` (`renderResults`/output formatting for labeled per-level sections), `docs/parity.md` (if MCP/HTTP need the same option), test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Implemented largely as specified, with the resolved
+design decisions' triggering condition made precise: a *single* active
+non-file level (e.g. plain `--level chunk`) keeps the pre-Phase-136 merged
+behavior (file + that one level in one ranked list) completely unchanged —
+"more than one level active" means 2+ of `{chunk, symbol, module}` are true
+*simultaneously*, reachable only via an explicit combination (`--chunks
+--level symbol`) or the Phase 77 Goal #4 model-level-fallback union
+disagreeing on 2+ levels. This keeps the common single-`--level` case
+byte-for-byte identical while fixing the crowding-out case the phase targeted.
+
+- `vectorSearch()`/`VectorSearchOptions` (and the `postgres`/`qdrant`
+  `VectorStore.search()` backends, for consistency) gained a new
+  `includeFiles` option (default `true`, backward compatible). Set to
+  `false`, the base whole-file candidate pool is skipped entirely, so a
+  level-specific call (`searchChunks`/`searchSymbols`/`searchModules`) gets a
+  candidate pool and topK cutoff scoped to *only* that level.
+- `src/cli/commands/search.ts`: the existing hybrid/dual-model/single-model +
+  `--repos` merge + boolean-query + `--or`/`--and` + `--group` +
+  `--annotate-clusters` pipeline was factored into one `runLevelPipeline()`
+  closure parameterized by level flags, used both for the merged path (called
+  once with the union of active flags — byte-identical to the pre-Phase-136
+  code) and the new per-level path (called once per active level, isolated via
+  `includeFiles: false`). Two new exported pure helpers,
+  `resolveExtraLevels()` and `isMultiLevelActive()`, resolve which non-file
+  levels are active and whether the multi-level condition is met, unit-tested
+  in `tests/modelLevelFallback.test.ts` independent of the DB/provider
+  plumbing.
+- New `--merge-levels` CLI flag opts back into the single merged list when
+  the multi-level condition is met.
+- Output: text renders one `== <level> ==` labeled section per level
+  (`renderResultsByLevel()` in `ranking.ts`); `--out json` emits
+  `{ resultsByLevel: { file: [...], chunk: [...], ... } }` instead of `{
+  results }`; `--out html` concatenates all levels' results (each result
+  already carries its own `kind`) into one visualization. Commit-message
+  search (`--include-commits`) stays level-independent, computed once.
+- **Deferred, not partially done:** MCP `semantic_search` and the HTTP
+  `search` route can hit the same multi-level-active condition (e.g.
+  `level: 'symbol', chunks: true`) but were not given an equivalent
+  `merge_levels` param/labeled-list output — both have independent, simpler
+  result shapes (MCP renders text directly; HTTP returns a flat JSON array)
+  that would need a compatible-breaking shape change to carry per-level
+  lists. Logged in `docs/parity.md` §"CLI-only gaps" rather than silently
+  left inconsistent.
+- Tests: `tests/modelLevelFallback.test.ts` (pure resolver unit tests),
+  `tests/ranking.test.ts` (`renderResultsByLevel`), new
+  `tests/integration/searchLevelSeparation.test.ts` (proves the merged call
+  crowds a weak chunk match out of a small topK, while the isolated
+  `includeFiles: false` call keeps it). `pnpm build && pnpm test` green (1393
+  passed).
+- Changeset added (`distinct-per-level-search-results.md`, minor).
 
 ---
 
