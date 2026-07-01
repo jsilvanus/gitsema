@@ -5146,6 +5146,76 @@ byte-for-byte identical while fixing the crowding-out case the phase targeted.
 
 ---
 
+### Phase 137 — Per-level result-list separation for `code-search`
+
+**Goal:** Extend Phase 136's per-level search result separation to
+`gitsema code-search`. Currently the CLI command
+(`src/cli/commands/codeSearch.ts`), the MCP `code_search` tool
+(`src/mcp/tools/search.ts`), and the Guide `code_search` tool
+(`src/core/narrator/guideTools.ts`) all still make one merged
+`vectorSearch()` call with `searchChunks`/`searchSymbols` derived from a
+`level` argument — exactly the pre-Phase-136 `search` pattern — and each
+defaults `level` to `'symbol'`, which sets **both** flags true
+simultaneously. Unlike `search`'s opt-in multi-level condition, this means
+every default, no-flag `code-search` invocation already hits the
+crowding-out bug Phase 136 fixed for `search`. Found and logged during the
+Phase 136 parity audit (`docs/parity.md` §1 "CLI-only gaps" / §6 roadmap).
+
+**Design:** No separate design doc — scoped directly from the parity-audit
+finding. Approach: reuse Phase 136's already-shipped mechanism rather than
+re-deriving it — `vectorSearch()`'s `includeFiles` option for isolating a
+level's candidate pool, and the per-level-list pattern
+(`resolveExtraLevels()` / `isMultiLevelActive()` / `runLevelPipeline()` in
+`src/cli/commands/search.ts`) — so `code-search`'s three call sites (CLI,
+MCP, Guide) each run one isolated `vectorSearch()` call per active level and
+return/render separate per-level lists instead of one merged call.
+
+**Scope:**
+- CLI `gitsema code-search <snippet>`: isolate the chunk vs. symbol
+  candidate pools instead of merging them into one call/topK cut when
+  `--level symbol` (the default) is in effect; render as separate labeled
+  lists (reuse `renderResultsByLevel()` from Phase 136).
+- MCP `code_search` tool (`src/mcp/tools/search.ts`): same separation; the
+  JSON result shape needs a `resultsByLevel`-equivalent (or per-level array)
+  instead of one flat `results` array.
+- Guide `code_search` tool (`src/core/narrator/guideTools.ts`): same
+  separation for the tool's returned result object, consumed by the
+  agentic tool-calling loop.
+- Test coverage: extend/mirror `tests/integration/searchLevelSeparation.test.ts`'s
+  crowding-out proof for the `code-search` code path(s), plus unit tests for
+  any new resolver logic.
+- Update `docs/parity.md` (resolve the "`code-search` never received Phase
+  136's treatment" gap note and its §6 roadmap item once shipped),
+  `docs/features.md`, `README.md`.
+
+**Open design questions to resolve during implementation** (not yet
+decided):
+- Whether `code-search`'s default (`--level symbol`, no other flags) should
+  now *default* to separate chunk/symbol lists — a visible behavior/
+  output-shape change for the common case, unlike Phase 136, which kept the
+  common case unchanged — or whether `level: 'symbol'` was originally
+  intended as "search both chunk and symbol pools together to catch either
+  kind of match for a code snippet," in which case forcing separation by
+  default could be undesirable and an opt-in flag (mirroring
+  `--merge-levels`, inverted) might be the better default-preserving choice.
+- Whether the CLI's `code-search` command should gain a `--chunks`-style
+  explicit combinator (matching `search`'s flag surface) or keep just
+  `--level`, given it has no existing `--chunks` flag to combine with.
+- Whether MCP/Guide `code_search` should keep returning a flat array by
+  default for backward compatibility with existing agentic/tool callers,
+  with per-level detail available only via an additional field, rather than
+  changing the existing response shape outright.
+
+**Files likely touched:** `src/cli/commands/codeSearch.ts`,
+`src/mcp/tools/search.ts`, `src/core/narrator/guideTools.ts`,
+`src/core/search/ranking.ts` (if a shared per-level render/serialize helper
+needs generalizing beyond `search.ts`), `docs/parity.md`, `docs/features.md`,
+`README.md`, test files.
+
+**Status:** not started.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.
