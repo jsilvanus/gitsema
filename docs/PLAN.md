@@ -2781,15 +2781,20 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 **Complexity:** Medium. Requires schema changes, config propagation, and backwards-compatible search query routing.
 
-**Status:** ✅ complete (with two noted deviations below).
+**Status:** ✅ complete (with one noted deviation below; Goal #4 closed as a follow-up — see below).
 1. Done as specified — `search.ts` auto-recalls the most recently used `embed_config` chunker when `--level` is omitted, mapping it to the right search mode (`src/cli/commands/search.ts`).
 2. Done as specified — `--level file|chunk|symbol|module` on `search` routes to `searchChunksFlag`/`searchSymbolsFlag`/`searchModulesFlag` (`src/cli/commands/search.ts`).
 3. Partially done — see deviation below.
-4. Partially done — see deviation below.
+4. Done — see "Goal #4 follow-up" below.
 
 **Deviations from the original spec:**
 - **Goal #3:** "`index start --level function` stores both whole-file and function-level embeddings in one run, today it's either/or" was *not* implemented as implicit dual-level storage under `--level function`. Instead, `index start` adds an explicit `--level multi` value: passing `multi` runs the file-level pass and then re-invokes itself with `--level function`/`--chunker function` to also store function-level embeddings (`src/cli/commands/index.ts`). Plain `--level function` still stores function-level embeddings only, matching its pre-Phase-77 behavior. Users who want both must opt in with `--level multi` rather than getting it "for free" under `function`.
-- **Goal #4:** `models add`/`models update --level <level>` persists `ModelProfile.level` and displays it (`src/cli/register/setup.ts`, `src/cli/commands/models.ts`), but the value is **not yet consumed** anywhere — `indexStartCommand` only resolves `options.level`/`--chunker` and profile chunker presets, and `searchCommand` only uses `options.level` or the latest `embed_config` chunker (never `profile.level`). So a saved `gitsema models add m --level function` default is currently inert; `index start`/`search` calls ignore it. Wiring `profile.level` into both commands as a fallback default (after explicit flags, before `embed_config` auto-recall) remains open follow-up work.
+
+**Goal #4 follow-up (closed):** `models add`/`models update --level <level>` persists `ModelProfile.level` (`src/cli/commands/models.ts`), but for a long time nothing consumed it — `indexStartCommand` only resolved `options.level`/`--chunker` and profile chunker presets, and `searchCommand` only used `options.level` or the latest `embed_config` chunker. This is now wired in as a fallback default (lowest priority — after explicit `--chunker`/`--level` and, on the indexing side, after `--profile`):
+- `index start` (`src/cli/commands/index.ts`, `resolveModelLevelChunker()`): consults `getModelProfile(textModel).level` and `getModelProfile(codeModel).level`. When they agree (or only one is set), that level becomes the `--chunker` fallback. When `textModel` and `codeModel` are two different named models with genuinely *conflicting* saved levels, the fallback is skipped entirely (prints a one-line note) rather than guessing — this can only happen in the dual-model-routing case, since indexing uses one chunker for the whole run regardless of which embedding model ends up processing a given blob.
+- `search` (`src/cli/commands/search.ts`, `mapModelLevelToSearchLevel()`): consults `getModelProfile(textModel).level` only (queries always embed via the text model, so there's no dual-model conflict to resolve here), mapped into the search-level vocabulary (`file`/`chunk`/`symbol`/`module`) and applied ahead of the `embed_config` auto-recall.
+
+Unit tests: `tests/modelLevelFallback.test.ts` (10 cases covering both pure resolution helpers, including the conflict case).
 
 ---
 

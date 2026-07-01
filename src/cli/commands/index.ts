@@ -17,6 +17,7 @@ import { getProfileDefaults, postRunRecommendations } from '../../core/indexing/
 import { computeIndexStatus, formatIndexStatus } from '../../core/indexing/indexStatus.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
+import { getModelProfile } from '../../core/config/configManager.js'
 
 /** Maps `--level` values to the corresponding `--chunker` strategy string. */
 const LEVEL_TO_CHUNKER: Record<string, string> = {
@@ -26,6 +27,30 @@ const LEVEL_TO_CHUNKER: Record<string, string> = {
   fixed: 'fixed',
   /** 'multi' runs both file-level and function-level indexing in sequence */
   multi: 'file',
+}
+
+export interface ModelLevelResolution {
+  /** Resolved `--chunker` fallback, if the text/code models' saved levels agree. */
+  chunker?: string
+  /** Set instead of `chunker` when the two models' saved levels genuinely disagree. */
+  conflict?: { textLevel: string; codeLevel: string }
+}
+
+/**
+ * Resolves the `--chunker` fallback from two models' saved `ModelProfile.level`
+ * values (Phase 77 Goal #4: `gitsema models add <name> --level ...`). Never
+ * guesses on a genuine disagreement — returns a `conflict` descriptor instead
+ * so the caller can warn and fall through to the next-lower-priority default.
+ */
+export function resolveModelLevelChunker(
+  textLevel: string | undefined,
+  codeLevel: string | undefined,
+): ModelLevelResolution {
+  if (textLevel !== undefined && codeLevel !== undefined && textLevel !== codeLevel) {
+    return { conflict: { textLevel, codeLevel } }
+  }
+  const agreedLevel = textLevel ?? codeLevel
+  return { chunker: agreedLevel !== undefined ? LEVEL_TO_CHUNKER[agreedLevel] : undefined }
 }
 
 /**
@@ -398,6 +423,25 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
     codeModel: options.codeModel,
   })
 
+  // Phase 77 Goal #4: fall back to a per-model saved `--level` (`gitsema
+  // models add <name> --level ...`) when the user passed neither
+  // --chunker/--level nor --profile.
+  let modelLevelChunker: string | undefined
+  if (options.chunker === undefined) {
+    const textLevel = getModelProfile(textModel).level
+    const codeLevel = codeModel === textModel ? textLevel : getModelProfile(codeModel).level
+    const resolution = resolveModelLevelChunker(textLevel, codeLevel)
+    if (resolution.conflict) {
+      console.log(
+        `Note: text model '${textModel}' and code model '${codeModel}' have conflicting saved ` +
+        `--level defaults ('${resolution.conflict.textLevel}' vs '${resolution.conflict.codeLevel}') — ` +
+        `ignoring both; pass --level/--chunker explicitly.`,
+      )
+    } else {
+      modelLevelChunker = resolution.chunker
+    }
+  }
+
   // Remote mode: ship blobs to a gitsema server instead of embedding locally
   const remoteUrl = options.remote ?? process.env.GITSEMA_REMOTE
   if (remoteUrl) {
@@ -530,8 +574,9 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
     ? options.includeGlob.split(',').map((e) => e.trim()).filter(Boolean)
     : undefined
 
-  // Parse chunker strategy (profile default applies when user did not supply --chunker)
-  const effectiveChunker = opts.chunker ?? profileChunker
+  // Parse chunker strategy (profile default, then a saved per-model level,
+  // apply in that order when the user did not supply --chunker/--level)
+  const effectiveChunker = opts.chunker ?? profileChunker ?? modelLevelChunker
   let chunkerStrategy: ChunkStrategy = 'file'
   if (effectiveChunker !== undefined) {
     if (effectiveChunker !== 'file' && effectiveChunker !== 'function' && effectiveChunker !== 'fixed') {
@@ -539,6 +584,9 @@ export async function indexStartCommand(options: IndexCommandOptions): Promise<v
       process.exit(1)
     }
     chunkerStrategy = effectiveChunker as ChunkStrategy
+    if (opts.chunker === undefined && profileChunker === undefined && modelLevelChunker !== undefined) {
+      console.log(`Using saved model --level default: ${chunkerStrategy}`)
+    }
   }
 
   // Parse chunker options (only relevant for `fixed` strategy)

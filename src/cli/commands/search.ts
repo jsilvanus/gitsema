@@ -12,9 +12,20 @@ import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { getRawDb } from '../../core/db/sqlite.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { getModelProfile } from '../../core/config/configManager.js'
 import { splitIdentifier } from '../../core/search/clustering/labelEnhancer.js'
 import { narrateSearchResults } from '../../core/llm/narrator.js'
 import { formatExplainForLlm } from '../../core/search/analysis/explainFormatter.js'
+
+/** Maps an indexing-side `ModelProfile.level` (`blob`/`file`/`function`/`fixed`) to the search-side
+ * level vocabulary (`file`/`chunk`/`symbol`/`module`); already-search-native values pass through
+ * unchanged. Phase 77 Goal #4. */
+const INDEX_LEVEL_TO_SEARCH_LEVEL: Record<string, string> = { blob: 'file', file: 'file', function: 'chunk', fixed: 'chunk' }
+
+export function mapModelLevelToSearchLevel(level: string | undefined): string | undefined {
+  if (!level) return undefined
+  return INDEX_LEVEL_TO_SEARCH_LEVEL[level] ?? level
+}
 
 export interface SearchCommandOptions {
   top?: string
@@ -301,6 +312,16 @@ export async function searchCommand(query: string, options: SearchCommandOptions
 
   // Phase 77: auto-recall level from active embed_config when --level is not specified
   let effectiveLevel = options.level
+
+  // Phase 77 Goal #4: a saved per-model level (`gitsema models add <name>
+  // --level ...`) takes priority over the embed_config auto-recall below.
+  // Queries always embed via the text model (queries are natural language),
+  // so there's no textModel/codeModel conflict to resolve here — unlike
+  // `index start`, only one model's saved level is ever consulted.
+  if (!effectiveLevel) {
+    effectiveLevel = mapModelLevelToSearchLevel(getModelProfile(textModel).level)
+  }
+
   if (!effectiveLevel) {
     try {
       const { loadEmbedConfigs } = await import('../../core/indexing/provenance.js')
