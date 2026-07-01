@@ -5135,7 +5135,9 @@ byte-for-byte identical while fixing the crowding-out case the phase targeted.
   result shapes (MCP renders text directly; HTTP returns a flat JSON array)
   that would need a compatible-breaking shape change to carry per-level
   lists. Logged in `docs/parity.md` §"CLI-only gaps" rather than silently
-  left inconsistent.
+  left inconsistent. **Superseded:** this "avoid a breaking shape change"
+  tradeoff was later reversed (parity prioritized over API response
+  stability) and scheduled as Phase 138 — see that entry.
 - Tests: `tests/modelLevelFallback.test.ts` (pure resolver unit tests),
   `tests/ranking.test.ts` (`renderResultsByLevel`), new
   `tests/integration/searchLevelSeparation.test.ts` (proves the merged call
@@ -5210,25 +5212,28 @@ earlier over-narrowed draft of this phase):**
   (same name/semantics as `search`'s, for consistency) to opt back into the
   pre-Phase-137 single merged ranking, rather than inventing a different
   combinator surface.
-- **MCP/Guide `code_search` keep their existing flat-array response shape
-  by default.** Both are consumed programmatically by other agents/tool
-  callers, where a breaking shape change is riskier than for CLI text
-  output. Per-level detail is additive only (e.g. an optional
-  `results_by_level` field, or a `merge_levels`/opt-in param defaulting to
-  today's behavior) — the existing `results: [...]` shape is not removed or
-  restructured.
+- **MCP/Guide `code_search` adopt the same structured per-level shape as
+  CLI — reversed from an earlier draft of this phase.** Cross-interface
+  parity is prioritized over preserving the existing flat-array response
+  shape: MCP's `code_search` returns a `results_by_level` object (keyed by
+  level, mirroring CLI's `--out json` `resultsByLevel` shape) instead of a
+  flat `results: [...]` array when the multi-level condition is active, and
+  Guide's `code_search` tool result object gets the equivalent structure.
+  This is a breaking response-shape change for existing MCP/Guide callers of
+  `code_search`, accepted deliberately rather than worked around with an
+  additive-only compromise.
 
 **Scope:**
 - CLI `gitsema code-search <snippet>`: isolate the chunk vs. symbol
   candidate pools by default; render as separate labeled lists (reuse
   `renderResultsByLevel()` from Phase 136); add `--merge-levels` to opt back
   into one merged list.
-- MCP `code_search` tool (`src/mcp/tools/search.ts`): same separation,
-  additive to the existing flat-array response shape (see resolved decision
-  above) — do not break existing callers.
+- MCP `code_search` tool (`src/mcp/tools/search.ts`): same separation;
+  response shape changes to `results_by_level` (breaking change, see
+  resolved decision above).
 - Guide `code_search` tool (`src/core/narrator/guideTools.ts`): same
-  separation for the tool's returned result object, additive to its
-  existing shape, consumed by the agentic tool-calling loop.
+  separation and shape change for the tool's returned result object,
+  consumed by the agentic tool-calling loop.
 - Test coverage: a unit test asserting the per-blob dedup claim above (one
   row per blob survives regardless of originating pool) as a documented
   invariant, plus integration coverage mirroring
@@ -5243,6 +5248,53 @@ earlier over-narrowed draft of this phase):**
 `src/mcp/tools/search.ts`, `src/core/narrator/guideTools.ts`,
 `src/core/search/ranking.ts` (if a shared per-level render/serialize helper
 needs generalizing beyond `search.ts`), `docs/parity.md`, `docs/features.md`,
+`README.md`, test files.
+
+**Status:** not started.
+
+---
+
+### Phase 138 — Per-level result-list parity for `search` on MCP and HTTP
+
+**Goal:** Reopen and close the deferral Phase 136 explicitly logged: the
+MCP `semantic_search` tool and the HTTP `POST /search` route can hit the
+same multi-level-active condition `search` handles on the CLI (2+ of
+`{chunk, symbol, module}` active at once), but still return one merged,
+shared-cutoff list. Phase 136 deferred this specifically because "both have
+their own independent, simpler result-shape... that would need a
+compatible-breaking shape change to carry labeled per-level lists"
+(`docs/PLAN.md` Phase 136, `docs/parity.md` §1). That tradeoff is reversed
+per the same "parity over API response stability" decision made for Phase
+137: ship the breaking shape change rather than leave MCP/HTTP behind CLI.
+
+**Design:** No separate design doc — direct follow-on to Phase 136/137.
+Approach: apply the identical `includeFiles`/`resolveExtraLevels()`/
+`isMultiLevelActive()`/`runLevelPipeline()`-style per-level isolation
+already shipped for CLI `search` (Phase 136) and planned for `code-search`
+(Phase 137) to these two remaining interfaces.
+
+**Scope:**
+- MCP `semantic_search` tool (`src/mcp/tools/search.ts`): support `module`
+  in the `level` enum (currently `file|chunk|symbol` only — a pre-existing
+  gap independent of this phase's core ask, worth closing at the same time
+  since the per-level work touches this schema anyway); isolate per-level
+  candidate pools when 2+ levels are active; response shape changes to a
+  `results_by_level` object in that case (breaking change, accepted).
+- HTTP `POST /search` route (`src/server/routes/search.ts`): same
+  isolation; response shape changes to a `resultsByLevel` object (mirroring
+  the CLI's `--out json` shape) when the multi-level condition is active
+  (breaking change, accepted). Add a `mergeLevels` body param mirroring
+  CLI's `--merge-levels`.
+- Update `docs/parity.md`: remove the "search --merge-levels ... CLI-only"
+  gap note (or narrow it to whatever, if anything, remains after this
+  phase), update the flag table and §6 roadmap.
+- Test coverage: HTTP route tests (`tests/serverRoutes.test.ts` or
+  sibling) and MCP tool tests exercising the multi-level-active path and
+  asserting the new response shape, plus the `--merge-levels`/`mergeLevels`
+  opt-out.
+
+**Files likely touched:** `src/mcp/tools/search.ts`,
+`src/server/routes/search.ts`, `docs/parity.md`, `docs/features.md`,
 `README.md`, test files.
 
 **Status:** not started.
