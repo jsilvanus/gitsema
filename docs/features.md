@@ -251,12 +251,12 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/evolution/file`, `POST /api/v1/evolution/concept` | Evolution |
 | `POST /api/v1/remote/index` | Remote repo indexing |
 | `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
-| `POST /api/v1/analysis/clusters` | Clustering |
-| `POST /api/v1/analysis/change-points` | Change-point detection |
-| `POST /api/v1/analysis/author` | Author attribution |
-| `POST /api/v1/analysis/impact` | Impact analysis |
-| `POST /api/v1/analysis/semantic-diff` | Semantic diff |
-| `POST /api/v1/analysis/semantic-blame` | Semantic blame |
+| `POST /api/v1/analysis/clusters` | Clustering — accepts `{model, textModel, codeModel}` overrides for CLI/HTTP flag parity (Phase 140), though `computeClusters()` doesn't filter by model so behavior is unchanged today |
+| `POST /api/v1/analysis/change-points` | Change-point detection — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/author` | Author attribution — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/impact` | Impact analysis — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/semantic-diff` | Semantic diff — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/semantic-blame` | Semantic blame — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/dead-concepts` | Dead-concept detection |
 | `POST /api/v1/analysis/merge-audit` | Merge audit |
 | `POST /api/v1/analysis/merge-preview` | Merge preview |
@@ -267,10 +267,10 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/debt` | Technical debt scoring (Phase 45) |
 | `POST /api/v1/analysis/doc-gap` | Documentation gap analysis (Phase 38) |
 | `POST /api/v1/analysis/contributor-profile` | Contributor semantic profile (Phase 39) |
-| `POST /api/v1/analysis/triage` | Incident triage bundle (Phase 65) |
+| `POST /api/v1/analysis/triage` | Incident triage bundle (Phase 65) — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/policy-check` | Automated CI gate checks (Phase 66) |
 | `POST /api/v1/analysis/ownership` | Ownership heatmap by concept (Phase 67) |
-| `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68) |
+| `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68); accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | **Deprecated** (Phase 138) — search across multiple registered repos; use `POST /api/v1/search` with a `repos` body param instead, which merges multi-repo results into the full search flag surface. Kept as a thin unchanged-shape alias, see `docs/deprecations.md` |
 | `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |

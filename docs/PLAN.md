@@ -5530,7 +5530,36 @@ pattern rather than reinventing it per route.
 **Files likely touched:** `src/server/routes/analysis.ts`, a new shared
 helper module, `docs/parity.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete *(completed vNEXT)*. Implemented as specified: a new
+`src/server/lib/modelOverrides.ts` exports a `modelOverrideSchema` Zod
+fragment (`{model, textModel, codeModel}`, spread into each affected route's
+body schema via `...modelOverrideSchema.shape`) and a
+`resolveRequestProvider(body, fallbackProvider)` helper applied to all 8
+routes (`clusters`, `change-points`, `author`, `impact`, `semantic-diff`,
+`semantic-blame`, `triage`, `workflow`). One deliberate deviation from
+mirroring `resolveModels()`/`buildProviderOrExit()` verbatim: those CLI
+helpers mutate `process.env` and call `process.exit()` on failure, both
+unsafe for a long-running, concurrently-serving HTTP process (env mutation
+from one request could leak into another in-flight request; `process.exit`
+would kill the server). `resolveRequestProvider()` instead threads an
+explicit `ResolvedConfig` through `buildProvider()` (already supported,
+env-free) and throws a catchable `ModelOverrideError` that routes turn into
+a 400 instead of exiting. `clusters` accepts and validates the triplet for
+CLI/HTTP flag-surface parity, but — same as the CLI `clusters` command,
+which also only calls `applyModelOverrides()` and never threads a provider
+into `computeClusters()` — the override has no effect on clustering
+behavior today, since `computeClusters()` clusters all stored embeddings
+regardless of model; this is documented inline and in `docs/features.md`
+rather than silently faked. `docs/parity.md` §2.3 item 3 updated to mark the
+CLI-vs-HTTP gap closed. New `describe('Phase 140: model overrides on
+analysis routes', ...)` block in `tests/serverRoutes.test.ts` (11 new tests)
+covers all 8 routes, including a `providerFactory.js` mock that routes
+`model` names containing `"override"` to a distinguishable provider so the
+tests assert the override actually took effect, plus two tests asserting a
+400 (not a crash or 502) when the override resolves to an invalid provider
+config (`GITSEMA_PROVIDER=http` with no `GITSEMA_HTTP_URL`). `pnpm build &&
+pnpm test` green. Changeset added (`analysis-routes-model-overrides.md`,
+minor).
 
 ---
 
