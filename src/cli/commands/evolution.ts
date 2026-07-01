@@ -1,7 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { computeEvolution, getCommitAuthor, getRemoteUrl, buildCommitUrl } from '../../core/search/temporal/evolution.js'
 import { applyModelOverrides } from '../../core/embedding/providerFactory.js'
-import { getBranchBlobHashSet } from '../../core/search/analysis/vectorSearch.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { getBlobContent } from '../../core/indexing/blobStore.js'
 import type { EvolutionEntry } from '../../core/search/temporal/evolution.js'
@@ -67,8 +66,12 @@ export function buildAlerts(
 /**
  * Enriches a list of raw alert candidates with author and commit-URL metadata
  * by running `git log` and inspecting the `origin` remote.
+ *
+ * Exported so `POST /evolution/file` (`src/server/routes/evolution.ts`) can
+ * reuse the same alert-enrichment logic as the CLI's `--alerts` flag
+ * (Phase 139) rather than duplicating it.
  */
-async function enrichAlerts(
+export async function enrichAlerts(
   candidates: Array<{ entry: EvolutionEntry; index: number }>,
   repoPath = '.',
 ): Promise<EvolutionAlert[]> {
@@ -269,13 +272,10 @@ export async function evolutionCommand(
 
   const includeContent = options.includeContent ?? false
   const origin = options.origin
-  let entries = computeEvolution(filePath.trim(), origin, { useSymbolLevel: options.level === 'symbol' })
-
-  // If branch option specified, filter entries to blobs present on that branch
-  if (options.branch) {
-    const branchSet = getBranchBlobHashSet(options.branch)
-    entries = entries.filter((e) => branchSet.has(e.blobHash))
-  }
+  const entries = computeEvolution(filePath.trim(), origin, {
+    useSymbolLevel: options.level === 'symbol',
+    branch: options.branch,
+  })
 
   // Build and enrich alerts when --alerts is set.
   let enrichedAlerts: EvolutionAlert[] | undefined
