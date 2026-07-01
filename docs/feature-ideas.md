@@ -552,46 +552,12 @@ No design committed yet. Two independent, optional follow-ups:
 
 ---
 
-## Audit Coverage Gap: Public-Repo Attach-as-Reader Auto-Grant
-
-### Problem
-- Phase 132's audit-coverage-enforcement test (`tests/auditCoverageEnforcement.test.ts`)
-  surfaced a real, previously-unflagged gap while auditing existing routes: the
-  "attach-as-reader" auto-grant in `src/server/routes/remote.ts`'s `POST
-  /index` handler (Phase 126 §4.3, public-repo-sharing) calls `createGrant()`
-  — writing to `repo_grants` with `source: 'auto-public'` — with no
-  `recordAuditEvent()` call. Every other `repo_grants` write path
-  (`orgs.ts`'s explicit grant create/revoke routes) is audited; this one
-  isn't, purely because it's an implicit side effect of indexing rather than
-  an explicit grants-management call.
-- Phase 132 added this as a documented `EXEMPTIONS` entry (not a silent
-  pass) specifically flagged as a tracked gap rather than a deliberate
-  design decision, so the enforcement test doesn't widen its own scope to
-  fix something outside Phase 132's remit, but the gap itself still needs a
-  real fix.
-
-### Intended Behavior
-Add a `recordAuditEvent(activeRawDb, { actorUserId: req.userId, action:
-'grant.create', target: ..., repoId: existing!.id })` call at the
-`createGrant(...)` call site in `remote.ts` (around the "2e. Attach-as-reader"
-comment block), then remove the corresponding `EXEMPTIONS` entry in
-`tests/auditCoverageEnforcement.test.ts` — the enforcement test will then
-require it going forward.
-
-### Effort Estimate
-- Trivial — one `recordAuditEvent()` call plus removing one exemption entry
-  and its test coverage expectation.
-
-### Prerequisites
-- None.
-
----
 
 ## Related Issues & Documents
 
 - **Parity tracking:** See `docs/parity.md` for tool availability across interfaces
 - **Active roadmap:** See `docs/PLAN.md` for phases 111+ in development
-- **Latest review:** See `docs/review9.md` for the most recent strategic review (note: most of its open findings have since been resolved — check current source before assuming a finding is still live)
+- **Latest review:** See `docs/review10.md` for the most recent strategic review (note: all 8 of its concrete improvement points have since been addressed — check current source before assuming a finding is still live)
 
 ---
 

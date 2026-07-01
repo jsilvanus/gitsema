@@ -156,19 +156,6 @@ const EXEMPTIONS: Exemption[] = [
       'is reserved for adding *other* users to an org (see POST /:orgId/members below, which is ' +
       'audited). Revisit if org-creation events themselves need a dedicated audit action.',
   },
-  {
-    file: 'remote.ts',
-    method: 'POST',
-    path: '/index',
-    table: 'repo_grants',
-    reason:
-      'Known gap (Phase 126 "attach-as-reader" auto-grant, public-repo-sharing §4.3): a non-owner ' +
-      'caller indexing/re-indexing an already-registered public repo is auto-granted a read-only ' +
-      'grant with source=\'auto-public\'. This is a real, tracked gap (not a deliberate design ' +
-      'decision) — see docs/feature-ideas.md. Exempted here so Phase 132 doesn\'t silently widen its ' +
-      'own enforcement net to cover a gap it isn\'t scoped to fix; remove this exemption once the ' +
-      'auto-grant path gets a recordAuditEvent call.',
-  },
 ]
 
 function isExempt(file: string, method: string, path: string, table: string): boolean {
