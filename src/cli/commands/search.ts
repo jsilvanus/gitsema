@@ -12,9 +12,51 @@ import { remoteSearch } from '../../client/remoteClient.js'
 import { searchCommits, type CommitSearchResult } from '../../core/search/commitSearch.js'
 import { getRawDb } from '../../core/db/sqlite.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
+import { getModelProfile } from '../../core/config/configManager.js'
 import { splitIdentifier } from '../../core/search/clustering/labelEnhancer.js'
 import { narrateSearchResults } from '../../core/llm/narrator.js'
 import { formatExplainForLlm } from '../../core/search/analysis/explainFormatter.js'
+
+/** Maps an indexing-side `ModelProfile.level` (`blob`/`file`/`function`/`fixed`) to the search-side
+ * level vocabulary (`file`/`chunk`/`symbol`/`module`); already-search-native values pass through
+ * unchanged. Phase 77 Goal #4. */
+const INDEX_LEVEL_TO_SEARCH_LEVEL: Record<string, string> = { blob: 'file', file: 'file', function: 'chunk', fixed: 'chunk' }
+
+export function mapModelLevelToSearchLevel(level: string | undefined): string | undefined {
+  if (!level) return undefined
+  return INDEX_LEVEL_TO_SEARCH_LEVEL[level] ?? level
+}
+
+export interface LevelUnionResult {
+  searchChunks: boolean
+  searchSymbols: boolean
+  searchModules: boolean
+  /** True when either model contributed a level (including plain 'file', which needs no flag). */
+  resolved: boolean
+}
+
+/**
+ * Unions the search-flags implied by whichever of two already-mapped
+ * per-model levels are set (Phase 77 Goal #4). `vectorSearch()`'s
+ * searchChunks/searchSymbols/searchModules flags are additive, not
+ * exclusive — a single call already merges file + chunk + symbol + module
+ * candidates into one ranked pool (`vectorSearch.ts`) — so when the text
+ * and code models' saved levels differ, both are searched rather than one
+ * winning, the same way dual-model search already merges two models'
+ * results rather than picking one.
+ */
+export function unionModelLevels(textLevel: string | undefined, codeLevel: string | undefined): LevelUnionResult {
+  const result: LevelUnionResult = { searchChunks: false, searchSymbols: false, searchModules: false, resolved: false }
+  for (const level of [textLevel, codeLevel]) {
+    if (level === undefined) continue
+    result.resolved = true
+    if (level === 'chunk') result.searchChunks = true
+    else if (level === 'symbol') result.searchSymbols = true
+    else if (level === 'module') result.searchModules = true
+    // 'file' needs no flag — it's always included in vectorSearch()'s base candidate pool.
+  }
+  return result
+}
 
 export interface SearchCommandOptions {
   top?: string
@@ -301,7 +343,25 @@ export async function searchCommand(query: string, options: SearchCommandOptions
 
   // Phase 77: auto-recall level from active embed_config when --level is not specified
   let effectiveLevel = options.level
+
+  // Phase 77 Goal #4: a saved per-model level (`gitsema models add <name>
+  // --level ...`) takes priority over the embed_config auto-recall below.
+  // When the text and code models' saved levels differ, both are searched
+  // (union of flags) rather than either one winning — see unionModelLevels().
+  let resolvedFromModelLevel = false
   if (!effectiveLevel) {
+    const textLevel = mapModelLevelToSearchLevel(getModelProfile(textModel).level)
+    const codeLevel = dualModel ? mapModelLevelToSearchLevel(getModelProfile(codeModel).level) : textLevel
+    const union = unionModelLevels(textLevel, codeLevel)
+    if (union.resolved) {
+      resolvedFromModelLevel = true
+      searchChunksFlag = searchChunksFlag || union.searchChunks
+      searchSymbolsFlag = union.searchSymbols
+      searchModulesFlag = union.searchModules
+    }
+  }
+
+  if (!effectiveLevel && !resolvedFromModelLevel) {
     try {
       const { loadEmbedConfigs } = await import('../../core/indexing/provenance.js')
       const { getRawDb } = await import('../../core/db/sqlite.js')

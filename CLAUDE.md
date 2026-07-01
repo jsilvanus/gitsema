@@ -651,7 +651,7 @@ generated skill block matches what's committed.
 **Practical rules:**
 - The deduplication check in `deduper.ts` is the most critical optimization — preserve it in all indexing paths.
 - `p-limit` concurrency wraps all embedding calls. Default concurrency is 4 — don't remove this throttle.
-- Search queries always use the text provider (not the code provider), since queries are natural language.
+- Search queries embed via the text provider by default (queries are natural language). When `--text-model`/`--code-model` differ (dual-model routing), `search` additionally embeds the query with the code provider and merges both models' results (`dualModel` branch in `src/cli/commands/search.ts`) — the code provider is not skipped in that case.
 - Cosine similarity is computed in pure JS. This is fast enough for ~500K blobs; do not add a vector index unless scale demands it.
 - Do not add new top-level CLI commands without updating `src/cli/index.ts`.
 

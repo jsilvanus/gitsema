@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-06-23 (added the public-repo-sharing throttle/policy-extraction idea, found during the Phase 126/127 `/simplify` review; added audit log coverage enforcement idea, found during the Phase 125 `/simplify` review; refined public-repo sharing's access-control half into `docs/public-repo-sharing-plan.md` and the superadmin-locked model set idea into `docs/locked-model-set-plan.md`; kept cross-repo blob dedup as an open idea)
+**Last updated:** 2026-07-01 (added the hierarchical prose/document chunker idea, raised during Phase 136 planning — distinct per-level search result lists)
 **Audience:** Developers considering next phases; product planning
 
 > **Note:** As of this update, the LSP/MCP remote-delegation foundation this
@@ -552,38 +552,96 @@ No design committed yet. Two independent, optional follow-ups:
 
 ---
 
-## Audit Coverage Gap: Public-Repo Attach-as-Reader Auto-Grant
+## Hierarchical Prose/Document Chunker (Markdown headings + paragraphs, multi-format ingestion)
 
 ### Problem
-- Phase 132's audit-coverage-enforcement test (`tests/auditCoverageEnforcement.test.ts`)
-  surfaced a real, previously-unflagged gap while auditing existing routes: the
-  "attach-as-reader" auto-grant in `src/server/routes/remote.ts`'s `POST
-  /index` handler (Phase 126 §4.3, public-repo-sharing) calls `createGrant()`
-  — writing to `repo_grants` with `source: 'auto-public'` — with no
-  `recordAuditEvent()` call. Every other `repo_grants` write path
-  (`orgs.ts`'s explicit grant create/revoke routes) is audited; this one
-  isn't, purely because it's an implicit side effect of indexing rather than
-  an explicit grants-management call.
-- Phase 132 added this as a documented `EXEMPTIONS` entry (not a silent
-  pass) specifically flagged as a tracked gap rather than a deliberate
-  design decision, so the enforcement test doesn't widen its own scope to
-  fix something outside Phase 132's remit, but the gap itself still needs a
-  real fix.
+- Raised while planning Phase 136 (distinct per-level search result lists):
+  today's three chunkers (`file`/`function`/`fixed`, `src/core/chunking/chunker.ts`)
+  have nothing prose-aware. `function` is a regex-based code-symbol splitter;
+  `fixed` is arbitrary character windows with no respect for document
+  structure; `file` is whole-document only. A long README, design doc, or wiki
+  page gets embedded as one flat blob (losing sectional granularity) or
+  chopped at arbitrary character boundaries (losing semantic boundaries
+  entirely) — there's no chunker that respects a prose document's own
+  structure (headings, paragraphs) the way `function` respects code's.
+- Separately, gitsema only ever reads text content from Git blobs today —
+  `.doc`/`.docx`/`.pdf` files aren't natively text, so they currently can't be
+  meaningfully indexed at all (or would need to already be committed as
+  extracted text). Converting them to Markdown first would let the same new
+  chunker handle all prose sources uniformly.
 
 ### Intended Behavior
-Add a `recordAuditEvent(activeRawDb, { actorUserId: req.userId, action:
-'grant.create', target: ..., repoId: existing!.id })` call at the
-`createGrant(...)` call site in `remote.ts` (around the "2e. Attach-as-reader"
-comment block), then remove the corresponding `EXEMPTIONS` entry in
-`tests/auditCoverageEnforcement.test.ts` — the enforcement test will then
-require it going forward.
+A new `--chunker prose` strategy, orthogonal to today's three:
+- **Multi-format ingestion:** `.doc`/`.docx`/`.pdf` (and other non-native-text
+  prose formats) get converted to Markdown as a preprocessing step before
+  chunking, so the same heading/paragraph logic handles all of them
+  uniformly rather than needing per-format chunkers. Already-Markdown and
+  plain-text files skip the conversion step.
+- **Hierarchical, not flat, output:** unlike every existing chunker (which
+  produces one flat list of same-kind chunks), this one produces **nested
+  chunks at multiple simultaneous levels** — a chunk for the whole file (top),
+  one chunk per heading at *each depth actually present* in the document
+  (H1, then H2 nested under its parent H1, then H3 nested under its parent
+  H2, etc.), down to paragraph-level chunks at the bottom. This mirrors the
+  existing `Chunk.parentQualifiedName`/`qualifiedName` hierarchy concept
+  already used for code symbols (Phase 105), just applied to headings
+  instead of function/class scope nesting.
+- **Adapts to whatever structure actually exists:** if a document has H1
+  sections but no H2s, chunks go straight from the H1 tier to the paragraph
+  tier — missing intermediate heading levels are skipped entirely rather than
+  represented as empty placeholders. A document with no headings at all
+  still gets exactly two tiers: whole-file (top) and paragraphs (bottom).
+
+### Design Gaps
+- [ ] **Storage shape for parent-child chunk linkage.** The `chunks` table
+      has no parent-chunk relationship today (unlike `symbols`, which has
+      `qualifiedName`/`parentQualifiedName`/`signatureHash` from Phase 105).
+      Needs either new columns on `chunks` (parent chunk ref + heading depth)
+      or a new table, plus corresponding `chunk_embeddings` handling for what
+      could be many more rows per document than any existing chunker produces.
+- [ ] **Document conversion dependency.** Which library/tool converts
+      `.docx`/`.doc`/`.pdf` to Markdown — `mammoth` (docx), `pdf-parse`/
+      `pdfjs-dist` (PDF), shelling out to `pandoc` if present, or something
+      else? Conversion fidelity varies sharply by format: DOCX has real
+      heading styles that map cleanly to Markdown headings, but PDF headings
+      are usually just font-size/weight heuristics with no real structural
+      marker — heading detection for PDF specifically may be unreliable.
+- [ ] **Embedding volume/cost.** A hierarchical chunker embeds every tier
+      (file + every heading level present + every paragraph) — substantially
+      more embeddings per document than any existing chunker. Needs a
+      cost/storage sizing check before committing to "always embed every
+      level" (vs. e.g. only embedding leaf-level + one rollup tier).
+- [ ] **Interaction with search-side "level" vocabulary.** Phase 77 introduced
+      `file`/`chunk`/`symbol`/`module` as the search granularity vocabulary,
+      and Phase 136 (in planning) adds per-level separated result lists on
+      top of that. Does a "prose H2 chunk" just become another row in the
+      existing `chunk` search level, or does this need its own new
+      search-level concept (e.g. `heading1`/`heading2`) to let a query target
+      a specific heading depth? Worth sequencing this idea after Phase 136
+      lands so its per-level output machinery can inform the answer rather
+      than duplicating it.
+- [ ] **File-type scoping.** What counts as "prose" for `--chunker prose`
+      (extension list, or integration with the existing `getFileCategory()`
+      code/text/other classification in `src/core/embedding/fileType.ts`)?
+- [ ] **Long-paragraph handling.** Should an unusually long paragraph itself
+      fall back to `fixed`-style windowing (reusing `--window-size`/
+      `--overlap`), or is a paragraph always exactly one chunk regardless of
+      length?
 
 ### Effort Estimate
-- Trivial — one `recordAuditEvent()` call plus removing one exemption entry
-  and its test coverage expectation.
+- Substantial, multi-phase — not a single-phase addition. Comparable in
+  shape to the original knowledge-graph symbol-extraction work (Phases
+  105–107), which similarly introduced a new identity/hierarchy concept and
+  had to plumb it through the storage abstraction end to end. This idea adds
+  a new chunker, a schema change (or new table) for parent-chunk linkage, a
+  new document-conversion dependency and preprocessing step in the indexing
+  pipeline, and downstream interaction with search's level vocabulary.
 
 ### Prerequisites
-- None.
+- None blocking to start designing, but interacts with Phase 136 (distinct
+  per-level search result lists, currently in `docs/PLAN.md`) — worth
+  sequencing design/implementation after that phase lands so this idea's
+  search-level questions build on its output rather than duplicating it.
 
 ---
 
@@ -591,7 +649,7 @@ require it going forward.
 
 - **Parity tracking:** See `docs/parity.md` for tool availability across interfaces
 - **Active roadmap:** See `docs/PLAN.md` for phases 111+ in development
-- **Latest review:** See `docs/review9.md` for the most recent strategic review (note: most of its open findings have since been resolved — check current source before assuming a finding is still live)
+- **Latest review:** See `docs/review10.md` for the most recent strategic review (note: all 8 of its concrete improvement points have since been addressed — check current source before assuming a finding is still live)
 
 ---
 

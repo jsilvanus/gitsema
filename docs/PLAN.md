@@ -2781,15 +2781,20 @@ The following phases are derived from the **review5** strategic review (reflecti
 
 **Complexity:** Medium. Requires schema changes, config propagation, and backwards-compatible search query routing.
 
-**Status:** ✅ complete (with two noted deviations below).
+**Status:** ✅ complete (with one noted deviation below; Goal #4 closed as a follow-up — see below).
 1. Done as specified — `search.ts` auto-recalls the most recently used `embed_config` chunker when `--level` is omitted, mapping it to the right search mode (`src/cli/commands/search.ts`).
 2. Done as specified — `--level file|chunk|symbol|module` on `search` routes to `searchChunksFlag`/`searchSymbolsFlag`/`searchModulesFlag` (`src/cli/commands/search.ts`).
 3. Partially done — see deviation below.
-4. Partially done — see deviation below.
+4. Done — see "Goal #4 follow-up" below.
 
 **Deviations from the original spec:**
 - **Goal #3:** "`index start --level function` stores both whole-file and function-level embeddings in one run, today it's either/or" was *not* implemented as implicit dual-level storage under `--level function`. Instead, `index start` adds an explicit `--level multi` value: passing `multi` runs the file-level pass and then re-invokes itself with `--level function`/`--chunker function` to also store function-level embeddings (`src/cli/commands/index.ts`). Plain `--level function` still stores function-level embeddings only, matching its pre-Phase-77 behavior. Users who want both must opt in with `--level multi` rather than getting it "for free" under `function`.
-- **Goal #4:** `models add`/`models update --level <level>` persists `ModelProfile.level` and displays it (`src/cli/register/setup.ts`, `src/cli/commands/models.ts`), but the value is **not yet consumed** anywhere — `indexStartCommand` only resolves `options.level`/`--chunker` and profile chunker presets, and `searchCommand` only uses `options.level` or the latest `embed_config` chunker (never `profile.level`). So a saved `gitsema models add m --level function` default is currently inert; `index start`/`search` calls ignore it. Wiring `profile.level` into both commands as a fallback default (after explicit flags, before `embed_config` auto-recall) remains open follow-up work.
+
+**Goal #4 follow-up (closed):** `models add`/`models update --level <level>` persists `ModelProfile.level` (`src/cli/commands/models.ts`), but for a long time nothing consumed it — `indexStartCommand` only resolved `options.level`/`--chunker` and profile chunker presets, and `searchCommand` only used `options.level` or the latest `embed_config` chunker. This is now wired in as a fallback default (lowest priority — after explicit `--chunker`/`--level` and, on the indexing side, after `--profile`):
+- `index start` (`src/cli/commands/index.ts`, `resolveModelLevelChunker()`): consults `getModelProfile(textModel).level` and `getModelProfile(codeModel).level`. When they agree (or only one is set), that level becomes the `--chunker` fallback. When `textModel` and `codeModel` are two different named models with genuinely *conflicting* saved levels, the fallback is skipped entirely (prints a one-line note) rather than guessing — this can only happen in the dual-model-routing case, since indexing uses one chunker for the whole run regardless of which embedding model ends up processing a given blob.
+- `search` (`src/cli/commands/search.ts`, `mapModelLevelToSearchLevel()` + `unionModelLevels()`): consults `getModelProfile(textModel).level`, and — since dual-model search (`textModel !== codeModel`) embeds the query with *both* models and merges results (`mergeSearchResults()`) — also `getModelProfile(codeModel).level` when dual-model routing is active. Unlike the indexing side (one chunker per run, no choice but to pick a winner on disagreement), `vectorSearch()`'s `searchChunks`/`searchSymbols`/`searchModules` flags are additive, not exclusive — a single call already merges file + chunk + symbol + module candidates into one ranked pool — so when the two models' saved levels differ, **both are searched** (the union of the implied flags) rather than either one winning or the fallback being skipped. Applied ahead of the `embed_config` auto-recall.
+
+Unit tests: `tests/modelLevelFallback.test.ts` (10 cases covering both pure resolution helpers, including the conflict case).
 
 ---
 
@@ -4979,6 +4984,8 @@ Deviations from the design doc, discovered during implementation:
 
 **Status:** ✅ Complete. Implemented as a source-text static analysis test (no TS AST dependency): it maps known sensitive-table writer functions (`createUser`, `createSession`/`revokeSession`, `createApiKey`/`revokeApiKeyByPrefix`, `addOrgMember`/`removeOrgMember`, `createGrant`/`revokeGrant`/`moveRepoToOrg`, `linkSsoIdentity`/`unlinkSsoIdentity`) imported from `src/core/auth/*` to the sensitive table each one mutates, extracts every `router.<method>(<path>, ...)` handler body via brace-matching across all of `src/server/routes/`, and asserts each handler that calls a sensitive writer also contains a `recordAuditEvent(` call — unless explicitly exempted. Auditing this against the real codebase surfaced four pre-existing gaps beyond the routes already covered (auth.ts/orgs.ts login, token, grant, and member routes): `auth.ts` `POST /logout` (session revocation, self-service), `auth.ts` `DELETE /sso/:provider/:externalId` (self-service SSO unlink), `orgs.ts` `POST /` (org creation auto-adds the creator as org_admin of their own new org), and `remote.ts` `POST /index`'s Phase 126 "attach-as-reader" auto-grant. All four are recorded as documented `EXEMPTIONS` entries with rationale — the first three are judged not to need audit coverage (self-service or initial self-membership), while the `remote.ts` auto-grant is flagged in its exemption reason as a tracked real gap rather than a deliberate design decision. `pnpm build && pnpm test` green (118 test files / 1362 tests passing, no regressions).
 
+**Follow-up (closed):** the `remote.ts` `POST /index` attach-as-reader auto-grant gap flagged above is now fixed — `applyPublicRepoPolicy()` calls `recordAuditEvent(activeRawDb, { actorUserId: userId, action: 'grant.create', target: String(userId), repoId })` immediately after `createGrant(...)` (`src/server/routes/remote.ts`), and the corresponding `EXEMPTIONS` entry in `tests/auditCoverageEnforcement.test.ts` has been removed so the enforcement test now requires it going forward.
+
 ---
 
 ### Phase 133 — Public Repo Throttle/Policy Extraction
@@ -5059,6 +5066,34 @@ public-repo cases pass unmodified; full `pnpm test` suite green (1359 passed).
 **Files touched:** `src/server/routes/remote.ts`, `tests/remoteIndexPersistence.test.ts` (new ephemeral-profile tests).
 
 **Status:** ✅ complete. `resolvedProviders` in `POST /api/v1/remote/index` now initializes from `profiles.get('default') ?? { textProvider, codeProvider }` instead of always `{ textProvider, codeProvider }`. `remoteRouter()` already seeds a synthetic `'default'` profile key when no `profiles` option is supplied (single-profile servers, unchanged behavior), so this change is a no-op for existing single-profile deployments and only changes behavior when an operator configures multiple named profiles including one literally named `'default'`. The `persist: true` branch's full profile-resolution logic (pinning, allow-list enforcement, 403/409/400 gates) is untouched — it still overwrites `resolvedProviders` via `profiles.get(resolvedProfileName)!` after resolving the pinned/requested/auto-selected profile name. The `persist: false` branch does not run through the pinning/allow-list gate at all (that gate lives entirely inside the `if (persist)` block, since ephemeral jobs have no registry row to pin) — only the *provider-selection mechanism* is unified, not the policy-enforcement path, which remains persisted-job-only by design. New tests added to `tests/remoteIndexPersistence.test.ts` (`describe('POST /api/v1/remote/index — ephemeral-job profile routing (Phase 135)')`) assert an ephemeral job picks up the `'default'`-keyed profile's provider, that disabling `'default'` doesn't block the ephemeral path, and that ephemeral jobs fall back to the bare provider pair when no profile is named `'default'`. `pnpm build && pnpm test` green (1362 passed). Changeset added (`ephemeral-job-profile-routing.md`, patch) since this is a narrow real behavior change for multi-profile operators.
+
+---
+
+### Phase 136 — Distinct per-level search result lists
+
+**Goal:** Let `gitsema search` return separate, independently-ranked result lists per granularity level (file/chunk/symbol/module) instead of merging them into one shared-cutoff ranked list, so a level with fewer or weaker matches isn't crowded out by a higher-scoring level before a user ever sees it.
+
+**Design:** No separate design doc — scoped directly from the user's request. This follows on from the Phase 77 Goal #4 per-model saved-`--level` fallback: when `--text-model` and `--code-model` have conflicting saved levels, `unionModelLevels()` (`src/cli/commands/search.ts`) unions their flags into one shared search rather than picking a winner — which surfaced the underlying gap this phase addresses. Approach: mirror the existing `dualModel` precedent in the same file (~line 409-423), which already runs one `vectorSearchWithAnn()` call per embedding model and merges the two result sets via `mergeSearchResults()`. Instead of merging, the new **default** behavior runs one `vectorSearch()`/`vectorSearchWithAnn()` call per active level — each isolated to a single `searchChunks`/`searchSymbols`/`searchModules` flag, never combined within one call — so each level gets its own genuinely independent `topK` cutoff, presented as separate labeled lists instead of one intermixed ranking. A new `--merge-levels` flag opts back into today's single-merged-list behavior.
+
+**Resolved design decisions (confirmed in conversation):**
+- **Separate-by-default, flagged opt-in to merge.** Per-level separation becomes the default whenever more than one level is active (via an explicit combination like `--chunks --level symbol`, or via the Phase 77 Goal #4 model-level-fallback union); `--merge-levels` collapses them back into the pre-Phase-136 single ranked list — i.e. `--merge-levels` restores exactly what `unionModelLevels()` does today.
+- **Flag name is `--merge-levels`, not `--unified`.** "Unified" already names two unrelated concepts in this codebase (Phase 70's `--out` output system, Phase 77's "Unified Indexing + Search Level Concept" itself) and would confuse readers expecting it to relate to those instead of list-merging.
+- **Scope is the level axis only — the existing dual-model merge is untouched.** `dualModel` search (text-model vs. code-model results) keeps merging via `mergeSearchResults()` exactly as it does today, by default, unconditionally. This phase does not touch that axis at all: it was judged a separate, already-shipped, relied-upon behavior, and flipping its default would be a real breaking change outside this phase's actual ask. Each level's list can still be an internal dual-model merge (e.g. the "chunk" list reflects both models' chunk-level hits) — the two axes compose independently rather than being conflated into one on/off switch.
+
+**Scope:**
+- `unionModelLevels()`'s union-into-one-call behavior becomes the `--merge-levels` path; the new default instead issues one call per resolved level and keeps the results apart.
+- Output formatting: `renderResults()`/`--out` (text/json/html/markdown) need a shape for multiple labeled lists instead of one flat list — text/markdown render each level as its own labeled section; JSON needs a keyed-by-level shape (exact shape TBD during implementation).
+- Interaction with existing search options (`topK`, `--recent`/three-signal ranking, `--hybrid`, `--branch`, date filters, etc.): each per-level call should apply them independently and identically to how today's single merged call does — no new interaction expected, but needs test coverage confirming each level's list still respects them.
+- MCP/HTTP parity: check `docs/parity.md` for whether the MCP `semantic_search` tool and the HTTP search route need the equivalent option, and update parity.md if so.
+- Test coverage: extend `tests/modelLevelFallback.test.ts` or add a sibling test file covering the new per-level-call code path, the `--merge-levels` opt-in, and interaction with dual-model routing (each level's list still reflecting both models' hits internally).
+
+**Open design questions to resolve during implementation** (not yet decided):
+- JSON output shape for multiple labeled result lists.
+- Exact precedence/interaction of `--merge-levels` with `--group` (which still operates post-hoc on whichever list(s) result).
+
+**Files likely touched:** `src/cli/commands/search.ts` (new default behavior, `--merge-levels` flag parsing, replacing/branching around `unionModelLevels()`), `src/core/search/analysis/vectorSearch.ts` (no core logic change expected — reuses the existing per-flag candidate-pool mechanism via repeated calls), `src/core/search/ranking.ts` (`renderResults`/output formatting for labeled per-level sections), `docs/parity.md` (if MCP/HTTP need the same option), test files.
+
+**Status:** not started.
 
 ---
 

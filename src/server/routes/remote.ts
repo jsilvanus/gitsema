@@ -55,6 +55,7 @@ import {
 } from '../../core/indexing/repoRegistry.js'
 import { createGrant, resolveUserRepoAccess, getRepoOrgId } from '../../core/auth/grants.js'
 import { getEffectiveAllowedSet } from '../../core/admin/modelPolicy.js'
+import { recordAuditEvent } from '../../core/auth/auditLog.js'
 import { logger } from '../../utils/logger.js'
 
 // ---------------------------------------------------------------------------
@@ -449,6 +450,12 @@ function applyPublicRepoPolicy(params: {
       role: 'read',
       grantedBy: existingAuth!.ownerUserId ?? userId!,
       source: 'auto-public',
+    })
+    recordAuditEvent(activeRawDb, {
+      actorUserId: userId!,
+      action: 'grant.create',
+      target: String(userId!),
+      repoId: existing!.id,
     })
   }
 
