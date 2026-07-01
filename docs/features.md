@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.96.0** · Schema: **v32** · Test suite: **1375 tests**
+> Current version: **v0.96.0** · Schema: **v32** · Test suite: **1380 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -46,7 +46,7 @@ One database can hold embeddings from **multiple embedding models simultaneously
 | Glob-based selective indexing | `--include-glob "src/**"` |
 | Specific file indexing from HEAD | `--file <paths...>` |
 | Chunking strategies | `--chunker file|function|fixed` |
-| **Per-model saved level as chunker/search-level fallback (Phase 77 Goal #4)** | `gitsema models add <name> --level <level>` sets a default granularity for a model; `index start` and `search` now apply it as a fallback when no explicit `--chunker`/`--level`/`--profile` is passed (indexing side skips the fallback rather than guessing if `--text-model`/`--code-model` have conflicting saved levels) |
+| **Per-model saved level as chunker/search-level fallback (Phase 77 Goal #4)** | `gitsema models add <name> --level <level>` sets a default granularity for a model; `index start` and `search` now apply it as a fallback when no explicit `--chunker`/`--level`/`--profile` is passed. `search` consults both `--text-model` and `--code-model` (dual-model search embeds the query with both and merges results); both commands skip the fallback rather than guessing when the two models' saved levels genuinely conflict |
 | Fixed-window chunk tuning | `--window-size <n>`, `--overlap <n>` |
 | VSS / HNSW index build after indexing | `--auto-build-vss [threshold]` |
 | Int8 scalar quantization | `--quantize` |

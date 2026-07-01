@@ -27,6 +27,31 @@ export function mapModelLevelToSearchLevel(level: string | undefined): string | 
   return INDEX_LEVEL_TO_SEARCH_LEVEL[level] ?? level
 }
 
+export interface AgreedLevelResolution {
+  /** Resolved search-level fallback, if the text/code models' (already-mapped) levels agree. */
+  level?: string
+  /** Set instead of `level` when the two models' levels genuinely disagree. */
+  conflict?: { textLevel: string; codeLevel: string }
+}
+
+/**
+ * Resolves an agreed search-level fallback from two already-mapped per-model
+ * levels — mirrors `resolveModelLevelChunker()`'s index-side conflict
+ * handling (Phase 77 Goal #4). In dual-model search the query is embedded
+ * with both models and results merged, with the same `--level` flags
+ * applied to both passes — so a genuine disagreement can't be honored for
+ * both at once and is left unresolved rather than guessed at.
+ */
+export function resolveAgreedLevel(
+  textLevel: string | undefined,
+  codeLevel: string | undefined,
+): AgreedLevelResolution {
+  if (textLevel !== undefined && codeLevel !== undefined && textLevel !== codeLevel) {
+    return { conflict: { textLevel, codeLevel } }
+  }
+  return { level: textLevel ?? codeLevel }
+}
+
 export interface SearchCommandOptions {
   top?: string
   recent?: boolean
@@ -315,11 +340,25 @@ export async function searchCommand(query: string, options: SearchCommandOptions
 
   // Phase 77 Goal #4: a saved per-model level (`gitsema models add <name>
   // --level ...`) takes priority over the embed_config auto-recall below.
-  // Queries always embed via the text model (queries are natural language),
-  // so there's no textModel/codeModel conflict to resolve here — unlike
-  // `index start`, only one model's saved level is ever consulted.
+  // In dual-model mode the query is embedded with *both* models and results
+  // merged (see the `dualModel` branch below) — the resulting `--level`
+  // flags (searchChunksFlag/etc.) are applied identically to both models'
+  // search passes, so a genuine disagreement between the two saved levels
+  // can't be honored for both at once. Same rule as `index start`: agree
+  // (or only one is set) → use it; disagree → skip rather than guess.
   if (!effectiveLevel) {
-    effectiveLevel = mapModelLevelToSearchLevel(getModelProfile(textModel).level)
+    const textLevel = mapModelLevelToSearchLevel(getModelProfile(textModel).level)
+    const codeLevel = dualModel ? mapModelLevelToSearchLevel(getModelProfile(codeModel).level) : textLevel
+    const resolution = resolveAgreedLevel(textLevel, codeLevel)
+    if (resolution.conflict) {
+      console.log(
+        `Note: text model '${textModel}' and code model '${codeModel}' have conflicting saved ` +
+        `--level defaults ('${resolution.conflict.textLevel}' vs '${resolution.conflict.codeLevel}') — ` +
+        `ignoring both; pass --level explicitly.`,
+      )
+    } else {
+      effectiveLevel = resolution.level
+    }
   }
 
   if (!effectiveLevel) {

@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { resolveModelLevelChunker } from '../src/cli/commands/index.js'
-import { mapModelLevelToSearchLevel } from '../src/cli/commands/search.js'
+import { mapModelLevelToSearchLevel, resolveAgreedLevel } from '../src/cli/commands/search.js'
 
 describe('resolveModelLevelChunker (index start)', () => {
   it('returns undefined when neither model has a saved level', () => {
@@ -61,5 +61,34 @@ describe('mapModelLevelToSearchLevel (search)', () => {
     expect(mapModelLevelToSearchLevel('chunk')).toBe('chunk')
     expect(mapModelLevelToSearchLevel('symbol')).toBe('symbol')
     expect(mapModelLevelToSearchLevel('module')).toBe('module')
+  })
+})
+
+describe('resolveAgreedLevel (search, dual-model)', () => {
+  // Dual-model search embeds the query with both the text and code models
+  // and merges results (see the `dualModel` branch in searchCommand) — the
+  // resulting --level flags apply identically to both passes, so this must
+  // refuse to guess when the two models' saved levels disagree, exactly
+  // like resolveModelLevelChunker does on the indexing side.
+  it('returns undefined when neither model has a level', () => {
+    expect(resolveAgreedLevel(undefined, undefined)).toEqual({ level: undefined })
+  })
+
+  it('uses the text level when only it is set', () => {
+    expect(resolveAgreedLevel('chunk', undefined)).toEqual({ level: 'chunk' })
+  })
+
+  it('uses the code level when only it is set', () => {
+    expect(resolveAgreedLevel(undefined, 'symbol')).toEqual({ level: 'symbol' })
+  })
+
+  it('uses the agreed level when both models match', () => {
+    expect(resolveAgreedLevel('chunk', 'chunk')).toEqual({ level: 'chunk' })
+  })
+
+  it('returns a conflict descriptor instead of guessing when the two models disagree', () => {
+    const result = resolveAgreedLevel('file', 'symbol')
+    expect(result.level).toBeUndefined()
+    expect(result.conflict).toEqual({ textLevel: 'file', codeLevel: 'symbol' })
   })
 })
