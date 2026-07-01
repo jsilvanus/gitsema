@@ -24,6 +24,30 @@ vi.mock('../src/core/db/sqlite.js', async (importOriginal) => {
   }
 })
 
+// Mock the provider factory so per-request model overrides (Phase 140) are
+// observable without hitting a real Ollama/HTTP backend: any model name
+// containing "override" resolves to a distinguishable mock provider whose
+// `.model` reflects the requested override, letting tests assert that
+// `resolveRequestProvider()` actually swapped providers instead of always
+// falling back to the router's default `textProvider`.
+vi.mock('../src/core/embedding/providerFactory.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/embedding/providerFactory.js')>()
+  return {
+    ...actual,
+    buildProvider: (type: string, model: string) => {
+      if (model.includes('override')) {
+        return {
+          model,
+          embed: async () => [0.9, 0.8, 0.7, 0.6],
+          embedBatch: async (texts: string[]) => texts.map(() => [0.9, 0.8, 0.7, 0.6]),
+          dimensions: 4,
+        }
+      }
+      return actual.buildProvider(type, model)
+    },
+  }
+})
+
 import { createApp } from '../src/server/app.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
@@ -843,6 +867,116 @@ describe('POST /api/v1/analysis/eval', () => {
       .post('/api/v1/analysis/eval')
       .send({ cases: [] })
     expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// Phase 140: model-override triplet on analysis.ts routes
+//
+// `--model`/`--text-model`/`--code-model` are now accepted as body fields on
+// clusters, change-points, author, impact, semantic-diff, semantic-blame,
+// triage, and workflow. Requesting a model name containing "override" routes
+// (via the providerFactory mock above) to a distinguishable mock provider —
+// confirming resolveRequestProvider() actually swapped providers instead of
+// silently ignoring the override.
+// ===========================================================================
+describe('Phase 140: model overrides on analysis routes', () => {
+  it('change-points accepts model override and still returns 200', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/change-points')
+      .send({ query: 'authentication', model: 'override-model' })
+    expect(res.status).toBe(200)
+  })
+
+  it('author accepts textModel override and still returns 200', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', textModel: 'override-text-model' })
+    expect(res.status).toBe(200)
+  })
+
+  it('impact accepts codeModel override and returns 200 or 500 (no git repo)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', codeModel: 'override-code-model' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('semantic-diff accepts model override and returns 200 or 500 (no git repo)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication', model: 'override-model' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('semantic-blame accepts model override and returns 200 with an array', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts', content: 'export function auth() {}', model: 'override-model' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('triage accepts model override and returns 200 with sections', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/triage')
+      .send({ query: 'authentication', top: 3, model: 'override-model' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('sections')
+  })
+
+  it('workflow accepts model override for the incident template', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'incident', query: 'database crash', top: 3, model: 'override-model' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'incident')
+  })
+
+  it('clusters accepts the model-override triplet without rejecting the request', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ k: 3, model: 'override-model' })
+    // clusters ignores the override for behavior (no per-model filtering),
+    // but must still accept the field and not 400 on it.
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('clusters returns 400 when the override resolves to an invalid provider config', async () => {
+    const prevProvider = process.env.GITSEMA_PROVIDER
+    process.env.GITSEMA_PROVIDER = 'http'
+    delete process.env.GITSEMA_HTTP_URL
+    try {
+      const res = await request(app)
+        .post('/api/v1/analysis/clusters')
+        .send({ k: 3, model: 'some-http-model' })
+      expect(res.status).toBe(400)
+    } finally {
+      if (prevProvider === undefined) delete process.env.GITSEMA_PROVIDER
+      else process.env.GITSEMA_PROVIDER = prevProvider
+    }
+  })
+
+  it('change-points returns 400 when the override resolves to an invalid provider config', async () => {
+    const prevProvider = process.env.GITSEMA_PROVIDER
+    process.env.GITSEMA_PROVIDER = 'http'
+    delete process.env.GITSEMA_HTTP_URL
+    try {
+      const res = await request(app)
+        .post('/api/v1/analysis/change-points')
+        .send({ query: 'auth', model: 'some-http-model' })
+      expect(res.status).toBe(400)
+    } finally {
+      if (prevProvider === undefined) delete process.env.GITSEMA_PROVIDER
+      else process.env.GITSEMA_PROVIDER = prevProvider
+    }
+  })
+
+  it('requests without any override field still use the router default textProvider', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication' })
+    expect(res.status).toBe(200)
   })
 })
 

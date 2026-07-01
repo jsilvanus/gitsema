@@ -341,11 +341,18 @@ This table shows less common flags used by specific commands or command groups.
 
 3. **Model overrides:**
    - Consistently available: `--model`, `--text-model`, `--code-model`
-   - **Status:** ✓ Good coherence *on the CLI*. The Interface Parity Track
-     audit (§6) found the *HTTP* routes for `clusters`, `change-points`,
-     `author`, `impact`, `semantic-diff`, `semantic-blame`, `triage`, and
-     `workflow` don't expose this triplet at all — scheduled as
-     `docs/PLAN.md` Phase 140 (one shared fix, not eight per-route ones).
+   - **Status:** ✓ Good coherence on the CLI, **and now closed on HTTP too**
+     (`docs/PLAN.md` Phase 140). The Interface Parity Track audit (§6) found
+     the HTTP routes for `clusters`, `change-points`, `author`, `impact`,
+     `semantic-diff`, `semantic-blame`, `triage`, and `workflow` didn't
+     expose this triplet at all; all 8 now accept `{model, textModel,
+     codeModel}` body fields via a shared `modelOverrideSchema` fragment +
+     `resolveRequestProvider()` helper (`src/server/lib/modelOverrides.ts`)
+     — one fix applied to all 8 routes rather than eight independent
+     per-route patches. Note: `clusters` accepts and validates the triplet
+     for flag-surface parity, but it has no effect on clustering behavior
+     (same as the CLI `clusters` command) since `computeClusters()` doesn't
+     filter by model.
 
 4. **Temporal filtering:**
    - `--before`/`--after` (search) vs. `--since` (index: resume point)
