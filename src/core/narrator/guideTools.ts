@@ -28,6 +28,7 @@ import { getTextProvider, getCodeProvider, buildProvider } from '../embedding/pr
 import { embedQuery } from '../embedding/embedQuery.js'
 import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import { hybridSearch } from '../search/analysis/hybridSearch.js'
+import { resolveExtraLevels, isMultiLevelActive } from '../../cli/commands/search.js'
 import { searchCommits } from '../search/commitSearch.js'
 import { multiRepoSearch } from '../indexing/repoRegistry.js'
 import { computeEvolution, computeConceptEvolution, computeDiff } from '../search/temporal/evolution.js'
@@ -311,20 +312,41 @@ export const GUIDE_TOOLS: Record<string, GuideToolEntry> = {
     needsIndex: true,
     definition: {
       name: 'code_search',
-      description: 'Search code using the code embedding model and return symbol/chunk-level matches.',
+      description: 'Search code using the code embedding model and return symbol/chunk-level matches. The chunk and symbol pools are searched in isolation by default and returned as a `results_by_level` object with independently-ranked lists per level (Phase 137) — pass merge_levels to opt back into one merged `results` array.',
       parameters: obj({
         snippet: str('Code snippet to embed and search for.'),
         top_k: int('Maximum number of results to return (default 10, max 25).', { min: 1, max: 25 }),
         branch: str('Restrict to blobs on this branch.'),
+        merge_levels: bool('Merge the chunk/symbol pools into one shared-cutoff results array instead of separate per-level results_by_level lists.'),
       }, ['snippet']),
     },
     run: async (args) => {
       const snippet = strArg(args, 'snippet')
       if (!snippet) return errorResult('code_search requires a non-empty "snippet" argument')
       const topK = numArg(args, 'top_k', 10, 1, 25)
+      const branch = strArg(args, 'branch')
       const { provider, embedding } = await embedFor(snippet, true)
-      const results = await vectorSearch(embedding, { topK, searchChunks: true, searchSymbols: true, model: provider.model, branch: strArg(args, 'branch') })
-      return { snippet, results: results.map((r) => ({ paths: r.paths, score: r.score, blobHash: r.blobHash })) }
+      const project = (results: Awaited<ReturnType<typeof vectorSearch>>) => results.map((r) => ({ paths: r.paths, score: r.score, blobHash: r.blobHash }))
+
+      // Phase 137: isolate chunk vs. symbol candidate pools by default (both
+      // are always active for this tool) — same mechanism as CLI code-search
+      // / MCP code_search (src/cli/commands/{codeSearch,search}.ts).
+      const extraLevels = resolveExtraLevels(true, true, false)
+      const multiLevelActive = isMultiLevelActive(extraLevels)
+
+      if (multiLevelActive && !boolArg(args, 'merge_levels')) {
+        const resultsByLevel: Record<string, ReturnType<typeof project>> = {}
+        const fileResults = await vectorSearch(embedding, { topK, searchChunks: false, searchSymbols: false, includeFiles: true, model: provider.model, branch })
+        resultsByLevel.file = project(fileResults)
+        for (const lvl of extraLevels) {
+          const levelResults = await vectorSearch(embedding, { topK, ...lvl.flags, model: provider.model, branch })
+          resultsByLevel[lvl.name] = project(levelResults)
+        }
+        return { snippet, results_by_level: resultsByLevel }
+      }
+
+      const results = await vectorSearch(embedding, { topK, searchChunks: true, searchSymbols: true, includeFiles: true, model: provider.model, branch })
+      return { snippet, results: project(results) }
     },
   },
   search_history: {

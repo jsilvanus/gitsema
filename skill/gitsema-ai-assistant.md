@@ -661,10 +661,10 @@ This section is generated from `src/core/narrator/interpretations.ts` (result in
 
 **`code_search`** — Symbol/chunk-level search using the code embedding model.
 
-- Usage: Search code using the code embedding model and return symbol/chunk-level matches.
-- Parameters: `snippet` (required) — Code snippet to embed and search for.; `top_k` — Maximum number of results to return (default 10, max 25).; `branch` — Restrict to blobs on this branch.
-- Result shape: Rendered "score  path  [blobHash]" lines (symbol level by default).
-- How to read it: Like semantic_search but embeds with the code model and targets symbols/chunks — better for finding specific functions/classes from a code snippet than from prose. Higher scores mean closer code-level similarity.
+- Usage: Search code using the code embedding model and return symbol/chunk-level matches. The chunk and symbol pools are searched in isolation by default and returned as a `results_by_level` object with independently-ranked lists per level (Phase 137) — pass merge_levels to opt back into one merged `results` array.
+- Parameters: `snippet` (required) — Code snippet to embed and search for.; `top_k` — Maximum number of results to return (default 10, max 25).; `branch` — Restrict to blobs on this branch.; `merge_levels` — Merge the chunk/symbol pools into one shared-cutoff results array instead of separate per-level results_by_level lists.
+- Result shape: { snippet, results_by_level: { file: [...], chunk: [...], symbol: [...] } } by default — chunk and symbol pools are searched in isolation and returned as separate, independently-ranked lists (Phase 137). Pass merge_levels to get the pre-Phase-137 shape instead: { snippet, results: [{ paths[], score, blobHash }] }.
+- How to read it: Like semantic_search but embeds with the code model and targets symbols/chunks — better for finding specific functions/classes from a code snippet than from prose. Higher scores mean closer code-level similarity within a level's own list. Don't rank across levels by raw score — chunk and symbol pools embed differently-framed text (raw excerpt vs. name+signature-annotated), so their scores are not on a directly comparable scale; read each level list separately.
 
 **`cross_repo_similarity`** — Compare semantic search results for the same query across two separate repos.
 

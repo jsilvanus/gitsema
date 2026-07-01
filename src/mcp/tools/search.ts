@@ -9,6 +9,8 @@ import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { groupResults, renderResults } from '../../core/search/ranking.js'
 import { multiRepoSearch } from '../../core/indexing/repoRegistry.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
+import { resolveExtraLevels, isMultiLevelActive } from '../../cli/commands/search.js'
+import type { SearchResult } from '../../core/models/types.js'
 
 export function registerSearchTools(server: McpServer) {
   // semantic_search
@@ -89,28 +91,51 @@ export function registerSearchTools(server: McpServer) {
   registerTool(
     server,
     'code_search',
-    'Search code using the code embedding model and return symbol/chunk level matches (default: symbol level)',
+    'Search code using the code embedding model and return symbol/chunk level matches (default: symbol level). When the chunk and symbol pools are both active (the default), results are returned as a `results_by_level` object with separate, independently-ranked lists per level instead of one merged list — pass merge_levels to opt back into a single flat results array.',
     {
       snippet: z.string().describe('Code snippet to embed and search for'),
       top_k: z.number().int().positive().optional().default(10).describe('Maximum number of results to return'),
       level: z.enum(['file', 'chunk', 'symbol']).optional().default('symbol').describe('Search granularity level'),
       branch: z.string().optional().describe('Restrict to blobs on this branch'),
+      merge_levels: z.boolean().optional().default(false).describe('Merge the chunk/symbol pools into one shared-cutoff results array instead of separate per-level results_by_level lists'),
     },
-    async ({ snippet, top_k, level, branch }, { embed, serializeSearchResults }) => {
+    async ({ snippet, top_k, level, branch, merge_levels }, { embed }) => {
       const provider = getCodeProvider()
       const eRes = await embed(provider, snippet, 'Error embedding snippet')
       if (!eRes.ok) return eRes.resp
       const embedding = eRes.embedding!
 
+      const searchChunksFlag = level === 'chunk' || level === 'symbol'
+      const searchSymbolsFlag = level === 'symbol'
+      const baseOpts = { topK: top_k, branch, model: provider.model }
+
+      // Phase 137: isolate the chunk vs. symbol candidate pools by default —
+      // see codeSearchCommand()/resolveExtraLevels() in src/cli/commands/
+      // search.ts and codeSearch.ts for the shared mechanism/rationale.
+      const extraLevels = resolveExtraLevels(searchChunksFlag, searchSymbolsFlag, false)
+      const multiLevelActive = isMultiLevelActive(extraLevels)
+
+      const project = (results: SearchResult[]) => results.map((r) => ({ paths: r.paths, score: r.score, blobHash: r.blobHash, kind: r.kind }))
+
+      if (multiLevelActive && !merge_levels) {
+        const resultsByLevel: Record<string, ReturnType<typeof project>> = {}
+        const fileResults = await vectorSearch(embedding, { ...baseOpts, searchChunks: false, searchSymbols: false, includeFiles: true })
+        resultsByLevel.file = project(fileResults)
+        for (const lvl of extraLevels) {
+          const levelResults = await vectorSearch(embedding, { ...baseOpts, ...lvl.flags })
+          resultsByLevel[lvl.name] = project(levelResults)
+        }
+        return { content: [{ type: 'text', text: JSON.stringify({ snippet, results_by_level: resultsByLevel }, null, 2) }] }
+      }
+
       const results = await vectorSearch(embedding, {
-        topK: top_k,
-        searchChunks: level === 'chunk' || level === 'symbol',
-        searchSymbols: level === 'symbol',
-        branch,
-        model: provider.model,
+        ...baseOpts,
+        searchChunks: searchChunksFlag,
+        searchSymbols: searchSymbolsFlag,
+        includeFiles: true,
       })
 
-      return { content: [{ type: 'text', text: serializeSearchResults(results) }] }
+      return { content: [{ type: 'text', text: JSON.stringify({ snippet, results: project(results) }, null, 2) }] }
     },
   )
 

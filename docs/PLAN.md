@@ -5250,7 +5250,52 @@ earlier over-narrowed draft of this phase):**
 needs generalizing beyond `search.ts`), `docs/parity.md`, `docs/features.md`,
 `README.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Implemented as specified, reusing Phase 136's
+`resolveExtraLevels()`/`isMultiLevelActive()`/`includeFiles` mechanism
+directly (imported from `src/cli/commands/search.ts`) rather than
+re-deriving it in each of the three call sites.
+
+- CLI `gitsema code-search`: `codeSearchCommand()` now resolves
+  `resolveExtraLevels(searchChunksFlag, searchSymbolsFlag, false)` from the
+  `--level` argument (default `symbol` → both flags true → always
+  multi-level-active) and, when active and `--merge-levels` is not passed,
+  runs one isolated `vectorSearch()` call per level (`file`/`chunk`/`symbol`)
+  and renders them via `renderResultsByLevel()`. New `--merge-levels` flag
+  restores the pre-Phase-137 single merged call/`renderResults()` output.
+- MCP `code_search` (`src/mcp/tools/search.ts`): same isolation; adds a
+  `merge_levels` boolean param (default `false`). When multi-level and not
+  merged, returns `{ snippet, results_by_level: { file, chunk, symbol } }`
+  (each level's array pared to `{ paths, score, blobHash, kind }`) instead of
+  the old flat `{ snippet, results: [...] }` — accepted breaking change per
+  `docs/parity.md` §4.
+- Guide `code_search` tool (`src/core/narrator/guideTools.ts`): same shape
+  change (`results_by_level` vs. `results`), same `merge_levels` param. This
+  tool always searches both pools (no `level` param existed), so it always
+  hits the multi-level condition unless `merge_levels` is passed.
+- `src/core/narrator/interpretations.ts`'s `code_search` entry updated to
+  document the new `results_by_level` shape and to warn against comparing
+  raw scores across levels (chunk vs. symbol embedding-framing bias); skill
+  regenerated via `pnpm gen:skill` (`skill/gitsema-ai-assistant.md` and
+  `.github/skills/gitsema.md` both updated).
+- Tests: new `tests/integration/codeSearchLevelSeparation.test.ts` — proves
+  (a) the per-blob dedup invariant (a blob with both a chunk and a symbol
+  candidate appears at most once, in both a merged call and each isolated
+  per-level call), and (b) the crowding-out proof mirroring
+  `searchLevelSeparation.test.ts`, adapted to code-search's chunk-vs-symbol
+  pools (a weak lone chunk match survives its own isolated topK cutoff but
+  is crowded out of a small shared topK by two stronger symbol matches in
+  the merged/`--merge-levels` path). `pnpm build && pnpm test` green.
+- `docs/parity.md` updated: the "`code-search` never received Phase 136's
+  treatment" gap note (§ Parity Observations) and its §6 roadmap mention are
+  resolved; Tool Matrix/flag tables unaffected (no new interface reached,
+  same five interfaces as before — CLI/Guide/MCP/LSP/Interactive — just a
+  shape/flag change within each).
+- **Deviation from spec:** the phase entry's "Files likely touched" list
+  did not anticipate `src/core/narrator/interpretations.ts` needing an
+  update — included because `code_search`'s result shape changed and that
+  file is the single source of truth for "how to read" a tool's output
+  (enforced by the `docsSync` test).
+- Changeset added (`code-search-per-level-results.md`, minor).
 
 ---
 

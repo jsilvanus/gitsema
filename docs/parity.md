@@ -193,7 +193,7 @@ This table shows which tools/commands are available in which interface. A checkm
 **CLI-only gaps (not in Guide/MCP):**
 - `index doctor`, `graph path`, `graph relate`, `graph similar`, `graph unused`, `blast-radius`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`, `co-change`, `deps`, `cycles`, and all maintenance subcommands
 - `search --merge-levels` / distinct per-level result lists (Phase 136): the CLI's `search` command is the only interface where combining 2+ of `--chunks`/`--level symbol`/`--level module` at once (or a Phase 77 model-level-fallback union) returns separate labeled per-level lists by default, with `--merge-levels` opting back into one shared-cutoff list. The MCP `semantic_search` tool and the HTTP `search` route can still hit the same multi-level-active condition (e.g. `level: 'symbol', chunks: true`) but only expose the pre-Phase-136 single merged-list behavior — no equivalent flag/param was added to either, since both have their own independent, simpler result-shape (MCP returns a rendered text blob; HTTP returns a flat JSON array) that would need a compatible-breaking shape change to carry labeled per-level lists. Deferred rather than done partially; see `docs/PLAN.md` Phase 136.
-- **`code-search` never received Phase 136's per-level-list treatment at all, in any interface** (found during the Phase 136 parity audit). CLI `code-search` (`src/cli/commands/codeSearch.ts`), MCP `code_search` (`src/mcp/tools/search.ts`), and Guide's `code_search` tool (`src/core/narrator/guideTools.ts`) each call `vectorSearch()` with `searchChunks`/`searchSymbols` set from a `level` argument the same way `search` used to pre-Phase-136 — one shared-cutoff merged call, no isolation, no `--merge-levels`-equivalent. This is more exposed than `search`'s gap: CLI `code-search`'s and MCP/Guide `code_search`'s **default** `level`/parameter value is `'symbol'`, which sets `searchChunks: true` *and* `searchSymbols: true` simultaneously — so every default, no-flags invocation of `code-search` hits the exact crowding-out condition Phase 136 fixed for `search`, not just an opt-in flag combination. Not fixed here; added to §6 roadmap.
+- ~~`code-search` never received Phase 136's per-level-list treatment~~ — **resolved in Phase 137.** CLI `code-search`, MCP `code_search`, and Guide's `code_search` tool all now isolate the chunk/symbol candidate pools by default (the default `--level`/`level` value `'symbol'` sets both flags, so this was the *every-call* case, not an opt-in combination) and return separate per-level lists — CLI via `renderResultsByLevel()`, MCP/Guide via a `results_by_level: { file, chunk, symbol }` object (breaking response-shape change, accepted per §4). All three gained a `--merge-levels`/`merge_levels` opt-out back to the pre-Phase-137 single merged list/array. See `docs/PLAN.md` Phase 137.
 
 **HTTP gaps:**
 - Most graph commands (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`)
@@ -267,7 +267,7 @@ This table shows less common flags used by specific commands or command groups.
 | `--chunks` | `search`, `code-search`, `first-seen` | bool | false | Include chunk-level embeddings in results |
 | `--include-commits` | `search`, `first-seen` | bool | false | Also search commit message embeddings |
 | `--annotate-clusters` | `search` | bool | false | Annotate each result with cluster label |
-| `--merge-levels` | `search` | bool | false | Merge active search levels into one shared-cutoff ranked list (pre-Phase-136 behavior) instead of separate per-level lists; only meaningful when 2+ of {chunk, symbol, module} are active at once (Phase 136) |
+| `--merge-levels` | `search`, `code-search` | bool | false | Merge active search levels into one shared-cutoff ranked list (pre-Phase-136/137 behavior) instead of separate per-level lists; for `search`, only meaningful when 2+ of {chunk, symbol, module} are active at once (Phase 136); for `code-search`, active by default at `--level symbol` since chunk+symbol are always both searched (Phase 137) |
 | `--not-like` | `search` | string | — | Negative example query (subtract from score) |
 | `--lambda` | `search` | float | 0.5 | Weight for negative example subtraction |
 | `--early-cut` | `search` | int | 0 | Limit candidate pool to n random samples |
@@ -561,10 +561,12 @@ this section's prior open-ended bullets into concrete, numbered
 - *"Add HTTP endpoint for `code-search`"* — still true for a **literal**
   named route, but the audit found `code-search` **is** already reachable
   over HTTP today via `POST /api/v1/protocol/mcp.code_search` (the generic
-  MCP-tool dispatcher in `src/server/routes/protocol.ts`). Not a total gap;
-  whether a literal `/code-search` route is still worth adding for API
-  discoverability is folded into Phase 137/138's scope rather than tracked
-  separately here.
+  MCP-tool dispatcher in `src/server/routes/protocol.ts`), which forwards to
+  the MCP `code_search` tool handler directly — so it picked up Phase 137's
+  `results_by_level`/`merge_levels` shape for free once that tool changed,
+  with no route-specific work needed. Not a total gap; whether a literal
+  `/code-search` route is still worth adding for API discoverability remains
+  open, folded into Phase 138's scope rather than tracked separately here.
 - *"Add `cluster-diff`, `cluster-timeline` to MCP/HTTP"* — also already
   reachable via the same `protocol.ts` dispatcher
   (`mcp.cluster_diff`/`mcp.cluster_timeline`), confirmed by the same audit.
