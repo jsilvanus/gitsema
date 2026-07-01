@@ -250,7 +250,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
 | `POST /api/v1/analysis/clusters` | Clustering |
 | `POST /api/v1/analysis/change-points` | Change-point detection |
-| `POST /api/v1/analysis/author` | Author attribution |
+| `POST /api/v1/analysis/author` | Author attribution — full CLI flag parity (Phase 141): `since`, `detail`, `includeCommits`, `hybrid`, `bm25Weight` all wired through; response is `{ authors, commits? }` |
 | `POST /api/v1/analysis/impact` | Impact analysis |
 | `POST /api/v1/analysis/semantic-diff` | Semantic diff |
 | `POST /api/v1/analysis/semantic-blame` | Semantic blame |

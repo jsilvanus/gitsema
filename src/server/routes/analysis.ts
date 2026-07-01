@@ -15,6 +15,8 @@ import type { Embedding } from '../../core/models/types.js'
 import { computeClusters, getBlobHashesOnBranch } from '../../core/search/clustering/clustering.js'
 import { computeConceptChangePoints } from '../../core/search/temporal/changePoints.js'
 import { computeAuthorContributions } from '../../core/search/authorSearch.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
+import { searchCommits } from '../../core/search/commitSearch.js'
 import { computeExperts } from '../../core/search/experts.js'
 import { computeImpact } from '../../core/search/impact.js'
 import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
@@ -57,6 +59,19 @@ const AuthorBodySchema = z.object({
   topK: z.number().int().positive().optional().default(50),
   topAuthors: z.number().int().positive().optional().default(10),
   branch: z.string().optional(),
+  since: z.string().optional(),
+  detail: z.boolean().optional().default(false),
+  includeCommits: z.boolean().optional().default(false),
+  hybrid: z.boolean().optional().default(false),
+  bm25Weight: z.number().min(0).max(1).optional().default(0.3),
+  // `chunks`/`level`/`vss` are accepted for CLI flag-surface parity but are
+  // not wired to anything — `computeAuthorContributions` is blob-level only,
+  // and the CLI's `author` command itself treats these three the same way
+  // (declared flags with no effect on results; `--vss` just prints a
+  // warning). See docs/parity.md for the audit note.
+  chunks: z.boolean().optional().default(false),
+  level: z.enum(['file', 'chunk', 'symbol']).optional(),
+  vss: z.boolean().optional().default(false),
 })
 
 const ImpactBodySchema = z.object({
@@ -139,6 +154,15 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
+
+    let since: number | undefined
+    try {
+      if (opts.since) since = parseDateArg(opts.since)
+    } catch (err) {
+      res.status(400).json({ error: `Date parse error: ${err instanceof Error ? err.message : String(err)}` })
+      return
+    }
+
     let queryEmbedding: Embedding
     try {
       queryEmbedding = await textProvider.embed(opts.query)
@@ -147,12 +171,35 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     try {
+      // Mirrors the CLI `author` command (src/cli/commands/author.ts): when
+      // --hybrid is set, use hybridSearch to get pre-scored candidate blobs
+      // instead of scoring the whole embeddings table by cosine similarity.
+      let candidateBlobs: Array<{ blobHash: string; score: number }> | undefined
+      if (opts.hybrid) {
+        const hybridResults = await hybridSearch(opts.query, queryEmbedding, {
+          topK: 50,
+          bm25Weight: opts.bm25Weight,
+          branch: opts.branch,
+        })
+        candidateBlobs = hybridResults.map((r) => ({ blobHash: r.blobHash, score: r.score }))
+      }
+
       const contributions = await computeAuthorContributions(queryEmbedding, {
         topK: opts.topK,
         topAuthors: opts.topAuthors,
         branch: opts.branch,
+        since,
+        detail: opts.detail,
+        candidateBlobs,
       })
-      res.json(contributions)
+
+      if (opts.includeCommits) {
+        const commitResults = await searchCommits(queryEmbedding, { topK: opts.topK, model: textProvider.model })
+        res.json({ authors: contributions, commits: commitResults })
+        return
+      }
+
+      res.json({ authors: contributions })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }
