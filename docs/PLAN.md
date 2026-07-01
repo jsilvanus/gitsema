@@ -5069,6 +5069,31 @@ public-repo cases pass unmodified; full `pnpm test` suite green (1359 passed).
 
 ---
 
+### Phase 136 — Distinct per-level search result lists
+
+**Goal:** Let `gitsema search` return separate, independently-ranked result lists per granularity level (file/chunk/symbol/module) instead of merging them into one shared-cutoff ranked list, so a level with fewer or weaker matches isn't crowded out by a higher-scoring level before a user ever sees it.
+
+**Design:** No separate design doc — scoped directly from the user's request. This follows on from the Phase 77 Goal #4 per-model saved-`--level` fallback: when `--text-model` and `--code-model` have conflicting saved levels, `unionModelLevels()` (`src/cli/commands/search.ts`) unions their flags into one shared search rather than picking a winner — which surfaced the underlying gap this phase addresses. Approach: mirror the existing `dualModel` precedent in the same file (~line 409-423), which already runs one `vectorSearchWithAnn()` call per embedding model and merges the two result sets via `mergeSearchResults()`. Instead of merging, a new "separate levels" mode runs one `vectorSearch()`/`vectorSearchWithAnn()` call per active level — each isolated to a single `searchChunks`/`searchSymbols`/`searchModules` flag, never combined within one call — so each level gets its own genuinely independent `topK` cutoff, and the results are presented as separate labeled lists instead of one intermixed ranking.
+
+**Scope:**
+- New CLI trigger for the mode (exact flag name/spelling to be decided during implementation — e.g. `--separate-levels` or a new `--group level` value; must not collide with the existing `--group file|module|commit` post-hoc collapsing mode, which operates on an already-merged list).
+- Applies to the general per-level case (file/chunk/symbol/module), which subsumes the text-model-vs-code-model level-conflict case introduced by `unionModelLevels()` — when the new mode is active, bypass `unionModelLevels()`'s union-into-one-call behavior in favor of one call per resolved level.
+- Output formatting: `renderResults()`/`--out` (text/json/html/markdown) need a shape for multiple labeled lists instead of one flat list — text/markdown render each level as its own labeled section; JSON needs a keyed-by-level shape (exact shape TBD during implementation).
+- Interaction with existing search options (`topK`, `--recent`/three-signal ranking, `--hybrid`, `--branch`, date filters, etc.): each per-level call should apply them independently and identically to how today's single merged call does — no new interaction expected, but needs test coverage confirming each level's list still respects them.
+- MCP/HTTP parity: check `docs/parity.md` for whether the MCP `semantic_search` tool and the HTTP search route need the equivalent option, and update parity.md if so.
+- Test coverage: extend `tests/modelLevelFallback.test.ts` or add a sibling test file covering the new per-level-call code path and its interaction with `unionModelLevels()`/dual-model routing.
+
+**Open design questions to resolve during implementation** (not yet decided):
+- Exact flag name/spelling and its precedence vs. `--level`, `--chunks`, `--group`.
+- Whether "level" in this new mode always means the four granularities (file/chunk/symbol/module) generally, or, when dual-model routing is active with conflicting saved levels, is scoped specifically to the two models' respective levels (two lists) rather than up to four.
+- JSON output shape for multiple labeled result lists.
+
+**Files likely touched:** `src/cli/commands/search.ts` (new mode, flag parsing, replacing/branching around `unionModelLevels()`), `src/core/search/analysis/vectorSearch.ts` (no core logic change expected — reuses the existing per-flag candidate-pool mechanism via repeated calls), `src/core/search/ranking.ts` (`renderResults`/output formatting for labeled per-level sections), `docs/parity.md` (if MCP/HTTP need the same option), test files.
+
+**Status:** not started.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.
