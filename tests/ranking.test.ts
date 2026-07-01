@@ -5,6 +5,7 @@ import {
   formatDate,
   groupResults,
   renderResults,
+  renderResultsByLevel,
 } from '../src/core/search/ranking.js'
 import type { SearchResult } from '../src/core/models/types.js'
 
@@ -202,5 +203,30 @@ describe('renderResults', () => {
     ]
     const output = renderResults(results)
     expect(output).toContain('(unknown path)')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// renderResultsByLevel (Phase 136 — distinct per-level search result lists)
+// ---------------------------------------------------------------------------
+
+describe('renderResultsByLevel', () => {
+  it('renders one labeled section per level, in insertion order', () => {
+    const output = renderResultsByLevel({
+      file: [makeResult({ blobHash: 'a3f9c2d1e5b7f0123456789', paths: ['src/auth.ts'], score: 0.9 })],
+      chunk: [makeResult({ blobHash: 'bbbbbbb', paths: ['src/db.ts'], score: 0.4 })],
+    })
+    const fileIdx = output.indexOf('== file ==')
+    const chunkIdx = output.indexOf('== chunk ==')
+    expect(fileIdx).toBeGreaterThanOrEqual(0)
+    expect(chunkIdx).toBeGreaterThan(fileIdx)
+    expect(output).toContain('src/auth.ts')
+    expect(output).toContain('src/db.ts')
+  })
+
+  it('shows "(no results)" for a level with an empty list', () => {
+    const output = renderResultsByLevel({ file: [], symbol: [] })
+    expect(output).toContain('== file ==\n  (no results)')
+    expect(output).toContain('== symbol ==\n  (no results)')
   })
 })

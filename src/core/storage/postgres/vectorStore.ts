@@ -61,7 +61,7 @@ export class PgVectorStore implements VectorStore {
     const {
       topK = 10, model, recent = false, alpha = 0.8, before, after,
       weightVector, weightRecency, weightPath, query = '',
-      searchChunks = false, searchSymbols = false, searchModules = false, branch,
+      searchChunks = false, searchSymbols = false, searchModules = false, includeFiles = true, branch,
       negativeQueryEmbedding, negativeLambda, explain,
     } = options
 
@@ -77,7 +77,7 @@ export class PgVectorStore implements VectorStore {
     const negLambda = negativeLambda ?? 0.5
 
     let candidates: FileCandidate[] = []
-    candidates.push(...await this.queryFileCandidates(pool, queryVec, negVec, model, branch, poolSize))
+    if (includeFiles) candidates.push(...await this.queryFileCandidates(pool, queryVec, negVec, model, branch, poolSize))
     if (searchChunks) candidates.push(...await this.queryChunkCandidates(pool, queryVec, model, branch, poolSize))
     if (searchSymbols) candidates.push(...await this.querySymbolCandidates(pool, queryVec, model, branch, poolSize))
     if (searchModules) candidates.push(...await this.queryModuleCandidates(pool, queryVec, model, poolSize))

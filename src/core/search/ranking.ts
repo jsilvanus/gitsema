@@ -77,4 +77,17 @@ export function renderFirstSeenResults(results: SearchResult[], showHeadings = t
 	return renderResults(results, showHeadings)
 }
 
+/**
+ * Renders distinct per-level result lists (Phase 136) as separate labeled
+ * text sections, e.g. `== file ==` / `== chunk ==` / `== symbol ==`, in the
+ * order the levels appear in `resultsByLevel`.
+ */
+export function renderResultsByLevel(resultsByLevel: Record<string, SearchResult[]>, showHeadings = true): string {
+	const sections: string[] = []
+	for (const [level, results] of Object.entries(resultsByLevel)) {
+		sections.push(`== ${level} ==\n${renderResults(results, showHeadings)}`)
+	}
+	return sections.join('\n\n')
+}
+
 

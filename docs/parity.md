@@ -192,6 +192,7 @@ This table shows which tools/commands are available in which interface. A checkm
 
 **CLI-only gaps (not in Guide/MCP):**
 - `index doctor`, `graph path`, `graph relate`, `graph similar`, `graph unused`, `blast-radius`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`, `co-change`, `deps`, `cycles`, and all maintenance subcommands
+- `search --merge-levels` / distinct per-level result lists (Phase 136): the CLI's `search` command is the only interface where combining 2+ of `--chunks`/`--level symbol`/`--level module` at once (or a Phase 77 model-level-fallback union) returns separate labeled per-level lists by default, with `--merge-levels` opting back into one shared-cutoff list. The MCP `semantic_search` tool and the HTTP `search` route can still hit the same multi-level-active condition (e.g. `level: 'symbol', chunks: true`) but only expose the pre-Phase-136 single merged-list behavior — no equivalent flag/param was added to either, since both have their own independent, simpler result-shape (MCP returns a rendered text blob; HTTP returns a flat JSON array) that would need a compatible-breaking shape change to carry labeled per-level lists. Deferred rather than done partially; see `docs/PLAN.md` Phase 136.
 
 **HTTP gaps:**
 - Most graph commands (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`)
@@ -265,6 +266,7 @@ This table shows less common flags used by specific commands or command groups.
 | `--chunks` | `search`, `code-search`, `first-seen` | bool | false | Include chunk-level embeddings in results |
 | `--include-commits` | `search`, `first-seen` | bool | false | Also search commit message embeddings |
 | `--annotate-clusters` | `search` | bool | false | Annotate each result with cluster label |
+| `--merge-levels` | `search` | bool | false | Merge active search levels into one shared-cutoff ranked list (pre-Phase-136 behavior) instead of separate per-level lists; only meaningful when 2+ of {chunk, symbol, module} are active at once (Phase 136) |
 | `--not-like` | `search` | string | — | Negative example query (subtract from score) |
 | `--lambda` | `search` | float | 0.5 | Weight for negative example subtraction |
 | `--early-cut` | `search` | int | 0 | Limit candidate pool to n random samples |

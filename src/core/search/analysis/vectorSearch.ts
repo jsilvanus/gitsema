@@ -183,6 +183,15 @@ export interface VectorSearchOptions {
   searchChunks?: boolean
   searchSymbols?: boolean
   searchModules?: boolean
+  /**
+   * Whether to include the base whole-file/blob candidate pool (`embeddings`
+   * table). Defaults to `true` for backward compatibility — set to `false`
+   * to isolate a search to only the levels selected by `searchChunks`/
+   * `searchSymbols`/`searchModules`, so that level gets its own independent
+   * candidate pool and topK cutoff instead of being merged against file-level
+   * matches (Phase 136).
+   */
+  includeFiles?: boolean
   branch?: string
   negativeQueryEmbedding?: Embedding
   negativeLambda?: number
@@ -211,7 +220,7 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
   const {
     topK = 10, model, recent = false, alpha = 0.8, before, after,
     weightVector, weightRecency, weightPath, weightStructural, structuralScores, query = '',
-    searchChunks = false, searchSymbols = false, searchModules = false, branch,
+    searchChunks = false, searchSymbols = false, searchModules = false, includeFiles = true, branch,
     negativeQueryEmbedding, negativeLambda, explain, earlyCut = 0,
     queryText, noCache = false, allowedHashes,
   } = options
@@ -240,7 +249,7 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
   const cacheKeyOptions: Record<string, unknown> = {
     topK, model, recent, alpha, before, after,
     weightVector, weightRecency, weightPath, weightStructural, query,
-    searchChunks, searchSymbols, searchModules, branch,
+    searchChunks, searchSymbols, searchModules, includeFiles, branch,
     negativeLambda, explain, earlyCut,
     // §11.1 — include a deterministic fingerprint of allowedHashes so that
     // two calls with the same query but different filter sets (e.g. different
@@ -270,31 +279,35 @@ export async function vectorSearch(queryEmbedding: Embedding, options: VectorSea
   const { db, rawDb } = getActiveSession()
   const AUTO_CANDIDATE_LIMIT = FILE_CAP
 
-  const baseQuery = db.select({
-    blobHash: embeddings.blobHash,
-    vector: embeddings.vector,
-    quantized: embeddings.quantized,
-    quantMin: embeddings.quantMin,
-    quantScale: embeddings.quantScale,
-  }).from(embeddings)
+  let candidatePool: CandidateRow[] = []
 
-  const conditions: SQL[] = []
-  if (model) conditions.push(eq(embeddings.model, model))
-  if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+  if (includeFiles) {
+    const baseQuery = db.select({
+      blobHash: embeddings.blobHash,
+      vector: embeddings.vector,
+      quantized: embeddings.quantized,
+      quantMin: embeddings.quantMin,
+      quantScale: embeddings.quantScale,
+    }).from(embeddings)
 
-  let filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
-  if (earlyCut === 0 && !allowedHashes) {
-    filteredQuery = (filteredQuery.orderBy(sql`RANDOM()`).limit(AUTO_CANDIDATE_LIMIT)) as typeof filteredQuery
+    const conditions: SQL[] = []
+    if (model) conditions.push(eq(embeddings.model, model))
+    if (branch) conditions.push(sql`${embeddings.blobHash} IN (SELECT blob_hash FROM blob_branches WHERE branch_name = ${branch})`)
+
+    let filteredQuery = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
+    if (earlyCut === 0 && !allowedHashes) {
+      filteredQuery = (filteredQuery.orderBy(sql`RANDOM()`).limit(AUTO_CANDIDATE_LIMIT)) as typeof filteredQuery
+    }
+    const allRows = filteredQuery.all()
+
+    candidatePool = allRows.map((r) => ({
+      blobHash: r.blobHash,
+      vector: r.vector as Buffer,
+      quantized: r.quantized ?? null,
+      quantMin: r.quantMin ?? null,
+      quantScale: r.quantScale ?? null,
+    }))
   }
-  const allRows = filteredQuery.all()
-
-  let candidatePool: CandidateRow[] = allRows.map((r) => ({
-    blobHash: r.blobHash,
-    vector: r.vector as Buffer,
-    quantized: r.quantized ?? null,
-    quantMin: r.quantMin ?? null,
-    quantScale: r.quantScale ?? null,
-  }))
 
   if (allowedHashes) {
     candidatePool = candidatePool.filter((r) => allowedHashes.has(r.blobHash))
@@ -609,7 +622,7 @@ export async function vectorSearchWithAnn(
     before: options.before, after: options.after,
     weightVector: options.weightVector, weightRecency: options.weightRecency, weightPath: options.weightPath,
     query: options.query, searchChunks: options.searchChunks, searchSymbols: options.searchSymbols,
-    searchModules: options.searchModules, branch: options.branch,
+    searchModules: options.searchModules, includeFiles: options.includeFiles, branch: options.branch,
     negativeLambda: options.negativeLambda, explain: options.explain, earlyCut: options.earlyCut,
   }
   const cacheKey = buildCacheKey(

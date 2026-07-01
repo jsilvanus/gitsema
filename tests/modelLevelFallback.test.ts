@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { resolveModelLevelChunker } from '../src/cli/commands/index.js'
-import { mapModelLevelToSearchLevel, unionModelLevels } from '../src/cli/commands/search.js'
+import { mapModelLevelToSearchLevel, unionModelLevels, resolveExtraLevels, isMultiLevelActive } from '../src/cli/commands/search.js'
 
 describe('resolveModelLevelChunker (index start)', () => {
   it('returns undefined when neither model has a saved level', () => {
@@ -107,5 +107,55 @@ describe('unionModelLevels (search, dual-model)', () => {
     expect(unionModelLevels('chunk', 'module')).toEqual({
       searchChunks: true, searchSymbols: false, searchModules: true, resolved: true,
     })
+  })
+})
+
+describe('resolveExtraLevels / isMultiLevelActive (search, Phase 136 distinct per-level lists)', () => {
+  it('returns no extra levels when none of the flags are set', () => {
+    expect(resolveExtraLevels(false, false, false)).toEqual([])
+  })
+
+  it('returns one isolated chunk-level spec when only searchChunks is set', () => {
+    const levels = resolveExtraLevels(true, false, false)
+    expect(levels).toEqual([
+      { name: 'chunk', flags: { searchChunks: true, searchSymbols: false, searchModules: false, includeFiles: false } },
+    ])
+    expect(isMultiLevelActive(levels)).toBe(false)
+  })
+
+  it('returns one isolated symbol-level spec when only searchSymbols is set', () => {
+    const levels = resolveExtraLevels(false, true, false)
+    expect(levels).toEqual([
+      { name: 'symbol', flags: { searchChunks: false, searchSymbols: true, searchModules: false, includeFiles: false } },
+    ])
+    expect(isMultiLevelActive(levels)).toBe(false)
+  })
+
+  it('returns one isolated module-level spec when only searchModules is set', () => {
+    const levels = resolveExtraLevels(false, false, true)
+    expect(levels).toEqual([
+      { name: 'module', flags: { searchChunks: false, searchSymbols: false, searchModules: true, includeFiles: false } },
+    ])
+    expect(isMultiLevelActive(levels)).toBe(false)
+  })
+
+  it('marks multi-level active when chunk and symbol are both set (e.g. --chunks --level symbol)', () => {
+    const levels = resolveExtraLevels(true, true, false)
+    expect(levels.map((l) => l.name)).toEqual(['chunk', 'symbol'])
+    expect(isMultiLevelActive(levels)).toBe(true)
+  })
+
+  it('marks multi-level active when all three levels are set', () => {
+    const levels = resolveExtraLevels(true, true, true)
+    expect(levels.map((l) => l.name)).toEqual(['chunk', 'symbol', 'module'])
+    expect(isMultiLevelActive(levels)).toBe(true)
+  })
+
+  it('each extra level isolates its pool via includeFiles: false and only its own flag', () => {
+    for (const level of resolveExtraLevels(true, true, true)) {
+      expect(level.flags.includeFiles).toBe(false)
+      const trueFlags = [level.flags.searchChunks, level.flags.searchSymbols, level.flags.searchModules].filter(Boolean)
+      expect(trueFlags).toEqual([true])
+    }
   })
 })

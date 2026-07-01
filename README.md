@@ -293,6 +293,8 @@ public repo are throttled to one per `auth.minReindexIntervalSeconds` /
 | `--weight-path <n>` | `0.1` | Path-relevance weight |
 | `--group <mode>` | — | Collapse results by `file` \| `module` \| `commit` |
 | `--chunks` | off | Include chunk-level embeddings |
+| `--level <level>` | `file` | Search granularity: `file` \| `chunk` \| `symbol` \| `module` |
+| `--merge-levels` | off | When 2+ of {chunk, symbol, module} are active at once, merge them into one shared-cutoff ranked list instead of the default separate per-level lists (pre-Phase-136 behavior) |
 | `--hybrid` | off | Combine vector + BM25 (FTS5); requires prior `gitsema index rebuild-fts` for older data |
 | `--bm25-weight <n>` | `0.3` | BM25 weight in hybrid score |
 | `--branch <name>` | — | Restrict results to blobs seen on this branch |

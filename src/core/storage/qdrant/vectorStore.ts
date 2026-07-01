@@ -111,7 +111,7 @@ export class QdrantVectorStore implements VectorStore {
     const {
       topK = 10, model, recent = false, alpha = 0.8, before, after,
       weightVector, weightRecency, weightPath, query = '',
-      searchChunks = false, searchSymbols = false, searchModules = false, branch,
+      searchChunks = false, searchSymbols = false, searchModules = false, includeFiles = true, branch,
       explain,
     } = options
 
@@ -125,7 +125,7 @@ export class QdrantVectorStore implements VectorStore {
     const dims = queryEmbedding.length
 
     let candidates: FileCandidate[] = []
-    candidates.push(...await this.queryCandidates('file', queryEmbedding, dims, model, poolSize))
+    if (includeFiles) candidates.push(...await this.queryCandidates('file', queryEmbedding, dims, model, poolSize))
     if (searchChunks) candidates.push(...await this.queryCandidates('chunk', queryEmbedding, dims, model, poolSize))
     if (searchSymbols) candidates.push(...await this.queryCandidates('symbol', queryEmbedding, dims, model, poolSize))
     if (searchModules) candidates.push(...await this.queryCandidates('module', queryEmbedding, dims, model, poolSize))

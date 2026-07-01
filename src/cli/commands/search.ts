@@ -5,7 +5,7 @@ import { embedQuery as sharedEmbedQuery } from '../../core/embedding/embedQuery.
 import type { Embedding, SearchResult } from '../../core/models/types.js'
 import { vectorSearch, vectorSearchWithAnn, mergeSearchResults, type VectorSearchOptions } from '../../core/search/analysis/vectorSearch.js'
 import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
-import { renderResults, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
+import { renderResults, renderResultsByLevel, groupResults, formatScore, formatDate, shortHash, type GroupMode } from '../../core/search/ranking.js'
 import { parseBooleanQuery, mergeOr, mergeAnd } from '../../core/search/analysis/booleanSearch.js'
 import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
 import { remoteSearch } from '../../client/remoteClient.js'
@@ -25,6 +25,39 @@ const INDEX_LEVEL_TO_SEARCH_LEVEL: Record<string, string> = { blob: 'file', file
 export function mapModelLevelToSearchLevel(level: string | undefined): string | undefined {
   if (!level) return undefined
   return INDEX_LEVEL_TO_SEARCH_LEVEL[level] ?? level
+}
+
+/** Level-isolating flags for one `runLevelPipeline()` call (Phase 136). */
+export type LevelFlags = Pick<VectorSearchOptions, 'searchChunks' | 'searchSymbols' | 'searchModules' | 'includeFiles'>
+
+export interface LevelSpec {
+  name: 'chunk' | 'symbol' | 'module'
+  flags: LevelFlags
+}
+
+/**
+ * Resolves which non-file levels are active given the three additive
+ * `vectorSearch()` flags, each paired with the isolating flag set
+ * (`includeFiles: false`, only its own flag `true`) a per-level search call
+ * needs to get a candidate pool scoped to just that level (Phase 136).
+ */
+export function resolveExtraLevels(searchChunksFlag: boolean, searchSymbolsFlag: boolean, searchModulesFlag: boolean): LevelSpec[] {
+  const extraLevels: LevelSpec[] = []
+  if (searchChunksFlag) extraLevels.push({ name: 'chunk', flags: { searchChunks: true, searchSymbols: false, searchModules: false, includeFiles: false } })
+  if (searchSymbolsFlag) extraLevels.push({ name: 'symbol', flags: { searchChunks: false, searchSymbols: true, searchModules: false, includeFiles: false } })
+  if (searchModulesFlag) extraLevels.push({ name: 'module', flags: { searchChunks: false, searchSymbols: false, searchModules: true, includeFiles: false } })
+  return extraLevels
+}
+
+/**
+ * True when 2+ of {chunk, symbol, module} are active at once — the trigger
+ * for Phase 136's default per-level-list separation (an explicit combination
+ * like `--chunks --level symbol`, or the Phase 77 Goal #4 model-level-fallback
+ * union). A single active non-file level keeps the pre-Phase-136 merged
+ * behavior (file + that one level in one ranked list) unchanged.
+ */
+export function isMultiLevelActive(extraLevels: LevelSpec[]): boolean {
+  return extraLevels.length >= 2
 }
 
 export interface LevelUnionResult {
@@ -89,6 +122,12 @@ export interface SearchCommandOptions {
   includeCommits?: boolean
   /** Search granularity level: 'file' (default), 'chunk', 'symbol', or 'module'. */
   level?: string
+  /**
+   * When true, merge all active search levels into one shared-cutoff ranked
+   * list (pre-Phase-136 behavior) instead of returning separate per-level
+   * lists. Only meaningful when more than one non-file level is active.
+   */
+  mergeLevels?: boolean
   /**
    * When true, annotate each result with the cluster label from `cluster_assignments`
    * (requires a prior `gitsema clusters` run to have populated the table).
@@ -439,15 +478,19 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
   }
 
-  let results: SearchResult[] | undefined
+  let results: SearchResult[] = []
+  let resultsByLevel: Record<string, SearchResult[]> | undefined
   const _searchStartMs = Date.now()
 
-  if (options.hybrid) {
-    // Hybrid search: BM25 (FTS5) + vector similarity (no ANN pre-filter)
-    results = await hybridSearch(query, textEmbedding, { ...searchOpts, bm25Weight })
-  } else if (dualModel && codeProvider) {
-    // Dual-model search: embed with both models and merge results
-    let codeEmbedding: Embedding
+  // Level-invariant work, hoisted above the per-level loop and computed (at
+  // most) once regardless of how many levels are searched below: dual-model
+  // code embedding, the second half of a boolean AND/OR query, --or/--and
+  // query embeddings, and the --repos multi-repo result set. None of these
+  // depend on which level flags a given `runLevelPipeline()` call uses, so
+  // recomputing them per level (as an earlier draft of this phase did) would
+  // mean redundant embedding calls and DB round-trips per extra level.
+  let codeEmbedding: Embedding | undefined
+  if (dualModel && codeProvider) {
     try {
       codeEmbedding = await sharedEmbedQuery(codeProvider, query, { noCache })
     } catch (err) {
@@ -456,128 +499,199 @@ export async function searchCommand(query: string, options: SearchCommandOptions
       process.exit(1)
       throw err
     }
-    const topKExtended = topK * 2
-    const textResults = await vectorSearchWithAnn(textEmbedding, { ...searchOpts, model: textModel, topK: topKExtended, useVss: !!options.vss })
-    const codeResults = await vectorSearchWithAnn(codeEmbedding, { ...searchOpts, model: codeModel, topK: topKExtended, useVss: !!options.vss })
-    results = mergeSearchResults(textResults, codeResults, topK)
-  } else {
-    // Single-model: vectorSearchWithAnn auto-routes through HNSW when a VSS
-    // index exists (--vss flag) or when the index exceeds GITSEMA_VSS_THRESHOLD.
-    results = await vectorSearchWithAnn(textEmbedding, { ...searchOpts, useVss: !!options.vss })
   }
 
-  // --repos: merge results across registered repositories
+  const parsedBool = parseBooleanQuery(query)
+  let boolPartBEmbedding: Embedding | undefined
+  if (parsedBool) {
+    try {
+      boolPartBEmbedding = await sharedEmbedQuery(textProvider, parsedBool.parts[1], { noCache })
+    } catch (err) {
+      // On failure, runLevelPipeline falls back to its precomputed results below
+    }
+  }
+
+  let orEmbedding: Embedding | undefined
+  if (options.or) {
+    try {
+      orEmbedding = await sharedEmbedQuery(textProvider, options.or, { noCache })
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  let andEmbedding: Embedding | undefined
+  if (options.and) {
+    try {
+      andEmbedding = await sharedEmbedQuery(textProvider, options.and, { noCache })
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  let repoResults: SearchResult[] | undefined
   if (options.repos) {
     try {
       const { multiRepoSearch } = await import('../../core/indexing/repoRegistry.js')
       const { getActiveSession } = await import('../../core/db/sqlite.js')
       const session = getActiveSession()
       const repoIds = options.repos.split(',').map((s) => s.trim()).filter(Boolean)
-      const multiResults = await multiRepoSearch(session, Array.from(textEmbedding) as number[], {
+      repoResults = await multiRepoSearch(session, Array.from(textEmbedding) as number[], {
         repoIds: repoIds.length > 0 ? repoIds : undefined,
         topK,
         model: textModel,
       })
-      // Merge local results with multi-repo results
-      const combined = [...results, ...multiResults]
-      combined.sort((a, b) => b.score - a.score)
-      results = combined.slice(0, topK)
     } catch (err) {
       console.error(`Warning: multi-repo search failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
-  // Support boolean/composite queries: detect "A AND B" or "A OR B" in the main query
-  const parsedBool = parseBooleanQuery(query)
-  if (parsedBool) {
-    try {
-      const partA = parsedBool.parts[0]
-      const partB = parsedBool.parts[1]
-      const embA = textEmbedding
-      const embB = await sharedEmbedQuery(textProvider, partB, { noCache })
-      const resA = await vectorSearch(embA, { ...searchOpts, topK })
-      const resB = await vectorSearch(embB, { ...searchOpts, topK })
-      results = parsedBool.op === 'OR' ? mergeOr(resA, resB, topK) : mergeAnd(resA, resB, topK)
-    } catch (err) {
-      // On failure fall back to the precomputed results
+  // Runs the full single-list search pipeline (vector/hybrid/dual-model search,
+  // --repos merge, boolean AND/OR query, --or/--and, --group, --annotate-clusters)
+  // scoped to one set of level flags. Used once with the union of active flags
+  // for the merged (pre-Phase-136 / --merge-levels) path, and once per level
+  // — each isolated to a single flag via `includeFiles: false` — for the new
+  // default per-level-list path, so every call applies these options
+  // identically to how the single merged call always has (Phase 136).
+  async function runLevelPipeline(levelFlags: LevelFlags): Promise<SearchResult[]> {
+    const levelSearchOpts: VectorSearchOptions = { ...searchOpts, ...levelFlags }
+    let levelResults: SearchResult[]
+
+    if (options.hybrid) {
+      levelResults = await hybridSearch(query, textEmbedding, { ...levelSearchOpts, bm25Weight })
+    } else if (dualModel && codeProvider && codeEmbedding) {
+      const topKExtended = topK * 2
+      const textResults = await vectorSearchWithAnn(textEmbedding, { ...levelSearchOpts, model: textModel, topK: topKExtended, useVss: !!options.vss })
+      const codeResults = await vectorSearchWithAnn(codeEmbedding, { ...levelSearchOpts, model: codeModel, topK: topKExtended, useVss: !!options.vss })
+      levelResults = mergeSearchResults(textResults, codeResults, topK)
+    } else {
+      // Single-model: vectorSearchWithAnn auto-routes through HNSW when a VSS
+      // index exists (--vss flag) or when the index exceeds GITSEMA_VSS_THRESHOLD.
+      levelResults = await vectorSearchWithAnn(textEmbedding, { ...levelSearchOpts, useVss: !!options.vss })
     }
+
+    // --repos: merge results across registered repositories (computed once, above)
+    if (repoResults) {
+      const combined = [...levelResults, ...repoResults]
+      combined.sort((a, b) => b.score - a.score)
+      levelResults = combined.slice(0, topK)
+    }
+
+    // Support boolean/composite queries: detect "A AND B" or "A OR B" in the main query
+    if (parsedBool && boolPartBEmbedding) {
+      try {
+        const resA = await vectorSearch(textEmbedding, { ...levelSearchOpts, topK })
+        const resB = await vectorSearch(boolPartBEmbedding, { ...levelSearchOpts, topK })
+        levelResults = parsedBool.op === 'OR' ? mergeOr(resA, resB, topK) : mergeAnd(resA, resB, topK)
+      } catch (err) {
+        // On failure fall back to the precomputed results
+      }
+    }
+
+    // CLI flags: --or / --and to combine with an additional query
+    if (orEmbedding) {
+      try {
+        const orResults = await vectorSearch(orEmbedding, { ...levelSearchOpts, topK })
+        levelResults = mergeOr(levelResults, orResults, topK)
+      } catch (err) {
+        // ignore
+      }
+    }
+    if (andEmbedding) {
+      try {
+        const andResults = await vectorSearch(andEmbedding, { ...levelSearchOpts, topK })
+        levelResults = mergeAnd(levelResults, andResults, topK)
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    if (groupMode) {
+      levelResults = groupResults(levelResults, groupMode, topK)
+    }
+
+    // --annotate-clusters: join each result with its cluster label (if a clustering run exists)
+    if (options.annotateClusters && levelResults.length > 0) {
+      try {
+        const rawDb = getRawDb()
+        const hashes = levelResults.map((r) => `'${r.blobHash}'`).join(',')
+        const rows = rawDb.prepare(
+          `SELECT ca.blob_hash, bc.label FROM cluster_assignments ca
+           JOIN blob_clusters bc ON bc.id = ca.cluster_id
+           WHERE ca.blob_hash IN (${hashes})`
+        ).all() as Array<{ blob_hash: string; label: string }>
+        const labelMap = new Map(rows.map((r) => [r.blob_hash, r.label]))
+        for (const r of levelResults) {
+          if (labelMap.has(r.blobHash)) r.clusterLabel = labelMap.get(r.blobHash)
+        }
+      } catch {
+        // cluster_assignments table may not exist (no clustering run yet) — silently skip
+      }
+    }
+
+    return levelResults
   }
 
-  // CLI flags: --or / --and to combine with an additional query
-  if (options.or) {
-    try {
-      const orEmb = await sharedEmbedQuery(textProvider, options.or, { noCache })
-      const orResults = await vectorSearch(orEmb, { ...searchOpts, topK })
-      results = mergeOr(results, orResults, topK)
-    } catch (err) {
-      // ignore
+  // Phase 136: whenever more than one of {chunk, symbol, module} is active at
+  // once — an explicit combination like `--chunks --level symbol`, or the
+  // Phase 77 Goal #4 model-level-fallback union when the text/code models'
+  // saved levels disagree — separate, independently-ranked lists become the
+  // default (one isolated `runLevelPipeline()` call per level, each with its
+  // own topK cutoff) instead of merging every level into one shared-cutoff
+  // ranked list. `--merge-levels` opts back into the pre-Phase-136 single
+  // merged call. A single active level (the common case) is unaffected.
+  const extraLevels = resolveExtraLevels(searchChunksFlag, searchSymbolsFlag, searchModulesFlag)
+  const multiLevelActive = isMultiLevelActive(extraLevels)
+
+  if (multiLevelActive && !options.mergeLevels) {
+    resultsByLevel = {}
+    resultsByLevel.file = await runLevelPipeline({ searchChunks: false, searchSymbols: false, searchModules: false, includeFiles: true })
+    for (const level of extraLevels) {
+      resultsByLevel[level.name] = await runLevelPipeline(level.flags)
     }
-  }
-  if (options.and) {
-    try {
-      const andEmb = await sharedEmbedQuery(textProvider, options.and, { noCache })
-      const andResults = await vectorSearch(andEmb, { ...searchOpts, topK })
-      results = mergeAnd(results, andResults, topK)
-    } catch (err) {
-      // ignore
-    }
+  } else {
+    results = await runLevelPipeline({ searchChunks: searchChunksFlag, searchSymbols: searchSymbolsFlag, searchModules: searchModulesFlag, includeFiles: true })
   }
 
-  if (groupMode) {
-    results = groupResults(results, groupMode, topK)
-  }
-
-  // Optional commit message search
+  // Optional commit message search (level-independent — commit messages aren't file/chunk/symbol/module blobs)
   let commitResults
   if (options.includeCommits) {
     commitResults = await searchCommits(textEmbedding, { topK, model: textModel })
   }
 
-  // --annotate-clusters: join each result with its cluster label (if a clustering run exists)
-  if (options.annotateClusters && results.length > 0) {
-    try {
-      const rawDb = getRawDb()
-      const hashes = results.map((r) => `'${r.blobHash}'`).join(',')
-      const rows = rawDb.prepare(
-        `SELECT ca.blob_hash, bc.label FROM cluster_assignments ca
-         JOIN blob_clusters bc ON bc.id = ca.cluster_id
-         WHERE ca.blob_hash IN (${hashes})`
-      ).all() as Array<{ blob_hash: string; label: string }>
-      const labelMap = new Map(rows.map((r) => [r.blob_hash, r.label]))
-      for (const r of results) {
-        if (labelMap.has(r.blobHash)) r.clusterLabel = labelMap.get(r.blobHash)
-      }
-    } catch {
-      // cluster_assignments table may not exist (no clustering run yet) — silently skip
-    }
-  }
-
-    // Unified output handling (--out, or legacy --dump / --html)
+  // Unified output handling (--out, or legacy --dump / --html). The JSON
+  // payload shape intentionally differs (`resultsByLevel` vs. `results`) so
+  // existing single-list JSON consumers see an unchanged shape, but the
+  // HTML/text/explain-llm/narrate/slow-query-hint logic below is otherwise
+  // identical for both paths and so is written once against `allResults`
+  // (the flattened per-level lists, or `results` unchanged when not
+  // multi-level).
   const sinks = resolveOutputs({ out: options.out, dump: options.dump, html: options.html })
+  const allResults: SearchResult[] = resultsByLevel ? Object.values(resultsByLevel).flat() : results
 
   // JSON sink
   const jsonSink = getSink(sinks, 'json')
   if (jsonSink) {
-    const payload: Record<string, unknown> = { results }
+    const payload: Record<string, unknown> = resultsByLevel ? { resultsByLevel } : { results }
     if (commitResults) payload.commits = commitResults
     writeToSink(jsonSink, JSON.stringify(payload, null, 2), 'Search results JSON')
     if (!hasSinkFormat(sinks, 'text') && !hasSinkFormat(sinks, 'html')) return
   }
 
-  // HTML sink
+  // HTML sink: for per-level results, concatenates all levels (each result is still tagged with its `kind`)
   const htmlSink = getSink(sinks, 'html')
   if (htmlSink) {
     const { renderSearchHtml } = await import('../../core/viz/htmlRenderer.js')
-    const html = renderSearchHtml(results, query)
+    const html = renderSearchHtml(allResults, query)
     const outFile = htmlSink.file ?? 'search.html'
     writeFileSync(outFile, html, 'utf8')
     console.log(`Search HTML written to: ${outFile}`)
     if (!hasSinkFormat(sinks, 'text')) return
   }
 
-  // Default text output
+  // Default text output: one labeled section per level, or a flat list when not multi-level
   if (hasSinkFormat(sinks, 'text') || (!jsonSink && !htmlSink)) {
-    console.log(renderResults(results, !options.noHeadings))
+    console.log(resultsByLevel ? renderResultsByLevel(resultsByLevel, !options.noHeadings) : renderResults(results, !options.noHeadings))
 
     if (commitResults) {
       console.log('\nCommit matches:')
@@ -585,16 +699,16 @@ export async function searchCommand(query: string, options: SearchCommandOptions
     }
 
     // LLM-ready provenance citations (--explain-llm)
-    if (options.explainLlm && results.length > 0) {
+    if (options.explainLlm && allResults.length > 0) {
       console.log('\n=== Provenance Citations (LLM Context) ===')
-      console.log(formatExplainForLlm(results, { includeSnippet: true }))
+      console.log(formatExplainForLlm(allResults, { includeSnippet: true }))
     }
 
     // LLM narration of search results
-    if (options.narrate && results.length > 0) {
+    if (options.narrate && allResults.length > 0) {
       console.log('')
       console.log('=== LLM Search Narrative ===')
-      const narrative = await narrateSearchResults(query, results)
+      const narrative = await narrateSearchResults(query, allResults)
       console.log(narrative)
     }
 

@@ -613,13 +613,13 @@ A new `--chunker prose` strategy, orthogonal to today's three:
       level" (vs. e.g. only embedding leaf-level + one rollup tier).
 - [ ] **Interaction with search-side "level" vocabulary.** Phase 77 introduced
       `file`/`chunk`/`symbol`/`module` as the search granularity vocabulary,
-      and Phase 136 (in planning) adds per-level separated result lists on
-      top of that. Does a "prose H2 chunk" just become another row in the
-      existing `chunk` search level, or does this need its own new
-      search-level concept (e.g. `heading1`/`heading2`) to let a query target
-      a specific heading depth? Worth sequencing this idea after Phase 136
-      lands so its per-level output machinery can inform the answer rather
-      than duplicating it.
+      and Phase 136 (✅ shipped — see `docs/PLAN.md`) added per-level
+      separated result lists on top of that. Does a "prose H2 chunk" just
+      become another row in the existing `chunk` search level, or does this
+      need its own new search-level concept (e.g. `heading1`/`heading2`) to
+      let a query target a specific heading depth? Phase 136's per-level
+      output machinery (`resolveExtraLevels()`/`runLevelPipeline()` in
+      `src/cli/commands/search.ts`) can now inform this design directly.
 - [ ] **File-type scoping.** What counts as "prose" for `--chunker prose`
       (extension list, or integration with the existing `getFileCategory()`
       code/text/other classification in `src/core/embedding/fileType.ts`)?
@@ -638,10 +638,10 @@ A new `--chunker prose` strategy, orthogonal to today's three:
   pipeline, and downstream interaction with search's level vocabulary.
 
 ### Prerequisites
-- None blocking to start designing, but interacts with Phase 136 (distinct
-  per-level search result lists, currently in `docs/PLAN.md`) — worth
-  sequencing design/implementation after that phase lands so this idea's
-  search-level questions build on its output rather than duplicating it.
+- None blocking to start designing. Phase 136 (distinct per-level search
+  result lists) has now shipped (see `docs/PLAN.md`), so this idea's
+  search-level questions can build directly on its output rather than
+  waiting on it.
 
 ---
 
