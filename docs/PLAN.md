@@ -5135,7 +5135,9 @@ byte-for-byte identical while fixing the crowding-out case the phase targeted.
   result shapes (MCP renders text directly; HTTP returns a flat JSON array)
   that would need a compatible-breaking shape change to carry per-level
   lists. Logged in `docs/parity.md` §"CLI-only gaps" rather than silently
-  left inconsistent.
+  left inconsistent. **Superseded:** this "avoid a breaking shape change"
+  tradeoff was later reversed (parity prioritized over API response
+  stability) and scheduled as Phase 138 — see that entry.
 - Tests: `tests/modelLevelFallback.test.ts` (pure resolver unit tests),
   `tests/ranking.test.ts` (`renderResultsByLevel`), new
   `tests/integration/searchLevelSeparation.test.ts` (proves the merged call
@@ -5143,6 +5145,506 @@ byte-for-byte identical while fixing the crowding-out case the phase targeted.
   `includeFiles: false` call keeps it). `pnpm build && pnpm test` green (1393
   passed).
 - Changeset added (`distinct-per-level-search-results.md`, minor).
+
+---
+
+### Phase 137 — Per-level result-list separation for `code-search`
+
+**Goal:** Extend Phase 136's per-level search result separation to
+`gitsema code-search`. Currently the CLI command
+(`src/cli/commands/codeSearch.ts`), the MCP `code_search` tool
+(`src/mcp/tools/search.ts`), and the Guide `code_search` tool
+(`src/core/narrator/guideTools.ts`) all still make one merged
+`vectorSearch()` call with `searchChunks`/`searchSymbols` derived from a
+`level` argument — exactly the pre-Phase-136 `search` pattern — and each
+defaults `level` to `'symbol'`, which sets **both** flags true
+simultaneously. Unlike `search`'s opt-in multi-level condition, this means
+every default, no-flag `code-search` invocation already hits the
+crowding-out bug Phase 136 fixed for `search`. Found and logged during the
+Phase 136 parity audit (`docs/parity.md` §1 "CLI-only gaps" / §6 roadmap).
+
+**Design:** No separate design doc — scoped directly from the parity-audit
+finding. Approach: reuse Phase 136's already-shipped mechanism rather than
+re-deriving it — `vectorSearch()`'s `includeFiles` option for isolating a
+level's candidate pool, and the per-level-list pattern
+(`resolveExtraLevels()` / `isMultiLevelActive()` / `runLevelPipeline()` in
+`src/cli/commands/search.ts`) — so `code-search`'s three call sites (CLI,
+MCP, Guide) each run one isolated `vectorSearch()` call per active level and
+return/render separate per-level lists instead of one merged call.
+
+**Why this is the right fix, precisely (resolved during planning
+discussion):** `vectorSearch()`'s final ranking dedups strictly by
+`blobHash` (`bestByBlob` in `vectorSearch.ts`) — every candidate from one
+blob (whole-file, every chunk, every symbol) collapses to a single
+highest-scoring row before `topK` is applied. So the risk is **not** that a
+function shows up twice (once as a chunk hit, once as a symbol hit) — that's
+structurally impossible, the per-blob dedup already prevents it. The real
+risk is a **scale mismatch across pools**: `code-search`'s three candidate
+pools embed systematically different text for a query snippet to match
+against — whole-file raw text, raw chunk excerpts, and symbol text wrapped
+by `buildEnrichedText()` (`// file: <path> lines <a>-<b>` + `// <kind>:
+<name>` + code prepended, in `indexer.ts`). Cosine scores from these three
+framings aren't on a directly comparable scale. Since each file's one
+surviving candidate is "whichever pool happened to score highest for that
+file," and `code-search` then ranks *across files* on that same shared
+scale, a file whose best evidence is chunk-framed can get crowded out of
+`topK` by files whose best evidence is symbol-framed (or vice versa) purely
+from embedding-framing bias, not relevance. That is exactly the class of bug
+Phase 136 built per-level isolation to fix — just operating file-vs-file
+here instead of span-vs-span in `search`'s multi-level case.
+
+**Resolved design decisions (confirmed in conversation, reversing an
+earlier over-narrowed draft of this phase):**
+- **Default to separate per-level lists for `code-search`, matching
+  `search`'s Phase 136 default.** `--level symbol` (the default) isolates
+  the chunk pool and the symbol pool into two independently-ranked,
+  independently-cut lists instead of one merged cross-pool ranking. This is
+  a visible output-shape change for `code-search`'s current default — unlike
+  `search`, where the common single-level case was left byte-for-byte
+  unchanged — because `code-search`'s default already combines two pools
+  unconditionally (`level: 'symbol'` implies `searchChunks: true` *and*
+  `searchSymbols: true`), so there is no single-level "common case" to
+  preserve here the way there was for `search`.
+- **No new `--chunks`-style combinator flag.** `code-search` has only one
+  built-in multi-pool combination (`--level symbol`'s chunk+symbol pair) —
+  not a user-driven ad hoc combination like `search --chunks --level
+  symbol` — so there's nothing to combine. Add a `--merge-levels` flag
+  (same name/semantics as `search`'s, for consistency) to opt back into the
+  pre-Phase-137 single merged ranking, rather than inventing a different
+  combinator surface.
+- **MCP/Guide `code_search` adopt the same structured per-level shape as
+  CLI — reversed from an earlier draft of this phase.** Cross-interface
+  parity is prioritized over preserving the existing flat-array response
+  shape: MCP's `code_search` returns a `results_by_level` object (keyed by
+  level, mirroring CLI's `--out json` `resultsByLevel` shape) instead of a
+  flat `results: [...]` array when the multi-level condition is active, and
+  Guide's `code_search` tool result object gets the equivalent structure.
+  This is a breaking response-shape change for existing MCP/Guide callers of
+  `code_search`, accepted deliberately rather than worked around with an
+  additive-only compromise.
+
+**Scope:**
+- CLI `gitsema code-search <snippet>`: isolate the chunk vs. symbol
+  candidate pools by default; render as separate labeled lists (reuse
+  `renderResultsByLevel()` from Phase 136); add `--merge-levels` to opt back
+  into one merged list.
+- MCP `code_search` tool (`src/mcp/tools/search.ts`): same separation;
+  response shape changes to `results_by_level` (breaking change, see
+  resolved decision above).
+- Guide `code_search` tool (`src/core/narrator/guideTools.ts`): same
+  separation and shape change for the tool's returned result object,
+  consumed by the agentic tool-calling loop.
+- Test coverage: a unit test asserting the per-blob dedup claim above (one
+  row per blob survives regardless of originating pool) as a documented
+  invariant, plus integration coverage mirroring
+  `tests/integration/searchLevelSeparation.test.ts`'s crowding-out proof but
+  for cross-file chunk-vs-symbol pool scale mismatch (not cross-span
+  duplication, which cannot occur) in the `code-search` code path(s).
+- Update `docs/parity.md` (resolve the "`code-search` never received Phase
+  136's treatment" gap note and its §6 roadmap item once shipped),
+  `docs/features.md`, `README.md`.
+
+**Files likely touched:** `src/cli/commands/codeSearch.ts`,
+`src/mcp/tools/search.ts`, `src/core/narrator/guideTools.ts`,
+`src/core/search/ranking.ts` (if a shared per-level render/serialize helper
+needs generalizing beyond `search.ts`), `docs/parity.md`, `docs/features.md`,
+`README.md`, test files.
+
+**Status:** not started.
+
+---
+
+### Phase 138 — Full flag parity for `search`/`first-seen` on MCP and HTTP (widened)
+
+**Goal:** Originally scoped narrowly to reopening Phase 136's per-level
+deferral; **widened** after a full HTTP-vs-CLI flag audit (4 parallel
+subagents, see Phase 138–148 track intro below) found the MCP
+`semantic_search`/`code_search` tools and the HTTP `POST /search`/
+`POST /search/first-seen`/`POST /analysis/multi-repo-search` routes are
+missing most of `search`'s query-shaping flags, not just per-level
+separation. Per the "parity over API response stability" principle now
+recorded in `docs/parity.md` §4 and `CLAUDE.md`, close all of it — ship
+breaking response-shape changes where needed rather than leaving MCP/HTTP
+behind CLI.
+
+**Design:** No separate design doc — direct follow-on to Phase 136/137 plus
+the Phase 138–148 parity audit. Approach: (a) apply the identical
+`includeFiles`/`resolveExtraLevels()`/`isMultiLevelActive()`/
+`runLevelPipeline()`-style per-level isolation already shipped for CLI
+`search` (Phase 136) to MCP/HTTP; (b) add the remaining missing flags to
+both interfaces' schemas and wire them into the same `vectorSearch()`/
+`hybridSearch()` options CLI already uses (no new core logic expected —
+CLI's own implementation already threads these through
+`VectorSearchOptions`).
+
+**Scope:**
+- **Per-level separation** (original scope): MCP `semantic_search` gets a
+  `module` level option (currently `file|chunk|symbol` only) and isolates
+  per-level pools when 2+ are active, returning `results_by_level` in that
+  case (breaking change, accepted). HTTP `POST /search` gets the same, as
+  `resultsByLevel`, plus a `mergeLevels` body param mirroring
+  `--merge-levels`.
+- **Missing query-shaping flags on `POST /search`** (found by audit):
+  negative-example scoring (`notLike`/`lambda`), boolean query composition
+  (`or`/`and`), `explain`, `explainLlm`, `expandQuery`, `annotateClusters`,
+  `vss` (ANN routing — also switch the route to `vectorSearchWithAnn()`),
+  `repos` (multi-repo — see next bullet), `model`/`textModel`/`codeModel`
+  per-request overrides, `earlyCut`, `noCache`.
+- **Missing flags on MCP `semantic_search`**: same set, translated to the
+  tool's snake_case param convention.
+- **`first-seen` (MCP `first_seen`, HTTP `POST /search/first-seen`)**: add
+  `vss`, `repos`, and `model`/`text_model`/`code_model` overrides.
+- **`multi-repo-search`**: `POST /analysis/multi-repo-search` is currently a
+  bare 4-param stub (`query`, `repoIds`, `topK`, `model`) versus CLI's
+  `search --repos <ids>`, which is the *same* underlying feature routed
+  through the full `search` flag surface. Resolve during implementation
+  whether to (a) enrich `/multi-repo-search` in place to accept the full
+  search option set, or (b) fold `repos` into `POST /search` directly (as
+  CLI does) and treat `/multi-repo-search` as a thin deprecated alias —
+  don't maintain two divergent partial implementations of the same feature.
+- Update `docs/parity.md` (§1, §2, §6) and `docs/features.md`/`README.md`.
+- Test coverage: HTTP route tests and MCP tool tests exercising each
+  restored flag plus the per-level/`mergeLevels` path.
+
+**Files likely touched:** `src/mcp/tools/search.ts`,
+`src/server/routes/search.ts`, `src/server/routes/analysis.ts`
+(`multi-repo-search`), `docs/parity.md`, `docs/features.md`, `README.md`,
+test files.
+
+**Status:** not started.
+
+---
+
+## Interface Parity Track (Phases 138–148)
+
+Scheduled from a full HTTP-vs-CLI (and, where relevant, MCP) flag/route
+audit run across the whole command surface — 4 parallel research subagents,
+one each covering `src/server/routes/analysis.ts` (22 routes), the
+search/evolution/graph routes, the remote/watch/guide/narrator routes, and
+a dedicated hunt for CLI commands with no HTTP or MCP exposure at all
+(cross-checked against `src/server/routes/protocol.ts`'s generic
+`POST /:operation` MCP-tool dispatcher, which covers several commands —
+`cluster-diff`, `cluster-timeline`, `file-change-points`, `code-search` —
+that have no *literal* named route but are reachable that way; those are
+not counted as gaps below). Per `docs/parity.md` §4's now-recorded
+principle, parity is prioritized over preserving existing response shapes
+throughout this track — breaking changes are expected and accepted, not
+avoided.
+
+**Build order:** no hard dependencies between these phases; Phase 138 is
+already in flight (above). The rest can ship in any order, though 140
+(the model-override umbrella) is worth doing early since it's referenced by
+several others (141, 143) as "don't duplicate this per-route, do it once."
+
+| Phase | Scope | Source finding |
+|---|---|---|
+| 138 | `search`/`first-seen`/`multi-repo-search` full parity (widened above) | Search/evolution/graph audit + analysis.ts audit |
+| 139 | `evolution` (file/concept) + `hotspots` HTTP/MCP parity | Search/evolution/graph audit |
+| 140 | Systemic `--model`/`--text-model`/`--code-model` override triplet, missing from nearly every `analysis.ts` HTTP route | analysis.ts audit |
+| 141 | `author` HTTP route full parity (largest single-command gap) | analysis.ts audit |
+| 142 | `workflow` HTTP route parity (3/8 → 8/8 templates, `--role`/`--ref`/`--base`) | analysis.ts audit |
+| 143 | Analysis-route small-fixes bundle (merge-audit, merge-preview, branch-summary, clusters, security-scan, impact, semantic-diff, semantic-blame) | analysis.ts audit |
+| 144 | `narrate`/`explain` HTTP routes: evidence-only/LLM-prose toggle, `--log`/`--files`, `--lens` | remote/watch/guide/narrator audit |
+| 145 | `guide` HTTP route: `--lens` param, remote multi-turn/session support | remote/watch/guide/narrator audit |
+| 146 | `watch list`/`watch remove` HTTP routes (currently only `add`/`run` exist) | remote/watch/guide/narrator audit |
+| 147 | Graph command family HTTP/MCP exposure (`graph build/callers/callees/path/relate/similar/unused`, `cycles`, `deps`, `co-change`, `blast-radius`) | Missing-endpoints audit; closes the pre-existing `docs/parity.md` "Expose graph commands to HTTP API" roadmap item |
+| 148 | Triage which remaining zero-HTTP/MCP-exposure CLI commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`, `cherry-pick-suggest`, `regression-gate`, `code-review`, `cross-repo-similarity`, `pr-report`, `file-diff`, `diff`, `map`/`heatmap`/`project`) genuinely warrant exposure vs. are CLI/visualization-shaped by nature | Missing-endpoints audit |
+
+---
+
+### Phase 139 — `evolution` and `hotspots` HTTP/MCP parity
+
+**Goal:** `POST /evolution/file`, `POST /evolution/concept`, and
+`POST /graph/hotspots` are missing flags/params their CLI equivalents
+(`file-evolution`, `evolution`/`concept-evolution`, `hotspots`) have — most
+notably, the evolution routes' underlying `computeEvolution()`/
+`computeConceptEvolution()` calls don't even accept a branch filter today,
+so this isn't purely a schema gap.
+
+**Design:** No separate design doc — audit finding, part of the Interface
+Parity Track (see Phase 138's track table).
+
+**Scope:**
+- `file-evolution`: add `level: 'symbol'` (per-symbol centroid embeddings),
+  `branch`, `model`/`textModel`/`codeModel` overrides, an `alerts`-equivalent
+  summary field (top-N largest jumps with author/commit).
+- `concept-evolution`: add `branch`, `model`/`textModel`/`codeModel`
+  overrides.
+- Both: thread `branch` through to `computeEvolution()`/
+  `computeConceptEvolution()` — a core function signature change, not just
+  route-schema plumbing.
+- `hotspots`: add `weightStructural` (the lens's structural-signal weight
+  override, exposed on CLI via `addLensOption`).
+- `--narrate` on all three: resolve during implementation whether this is
+  in-scope (LLM/infra-adjacent, borderline per the audit) or deferred as a
+  separate narrator-specific phase alongside Phase 144.
+- Update `docs/parity.md`, `docs/features.md`, `README.md`.
+
+**Files likely touched:** `src/server/routes/evolution.ts`,
+`src/server/routes/graph.ts`, `src/core/search/temporal/evolution.ts` (or
+wherever `computeEvolution`/`computeConceptEvolution` live), `docs/parity.md`,
+test files.
+
+**Status:** not started.
+
+---
+
+### Phase 140 — Systemic model-override parity across `analysis.ts` HTTP routes
+
+**Goal:** `--model`/`--text-model`/`--code-model` are consistently
+available across CLI commands (`docs/parity.md` §2.3 already rates this
+"✓ Good coherence" — that rating is about CLI-internal consistency only).
+The audit found the *HTTP* routes for `clusters`, `change-points`,
+`author`, `impact`, `semantic-diff`, `semantic-blame`, `triage`, and
+`workflow` are all missing this override triplet — the same gap repeated
+eight times. Fix it once as a shared mechanism rather than eight
+independent per-route patches.
+
+**Design:** No separate design doc. Approach: add a shared
+`modelOverrideSchema` fragment (Zod) used by every affected route's body
+schema, and a shared helper resolving `{model, textModel, codeModel}` into
+the provider(s) each route's underlying core function expects — mirroring
+`src/cli/lib/provider.ts`'s `resolveModels()`/`buildProviderOrExit()`
+pattern rather than reinventing it per route.
+
+**Scope:**
+- New shared Zod fragment + resolver helper in `src/server/routes/` (or a
+  new `src/server/lib/modelOverrides.ts`).
+- Apply to all 8 routes listed above.
+- Update `docs/parity.md` §2.3 item 3 to note the CLI-vs-HTTP distinction
+  once closed.
+
+**Files likely touched:** `src/server/routes/analysis.ts`, a new shared
+helper module, `docs/parity.md`, test files.
+
+**Status:** not started.
+
+---
+
+### Phase 141 — `author` HTTP route full parity
+
+**Goal:** `author` is CLI's richest single retrieval command among the
+`analysis.ts` group but its HTTP route (`POST /analysis/author`) only
+exposes `query`/`topK`/`topAuthors`/`branch` — missing `--since`,
+`--detail`, `--include-commits`, `--chunks`, `--level`, `--hybrid`,
+`--bm25-weight`, `--vss` (model overrides tracked separately in Phase 140).
+
+**Design:** No separate design doc — audit finding.
+
+**Scope:** Add each missing param to `AuthorBodySchema` and thread through
+to the same core `author`-attribution function the CLI command calls.
+Update `docs/parity.md`, `docs/features.md`, `README.md`.
+
+**Files likely touched:** `src/server/routes/analysis.ts`,
+`src/core/search/authorSearch.ts` (or wherever author attribution lives),
+`docs/parity.md`, test files.
+
+**Status:** not started.
+
+---
+
+### Phase 142 — `workflow` HTTP route parity
+
+**Goal:** CLI's `workflow run` supports all 8 productized workflow
+templates (`pr-review`, `incident`, `release-audit`, `onboarding`,
+`ownership-intel`, `arch-drift`, `knowledge-portal`, `regression-forecast`);
+the HTTP `POST /analysis/workflow` route's `WorkflowBodySchema` enum only
+allows 3 (`pr-review`/`incident`/`release-audit`). Also missing: `--role`,
+`--ref`, a `--base` that isn't limited to the `pr-review` template only,
+and model overrides (tracked in Phase 140).
+
+**Design:** No separate design doc — audit finding, the single largest
+scope gap found in the whole audit.
+
+**Scope:** Extend `WorkflowBodySchema`'s template enum to all 8 names; add
+`role`/`ref`/`base` generally rather than gated to one template; verify
+each of the 5 newly-exposed templates' underlying core function is already
+HTTP-callable (no local-filesystem/interactive assumptions) before wiring
+it in — flag any that aren't as a follow-up rather than silently stubbing.
+
+**Files likely touched:** `src/server/routes/analysis.ts`,
+`src/core/workflow/*` (wherever templates are implemented), `docs/parity.md`,
+`docs/features.md`, `README.md`, test files.
+
+**Status:** not started.
+
+---
+
+### Phase 143 — Analysis-route small-fixes bundle
+
+**Goal:** A grab-bag of small, independent, low-risk flag gaps found across
+`analysis.ts` routes — each too small to deserve its own phase, per the
+precedent of Phase 95's "Flag unification" bundling multiple small
+coherence fixes into one sweep.
+
+**Design:** No separate design doc — audit findings, bundled.
+
+**Scope:**
+- `merge-audit`: add `base` (merge-base commit override).
+- `merge-preview`: add `top`, `iterations`, `edge-threshold`,
+  `enhanced-keywords-n`.
+- `branch-summary`: add `enhanced-labels`, `enhanced-keywords-n`.
+- `clusters`: add `iterations`, `edge-threshold`, `enhanced-keywords-n`.
+- `security-scan`: add `high-confidence-only`.
+- `impact`: add `chunks`, `level`, and — most notably — `lens`
+  (semantic/structural/hybrid); HTTP currently only does semantic-lens
+  impact analysis, silently diverging from CLI's hybrid-by-default.
+- `semantic-diff`/`diff`: add `hybrid`, `bm25Weight`.
+- `semantic-blame`/`blame`: add `level` (file/symbol) — `searchSymbols`
+  partially covers this today but doesn't match the CLI's flag surface.
+- Update `docs/parity.md`, `docs/features.md`, `README.md`.
+
+**Files likely touched:** `src/server/routes/analysis.ts`,
+`docs/parity.md`, test files.
+
+**Status:** not started.
+
+---
+
+### Phase 144 — `narrate`/`explain` HTTP routes: evidence-only toggle and missing context flags
+
+**Goal:** CLI's `narrate`/`explain` are "evidence-only by default, LLM
+prose only with `--narrate` and a configured narrator model" — a
+deliberate safe-by-default design (no network calls unless explicitly
+opted in). The HTTP routes (`POST /narrate`, `POST /explain`) have no
+schema field for this toggle at all, so HTTP callers cannot request
+evidence-only mode explicitly (defaults need checking in `runNarrate`/
+`runExplain`, but the *option* to choose is missing either way). `explain`
+is additionally missing `--log <path>` (error/stack-trace context) and
+`--files <glob>` (restrict search scope).
+
+**Design:** No separate design doc — audit finding.
+
+**Scope:** Add `evidenceOnly` (or equivalent) to both `NarrateBodySchema`
+and `ExplainBodySchema`; add `log`/`files` to `ExplainBodySchema`; add
+`lens` to both (structural/hybrid enrichment, Phase 111) — same gap as
+Phase 145's `guide` finding, worth doing together if convenient since both
+routes share narrator-config plumbing.
+
+**Files likely touched:** `src/server/routes/narrator.ts`, `docs/parity.md`,
+`docs/features.md`, `README.md`, test files.
+
+**Status:** not started.
+
+---
+
+### Phase 145 — `guide` HTTP route: `--lens` and remote session support
+
+**Goal:** HTTP `POST /guide/chat` is missing `--lens` (structural/hybrid
+tool-bias hint, Phase 111) present on CLI `guide`. Separately, CLI's
+`--interactive`/`-i` (multi-turn REPL reusing one agent session) has no
+HTTP equivalent — not a flag gap so much as a missing session concept for
+remote callers wanting a multi-turn conversation.
+
+**Design:** No separate design doc. The `--lens` half is a straightforward
+schema addition. The multi-turn/session half is a genuine open design
+question, not yet resolved — needs a decision (e.g. a `sessionId` the
+client generates and passes on each call, server-side session TTL/storage)
+before implementation, or an explicit call that remote multi-turn guide
+chat is out of scope for now and only `--lens` ships in this phase.
+
+**Scope:**
+- Add `lens` to `POST /guide/chat`'s body schema (straightforward part).
+- **Open design question:** resolve whether remote multi-turn guide
+  sessions are in scope for this phase or deferred to a follow-up.
+
+**Files likely touched:** `src/server/routes/guide.ts`, `docs/parity.md`,
+test files.
+
+**Status:** not started.
+
+---
+
+### Phase 146 — `watch list`/`watch remove` HTTP routes
+
+**Goal:** CLI `gitsema watch` has `add`/`run`/`list`/`remove`; HTTP only
+exposes `POST /watch/add` and `POST /watch/run` — `list`/`remove` have no
+HTTP route at all, not just a flag gap.
+
+**Design:** No separate design doc — audit finding.
+
+**Scope:** Add `GET /watch` (list) and `DELETE /watch/:id` (or equivalent)
+routes mirroring CLI's `watch list`/`watch remove` behavior. Update
+`docs/parity.md`, `docs/features.md`, `README.md`.
+
+**Files likely touched:** `src/server/routes/watch.ts`, `docs/parity.md`,
+test files.
+
+**Status:** not started.
+
+---
+
+### Phase 147 — Graph command family HTTP/MCP exposure
+
+**Goal:** Closes the pre-existing `docs/parity.md` §6 Medium-Term roadmap
+item ("Expose graph commands to HTTP API") as an actual scheduled phase.
+`src/server/routes/graph.ts` only exposes `hotspots`; the MCP graph tool
+registry (`registerGraphTools`) only covers `call_graph`/`graph_neighbors`/
+`hotspots`. Everything else in the CLI's `graph` command family has no
+HTTP route and no MCP tool: `graph build`, `graph callers`, `graph callees`,
+`graph path`, `graph relate`, `graph similar`, `graph unused`, `cycles`,
+`deps`, `co-change`, `blast-radius`.
+
+**Design:** No separate design doc. Approach: these all read from the
+already-built `graph_nodes`/`edges` tables (Phase 107) via the existing
+typed BFS traversal helpers in `src/core/graph/` — this is route/tool
+plumbing over already-shipped query logic, not new core work, for every
+item except `graph build` (which *writes* the graph and may warrant staying
+CLI/local-only given it truncates-and-rebuilds a table — resolve during
+implementation whether to expose it as a mutating HTTP route at all, or
+document it as intentionally CLI-only alongside other index-maintenance
+commands).
+
+**Scope:**
+- MCP tools for `graph_path`, `graph_relate`, `graph_similar`,
+  `graph_unused`, `cycles`, `deps`, `co_change`, `blast_radius` in
+  `src/mcp/tools/graph.ts`.
+- HTTP routes in `src/server/routes/graph.ts` for the same set, following
+  the existing `hotspots` route's pattern.
+- `graph build`: resolve open design question above.
+- Update `docs/parity.md` (§1 matrix, §6 roadmap — remove the now-closed
+  Medium-Term item), `docs/features.md`, `README.md`.
+
+**Files likely touched:** `src/server/routes/graph.ts`,
+`src/mcp/tools/graph.ts`, `docs/parity.md`, `docs/features.md`, `README.md`,
+test files.
+
+**Status:** not started.
+
+---
+
+### Phase 148 — Triage remaining zero-HTTP/MCP-exposure CLI commands
+
+**Goal:** The audit found a long tail of CLI commands with no HTTP route
+and no MCP tool at all: `bisect`, `refactor-candidates`, `ci-diff`,
+`lifecycle`, `cherry-pick-suggest`, `regression-gate`, `code-review`,
+`cross-repo-similarity`, `pr-report`, `file-diff`, `diff` (conceptual
+diff — distinct from `semantic-diff`, which *is* covered), `map`,
+`heatmap`, `project`. Unlike Phases 139–147, this list wasn't validated
+against "does this command's nature actually fit a JSON API/tool-call
+shape" — e.g. `map`/`heatmap`/`project` are HTML/visualization-output
+commands that may not translate to a JSON response at all.
+
+**Design:** No separate design doc. This phase is explicitly a **triage**
+pass, not a blanket "expose everything" implementation: for each command,
+decide (a) genuinely missing and should get a route/tool, (b) CLI-shaped by
+nature (interactive, writes local files, visualization output) and
+correctly excluded, or (c) redundant with an already-covered command under
+a different name. Only implement (a); document (b) and (c) explicitly in
+`docs/parity.md` rather than leaving them looking like unexamined gaps.
+
+**Scope:**
+- Triage each of the 13 commands listed above against the (a)/(b)/(c)
+  criteria.
+- Implement HTTP routes/MCP tools for whichever land in bucket (a).
+- Update `docs/parity.md` §1 (mark (b)/(c) commands with an explanatory
+  footnote rather than a bare "—"), §6 (remove closed items).
+
+**Files likely touched:** varies by triage outcome — likely
+`src/server/routes/*.ts`, `src/mcp/tools/*.ts`, `docs/parity.md`, test
+files.
+
+**Status:** not started.
 
 ---
 

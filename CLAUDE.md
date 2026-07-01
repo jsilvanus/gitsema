@@ -20,7 +20,7 @@ When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.
 2. Update the command/option tables in **`README.md`** if the feature adds a new command or flag.
 3. Mark the phase as completed in **`docs/PLAN.md`** and note any deviations from the original spec.
-4. **Update `docs/parity.md`** if the change affects tool availability across interfaces (CLI/REPL/Guide/MCP/HTTP) or adds/modifies command flags. See the "Maintenance & Governance" section in parity.md.
+4. **Update `docs/parity.md`** if the change affects tool availability across interfaces (CLI/REPL/Guide/MCP/HTTP) or adds/modifies command flags. See the "Maintenance & Governance" section in parity.md. **Parity across interfaces is prioritized over preserving an existing API response shape** — if closing a gap requires a breaking change to an MCP tool's output, an HTTP route's JSON shape, or a Guide tool result, make the breaking change rather than leaving that interface behind CLI via an additive-only compromise (see parity.md §4, "Resolving Conflicts: Parity vs. API Response Stability").
 5. **Update `docs/deprecations.md`** if the change deprecates a command/flag/transport (add a row with replacement + evidence) or actually removes something previously listed there (delete its row only once the removal has shipped).
 6. Use latest review when starting the next iteration of development.
 7. **Add a changeset** describing the change (see "Releases & changesets" below). Do **not** run `npm version` or push `v*` tags manually — versioning and publishing are handled by changesets.
