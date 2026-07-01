@@ -451,6 +451,22 @@ Update the parity tables whenever:
      transport doesn't change which tools/methods are reachable
    - Add the bind flag and its auth flag (if any) to §2
 
+### Resolving Conflicts: Parity vs. API Response Stability
+
+**Parity is important — when closing a parity gap requires a breaking
+response-shape change on an interface (MCP tool output, an HTTP route's
+JSON shape, a Guide tool result), ship the breaking change. Don't leave
+interfaces silently behind CLI via an additive-only/back-compat-preserving
+compromise.** An "avoid breaking existing callers" instinct is reasonable in
+isolation, but it's what produced the very gaps this document exists to
+catch and close — see Phase 136 (`docs/PLAN.md`), which deferred MCP
+`semantic_search`/HTTP `search` parity for exactly this reason, and Phase
+138, which had to reopen that deferral once the tradeoff was made
+explicit. When in doubt, prefer the interface that's behind adopting the
+same behavior/shape as the interface that's ahead, and document the
+breaking change in the changeset and in this file's flag/matrix tables —
+don't quietly diverge instead.
+
 ### Single Source of Truth
 
 These tables are authoritative. Keep them in sync with:
