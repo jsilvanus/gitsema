@@ -341,7 +341,11 @@ This table shows less common flags used by specific commands or command groups.
 
 3. **Model overrides:**
    - Consistently available: `--model`, `--text-model`, `--code-model`
-   - **Status:** ✓ Good coherence
+   - **Status:** ✓ Good coherence *on the CLI*. The Interface Parity Track
+     audit (§6) found the *HTTP* routes for `clusters`, `change-points`,
+     `author`, `impact`, `semantic-diff`, `semantic-blame`, `triage`, and
+     `workflow` don't expose this triplet at all — scheduled as
+     `docs/PLAN.md` Phase 140 (one shared fix, not eight per-route ones).
 
 4. **Temporal filtering:**
    - `--before`/`--after` (search) vs. `--since` (index: resume point)
@@ -516,25 +520,72 @@ If you find a discrepancy, **update this file first**, then propagate the change
 
 ## 6. Roadmap: Closing Parity Gaps
 
+### Scheduled (Interface Parity Track, Phases 138–148)
+
+A full HTTP-vs-CLI (and, where relevant, MCP) flag/route audit — run via 4
+parallel research subagents across every route file — converted most of
+this section's prior open-ended bullets into concrete, numbered
+`docs/PLAN.md` phases. See `docs/PLAN.md`'s "Interface Parity Track (Phases
+138–148)" section for the full breakdown; summary:
+
+- **Phase 138** (widened): `search`/`first-seen`/`multi-repo-search` full
+  MCP+HTTP parity, including the Phase 136 per-level-list separation this
+  phase originally covered narrowly.
+- **Phase 139:** `evolution` (file/concept) + `hotspots` HTTP/MCP parity.
+- **Phase 140:** systemic `--model`/`--text-model`/`--code-model` gap
+  across `analysis.ts` HTTP routes (one shared fix, not 8 per-route ones).
+- **Phase 141:** `author` HTTP route full parity (largest single-command
+  gap found).
+- **Phase 142:** `workflow` HTTP route parity — 3/8 templates exposed
+  today, all 8 on CLI.
+- **Phase 143:** analysis-route small-fixes bundle (merge-audit,
+  merge-preview, branch-summary, clusters, security-scan, impact,
+  semantic-diff, semantic-blame).
+- **Phase 144:** `narrate`/`explain` HTTP routes — evidence-only toggle,
+  `--log`/`--files`, `--lens`.
+- **Phase 145:** `guide` HTTP route — `--lens`, remote multi-turn/session
+  support (open design question).
+- **Phase 146:** `watch list`/`watch remove` HTTP routes (currently missing
+  entirely, not just flags).
+- **Phase 147:** graph command family HTTP/MCP exposure — closes the
+  "Expose graph commands to HTTP API" item below.
+- **Phase 148:** triage pass on the remaining zero-HTTP/MCP-exposure CLI
+  commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`,
+  `cherry-pick-suggest`, `regression-gate`, `code-review`,
+  `cross-repo-similarity`, `pr-report`, `file-diff`, `diff`,
+  `map`/`heatmap`/`project`) — decides which genuinely warrant exposure vs.
+  are CLI/visualization-shaped by nature, rather than blanket-implementing.
+
+**Two corrections the audit surfaced in this section's prior bullets**
+(kept here as a record, not re-listed as open items below):
+- *"Add HTTP endpoint for `code-search`"* — still true for a **literal**
+  named route, but the audit found `code-search` **is** already reachable
+  over HTTP today via `POST /api/v1/protocol/mcp.code_search` (the generic
+  MCP-tool dispatcher in `src/server/routes/protocol.ts`). Not a total gap;
+  whether a literal `/code-search` route is still worth adding for API
+  discoverability is folded into Phase 137/138's scope rather than tracked
+  separately here.
+- *"Add `cluster-diff`, `cluster-timeline` to MCP/HTTP"* — also already
+  reachable via the same `protocol.ts` dispatcher
+  (`mcp.cluster_diff`/`mcp.cluster_timeline`), confirmed by the same audit.
+  Dropped from Quick Wins below as stale; a literal named route, if wanted,
+  belongs in a future phase, not this one.
+
 ### Quick Wins (Phase 111+)
 
-- [ ] Add HTTP endpoint for `code-search`
-- [ ] Add MCP tool for `cluster-change-points`
 - [ ] Standardize `--out` format across all commands (hide legacy flags)
-- [ ] Add `--narrate` to `evolution`, `semantic-diff`, `branch-summary`
-- [ ] **Apply Phase 136's per-level-list separation to `code-search` (CLI/MCP/Guide)** — its default `level: 'symbol'` unconditionally merges chunk + symbol candidates into one shared-cutoff call today (see §1 Parity Observations, "CLI-only gaps"), the same crowding-out bug Phase 136 fixed for `search`, but hit on every default `code-search` invocation rather than only an explicit flag combination
+- [ ] Add MCP tool for `cluster-change-points` (this one genuinely has no
+  route or `protocol.ts`-dispatched tool — confirmed still open)
 
 ### Medium-Term (Phase 112+)
 
-- [ ] Expose graph commands (`callers`, `callees`, `neighbors`) to HTTP API
-- [ ] Add `cluster-diff`, `cluster-timeline` to MCP/HTTP
 - [ ] Implement CLI Interactive with tab completion and inline help
-- [ ] Add missing graph commands to Guide tool registry
 
 ### Long-Term (Phase 113+)
 
 - [ ] Beta Web UI with visualization (map, heatmap, project)
-- [ ] Full parity across all interfaces (all tools everywhere applicable)
+- [ ] Full parity across all interfaces (all tools everywhere applicable) —
+  Phases 138–148 are the concrete execution of this line item
 - [ ] Remove `tools lsp --tcp` once downstream clients have migrated to `--websocket` (deprecated, not removed, as of Phase 120 — see §0; tracked in `CLAUDE.md`)
 
 ---
