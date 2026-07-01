@@ -421,6 +421,15 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     }
   })
 
+  // POST /analysis/multi-repo-search
+  // Deprecated (Phase 138): `POST /search` now accepts the same `repos`
+  // param (an array of repo IDs) and merges multi-repo results into its
+  // full query-shaping pipeline (levels, hybrid, boolean composition, model
+  // overrides, etc.) — this route's bare 4-param shape can't express any of
+  // that. Kept as a thin, unchanged-shape alias over the same
+  // `multiRepoSearch()` core call for backward compatibility; prefer
+  // `POST /search` with `repos: [...]` for new integrations. See
+  // docs/deprecations.md.
   const MultiRepoSearchBodySchema = z.object({
     query: z.string().min(1),
     repoIds: z.array(z.string()).optional(),
@@ -438,6 +447,8 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       const session = getActiveSession()
       const embedding = await embedQuery(textProvider, query) as number[]
       const results = await multiRepoSearch(session, embedding, { repoIds, topK, model })
+      res.setHeader('Deprecation', 'true')
+      res.setHeader('Link', '</api/v1/search>; rel="successor-version"')
       res.json(results)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })

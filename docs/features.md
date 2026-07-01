@@ -98,12 +98,13 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | LLM narrative summary | `--narrate` (requires `GITSEMA_LLM_URL`) |
 | HNSW approximate-nearest-neighbor search | `--vss` (requires built VSS index) |
 | HTML output | `--html [file]` |
-| Multi-repo search | `gitsema repos` + MCP `multi_repo_search` |
+| Multi-repo search | `gitsema search --repos <ids>` + MCP `semantic_search`/`first_seen` (`repos`) + HTTP `POST /search`/`POST /search/first-seen` (`repos`, Phase 138) + MCP `multi_repo_search` (dedicated tool) + HTTP `POST /analysis/multi-repo-search` (deprecated alias since Phase 138, see `docs/deprecations.md`) |
 | **Early-cut (Phase 64)** | `--early-cut <n>` — random-sample candidate pool for speed on large indexes |
 | **LLM provenance citations (Phase 64)** | `--explain-llm` — structured citation block for LLM prompt grounding |
 | **Stable symbol identity (Phase 105)** | Symbol-level results (`code_search`, `--chunks` with symbols) carry path-free `qualifiedName` (scope chain, e.g. `Auth.validateToken`), `signature` (normalized param list), `signatureHash`, and `parentQualifiedName`, for TS/TSX/JS/Python; `renderResults()` displays `qualifiedName(signature)`, falling back to `symbolName` for other languages/older rows |
-| **Distinct per-level result lists (Phase 136)** | When 2+ of {chunk, symbol, module} are active at once — e.g. `--chunks --level symbol`, or the Phase 77 Goal #4 model-level-fallback union when the text/code models' saved levels disagree — `search` now runs one isolated `vectorSearch()` call per level by default (each with its own topK cutoff) and renders them as separate labeled lists (`== file ==`, `== chunk ==`, etc. in text; a `resultsByLevel` object keyed by level in `--out json`), instead of merging every level into one shared-cutoff ranked list where a weaker level could be crowded out entirely. `--merge-levels` opts back into the pre-Phase-136 single merged list. A single active level (the common case) is unaffected. CLI-only for now — MCP `semantic_search` and the HTTP `search` route still return one merged list even when the same multi-level condition is hit (see `docs/parity.md`) |
+| **Distinct per-level result lists (Phase 136, MCP/HTTP parity Phase 138)** | When 2+ of {chunk, symbol, module} are active at once — e.g. `--chunks --level symbol`, or the Phase 77 Goal #4 model-level-fallback union when the text/code models' saved levels disagree — `search` runs one isolated `vectorSearch()` call per level by default (each with its own topK cutoff) and renders them as separate labeled lists (`== file ==`, `== chunk ==`, etc. in text; a `resultsByLevel` object keyed by level in `--out json`), instead of merging every level into one shared-cutoff ranked list where a weaker level could be crowded out entirely. `--merge-levels` opts back into the pre-Phase-136 single merged list. A single active level (the common case) is unaffected. Since Phase 138, MCP `semantic_search` (`level` now includes `module`; `merge_levels` param) and HTTP `POST /search` (`level`/`mergeLevels`) mirror this — HTTP returns `{ resultsByLevel: {...} }` instead of a flat array when 2+ levels are active (breaking response-shape change, accepted per `docs/parity.md` §4) |
 | **Per-level result-list separation for `code-search` (Phase 137)** | `code-search`'s default `--level symbol` isolates the chunk and symbol candidate pools by default instead of merging them into one shared-cutoff ranked list — every default, no-flags `code-search` call was hitting the Phase 136 crowding-out condition unconditionally (unlike `search`'s opt-in multi-level combinations), since `symbol` level always sets both `searchChunks` and `searchSymbols`. CLI renders separate `== file ==`/`== chunk ==`/`== symbol ==` sections (reusing `renderResultsByLevel()`); `--merge-levels` opts back into one merged list. MCP `code_search` and Guide's `code_search` tool adopt the same shape — returning a `results_by_level` object keyed by level instead of a flat `results` array (breaking response-shape change, accepted per `docs/parity.md` §4's parity-over-stability principle); both gained a `merge_levels` param to opt back into the flat shape |
+| **Full MCP/HTTP query-shaping parity for `search`/`first-seen` (Phase 138)** | MCP `semantic_search`/HTTP `POST /search` gained the remaining CLI `search` flags previously missing: negative-example scoring (`not_like`/`notLike`, `lambda`), boolean composition (`or`, `and`), `explain`, `explain_llm`/`explainLlm`, `expand_query`/`expandQuery`, `annotate_clusters`/`annotateClusters`, `vss` (now routes through `vectorSearchWithAnn()`), `repos` (multi-repo, results merged into the primary list), per-request `model`/`text_model`/`code_model` (MCP) or `model`/`textModel`/`codeModel` (HTTP) overrides (resolved without mutating server process env, so concurrent requests don't race), `early_cut`/`earlyCut`, and `no_cache`/`noCache`. `first_seen`/`POST /search/first-seen` gained `vss`, `repos`, and the model-override triplet. See `docs/parity.md` §2 |
 
 ---
 
@@ -245,7 +246,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/blobs/check` | Check if blobs are already indexed |
 | `POST /api/v1/blobs` | Write blob + embedding |
 | `POST /api/v1/commits`, `POST /api/v1/commits/mark-indexed` | Commit metadata |
-| `POST /api/v1/search`, `POST /api/v1/search/first-seen` | Search |
+| `POST /api/v1/search`, `POST /api/v1/search/first-seen` | Search — full CLI `search`/`first-seen` flag parity since Phase 138, including per-level `resultsByLevel` responses and multi-repo `repos` |
 | `POST /api/v1/evolution/file`, `POST /api/v1/evolution/concept` | Evolution |
 | `POST /api/v1/remote/index` | Remote repo indexing |
 | `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
@@ -270,7 +271,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/ownership` | Ownership heatmap by concept (Phase 67) |
 | `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
-| `POST /api/v1/analysis/multi-repo-search` | Search across multiple registered repos |
+| `POST /api/v1/analysis/multi-repo-search` | **Deprecated** (Phase 138) — search across multiple registered repos; use `POST /api/v1/search` with a `repos` body param instead, which merges multi-repo results into the full search flag surface. Kept as a thin unchanged-shape alias, see `docs/deprecations.md` |
 | `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `POST /api/v1/auth/login` | Username/password → session token (Phase 122) |
@@ -576,10 +577,10 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 
 | Tool name | Description |
 |---|---|
-| `semantic_search` | Vector similarity search |
+| `semantic_search` | Vector similarity search — full CLI `search` flag parity since Phase 138 (levels incl. `module`, per-level `resultsByLevel`-equivalent text sections, negative-example scoring, boolean composition, `explain`/`explain_llm`, `expand_query`, `annotate_clusters`, `vss`, `repos`, per-request model overrides, `early_cut`, `no_cache`) |
 | `code_search` | Symbol / chunk-level code search |
 | `search_history` | Vector search enriched with Git history metadata |
-| `first_seen` | Find when a concept first appeared (chronological sort) |
+| `first_seen` | Find when a concept first appeared (chronological sort) — gained `vss`, `repos`, and model overrides in Phase 138 |
 | `evolution` | Single-file semantic drift timeline |
 | `concept_evolution` | Concept drift across codebase history |
 | `index` | Trigger incremental (or full) re-indexing |

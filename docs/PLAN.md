@@ -5356,7 +5356,45 @@ CLI's own implementation already threads these through
 (`multi-repo-search`), `docs/parity.md`, `docs/features.md`, `README.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from the original spec:**
+- **MCP per-level output shape:** the plan text said MCP `semantic_search`
+  would return `results_by_level`; MCP `registerTool()` handlers return
+  `{ content: [{ type: 'text', text }] }` (a rendered text blob, not
+  structured JSON — no MCP search tool returns JSON today), so the per-level
+  shape is expressed as labeled `== file ==` / `== chunk ==` / `== symbol ==`
+  / `== module ==` text sections (via the existing `renderResultsByLevel()`
+  helper), mirroring CLI `search`'s own text-mode per-level output exactly.
+  A `merge_levels` param still opts back into one unlabeled list, matching
+  the CLI's `--merge-levels` semantics. HTTP `POST /search` does return the
+  literal `resultsByLevel` JSON key as specified, since that route already
+  returns structured JSON.
+- **`multi-repo-search` resolution:** chose option (b) from the two
+  alternatives listed — `repos: string[]` was folded into `POST /search`
+  (and MCP `semantic_search`/`first_seen`) as the parity-complete
+  implementation, and `POST /analysis/multi-repo-search` was kept as a thin,
+  response-shape-unchanged **deprecated** alias over the same
+  `multiRepoSearch()` core call (adds a `Deprecation: true` header + a
+  `Link` header pointing at `/api/v1/search`) rather than duplicated or
+  enriched in place. Recorded in `docs/deprecations.md` §1.
+- **Per-request model overrides implementation:** rather than mutate
+  `process.env` (CLI's `applyModelOverrides()` pattern, unsafe for a
+  long-running server handling concurrent requests), added
+  `hasModelOverride()`/`buildProviderForRequest()` to
+  `src/core/embedding/providerFactory.ts` as a small shared core-level
+  helper — resolves a per-request `ResolvedConfig` and calls the existing
+  `getTextProvider()`/`getCodeProvider()` factories directly, with no env
+  mutation. Both MCP `src/mcp/tools/search.ts` and HTTP
+  `src/server/routes/search.ts` use this same helper (no duplicated
+  resolution logic between the two interfaces). This helper is intentionally
+  narrow to `search`/`first-seen` for now; Phase 140 is scheduled to
+  generalize a model-override mechanism across the rest of the
+  `analysis.ts` HTTP routes and may fold this in or build alongside it.
+- `code_search` (the third tool sharing `src/mcp/tools/search.ts`) was
+  **not** touched — that tool's per-level separation and flag parity is
+  Phase 137's scope (a separate, concurrently-developed phase), not
+  Phase 138's.
 
 ---
 
@@ -5377,13 +5415,17 @@ throughout this track — breaking changes are expected and accepted, not
 avoided.
 
 **Build order:** no hard dependencies between these phases; Phase 138 is
-already in flight (above). The rest can ship in any order, though 140
+✅ complete (above). The rest can ship in any order, though 140
 (the model-override umbrella) is worth doing early since it's referenced by
-several others (141, 143) as "don't duplicate this per-route, do it once."
+several others (141, 143) as "don't duplicate this per-route, do it once" —
+note Phase 138 already added a narrow `hasModelOverride()`/
+`buildProviderForRequest()` helper to
+`src/core/embedding/providerFactory.ts` scoped to `search`/`first-seen`;
+Phase 140 should generalize or fold into that rather than starting fresh.
 
 | Phase | Scope | Source finding |
 |---|---|---|
-| 138 | `search`/`first-seen`/`multi-repo-search` full parity (widened above) | Search/evolution/graph audit + analysis.ts audit |
+| 138 ✅ | `search`/`first-seen`/`multi-repo-search` full parity (widened above) | Search/evolution/graph audit + analysis.ts audit |
 | 139 | `evolution` (file/concept) + `hotspots` HTTP/MCP parity | Search/evolution/graph audit |
 | 140 | Systemic `--model`/`--text-model`/`--code-model` override triplet, missing from nearly every `analysis.ts` HTTP route | analysis.ts audit |
 | 141 | `author` HTTP route full parity (largest single-command gap) | analysis.ts audit |
