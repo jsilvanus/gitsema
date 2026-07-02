@@ -118,6 +118,37 @@ function scoreAndSort(
   return scored.slice(0, topK)
 }
 
+/**
+ * Score and sort a set of blobs using pre-scored hybrid (vector + BM25)
+ * candidates instead of pure cosine similarity — mirrors the
+ * `candidateBlobs` pattern used by `computeAuthorContributions`
+ * (`src/core/search/authorSearch.ts`, Phase 141). Only blobs present in both
+ * `candidateBlobs` and `blobHashes` (the gained/lost/stable membership set)
+ * are considered — this restricts the scoring universe to the hybrid-search
+ * results rather than falling back to cosine per-blob.
+ */
+function scoreAndSortHybrid(
+  blobHashes: string[],
+  embeddingMap: Map<string, { vector: number[]; paths: string[]; firstSeen: number }>,
+  candidateBlobs: Array<{ blobHash: string; score: number }>,
+  topK: number,
+): SemanticDiffEntry[] {
+  const hashSet = new Set(blobHashes)
+  const scored: SemanticDiffEntry[] = []
+  for (const c of candidateBlobs) {
+    if (!hashSet.has(c.blobHash)) continue
+    const data = embeddingMap.get(c.blobHash)
+    scored.push({
+      blobHash: c.blobHash,
+      paths: data?.paths ?? [],
+      score: c.score,
+      firstSeen: data?.firstSeen ?? 0,
+    })
+  }
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, topK)
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -139,6 +170,12 @@ function scoreAndSort(
  * @param ref1            Earlier git ref (branch, tag, commit, or date).
  * @param ref2            Later git ref.
  * @param topK            Maximum entries to return per group (default 10).
+ * @param branch          When provided, restrict blobs to those seen on this branch.
+ * @param candidateBlobs  Pre-scored hybrid (vector + BM25) candidates (e.g. from
+ *                        `hybridSearch()`, Phase 143). When supplied, each group is
+ *                        scored/ranked from this candidate set (intersected with
+ *                        group membership) instead of recomputing cosine similarity —
+ *                        mirrors the `author` command's `--hybrid` handling.
  */
 export function computeSemanticDiff(
   queryEmbedding: Embedding,
@@ -147,6 +184,7 @@ export function computeSemanticDiff(
   ref2: string,
   topK = 10,
   branch?: string,
+  candidateBlobs?: Array<{ blobHash: string; score: number }>,
 ): SemanticDiffResult {
   const ts1 = resolveRefToTimestamp(ref1)
   const ts2 = resolveRefToTimestamp(ref2)
@@ -168,6 +206,19 @@ export function computeSemanticDiff(
   // Load embeddings for the union of all blobs we need to score
   const allHashes = [...new Set([...set1, ...set2])]
   const embeddingMap = loadBlobData(allHashes)
+
+  if (candidateBlobs !== undefined) {
+    return {
+      ref1,
+      ref2,
+      topic,
+      timestamp1: ts1,
+      timestamp2: ts2,
+      gained: scoreAndSortHybrid(gainedHashes, embeddingMap, candidateBlobs, topK),
+      lost: scoreAndSortHybrid(lostHashes, embeddingMap, candidateBlobs, topK),
+      stable: scoreAndSortHybrid(stableHashes, embeddingMap, candidateBlobs, topK),
+    }
+  }
 
   return {
     ref1,

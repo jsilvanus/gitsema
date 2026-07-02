@@ -251,18 +251,18 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/evolution/file`, `POST /api/v1/evolution/concept` | Evolution |
 | `POST /api/v1/remote/index` | Remote repo indexing |
 | `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
-| `POST /api/v1/analysis/clusters` | Clustering — accepts `{model, textModel, codeModel}` overrides for CLI/HTTP flag parity (Phase 140), though `computeClusters()` doesn't filter by model so behavior is unchanged today |
+| `POST /api/v1/analysis/clusters` | Clustering — accepts `{model, textModel, codeModel}` overrides for CLI/HTTP flag parity (Phase 140), though `computeClusters()` doesn't filter by model so behavior is unchanged today; full `iterations`/`edgeThreshold`/`enhancedKeywordsN` flag parity with the CLI (Phase 143), alongside the pre-existing `useEnhancedLabels` |
 | `POST /api/v1/analysis/change-points` | Change-point detection — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/author` | Author attribution — full CLI flag parity (Phase 141): `since`, `detail`, `includeCommits`, `hybrid`, `bm25Weight` all wired through, plus `{model, textModel, codeModel}` embedding overrides (Phase 140); response is `{ authors, commits? }` |
-| `POST /api/v1/analysis/impact` | Impact analysis — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
-| `POST /api/v1/analysis/semantic-diff` | Semantic diff — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
-| `POST /api/v1/analysis/semantic-blame` | Semantic blame — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/impact` | Impact analysis — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140); `chunks`/`level` and, most notably, `lens` (`semantic`\|`structural`\|`hybrid`) for full CLI parity (Phase 143) — `structural`/`hybrid` makes this route a thin `blast-radius` alias, closing a prior silent divergence where HTTP only ever did semantic-lens impact analysis |
+| `POST /api/v1/analysis/semantic-diff` | Semantic diff — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140); `hybrid`/`bm25Weight` (Phase 143) blend BM25 keyword matching into candidate selection via `hybridSearch()` + `computeSemanticDiff()`'s new `candidateBlobs` parameter — this also fixed a pre-existing CLI bug where `diff`'s `--hybrid`/`--bm25-weight` flags were declared but never wired to anything |
+| `POST /api/v1/analysis/semantic-blame` | Semantic blame — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140); `level` (`file`\|`symbol`, Phase 143) as an alternate spelling of the pre-existing `searchSymbols` boolean, matching the CLI's flag surface |
 | `POST /api/v1/analysis/dead-concepts` | Dead-concept detection |
-| `POST /api/v1/analysis/merge-audit` | Merge audit |
-| `POST /api/v1/analysis/merge-preview` | Merge preview |
-| `POST /api/v1/analysis/branch-summary` | Branch summary |
+| `POST /api/v1/analysis/merge-audit` | Merge audit — `base` (Phase 143) overrides merge-base detection, mirroring CLI `--base` |
+| `POST /api/v1/analysis/merge-preview` | Merge preview — `top`/`iterations`/`edgeThreshold`/`enhancedKeywordsN`/`useEnhancedLabels` (Phase 143) for CLI cluster-flag parity |
+| `POST /api/v1/analysis/branch-summary` | Branch summary — `enhancedLabels`/`enhancedKeywordsN` (Phase 143) slice `nearestConcepts[].topKeywords` in the JSON response, mirroring the CLI's text-mode keyword-count behavior |
 | `POST /api/v1/analysis/experts` | Experts / reviewer suggestions (Phase 61) |
-| `POST /api/v1/analysis/security-scan` | Vulnerability pattern similarity scan (Phase 43) |
+| `POST /api/v1/analysis/security-scan` | Vulnerability pattern similarity scan (Phase 43) — `highConfidenceOnly` (Phase 143) filters to `confidence === 'high'` findings only |
 | `POST /api/v1/analysis/health` | Time-bucketed health timeline (Phase 44) |
 | `POST /api/v1/analysis/debt` | Technical debt scoring (Phase 45) |
 | `POST /api/v1/analysis/doc-gap` | Documentation gap analysis (Phase 38) |

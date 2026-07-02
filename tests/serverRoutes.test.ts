@@ -732,6 +732,18 @@ describe('POST /api/v1/analysis/security-scan', () => {
     expect(res.status).toBe(200)
     expect(res.body.disclaimer).toMatch(/not confirmed/i)
   })
+
+  // Phase 143: --high-confidence-only flag parity
+  it('accepts highConfidenceOnly and returns only high-confidence findings', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/security-scan')
+      .send({ highConfidenceOnly: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.findings)).toBe(true)
+    for (const f of res.body.findings) {
+      expect(f.confidence).toBe('high')
+    }
+  })
 })
 
 // ===========================================================================
@@ -814,6 +826,21 @@ describe('POST /api/v1/analysis/clusters', () => {
     const res = await request(app)
       .post('/api/v1/analysis/clusters')
       .send({ k: 0 })
+    expect(res.status).toBe(400)
+  })
+
+  // Phase 143: iterations/edgeThreshold/enhancedKeywordsN flag parity
+  it('accepts iterations, edgeThreshold, and enhancedKeywordsN', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ k: 3, iterations: 5, edgeThreshold: 0.5, useEnhancedLabels: true, enhancedKeywordsN: 8 })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for invalid iterations', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ iterations: 'bad' })
     expect(res.status).toBe(400)
   })
 })
@@ -942,6 +969,122 @@ describe('POST /api/v1/analysis/impact', () => {
     // May 500 because there's no git repo; should not be 400
     expect([200, 500]).toContain(res.status)
   })
+
+  // Phase 143: chunks/level flag parity
+  it('accepts chunks and level (chunk/symbol) options', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', chunks: true, level: 'symbol' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for an invalid level enum value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', level: 'not-a-real-level' })
+    expect(res.status).toBe(400)
+  })
+
+  // Phase 143: --lens structural|hybrid makes impact a blast-radius alias
+  it('accepts lens=structural and returns a blast-radius-shaped result', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', lens: 'structural' })
+    expect([200, 500]).toContain(res.status)
+    if (res.status === 200) {
+      expect(res.body).toHaveProperty('resolved')
+      expect(res.body).toHaveProperty('lens', 'structural')
+    }
+  })
+
+  it('accepts lens=hybrid', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', lens: 'hybrid' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', lens: 'not-a-real-lens' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/merge-audit (Phase 143: --base flag parity)
+// ===========================================================================
+describe('POST /api/v1/analysis/merge-audit', () => {
+  it('returns 400 for missing branchA/branchB', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-audit')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for a valid request without --base', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-audit')
+      .send({ branchA: 'main', branchB: 'main' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('accepts a --base override and returns 200 or 500', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-audit')
+      .send({ branchA: 'main', branchB: 'main', base: 'HEAD' })
+    expect([200, 500]).toContain(res.status)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/merge-preview (Phase 143: top/iterations/edgeThreshold/enhancedKeywordsN)
+// ===========================================================================
+describe('POST /api/v1/analysis/merge-preview', () => {
+  it('returns 400 for missing branch', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-preview')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for a valid request with the new flags', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-preview')
+      .send({
+        branch: 'main',
+        into: 'main',
+        top: 3,
+        iterations: 5,
+        edgeThreshold: 0.5,
+        useEnhancedLabels: true,
+        enhancedKeywordsN: 8,
+      })
+    expect([200, 500]).toContain(res.status)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/branch-summary (Phase 143: enhancedLabels/enhancedKeywordsN)
+// ===========================================================================
+describe('POST /api/v1/analysis/branch-summary', () => {
+  it('returns 400 for missing branch', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/branch-summary')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for a valid request with enhancedLabels/enhancedKeywordsN', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/branch-summary')
+      .send({ branch: 'main', baseBranch: 'main', enhancedLabels: true, enhancedKeywordsN: 8 })
+    expect([200, 500]).toContain(res.status)
+    if (res.status === 200) {
+      expect(Array.isArray(res.body.nearestConcepts)).toBe(true)
+    }
+  })
 })
 
 // ===========================================================================
@@ -989,6 +1132,21 @@ describe('POST /api/v1/analysis/semantic-diff', () => {
       .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication' })
     expect([200, 500]).toContain(res.status)
   })
+
+  // Phase 143: hybrid/bm25Weight flag parity
+  it('accepts hybrid + bm25Weight without error', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication', hybrid: true, bm25Weight: 0.5 })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for an out-of-range bm25Weight', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication', bm25Weight: 5 })
+    expect(res.status).toBe(400)
+  })
 })
 
 // ===========================================================================
@@ -1015,6 +1173,22 @@ describe('POST /api/v1/analysis/semantic-blame', () => {
       .send({ filePath: 'src/index.ts', content: 'export function auth() {}' })
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  // Phase 143: --level (file/symbol) flag parity
+  it('accepts level=symbol and returns array', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts', content: 'export function auth() {}', level: 'symbol' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns 400 for an invalid level enum value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts', content: 'x', level: 'not-a-real-level' })
+    expect(res.status).toBe(400)
   })
 })
 

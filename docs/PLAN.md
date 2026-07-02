@@ -5430,7 +5430,7 @@ Phase 140 should generalize or fold into that rather than starting fresh.
 | 140 | Systemic `--model`/`--text-model`/`--code-model` override triplet, missing from nearly every `analysis.ts` HTTP route | analysis.ts audit |
 | 141 | `author` HTTP route full parity (largest single-command gap) | analysis.ts audit |
 | 142 ✅ | `workflow` HTTP route parity (3/8 → 8/8 templates, `--role`/`--ref`/`--base`) | analysis.ts audit |
-| 143 | Analysis-route small-fixes bundle (merge-audit, merge-preview, branch-summary, clusters, security-scan, impact, semantic-diff, semantic-blame) | analysis.ts audit |
+| 143 ✅ | Analysis-route small-fixes bundle (merge-audit, merge-preview, branch-summary, clusters, security-scan, impact, semantic-diff, semantic-blame) | analysis.ts audit |
 | 144 | `narrate`/`explain` HTTP routes: evidence-only/LLM-prose toggle, `--log`/`--files`, `--lens` | remote/watch/guide/narrator audit |
 | 145 | `guide` HTTP route: `--lens` param, remote multi-turn/session support | remote/watch/guide/narrator audit |
 | 146 | `watch list`/`watch remove` HTTP routes (currently only `add`/`run` exist) | remote/watch/guide/narrator audit |
@@ -5690,7 +5690,33 @@ coherence fixes into one sweep.
 **Files likely touched:** `src/server/routes/analysis.ts`,
 `docs/parity.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Implemented as scoped, plus two small deviations:
+
+- **`merge-preview`** also gained `useEnhancedLabels` (not in the original
+  scope list) since `enhancedKeywordsN` is a no-op in `computeClusters`/
+  `computeMergeImpact` unless `useEnhancedLabels` is also true — adding the
+  keyword-count knob without the toggle that activates it would have shipped
+  a dead flag, contradicting the phase's own goal.
+- **`branch-summary`**: `computeBranchSummary()` has no enhanced-labels
+  concept of its own — in the CLI, `--enhanced-labels`/`--enhanced-keywords-n`
+  only control how many of a concept's already-computed `topKeywords` are
+  *displayed* in the text renderer, while `--dump` JSON always returns the
+  full unsliced array. Since HTTP has no equivalent "text vs. JSON" split
+  (it's JSON-only), `POST /analysis/branch-summary` now slices
+  `nearestConcepts[].topKeywords` to `enhancedKeywordsN` (default 8) when
+  `enhancedLabels` is set, else 5 — giving the flags a real, observable
+  effect on the only representation this interface has.
+- **`semantic-diff`/`diff`**: fixed a pre-existing CLI bug in the process —
+  the CLI `diff <ref1> <ref2> <query>` command already declared
+  `--hybrid`/`--bm25-weight` in its Commander options but never wired them
+  to anything (dead flags, silently ignored). `computeSemanticDiff()`
+  (`src/core/search/semanticDiff.ts`) gained an optional `candidateBlobs`
+  parameter mirroring `computeAuthorContributions`'s Phase-141
+  `candidateBlobs` pattern; both the CLI and `POST /analysis/semantic-diff`
+  now genuinely blend BM25 via `hybridSearch()` when `hybrid` is set.
+
+See `docs/parity.md` §1/§2.2/§6 (Phase 143 entry) for the full flag-by-flag
+breakdown.
 
 ---
 

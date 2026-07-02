@@ -341,6 +341,16 @@ This table shows less common flags used by specific commands or command groups.
 | `--hybrid` | `author` | bool | false | Use hybrid (vector + BM25) candidate selection (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
 | `--bm25-weight` | `author` | float | 0.3 | BM25 weight when `--hybrid` is set (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
 | `--chunks` / `--level` / `--vss` | `author` | bool/enum/bool | false/—/false | Declared on the CLI but not wired to anything in `computeAuthorContributions` (blob-level only); `--vss` prints a warning and is ignored. HTTP's `POST /analysis/author` accepts all three for flag-surface parity with the same no-op behavior (Phase 141) — not a gap, a documented CLI limitation mirrored intentionally. |
+| `--base` | `merge-audit` | commit/ref | — | Override merge-base detection (HTTP: also accepted by `POST /analysis/merge-audit`, Phase 143) |
+| `--iterations` | `clusters`, `cluster-diff`, `cluster-timeline`, `merge-preview` | int | 20 | Max k-means iterations (HTTP: also accepted by `POST /analysis/clusters` and `POST /analysis/merge-preview`, Phase 143) |
+| `--edge-threshold` | `clusters`, `cluster-diff`, `cluster-timeline`, `merge-preview` | float | 0.3 | Cosine similarity threshold for concept-graph edges (HTTP: also accepted by `POST /analysis/clusters` and `POST /analysis/merge-preview`, Phase 143) |
+| `--enhanced-keywords-n` | `clusters`, `cluster-diff`, `cluster-timeline`, `merge-preview`, `branch-summary` | int | 5 (8 for `branch-summary`) | Number of TF-IDF-enhanced keywords to compute (`clusters`/`merge-preview`) or display (`branch-summary`) when enhanced labels are enabled (HTTP: also accepted by `POST /analysis/clusters`, `POST /analysis/merge-preview`, `POST /analysis/branch-summary`, Phase 143 — `merge-preview` and `branch-summary` HTTP routes gained `useEnhancedLabels`/`enhancedLabels` too, since this flag is a no-op without it; see Phase 143 note in §6) |
+| `--top` | `merge-preview` | int | 5 | Top representative paths per cluster (HTTP: also accepted by `POST /analysis/merge-preview`, Phase 143) |
+| `--high-confidence-only` | `security-scan` | bool | false | Filter findings to `confidence === 'high'` only (HTTP: also accepted by `POST /analysis/security-scan`, Phase 143) |
+| `--chunks` / `--level` | `impact` | bool/enum | false/— | Include chunk-level embeddings / search level (`file`\|`chunk`\|`symbol`) for coupling (HTTP: also accepted by `POST /analysis/impact`, Phase 143) |
+| `--lens` | `impact`, `blast-radius`, `relate`, `similar`, `hotspots` | enum | semantic (`impact`); hybrid (others) | `semantic`\|`structural`\|`hybrid` — for `impact`, `structural`/`hybrid` makes it a thin `blast-radius` alias instead of pure semantic similarity (HTTP: also accepted by `POST /analysis/impact`, Phase 143 — previously HTTP only ever did semantic-lens impact, silently diverging from the CLI default) |
+| `--hybrid` / `--bm25-weight` | `diff` (semantic-diff) | bool/float | false/0.3 | Blend vector similarity with BM25 keyword matching to select candidate blobs. Previously declared on the CLI but never wired to anything (dead flags); Phase 143 fixed this in both the CLI and `POST /analysis/semantic-diff`, which now blend via `hybridSearch()` + `computeSemanticDiff()`'s new `candidateBlobs` parameter. |
+| `--level` | `blame` / `semantic-blame` | enum | file | `file`\|`symbol` — symbol uses function-level embeddings (HTTP: also accepted by `POST /analysis/semantic-blame`, Phase 143, as an alternate spelling of the pre-existing `searchSymbols` boolean) |
 
 ### 2.3 Flag Coherence Issues
 
@@ -602,9 +612,37 @@ this section's prior open-ended bullets into concrete, numbered
   this as a known CLI-level gap (not fixed here — out of scope for an
   HTTP-parity phase). Model-override triplet untouched — already closed in
   Phase 140.
-- **Phase 143:** analysis-route small-fixes bundle (merge-audit,
-  merge-preview, branch-summary, clusters, security-scan, impact,
-  semantic-diff, semantic-blame).
+- **Phase 143:** analysis-route small-fixes bundle. ✅ done —
+  `POST /analysis/merge-audit` gained `base` (merge-base override, mirrors
+  CLI `--base`); `POST /analysis/merge-preview` gained `top`, `iterations`,
+  `edgeThreshold`, `enhancedKeywordsN` (plus `useEnhancedLabels`, added as a
+  deviation since `enhancedKeywordsN` is a no-op without it —
+  `computeClusters`/`computeMergeImpact` only compute TF-IDF-enhanced
+  keywords when that flag is set); `POST /analysis/branch-summary` gained
+  `enhancedLabels`/`enhancedKeywordsN` — since `computeBranchSummary()` has
+  no enhanced-labels concept of its own (the CLI only uses these flags to
+  decide how many already-computed keywords to *print* in text mode), the
+  route now slices `nearestConcepts[].topKeywords` to `enhancedKeywordsN`
+  (or 5, unenhanced) so the flags have an observable effect on this
+  JSON-only interface; `POST /analysis/clusters` gained `iterations`,
+  `edgeThreshold`, `enhancedKeywordsN` (now threaded into `computeClusters`
+  alongside the existing `useEnhancedLabels`); `POST /analysis/security-scan`
+  gained `highConfidenceOnly` (filters to `confidence === 'high'`, mirrors
+  CLI `--high-confidence-only`); `POST /analysis/impact` gained `chunks`,
+  `level`, and `lens` — the most notable gap: HTTP previously only ever did
+  semantic-lens impact analysis, silently diverging from the CLI's
+  `--lens structural|hybrid` (thin `blast-radius` alias); the route now
+  mirrors that behavior exactly. `POST /analysis/semantic-diff` gained
+  `hybrid`/`bm25Weight` — this actually required fixing a **pre-existing
+  CLI bug**: the `diff <ref1> <ref2> <query>` command already declared
+  `--hybrid`/`--bm25-weight` in its Commander options but never wired them
+  to anything (dead flags). `computeSemanticDiff()` gained an optional
+  `candidateBlobs` parameter (mirrors `computeAuthorContributions`'s
+  Phase-141 `candidateBlobs` pattern) so both the CLI and this route now
+  genuinely blend BM25 via `hybridSearch()` when `hybrid` is set.
+  `POST /analysis/semantic-blame` gained `level` (file/symbol, mirrors CLI
+  `--level`) as an alternate spelling of the pre-existing `searchSymbols`
+  boolean (kept for backward compatibility).
 - **Phase 144:** `narrate`/`explain` HTTP routes — evidence-only toggle,
   `--log`/`--files`, `--lens`.
 - **Phase 145:** `guide` HTTP route — `--lens`, remote multi-turn/session
