@@ -213,6 +213,7 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | **Structural enrichment of fusion commands (Phase 110)** | `code-review`, `triage`, `explain`, and `guide` gain `--lens`: under `structural`/`hybrid` they surface grounded call-graph/co-change context (`structuralContextForPath()` — "N callers, co-changes with X 80%", and for triage the cascade planner). `--lens semantic` (default) leaves output byte-for-byte unchanged. New guide/MCP tools `call_graph`, `blast_radius`, `hotspots` let AI agents navigate structurally |
 | **Lens coverage & parity sweep (Phase 111)** | Every command where more than one lens is meaningful exposes the shared `--lens` (`addLensOption()`), with §7.3 defaults enforced uniformly (existing → `semantic`, graph-native → `structural`, fusion → `hybrid`) and per-hit lens labeling across text/JSON renderers. A mechanical parity test (`tests/lensParity.test.ts`, mirroring `docsSync`) introspects the Commander program + GUIDE_TOOLS + MCP/HTTP source to guarantee coverage stays uniform |
 | **Unified graph UI — HTML force-graph + CLI subgraph view (Phase 112)** | `gitsema graph neighbors`, `gitsema graph path`, `gitsema blast-radius`, `gitsema relate`, `gitsema similar`, and `gitsema hotspots` all gain `--out <spec>` (`text\|json[:file]\|html[:file]\|markdown[:file]`) rendering a shared `RenderableSubgraph` (`src/core/graph/subgraphView.ts`) built from `GraphStore.subgraph()`/the command's own traversal result. `--out html` (`renderGraphHtml()`, `src/core/viz/htmlRenderer-graph.ts`) is an interactive canvas force-graph (reusing the `htmlRenderer-clusters.ts` physics/`safeJson()`/`BASE_CSS` pattern); clicking a node opens a sidebar with its kind/path/risk weight and copyable "suggested commands" (`suggestedCommands()`) deep-linking into other per-command HTML views (e.g. `file-evolution --out html:evolution.html`). `--out text` (`renderGraphTree()`, `src/cli/lib/graphRender.ts`) renders the same subgraph as a cycle-safe indented ASCII tree for terminal-only workflows; `--out markdown` (`renderGraphMarkdown()`) renders a nested bullet list. Passing no `--out` leaves every command's pre-existing default text output unchanged |
+| **Graph command family HTTP/MCP exposure (Phase 147)** | Closes the long-standing HTTP/MCP gap for the rest of the `graph` command family: `POST /api/v1/graph/{callers,callees,neighbors,path,relate,similar,unused,cycles,deps,co-change,blast-radius}` HTTP routes and MCP tools `graph_path`, `graph_relate`, `graph_similar`, `graph_unused`, `cycles`, `deps`, `co_change`, `blast_radius` — thin Zod-validated / schema-validated wrappers over the existing `src/core/graph/*` query helpers, JSON-serializing the same result shapes the CLI commands already render to text. `graph callers`/`graph callees` gained HTTP routes but not new MCP tools — the pre-existing `call_graph` tool already covers both directions via its `direction` param. `graph build` remains intentionally CLI-only: it truncates and rebuilds `graph_nodes`/`edges`, a mutating index-maintenance operation like `index vacuum`/`gc`/`rebuild-fts`/etc, none of which have an HTTP route |
 
 ---
 
@@ -249,6 +250,8 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/commits`, `POST /api/v1/commits/mark-indexed` | Commit metadata |
 | `POST /api/v1/search`, `POST /api/v1/search/first-seen` | Search — full CLI `search`/`first-seen` flag parity since Phase 138, including per-level `resultsByLevel` responses and multi-repo `repos` |
 | `POST /api/v1/evolution/file`, `POST /api/v1/evolution/concept` | Evolution |
+| `POST /api/v1/graph/hotspots` | Architectural risk ranking (Phase 110) |
+| `POST /api/v1/graph/{callers,callees,neighbors,path,relate,similar,unused,cycles,deps,co-change,blast-radius}` | Structural knowledge-graph traversal/analysis routes — one per `graph`/top-level CLI graph command, following `/hotspots`'s pattern (Phase 147). `graph build` is intentionally **not** exposed here (mutating truncate-and-rebuild op — CLI-only, same as `index vacuum`/`gc`/etc) |
 | `POST /api/v1/remote/index` | Remote repo indexing |
 | `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
 | `POST /api/v1/analysis/clusters` | Clustering — accepts `{model, textModel, codeModel}` overrides for CLI/HTTP flag parity (Phase 140), though `computeClusters()` doesn't filter by model so behavior is unchanged today |
@@ -273,7 +276,7 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68); accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | **Deprecated** (Phase 138) — search across multiple registered repos; use `POST /api/v1/search` with a `repos` body param instead, which merges multi-repo results into the full search flag surface. Kept as a thin unchanged-shape alias, see `docs/deprecations.md` |
-| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |
+| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 46 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115; tool count updated Phase 147) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `POST /api/v1/auth/login` | Username/password → session token (Phase 122) |
 | `POST /api/v1/auth/logout` | Revoke the session token used to call it (Phase 122) |
@@ -612,6 +615,18 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | `workflow_run` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
 | `call_graph` | Structural call-graph traversal — callers/callees of a symbol (Phase 108) |
 | `graph_neighbors` | Typed neighborhood of a graph node — any edge kinds, direction, depth (Phase 108) |
+| `hotspots` | Architectural risk = co-change × call-coupling × churn; `lens` selects which signals (Phase 110) |
+| `graph_path` | Shortest typed path between two graph nodes (Phase 108/147) |
+| `graph_relate` | Structural callers/callees + semantically similar blobs/symbols for a node (Phase 109/147) |
+| `graph_similar` | Structural (Jaccard shape) + semantic similarity to a node (Phase 109/147) |
+| `graph_unused` | Symbols/files with no inbound calls/imports edges — structural complement to `dead_concepts` (Phase 109/147) |
+| `cycles` | Cycle detection over typed edges, default `imports` (Phase 107/147) |
+| `deps` | Dependency/dependent closure over imports/calls/extends/implements edges (Phase 107/147) |
+| `co_change` | Files that historically change together with a path (Phase 107/147) |
+| `blast_radius` | Structural dependents + semantic neighbors — "what breaks if I touch this" (Phase 109/147) |
+| `narrate_repo` | Generate evidence (default) or an LLM narrative of repository development history |
+| `explain_issue_or_error` | Generate evidence (default) or an LLM explanation/timeline for a bug, error, or topic |
+| `get_skill` | Return the gitsema agent skill (usage + result-interpretation guidance for every tool) — MCP-only |
 
 ---
 
