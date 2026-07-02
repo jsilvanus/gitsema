@@ -567,7 +567,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (38 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator,graph}.ts`):**
+**Exposed tools (46 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator,graph}.ts`):**
 
 | Tool | Description |
 |---|---|
@@ -608,6 +608,14 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `call_graph` | Structural call-graph traversal — callers/callees of a symbol (Phase 108) |
 | `graph_neighbors` | Typed neighborhood of a graph node — any edge kinds, direction, depth (Phase 108) |
 | `hotspots` | Architectural risk = co-change × call-coupling × churn; `lens` selects which signals (Phase 110) |
+| `graph_path` | Shortest typed path between two graph nodes (Phase 108/147) |
+| `graph_relate` | Structural callers/callees + semantically similar blobs/symbols for a node (Phase 109/147) |
+| `graph_similar` | Structural (Jaccard shape) + semantic similarity to a node (Phase 109/147) |
+| `graph_unused` | Symbols/files with no inbound calls/imports edges (Phase 109/147) |
+| `cycles` | Cycle detection over typed edges, default `imports` (Phase 107/147) |
+| `deps` | Dependency/dependent closure over imports/calls/extends/implements edges (Phase 107/147) |
+| `co_change` | Files that historically change together with a path (Phase 107/147) |
+| `blast_radius` | Structural dependents + semantic neighbors — "what breaks if I touch this" (Phase 109/147) |
 | `get_skill` | Return the gitsema agent skill (usage + result-interpretation guidance for every tool) — MCP-only, so clients can ground tool usage |
 
 ---

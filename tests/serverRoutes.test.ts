@@ -1504,6 +1504,186 @@ describe('POST /api/v1/graph/hotspots', () => {
 })
 
 // ===========================================================================
+// Phase 147: graph command family HTTP exposure
+//
+// Every route below reads from the (empty, in-memory) graph store — since no
+// `gitsema graph build` has run, every lookup resolves to `not-found`. These
+// tests assert 200 + the resolution-failure shape (not a 500), and that Zod
+// validation rejects malformed bodies with 400 — the same contract the
+// pre-existing `/hotspots` route follows.
+// ===========================================================================
+describe('POST /api/v1/graph/callers', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/callers').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('resolved')
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('hits')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/callers').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/callees', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/callees').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/callees').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/neighbors', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/neighbors').send({ node: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+  })
+
+  it('rejects an invalid edge type', async () => {
+    const res = await request(app).post('/api/v1/graph/neighbors').send({ node: 'foo', edgeTypes: ['bogus'] })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/path', () => {
+  it('returns 200 with not-found resolutions on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/path').send({ from: 'a', to: 'b' })
+    expect(res.status).toBe(200)
+    expect(res.body.from.status).toBe('not-found')
+    expect(res.body.to.status).toBe('not-found')
+    expect(res.body.path).toBeNull()
+  })
+
+  it('rejects a missing "to"', async () => {
+    const res = await request(app).post('/api/v1/graph/path').send({ from: 'a' })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/relate', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/relate').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('lens', 'hybrid')
+  })
+
+  it('accepts a lens override', async () => {
+    const res = await request(app).post('/api/v1/graph/relate').send({ symbol: 'foo', lens: 'structural' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'structural')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/relate').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/similar', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/similar').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/similar').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/unused', () => {
+  it('returns 200 with an empty nodes array on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/unused').send({})
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('nodes')
+    expect(Array.isArray(res.body.nodes)).toBe(true)
+  })
+
+  it('rejects an invalid edge type', async () => {
+    const res = await request(app).post('/api/v1/graph/unused').send({ edgeTypes: ['bogus'] })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/cycles', () => {
+  it('returns 200 with an empty cycles array on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/cycles').send({})
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('cycles')
+    expect(Array.isArray(res.body.cycles)).toBe(true)
+    expect(res.body).toHaveProperty('edgeTypes', ['imports'])
+  })
+
+  it('accepts an edgeTypes override', async () => {
+    const res = await request(app).post('/api/v1/graph/cycles').send({ edgeTypes: ['calls'] })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('edgeTypes', ['calls'])
+  })
+
+  it('rejects an invalid edge type', async () => {
+    const res = await request(app).post('/api/v1/graph/cycles').send({ edgeTypes: ['bogus'] })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/deps', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/deps').send({ identifier: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('hits')
+  })
+
+  it('rejects a missing identifier', async () => {
+    const res = await request(app).post('/api/v1/graph/deps').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/co-change', () => {
+  it('returns 200 with found:false on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/co-change').send({ path: 'src/foo.ts' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('found', false)
+  })
+
+  it('rejects a missing path', async () => {
+    const res = await request(app).post('/api/v1/graph/co-change').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/blast-radius', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/blast-radius').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('lens', 'hybrid')
+  })
+
+  it('accepts a lens override', async () => {
+    const res = await request(app).post('/api/v1/graph/blast-radius').send({ symbol: 'foo', lens: 'structural' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'structural')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/blast-radius').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
 // Phase 140: model-override triplet on analysis.ts routes
 //
 // `--model`/`--text-model`/`--code-model` are now accepted as body fields on

@@ -49,7 +49,7 @@ This table shows which tools/commands are available in which interface. A checkm
 - **REPL**: Lightweight interactive search REPL (search only)
 - **LSP**: Language Server Protocol for IDE integration (9 protocol methods: hover, definition, references, document/workspace symbol, call hierarchy, code lens) — available over stdio, `--tcp` (deprecated, Phase 120), or `--websocket` (see §0); tool availability is identical across all three, since they're just transports onto the same dispatcher
 - **Guide**: Agentic tool-calling loop in `gitsema guide` (49 tools, max 5 roundtrips)
-- **MCP**: Model Context Protocol tools (38 tools for AI clients) — available over stdio, `--websocket`, or `--http` (see §0); tool availability is identical across all three, since they're just transports onto the same `McpServer`
+- **MCP**: Model Context Protocol tools (46 tools for AI clients) — available over stdio, `--websocket`, or `--http` (see §0); tool availability is identical across all three, since they're just transports onto the same `McpServer`
 - **HTTP**: REST API server via `gitsema tools serve` (~30 endpoints)
 - **CLI Interactive** (planned): Full CLI in interactive mode
 - **Web UI** (planned): Browser-based interface
@@ -91,19 +91,19 @@ This table shows which tools/commands are available in which interface. A checkm
 | `eval` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | **Impact & Dependencies** |
 | `impact` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `co-change` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `deps` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `cycles` | ✓ | — | — | — | — | ✓ | ✓ | — |
+| `co-change` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
+| `deps` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
+| `cycles` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
 | **Graph & Structure** |
-| `graph build` | ✓ | — | — | — | — | ✓ | — | — |
-| `graph callers` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
-| `graph callees` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
-| `graph neighbors` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
-| `graph path` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `graph relate` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `graph similar` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `graph unused` | ✓ | — | — | — | — | ✓ | ✓ | — |
-| `blast-radius` | ✓ | — | — | — | — | ✓ | ✓ | — |
+| `graph build` | ✓ | — | — | — | — | — | — | — |
+| `graph callers` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `graph callees` | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `graph neighbors` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `graph path` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
+| `graph relate` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
+| `graph similar` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
+| `graph unused` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
+| `blast-radius` | ✓ | — | — | — | ✓ | ✓ | ✓ | — |
 | `hotspots` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Workflow & CI** |
 | `triage` | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -192,13 +192,14 @@ This table shows which tools/commands are available in which interface. A checkm
 - `search`, `code-search`, `index`, `first-seen`, `evolution`, `clusters`, `merge-audit`, `merge-preview`
 
 **CLI-only gaps (not in Guide/MCP):**
-- `index doctor`, `graph path`, `graph relate`, `graph similar`, `graph unused`, `blast-radius`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`, `co-change`, `deps`, `cycles`, and all maintenance subcommands
+- `index doctor`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`, and all maintenance subcommands (including `graph build` — see Phase 147's rationale for keeping it CLI-only)
+- ~~`graph path`, `graph relate`, `graph similar`, `graph unused`, `blast-radius`, `co-change`, `deps`, `cycles` (not in Guide/MCP)~~ — **closed for MCP by Phase 147** (`graph_path`, `graph_relate`, `graph_similar`, `graph_unused`, `cycles`, `deps`, `co_change`, `blast_radius` MCP tools added). Still absent from the `guide` agentic tool loop (`GUIDE_TOOLS` registry) — that gap is untouched by Phase 147, scoped to HTTP/MCP only.
 - ~~`search --merge-levels` / distinct per-level result lists (Phase 136)~~ — **closed by Phase 138.** MCP `semantic_search` now accepts `level: 'module'` (previously `file|chunk|symbol` only) and, when 2+ of {chunk, symbol, module} are active at once, returns a rendered text blob with one labeled `== <level> ==` section per level (mirroring CLI's per-level text output) instead of one merged list; a `merge_levels` param opts back into the pre-Phase-136-equivalent single list. The HTTP `POST /search` route gained the identical `level: 'module'` option, a `mergeLevels` body param, and — when 2+ levels are active and `mergeLevels` is not set — returns `{ resultsByLevel: { file: [...], chunk: [...], ... } }` instead of a flat array (breaking response-shape change, accepted per §4's parity-over-stability principle). See `docs/PLAN.md` Phase 138.
 - ~~`code-search` never received Phase 136's per-level-list treatment~~ — **resolved in Phase 137.** CLI `code-search`, MCP `code_search`, and Guide's `code_search` tool all now isolate the chunk/symbol candidate pools by default (the default `--level`/`level` value `'symbol'` sets both flags, so this was the *every-call* case, not an opt-in combination) and return separate per-level lists — CLI via `renderResultsByLevel()`, MCP/Guide via a `results_by_level: { file, chunk, symbol }` object (breaking response-shape change, accepted per §4). All three gained a `--merge-levels`/`merge_levels` opt-out back to the pre-Phase-137 single merged list/array. See `docs/PLAN.md` Phase 137.
 
 **HTTP gaps:**
-- Most graph commands (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`)
 - `code-search`, `file-change-points`, `cluster-diff`, `cluster-timeline`, `branch-summary`, `contributor-profile`, `eval`, `regression-gate`, `code-review`, `pr-report`, `cherry-pick-suggest`
+- ~~Most graph commands (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`)~~ — **closed by Phase 147.** All now have `POST /api/v1/graph/*` routes (`callers`, `callees`, `neighbors`, `path`, `relate`, `similar`, `unused`, plus `cycles`, `deps`, `co-change`, `blast-radius`), following the pre-existing `/hotspots` route's pattern. `graph build` remains CLI-only by design (mutating index-maintenance operation — see Phase 147's rationale).
 
 **`multi-repo-search` HTTP route consolidated (Phase 138):** `POST /search`
 now accepts a `repos: string[]` body param that merges multi-repo results
@@ -257,9 +258,9 @@ This section documents all flags used across CLI commands, their consistency, an
 | `--vss` | — | bool | false | `search`, `first-seen` | Use vector search index for approximate search |
 | `--level` | — | enum | file | `search`, `code-search`, `repl`, `file-evolution` | Search/index granularity: `file`, `chunk`, `symbol`, or `module` (`file-evolution` only supports `file`\|`symbol` — per-symbol centroid drift; also on `POST /evolution/file` since Phase 139); MCP `semantic_search`'s `level` param gained `module` (previously `file\|chunk\|symbol`) in Phase 138, matching HTTP `POST /search`'s `level` |
 | `--chunker` | — | enum | file | `index start` | Chunking strategy: `file`, `function`, or `fixed` |
-| `--lens` | — | enum | hybrid | `blast-radius`, `relate`, `similar`, `hotspots` | Structural/semantic lens toggle: `structural`, `semantic`, `hybrid` |
-| `--weight-structural` | — | float | lens-dependent | `blast-radius`, `relate`, `similar`, `hotspots` | Structural-signal weight override for the active `--lens` (`addLensOption`); **no-op on `hotspots`** specifically — its risk score is an unweighted geometric mean with no weighting hook, on both CLI and `POST /graph/hotspots` (accepted there for flag-surface parity only, Phase 139) |
-| `--depth` | — | int | varies | `deps`, `graph callers`, `graph callees`, `graph neighbors`, `graph path`, `blast-radius` | Traversal depth for graph commands |
+| `--lens` | — | enum | hybrid | `blast-radius`, `relate`, `similar`, `hotspots` | Structural/semantic lens toggle: `structural`, `semantic`, `hybrid`; MCP `graph_relate`/`graph_similar`/`blast_radius` (`lens`) and HTTP `POST /graph/{relate,similar,blast-radius}` (`lens`) mirror this since Phase 147 |
+| `--weight-structural` | — | float | lens-dependent | `blast-radius`, `relate`, `similar`, `hotspots` | Structural-signal weight override for the active `--lens` (`addLensOption`); **no-op on `hotspots`** specifically — its risk score is an unweighted geometric mean with no weighting hook, on both CLI and `POST /graph/hotspots` (accepted there for flag-surface parity only, Phase 139); not accepted on `POST /graph/{relate,similar,blast-radius}` (Phase 147) — those routes mirror only `lens`, matching the CLI's own no-op-if-set-elsewhere behavior for this flag on non-`hotspots` commands |
+| `--depth` | — | int | varies | `deps`, `graph callers`, `graph callees`, `graph neighbors`, `graph path`, `blast-radius` | Traversal depth for graph commands; MCP `call_graph`/`graph_neighbors`/`deps`/`blast_radius` (`depth`) and HTTP `POST /graph/{callers,callees,neighbors,deps,blast-radius}` (`depth`) mirror this since Phase 108/147 |
 | `--repos` | — | string | — | `search`, `first-seen` | Comma-separated repo IDs for multi-repo mode; MCP `semantic_search`/`first_seen` (`repos: string[]`) and HTTP `POST /search`/`POST /search/first-seen` (`repos: string[]`) mirror this since Phase 138 — results are merged into the primary-DB result list rather than returned separately, matching CLI's `--repos` behavior. `POST /analysis/multi-repo-search` remains as a thin deprecated alias (see `docs/deprecations.md`) |
 | `--threshold` | — | float | varies | `code-review`, `cross-repo-similarity`, `policy-check` | Similarity/distance threshold for matching |
 | `--base` | — | ref | varies | `regression-gate`, `code-review`, `ci-diff` | Base git ref to compare from |
@@ -319,9 +320,9 @@ This table shows less common flags used by specific commands or command groups.
 | `--fix` | `index doctor` | bool | false | Auto-repair fixable issues (missing FTS content, orphan embeddings) and re-report |
 | `--no-cache` | `search` | bool | false | Skip query embedding cache; MCP `semantic_search` (`no_cache`) / HTTP `POST /search` (`noCache`) since Phase 138 |
 | `--cache` | `search` | bool | true | Use query embedding cache |
-| `--edge-types` | `deps`, `graph cycles`, `graph neighbors`, `unused` | string | varies | Comma-separated edge types to traverse |
-| `--reverse` | `deps` | bool | false | Show dependents instead of dependencies |
-| `--direction` | `graph neighbors` | enum | both | Edge direction: `out`, `in`, or `both` |
+| `--edge-types` | `deps`, `graph cycles`, `graph neighbors`, `unused` | string | varies | Comma-separated edge types to traverse; MCP `deps`/`cycles`/`graph_neighbors`/`graph_unused` (`edge_types: string[]`) and HTTP `POST /graph/{deps,cycles,neighbors,unused}` (`edgeTypes: string[]`) mirror this since Phase 108/147 |
+| `--reverse` | `deps` | bool | false | Show dependents instead of dependencies; MCP `deps` (`reverse`) and HTTP `POST /graph/deps` (`reverse`) mirror this since Phase 147 |
+| `--direction` | `graph neighbors` | enum | both | Edge direction: `out`, `in`, or `both`; MCP `graph_neighbors` (`direction`) and HTTP `POST /graph/neighbors` (`direction`) mirror this since Phase 108/147 |
 | `--to` | `storage migrate` | enum | — | Destination backend: `sqlite`, `postgres`, or `qdrant` |
 | `--to-path` | `storage migrate` | path | — | Destination SQLite database file |
 | `--to-metadata-url` | `storage migrate` | url | — | Destination postgres connection string |
@@ -433,16 +434,16 @@ This table shows less common flags used by specific commands or command groups.
 - **Tools:** Defined in `guideTools.ts` with schema definitions and executors
 
 ### MCP (Model Context Protocol)
-- **Status:** 38 tools exposed for external AI clients
+- **Status:** 46 tools exposed for external AI clients
 - **Strengths:** Standardized protocol, works with Claude, other AI systems
-- **Gaps:** No maintenance commands, some graph commands, no visualization
+- **Gaps:** No maintenance commands (`graph build` included, by design — Phase 147), no visualization
 - **Transports:** stdio (default), `--websocket`, `--http` (Streamable HTTP, Phase 117) — see §0; identical 38-tool surface on all three
 - **Remote delegation:** `gitsema tools mcp --remote <url>` proxies every tool call to a `gitsema tools serve`'s `POST /api/v1/protocol/mcp.<toolName>` route (Phase 113) — a separate, outbound-delegation axis from the inbound transport above (see §0)
 
 ### HTTP API (`gitsema tools serve`)
-- **Status:** ~30 REST endpoints across multiple routes
+- **Status:** ~40 REST endpoints across multiple routes
 - **Strengths:** Language-agnostic, browser-accessible, remote delegation
-- **Gaps:** Missing graph commands (callers/callees/neighbors), some analysis endpoints
+- **Gaps:** Some analysis endpoints (see §6); `graph build` intentionally excluded (mutating index-maintenance op — Phase 147)
 - **Routes:** `search/`, `analysis/`, `evolution/`, `guide/`, `status/`, `graph/`, `commits/`, `blobs/`, `watch/`, `remote/`, `protocol/` (Phase 113 — generic LSP/MCP remote-delegation dispatch)
 - **Authentication:** Optional bearer token via `--key`/`GITSEMA_SERVE_KEY`
 
@@ -554,6 +555,7 @@ If you find a discrepancy, **update this file first**, then propagate the change
 | Phase 129 | Admin-gated enabled sets | New `gitsema admin models list\|allow\|deny\|reset` CLI command (operator-only, no other interface — see Tool Matrix); no flag changes to existing tools |
 | Phase 130 | BYOK for narrator/guide | `--byok-http-url`/`--byok-api-key`/`--byok-model`/`--byok-max-tokens`/`--byok-temperature` flags added to `narrate`/`explain`/`guide` (CLI), nested `byok` body field on the matching HTTP routes, flattened `byok_*` fields on the matching MCP tools; no Tool Matrix changes (additive flags on already-listed tools) |
 | Phase 139 | `evolution`/`hotspots` HTTP route parity | `POST /evolution/file` gains `level`, `branch`, `model`/`textModel`/`codeModel`, `alerts`; `POST /evolution/concept` gains `branch`, `model`/`textModel`/`codeModel`; `computeEvolution()` now accepts a `branch` filter directly (previously CLI-only post-filtering) — `computeConceptEvolution()` already did. `POST /graph/hotspots` gains `weightStructural` for flag-surface parity only (no-op, same as CLI — see §2.1's `--weight-structural` row). No Tool Matrix changes (both routes were already listed ✓ HTTP; this closes a flag-level, not tool-level, gap) |
+| Phase 147 | Graph command family HTTP/MCP exposure | `POST /api/v1/graph/{callers,callees,neighbors,path,relate,similar,unused,cycles,deps,co-change,blast-radius}` HTTP routes added; MCP tools `graph_path`, `graph_relate`, `graph_similar`, `graph_unused`, `cycles`, `deps`, `co_change`, `blast_radius` added (46 MCP tools total). `graph build` kept CLI-only — mutating truncate-and-rebuild index-maintenance op, same precedent as `index vacuum`/`gc`/`rebuild-fts`/etc, none of which have an HTTP route |
 | Future | CLI Interactive | Full CLI with autocomplete, history, interactive UI |
 | Future | Web UI | Browser-based dashboard with visualization |
 
@@ -680,8 +682,13 @@ this section's prior open-ended bullets into concrete, numbered
   numeric id). Added a `watch` row to the Tool Matrix above (it had no row
   at all before this phase, despite `add`/`run` already having HTTP
   routes).
-- **Phase 147:** graph command family HTTP/MCP exposure — closes the
-  "Expose graph commands to HTTP API" item below.
+- **Phase 147:** graph command family HTTP/MCP exposure. ✅ done — HTTP
+  routes and MCP tools added for `callers`/`callees`/`neighbors`/`path`/
+  `relate`/`similar`/`unused`/`cycles`/`deps`/`co-change`/`blast-radius`;
+  `graph build` kept CLI-only (mutating index-maintenance op, no HTTP
+  route — same as `index vacuum`/`gc`/etc). Closes the "Expose graph
+  commands to HTTP API" Medium-Term item (see the HTTP-gaps and
+  CLI-only-gaps notes above, now struck through).
 - **Phase 148:** triage pass on the remaining zero-HTTP/MCP-exposure CLI
   commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`,
   `cherry-pick-suggest`, `regression-gate`, `code-review`,

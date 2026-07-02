@@ -5903,7 +5903,50 @@ commands).
 `src/mcp/tools/graph.ts`, `docs/parity.md`, `docs/features.md`, `README.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Implemented as specified. `src/server/routes/graph.ts`
+gained `POST` routes for `/callers`, `/callees`, `/neighbors`, `/path`,
+`/relate`, `/similar`, `/unused`, `/cycles`, `/deps`, `/co-change`, and
+`/blast-radius`, each a thin Zod-validated wrapper over the existing
+`src/core/graph/*` query helpers (`traversal.ts`, `relate.ts`, `similar.ts`,
+`unused.ts`, `cycles.ts`, `deps.ts`, `coChange.ts`, `blastRadius.ts`) —
+JSON-serializing the same result shape the CLI commands already render to
+text, following the pre-existing `/hotspots` route's pattern exactly (POST +
+body schema, not GET, matching every other analysis route in this server).
+`src/mcp/tools/graph.ts` gained `graph_path`, `graph_relate`, `graph_similar`,
+`graph_unused`, `cycles`, `deps`, `co_change`, and `blast_radius` MCP tools —
+the exact 8 tools scoped above. `graph callers`/`graph callees` were **not**
+added as new MCP tools (deviation, not an omission): the pre-existing
+`call_graph` tool already covers both directions via its `direction`
+parameter, so a second tool would duplicate it; they **did** get new HTTP
+routes (`/callers`, `/callees`) since HTTP had no equivalent to `call_graph`
+at all and the Goal explicitly listed both as gaps.
+**`graph build` decision:** kept intentionally CLI-only, not exposed as a
+mutating HTTP route. Rationale (per the open design question): it truncates
+and rebuilds `graph_nodes`/`edges` from `structural_refs`/`symbols`/
+`blob_commits` — a full-table-rewrite index-maintenance operation, not a
+query. Auditing gitsema's other maintenance commands of the same shape
+(`index vacuum`, `index gc`, `index rebuild-fts`, `index update-modules`,
+`index clear-model`, `index build-vss`) confirmed **none** of them have a
+real HTTP route either (`docs/parity.md`'s matrix claimed HTTP ✓ for several
+of these rows, but no corresponding route exists anywhere in
+`src/server/routes/` — a pre-existing documentation inaccuracy, left
+uncorrected here as out of scope for this phase and not re-derived by rows
+this phase doesn't own). `graph build` follows the real (not the
+mis-documented) precedent: mutating maintenance stays CLI/local-only.
+Since remote MCP delegation (`tools mcp --remote`) dispatches through the
+same `registerGraphTools()` registrations via `protocolRouter()`
+(`src/server/routes/protocol.ts`), all 8 new MCP tools work transparently
+over `mcp.<name>` remote delegation with no additional wiring.
+Tests added: `tests/serverRoutes.test.ts` gained one `describe` block per new
+route (not-found-resolution shape on an empty graph, lens/edge-type
+validation, 400 on missing required fields) — 25 new assertions. No new
+tests were added directly against the MCP tool handlers or the CLI command
+wrappers, consistent with the existing precedent in this codebase that thin
+CLI-command/MCP-tool plumbing over already-unit-tested core `src/core/graph/*`
+functions (covered by `graphTraversal.test.ts`, `graphLens.test.ts`,
+`graphFusion.test.ts`, `graphBuild.test.ts`, `subgraphView.test.ts`) does not
+get its own duplicate test layer. `pnpm build && pnpm test` green (123 test
+files / 1493 tests passing, 22 skipped, no regressions).
 
 ---
 
