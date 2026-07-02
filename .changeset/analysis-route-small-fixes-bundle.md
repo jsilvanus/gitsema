@@ -1,5 +1,0 @@
----
-"gitsema": minor
----
-
-Phase 143: closed a grab-bag of small HTTP/CLI flag-parity gaps across `src/server/routes/analysis.ts`. `POST /analysis/merge-audit` gained `base` (merge-base override); `POST /analysis/merge-preview` gained `top`/`iterations`/`edgeThreshold`/`enhancedKeywordsN`/`useEnhancedLabels`; `POST /analysis/branch-summary` gained `enhancedLabels`/`enhancedKeywordsN` (slices `nearestConcepts[].topKeywords` in the JSON response); `POST /analysis/clusters` gained `iterations`/`edgeThreshold`/`enhancedKeywordsN`; `POST /analysis/security-scan` gained `highConfidenceOnly`; `POST /analysis/impact` gained `chunks`/`level`/`lens` (`structural`/`hybrid` now makes it a thin `blast-radius` alias, closing a prior silent divergence from the CLI's default); `POST /analysis/semantic-diff` gained `hybrid`/`bm25Weight` (also fixing a pre-existing CLI bug where `diff`'s `--hybrid`/`--bm25-weight` flags were declared but never wired to anything); `POST /analysis/semantic-blame` gained `level` (file/symbol).
