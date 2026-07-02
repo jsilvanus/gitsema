@@ -1161,6 +1161,100 @@ describe('POST /api/v1/analysis/workflow', () => {
       .send({ template: 'incident' })
     expect(res.status).toBe(400)
   })
+
+  // Phase 142: 5 newly-exposed templates (onboarding, ownership-intel,
+  // arch-drift, knowledge-portal, regression-forecast) — enum was previously
+  // limited to pr-review/incident/release-audit.
+  it('returns 200 for onboarding template using --role', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'onboarding', role: 'auth', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'onboarding')
+    expect(res.body.sections).toHaveProperty('relevantBlobs')
+    expect(res.body.sections).toHaveProperty('changePoints')
+    expect(res.body.sections).toHaveProperty('keyExperts')
+  })
+
+  it('returns 200 for onboarding template with no role/query (defaults)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'onboarding' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'onboarding')
+  })
+
+  it('returns 200 for ownership-intel template with query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'ownership-intel', query: 'database crash', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'ownership-intel')
+    expect(res.body.sections).toHaveProperty('suggestedReviewers')
+    expect(res.body.sections).toHaveProperty('topResults')
+  })
+
+  it('returns 400 for ownership-intel without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'ownership-intel' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 for arch-drift template without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'arch-drift', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'arch-drift')
+    expect(res.body.sections).toHaveProperty('health')
+    expect(res.body.sections).toHaveProperty('debt')
+    expect(res.body.sections).toHaveProperty('changePoints')
+  })
+
+  it('returns 200 for knowledge-portal template with query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'knowledge-portal', query: 'platform architecture', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'knowledge-portal')
+    expect(res.body.sections).toHaveProperty('results')
+    expect(res.body.sections).toHaveProperty('relatedConcepts')
+    expect(res.body.sections).toHaveProperty('owners')
+  })
+
+  it('returns 400 for knowledge-portal without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'knowledge-portal' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 for regression-forecast template with query and ref', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'regression-forecast', query: 'auth refactor', ref: 'main', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'regression-forecast')
+    expect(res.body.sections).toHaveProperty('currentNeighbourhood')
+    expect(res.body.sections).toHaveProperty('changePoints')
+    expect(res.body.sections).toHaveProperty('riskOwners')
+    expect(res.body.sections).toHaveProperty('baseRef', 'main')
+  })
+
+  it('returns 400 for regression-forecast without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'regression-forecast' })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts base for pr-review without error (no-op, mirrors CLI dead flag)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'pr-review', file: 'src/index.ts', base: 'main', top: 3 })
+    expect(res.status).toBe(200)
+  })
 })
 
 // ===========================================================================

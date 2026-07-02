@@ -2,7 +2,7 @@
 
 This document tracks the availability of gitsema tools and commands across all interfaces, and the implementation of common flags across the CLI. It serves as the single source of truth for interface parity and helps identify gaps, inconsistencies, and opportunities for unification.
 
-**Last updated:** 2026-07-01 (the only date in this document — see §4 for why)  
+**Last updated:** 2026-07-02 (the only date in this document — see §4 for why)  
 **Maintainer note:** Any tool change, interface change, or flag addition must be reflected in the tables below and in the canonical sections of `CLAUDE.md` / `docs/features.md` / `README.md`.
 
 ---
@@ -583,8 +583,25 @@ this section's prior open-ended bullets into concrete, numbered
   commits? }` (breaking change, per §4's parity-over-stability rule) to
   carry `includeCommits` results. Model-override triplet intentionally
   excluded — tracked separately in Phase 140.
-- **Phase 142:** `workflow` HTTP route parity — 3/8 templates exposed
-  today, all 8 on CLI.
+- **Phase 142:** `workflow` HTTP route parity. ✅ done —
+  `POST /analysis/workflow`'s `WorkflowBodySchema.template` enum now accepts
+  all 8 CLI templates (`pr-review`, `incident`, `release-audit`,
+  `onboarding`, `ownership-intel`, `arch-drift`, `knowledge-portal`,
+  `regression-forecast`), each wired to the same underlying functions the
+  CLI's `workflowCommand()` calls (`computeAuthorContributions`,
+  `getActiveSession`/`computeHealthTimeline`/`scoreDebt`, plus the
+  already-used `embedQuery`/`vectorSearch`/`computeConceptChangePoints`/
+  `computeExperts`) — all 5 newly-exposed templates' core functions were
+  already imported and HTTP-callable elsewhere in `analysis.ts` (via
+  `/author`, `/health`, `/debt`), so no follow-up gaps were found. `role`
+  and `ref` are new body fields (mirroring CLI `--role`/`--ref`); `base` was
+  already present and un-gated, but investigation found it's a **no-op in
+  the CLI itself** (`workflowCommand()` declares `options.base` but never
+  reads it, for any template) — the HTTP route intentionally mirrors this
+  rather than inventing HTTP-only behavior the CLI doesn't have. Flagging
+  this as a known CLI-level gap (not fixed here — out of scope for an
+  HTTP-parity phase). Model-override triplet untouched — already closed in
+  Phase 140.
 - **Phase 143:** analysis-route small-fixes bundle (merge-audit,
   merge-preview, branch-summary, clusters, security-scan, impact,
   semantic-diff, semantic-blame).

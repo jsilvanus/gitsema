@@ -586,7 +586,7 @@ Track semantic drift of a single file across its Git history.
 | Command | Description |
 |---|---|
 | `gitsema workflow list` | List available productized workflow templates |
-| `gitsema workflow run <name>` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
+| `gitsema workflow run <name>` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit` \| `onboarding` \| `ownership-intel` \| `arch-drift` \| `knowledge-portal` \| `regression-forecast`). Flags: `--file`, `--query`, `--role` (onboarding topic, alias for `--query`), `--ref` (regression-forecast base ref), `--base` (declared for pr-review, currently a no-op), `--top`, `--format`/`--dump`/`--out` |
 
 ### Repo Insights
 

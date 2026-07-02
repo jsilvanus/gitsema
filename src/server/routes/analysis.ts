@@ -752,14 +752,31 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   })
 
   // POST /analysis/workflow
-  // Run a named workflow template (pr-review | incident | release-audit).
+  // Run a named workflow template — all 8 productized patterns supported by
+  // the CLI's `workflow run` (Phase 142): pr-review, incident, release-audit,
+  // onboarding, ownership-intel, arch-drift, knowledge-portal,
+  // regression-forecast. `role`/`ref`/`base` are accepted generally (not
+  // gated to a single template) mirroring the CLI's `workflow run` flags —
+  // see docs/parity.md for the note on `base` remaining a no-op (same as
+  // the CLI, which never reads `options.base` in `workflowCommand`).
   const WorkflowBodySchema = z.object({
     ...modelOverrideSchema.shape,
-    template: z.enum(['pr-review', 'incident', 'release-audit']),
+    template: z.enum([
+      'pr-review',
+      'incident',
+      'release-audit',
+      'onboarding',
+      'ownership-intel',
+      'arch-drift',
+      'knowledge-portal',
+      'regression-forecast',
+    ]),
     query: z.string().optional(),
     file: z.string().optional(),
     top: z.number().int().positive().optional().default(5),
     base: z.string().optional(),
+    role: z.string().optional(),
+    ref: z.string().optional(),
   })
   router.post('/workflow', async (req, res) => {
     const parsed = WorkflowBodySchema.safeParse(req.body)
@@ -774,6 +791,18 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     }
     if (opts.template === 'incident' && !opts.query) {
       res.status(400).json({ error: '`query` is required for the incident template' })
+      return
+    }
+    if (opts.template === 'ownership-intel' && !opts.query) {
+      res.status(400).json({ error: '`query` is required for the ownership-intel template' })
+      return
+    }
+    if (opts.template === 'knowledge-portal' && !opts.query) {
+      res.status(400).json({ error: '`query` is required for the knowledge-portal template' })
+      return
+    }
+    if (opts.template === 'regression-forecast' && !opts.query) {
+      res.status(400).json({ error: '`query` is required for the regression-forecast template' })
       return
     }
     let provider: EmbeddingProvider
@@ -817,8 +846,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       try { sections.experts = computeExperts({ topN: top }) }
       catch (err) { sections.experts = { error: err instanceof Error ? err.message : String(err) } }
 
-    } else {
-      // release-audit
+    } else if (opts.template === 'release-audit') {
       const query = opts.query ?? 'architecture changes quality'
       let emb: number[]
       try {
@@ -833,6 +861,100 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       catch (err) { sections.changePoints = { error: err instanceof Error ? err.message : String(err) } }
       try { sections.experts = computeExperts({ topN: top }) }
       catch (err) { sections.experts = { error: err instanceof Error ? err.message : String(err) } }
+
+    } else if (opts.template === 'onboarding') {
+      const topic = opts.role ?? opts.query ?? 'authentication'
+      let emb: number[]
+      try {
+        emb = await embedQuery(provider, topic) as number[]
+      } catch (err) {
+        res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+        return
+      }
+      try { sections.relevantBlobs = await vectorSearch(emb, { topK: top }) }
+      catch (err) { sections.relevantBlobs = { error: err instanceof Error ? err.message : String(err) } }
+      try { sections.changePoints = computeConceptChangePoints(topic, emb, { topK: top }) }
+      catch (err) { sections.changePoints = { error: err instanceof Error ? err.message : String(err) } }
+      try { sections.keyExperts = computeExperts({ topN: top }) }
+      catch (err) { sections.keyExperts = { error: err instanceof Error ? err.message : String(err) } }
+
+    } else if (opts.template === 'ownership-intel') {
+      let emb: number[]
+      try {
+        emb = await embedQuery(provider, opts.query!) as number[]
+      } catch (err) {
+        res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+        return
+      }
+      try {
+        const contributions = await computeAuthorContributions(emb, { topAuthors: top })
+        sections.suggestedReviewers = contributions.map((c) => ({
+          author: c.authorName,
+          email: c.authorEmail,
+          score: c.totalScore,
+          blobCount: c.blobCount,
+        }))
+      } catch (err) {
+        sections.suggestedReviewers = { error: err instanceof Error ? err.message : String(err) }
+      }
+      try { sections.topResults = await vectorSearch(emb, { topK: top }) }
+      catch (err) { sections.topResults = { error: err instanceof Error ? err.message : String(err) } }
+
+    } else if (opts.template === 'arch-drift') {
+      try {
+        const session = getActiveSession()
+        sections.health = computeHealthTimeline(session, { buckets: Math.min(top, 12) })
+      } catch (err) {
+        sections.health = { error: err instanceof Error ? err.message : String(err) }
+      }
+      try {
+        const session = getActiveSession()
+        sections.debt = await scoreDebt(session, provider, { top })
+      } catch (err) {
+        sections.debt = { error: err instanceof Error ? err.message : String(err) }
+      }
+      try {
+        const query = opts.query ?? 'architecture structure modules'
+        const emb = await embedQuery(provider, query) as number[]
+        sections.changePoints = computeConceptChangePoints(query, emb, { topK: top })
+      } catch (err) {
+        sections.changePoints = { error: err instanceof Error ? err.message : String(err) }
+      }
+
+    } else if (opts.template === 'knowledge-portal') {
+      let emb: number[]
+      try {
+        emb = await embedQuery(provider, opts.query!) as number[]
+      } catch (err) {
+        res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+        return
+      }
+      try { sections.results = await vectorSearch(emb, { topK: top }) }
+      catch (err) { sections.results = { error: err instanceof Error ? err.message : String(err) } }
+      try { sections.relatedConcepts = computeConceptChangePoints(opts.query!, emb, { topK: top }) }
+      catch (err) { sections.relatedConcepts = { error: err instanceof Error ? err.message : String(err) } }
+      try { sections.owners = computeExperts({ topN: top }) }
+      catch (err) { sections.owners = { error: err instanceof Error ? err.message : String(err) } }
+
+    } else {
+      // regression-forecast
+      let emb: number[]
+      try {
+        emb = await embedQuery(provider, opts.query!) as number[]
+      } catch (err) {
+        res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+        return
+      }
+      try { sections.currentNeighbourhood = await vectorSearch(emb, { topK: top }) }
+      catch (err) { sections.currentNeighbourhood = { error: err instanceof Error ? err.message : String(err) } }
+      try { sections.changePoints = computeConceptChangePoints(opts.query!, emb, { topK: top }) }
+      catch (err) { sections.changePoints = { error: err instanceof Error ? err.message : String(err) } }
+      try { sections.riskOwners = computeExperts({ topN: top }) }
+      catch (err) { sections.riskOwners = { error: err instanceof Error ? err.message : String(err) } }
+      if (opts.ref) {
+        sections.baseRef = opts.ref
+        sections.note = 'Run `gitsema diff <ref> HEAD <query>` for a full semantic diff between refs.'
+      }
     }
 
     res.json({ template: opts.template, sections })
