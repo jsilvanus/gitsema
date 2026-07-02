@@ -1450,6 +1450,54 @@ describe('POST /api/v1/protocol/:operation', () => {
 })
 
 // ===========================================================================
+// /api/v1/watch (Phase 53 add/run; Phase 146 list/remove)
+// ===========================================================================
+describe('/api/v1/watch', () => {
+  it('POST /watch/add saves a named query', async () => {
+    const res = await request(app)
+      .post('/api/v1/watch/add')
+      .send({ name: 'watch-test-alpha', query: 'authentication middleware' })
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true, name: 'watch-test-alpha', query: 'authentication middleware' })
+  })
+
+  it('GET /watch lists saved queries newest-first, including the one just added', async () => {
+    const res = await request(app).get('/api/v1/watch')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.watches)).toBe(true)
+    const entry = res.body.watches.find((w: { name: string }) => w.name === 'watch-test-alpha')
+    expect(entry).toBeDefined()
+    expect(entry).toMatchObject({ name: 'watch-test-alpha', query: 'authentication middleware' })
+    expect(entry).toHaveProperty('id')
+    expect(entry).toHaveProperty('lastRunAt')
+    expect(entry).toHaveProperty('webhookUrl')
+  })
+
+  it('DELETE /watch/:name removes a saved query by name', async () => {
+    const res = await request(app).delete('/api/v1/watch/watch-test-alpha')
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true, name: 'watch-test-alpha' })
+
+    const listRes = await request(app).get('/api/v1/watch')
+    expect(listRes.body.watches.find((w: { name: string }) => w.name === 'watch-test-alpha')).toBeUndefined()
+  })
+
+  it('DELETE /watch/:name returns 404 for an unknown name', async () => {
+    const res = await request(app).delete('/api/v1/watch/watch-test-does-not-exist')
+    expect(res.status).toBe(404)
+    expect(res.body).toHaveProperty('error')
+  })
+
+  it('POST /watch/run returns an array (empty saved-queries set is fine)', async () => {
+    const res = await request(app)
+      .post('/api/v1/watch/run')
+      .send({})
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+})
+
+// ===========================================================================
 // Non-existent routes
 // ===========================================================================
 describe('non-existent routes', () => {

@@ -571,7 +571,7 @@ Track semantic drift of a single file across its Git history.
 | Command | Description |
 |---|---|
 | `gitsema repos` | Manage tracked repositories for multi-repo indexing |
-| `gitsema watch` | Manage saved searches and watch mode notifications |
+| `gitsema watch add/list/remove/run` | Manage saved searches and watch mode notifications. Also `POST /api/v1/watch/add`, `GET /api/v1/watch`, `DELETE /api/v1/watch/:name`, `POST /api/v1/watch/run` |
 | `gitsema pr-report [options]` | Compose a semantic PR report: diff, impacted modules, change-points, reviewer suggestions |
 | `gitsema regression-gate [options]` | CI gate: fail if key concepts drift beyond threshold between two refs |
 | `gitsema bisect <good> <bad> <query>` | Semantic git bisect — binary search to find where a concept diverged from a "good" baseline |

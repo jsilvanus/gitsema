@@ -274,6 +274,8 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | **Deprecated** (Phase 138) — search across multiple registered repos; use `POST /api/v1/search` with a `repos` body param instead, which merges multi-repo results into the full search flag surface. Kept as a thin unchanged-shape alias, see `docs/deprecations.md` |
 | `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |
+| `POST /api/v1/watch/add`, `POST /api/v1/watch/run` | Save a named watch query / run all saved queries and return new matches (Phase 53) |
+| `GET /api/v1/watch`, `DELETE /api/v1/watch/:name` | List all saved watch queries / remove one by name — full CLI `watch list`/`watch remove` parity (Phase 146) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `POST /api/v1/auth/login` | Username/password → session token (Phase 122) |
 | `POST /api/v1/auth/logout` | Revoke the session token used to call it (Phase 122) |
