@@ -115,8 +115,6 @@
 |   [Phase 97 — Full-toolset guide, tool interpretation registry, skill generation, Ollama docs](#phase-97-—-full-toolset-guide-tool-interpretation-registry-skill-generation-ollama-docs) | 3281 |
 |   [Phase 98 — CLI-based AI tool backends for narrator/guide](#phase-98-—-cli-based-ai-tool-backends-for-narratorguide) | 3342 |
 |   [Phase 99 — `--provider ollama` for narrator/guide + Ollama model discovery](#phase-99-—-provider-ollama-for-narratorguide-ollama-model-discovery) | 3406 |
-| [Long-Term Investments](#long-term-investments) | 3447 |
-| [Non-goals for now (revisited later)](#non-goals-for-now-revisited-later) | 3464 |
 |   [Phase 100 — Persistent, registry-backed server-side repo storage](#phase-100-—-persistent-registry-backed-server-side-repo-storage) | 3472 |
 |   [Phases 101–103 — Pluggable storage backends & index scoping](#phases-101–103-—-pluggable-storage-backends-index-scoping) | 3540 |
 |   [Phase 104 — Full-toolset guide coverage, per-command `--narrate`, and a guided `gitsema setup` wizard](#phase-104-—-full-toolset-guide-coverage-per-command-narrate-and-a-guided-gitsema-setup-wizard) | 3742 |
@@ -3457,31 +3455,6 @@ is given.
 
 **Status:** ✅ complete.
 
-## Long-Term Investments
-
-| Feature | Complexity | Notes |
-|---------|:----------:|-------|
-| Plugin API for custom analysers | High | Allow third-party modules to register their own search/analysis commands |
-
-> **Note:** the "pgvector migration path for >500K blobs" item formerly listed
-> here was implemented by Phases 101-103 (`storage.backend=postgres\|qdrant`,
-> see [Phases 101-103](#phases-101–103-—-pluggable-storage-backends-index-scoping)).
-> SQLite remains the default for new projects.
-
-**Scale notes (updated for v0.81.0):**
-
-- **Search memory:** auto early-cut (Phase 82) now guards the default search path — reservoir sampling kicks in at 50 K candidates without any flags. ANN path (`gitsema index build-vss`) eliminates the candidate-load entirely for large indexes.
-- **Indexing time:** commit-message embedding is now parallelised (Phase 83). The read/embed/store pipeline (Phase 69) + parallel commit embedding together keep both phases off the critical path. The remaining serial bottleneck is commit-graph walking itself (git rev-list) which is I/O-bound.
-- **Chunk/symbol candidate expansion:** when `--chunks` or `--vss` is combined with a large index the candidate pool grows 3–10× before scoring. Monitor RSS when indexing large monorepos with `--chunker function`.
-
-## Non-goals for now (revisited later)
-
-| Feature | Reasoning | 
-|---------|:----------:|-------|
-| Python model server (GPU Docker) | We already have Node.js embedeer and if we want Docker+python, we can use ollama. |
-
----
-
 ### Phase 100 — Persistent, registry-backed server-side repo storage
 
 **Goal:** Make `gitsema tools serve`'s `POST /api/v1/remote/index` persist cloned
@@ -6040,6 +6013,68 @@ detail):
   `guideTools.ts` before this phase), and `project`'s HTTP column was
   wrongly "✓" (conflating the adjacent `GET /projections` read route with
   `project` itself, which has no route of its own).
+
+---
+
+### Phase 149 — Remove `tools lsp --tcp`
+
+**Design:** no separate design doc — scoped directly from a `/whatnext`
+audit finding: review10 §3.5 flagged `tools lsp --tcp` as an unauthenticated
+network transport (raw TCP has no header to carry a Bearer token in), Phase
+120 deprecated it in favor of `--websocket --key` rather than fixing it, and
+Phase 120's own entry explicitly floated removal as "a separate,
+explicitly-scheduled future phase once usage data/feedback suggests it's
+safe." The audit confirmed no test in the suite exercises `--tcp` or
+`startLspTcpServer` (`grep -rln "startLspTcpServer\|--tcp" tests/` returns
+nothing), so removal is a clean cut with no test fallout to reconcile.
+
+**Goal:** Actually remove the `--tcp <port>` transport (not just deprecate
+it further) from `gitsema tools lsp` and the legacy `gitsema lsp` alias,
+closing the unauthenticated-transport gap by deleting the surface entirely
+rather than continuing to carry it forward.
+
+**Scope:**
+1. Removed the `--tcp <port>` Commander option and its handling from `tools
+   lsp` (`src/cli/commands/tools.ts`) and the top-level `gitsema lsp`
+   backward-compat alias (`src/cli/commands/lsp.ts`).
+2. Removed `startLspTcpServer()` from `src/core/lsp/server.ts`, along with
+   the now-unused `node:net` `createServer` import that only existed to
+   support it.
+3. Deleted the `gitsema tools lsp --tcp <port>` row from
+   `docs/deprecations.md` §1 (hard deprecations) per that file's own stated
+   policy — "delete its row only after the removal has actually shipped" —
+   and bumped its "Last updated" date.
+4. Updated `README.md`, `docs/features.md`, `docs/parity.md`, and
+   `CLAUDE.md` to remove `--tcp` references: README's and features.md's
+   `tools lsp` command-reference rows now read `[--websocket
+   <bind-address>] [--key <token>] ...` with no TCP mention;
+   `docs/parity.md`'s §0 transport table, legend, and flag-coherence rows
+   for `tools lsp` drop the `--tcp` column entirely (LSP is now stdio or
+   `--websocket` only, matching MCP's existing stdio/`--websocket`/`--http`
+   pattern); `CLAUDE.md`'s "Known gaps & future phases" table entry, which
+   previously described `--tcp` as an open, deprecated gap, now describes
+   the removal instead.
+5. Added `.changeset/remove-lsp-tcp-transport.md` (`minor` severity,
+   following this repo's established precedent of using `minor` rather than
+   `major` for breaking changes pre-1.0 — see `.changeset/deprecate-lsp-tcp.md`
+   and `.changeset/author-http-route-parity.md`).
+
+**Acceptance criteria:**
+- `gitsema tools lsp --tcp <port>` and `gitsema lsp --tcp <port>` no longer
+  parse as valid invocations (Commander has no `--tcp` option registered).
+- `startLspTcpServer` no longer exists anywhere in `src/`.
+- `docs/deprecations.md` no longer lists `--tcp` in §1.
+- `README.md`/`docs/features.md`/`docs/parity.md`/`CLAUDE.md` describe LSP
+  as available over stdio or `--websocket` only.
+- `pnpm build && pnpm test` clean — no test referenced `--tcp` or
+  `startLspTcpServer` before this change, so this is a clean removal.
+
+**Files touched:** `src/cli/commands/tools.ts`, `src/cli/commands/lsp.ts`,
+`src/core/lsp/server.ts`, `docs/deprecations.md`, `README.md`,
+`docs/features.md`, `docs/parity.md`, `CLAUDE.md`, `docs/PLAN.md`,
+`.changeset/remove-lsp-tcp-transport.md`.
+
+**Status:** ✅ complete.
 
 ---
 

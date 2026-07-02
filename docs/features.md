@@ -1,6 +1,6 @@
 # gitsema — Feature Catalog
 
-> Current version: **v0.96.0** · Schema: **v32** · Test suite: **1380 tests**
+> Current version: **v0.96.0** · Schema: **v32** · Test suite: **1594 tests**
 >
 > This document is a concise reference for implemented features grouped by area.
 > For the full development roadmap and planned phases see [`docs/PLAN.md`](docs/PLAN.md).
@@ -653,7 +653,7 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | Subcommand | Description |
 |---|---|
 | `gitsema tools mcp [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--websocket <bind-address>] [--http <bind-address>] [--key <token>]` | MCP stdio server (preferred entry point for AI clients) |
-| `gitsema tools lsp [--tcp <port>] [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio, TCP, or WebSocket) — `--tcp` is deprecated, use `--websocket` |
+| `gitsema tools lsp [--websocket <bind-address>] [--key <token>] [--remote <url>] [--remote-key <token>] [--remote-timeout <ms>] [--diagnostics]` | LSP semantic hover server (JSON-RPC over stdio or WebSocket) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | HTTP API server |
 
 ### Remote delegation (Phase 113)
@@ -720,27 +720,26 @@ Diagnostics (`textDocument/publishDiagnostics`) are opt-in via
 `gitsema tools lsp --diagnostics` (off by default — the false-positive rate of
 the v1 thresholds, debt score ≥ 0.7 or hotspot risk ≥ 0.6, is unproven). When
 enabled, the server pushes a notification per flagged file on each background
-refresh cycle, over stdout (stdio transport) or to every connected socket (TCP
-transport). Diagnostics are not supported in `--remote` mode, since remote
-delegation (Phase 113) is purely request/response and has no mechanism for the
-remote server to push notifications back to a local client — `gitsema tools lsp
---remote <url> --diagnostics` prints a warning and runs without diagnostics.
+refresh cycle, over stdout (stdio transport) or to every connected socket
+(WebSocket transport). Diagnostics are not supported in `--remote` mode, since
+remote delegation (Phase 113) is purely request/response and has no mechanism
+for the remote server to push notifications back to a local client —
+`gitsema tools lsp --remote <url> --diagnostics` prints a warning and runs
+without diagnostics.
 
-`gitsema tools lsp --tcp <port>` is **deprecated** (Phase 120): it has no
-`--key`/authentication mechanism at all (unlike `--websocket`, which supports
+`gitsema tools lsp --tcp` (the raw, unauthenticated TCP transport deprecated
+in Phase 120) was **removed** in Phase 149: it had no `--key`/authentication
+mechanism at all (unlike `--websocket`, which supports
 `--key`/`GITSEMA_WEBSOCKET_KEY`), and raw TCP has no header to carry a bearer
-token in — any client that can reach the port gets full LSP access. A
-deprecation warning is printed on every invocation recommending `--websocket
---key` instead, which is a strict superset of `--tcp`'s use case (same
-JSON-RPC dispatcher, with working auth). `--tcp` connections remain bounded
-by the same `DEFAULT_MAX_CONNECTIONS` cap as the other transports
-(review10 §3.5) and the flag still works — it is not scheduled for removal.
+token in. `--websocket <bind-address> --key <token>` is the replacement — a
+strict superset of `--tcp`'s use case (same JSON-RPC dispatcher, with working
+auth).
 
 ### WebSocket transport (Phase 116)
 
 Both `gitsema tools mcp --websocket <bind-address>` and `gitsema tools lsp --websocket
 <bind-address>` (e.g. `--websocket 0.0.0.0:4242`) listen on fixed `/mcp`/`/lsp` paths
-respectively, as an alternative to stdio/TCP for clients that need a network-reachable
+respectively, as an alternative to stdio for clients that need a network-reachable
 transport (no `--path` flag in v1). `--key <token>` requires a matching
 `Authorization: Bearer <token>` header on the WS upgrade request (mirrors
 `gitsema tools serve --key`'s convention); unset means no auth. `--key` falls back to
@@ -758,8 +757,8 @@ is a small hand-rolled `Transport` implementation over a `ws` socket, negotiatin
 `Protocol.connect()` can only be called once per `McpServer` instance, each WebSocket
 connection gets its own freshly-built server (`buildMcpServer()`) rather than sharing one
 instance the way stdio does. On the LSP side, WebSocket reuses the same stateless
-`handleRequest()` dispatcher as TCP, just framed as raw JSON per WS text frame instead of
-`Content-Length`-prefixed chunks — and unlike `--remote` delegation, WebSocket supports
+`handleRequest()` dispatcher as stdio, just framed as raw JSON per WS text frame instead
+of `Content-Length`-prefixed chunks — and unlike `--remote` delegation, WebSocket supports
 server push, so `--diagnostics` works normally over `--websocket`.
 
 **MCP `--websocket` is a known design flaw, kept only for forward compatibility.**

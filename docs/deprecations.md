@@ -4,7 +4,7 @@ Canonical list of every deprecated command, flag, and transport in gitsema:
 what replaced it, when it was deprecated, and whether (and when) it's
 scheduled for removal.
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02
 
 **Removal policy:** gitsema has never set a removal date for anything in this
 file. Every hard deprecation below has been kept indefinitely since it was
@@ -37,7 +37,6 @@ functional — the warning is the only behavior change.
 | `gitsema clear-model` | `gitsema index clear-model` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:315-318` |
 | `gitsema build-vss` | `gitsema index build-vss` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:324-329` |
 | `gitsema policy check` (two-word) | `gitsema policy-check` (kebab-case) | Phase 94 (v0.91.0) | Not scheduled | `src/cli/register/analysis.ts:63-75` |
-| `gitsema tools lsp --tcp <port>` | `gitsema tools lsp --websocket <bind-address> --key <token>` | Phase 120 | Not scheduled (raw TCP has no header to carry a Bearer token in — see §3) | `src/cli/commands/tools.ts:92,126-133` |
 | `POST /api/v1/analysis/multi-repo-search` | `POST /api/v1/search` with a `repos: string[]` body param | Phase 138 | Not scheduled | `src/server/routes/analysis.ts` (`multi-repo-search` handler); response carries a `Deprecation: true` header + a `Link: </api/v1/search>; rel="successor-version"` header on every call instead of a stderr warning (this is an HTTP route, not a CLI command) |
 
 `POST /analysis/multi-repo-search`'s bare 4-param shape (`query`, `repoIds`,

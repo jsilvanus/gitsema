@@ -257,7 +257,7 @@ Preferred entry point for all long-running protocol servers. Subcommands:
 | Subcommand | Description |
 |---|---|
 | `gitsema tools mcp` | Start the MCP stdio server (AI tool interface) |
-| `gitsema tools lsp [--tcp <port>]` | Start the LSP semantic hover server (JSON-RPC over stdio or TCP; `--tcp` is deprecated, use `--websocket`) |
+| `gitsema tools lsp [--websocket <bind-address>]` | Start the LSP semantic hover server (JSON-RPC over stdio or WebSocket) |
 | `gitsema tools serve [--port n] [--key token] [--ui]` | Start the HTTP API server (remote embedding backend) |
 
 The old top-level `gitsema mcp`, `gitsema lsp`, and `gitsema serve` still work as hidden backward-compat aliases.
@@ -395,7 +395,7 @@ git repo
    │                        chattydeerProvider.ts, cliProvider.ts, cliAdapters.ts — HTTP / local-CLI LLM backends
    │                        redact.ts         — secret/PII redaction applied to all outbound LLM content
 [ src/core/llm/ ]          narrator.ts       — system-prompt builders shared by narrator/guide/skill generator
-[ src/core/lsp/ ]          server.ts         — JSON-RPC semantic hover server (stdio, `--websocket`, or deprecated `--tcp`)
+[ src/core/lsp/ ]          server.ts         — JSON-RPC semantic hover server (stdio or `--websocket`)
 [ src/core/viz/ ]          htmlRenderer*.ts  — interactive HTML output for evolution/search/clusters/map
 [ src/core/models/ ]       types.ts          — shared embedding/result type definitions
    ↓
@@ -694,4 +694,3 @@ For the full list of gaps and planned work, see [`docs/PLAN.md`](docs/PLAN.md) a
 | Gap | Notes |
 |---|---|
 | **Python model server** | Docker image and Dockerfile provided to avoid local Rust/wheel issues on Windows; use Docker to run the modelserver. |
-| **Deprecated `tools lsp --tcp`** | No Bearer-token mechanism at all (review10 §3.5), unlike `--websocket`/`--http` which support `--key`/`GITSEMA_WEBSOCKET_KEY`/`GITSEMA_MCP_HTTP_KEY` — raw TCP has no header to carry a token in. Deprecated in favor of `--websocket` (Phase 120) rather than given a bespoke handshake-auth protocol; a deprecation warning is printed on every invocation, but the flag still works and is not yet scheduled for removal. |
