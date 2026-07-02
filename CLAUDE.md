@@ -14,7 +14,7 @@ The latest review is here. Do not edit the review file, but update that file wit
 
 | Document | Purpose |
 |---|---|
-| [`docs/review10.md`](docs/review10.md) | Latest strategic review: knowledge-graph completion (Phases 105–112), LSP/MCP network transports (Phases 113–117), review9 close-out verification |
+| [`docs/review11.md`](docs/review11.md) | Latest strategic review: Multi-Tenant Auth (Phases 122–125), Public Repo Sharing (126–127), Locked-Model-Set/BYOK (128–130), the Interface Parity Track (131–148), and review10 close-out verification |
 
 When implementing a new feature or phase:
 1. Add the feature to **`docs/features.md`** under the relevant group.

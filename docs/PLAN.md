@@ -6078,6 +6078,209 @@ rather than continuing to carry it forward.
 
 ---
 
+## review11 Security Close-Out Track (Phases 150–152)
+
+> **Design:** no separate design doc — scoped directly from the three
+> findings in [`docs/review11.md`](review11.md). Each phase closes one
+> finding (with the review's lower-severity hygiene items folded into the
+> phase that shares their root cause). Open design forks were resolved with
+> the user before scheduling; those decisions are recorded inline per phase.
+> The phases are independent and can ship in any order, but the priority
+> order from review11 §6 is 150 → 151 → 152.
+
+| Phase | Finding | Title | Deliverable |
+|---|---|---|---|
+| **150** | review11 §2.1 + §3.2 | Git argument-injection close-out | Reject leading-`-` refs / `--`-separate positionals at every `git` call site that takes a user-influenced ref, closing the PoC-confirmed arbitrary-file-overwrite reachable via `semantic_bisect`/`triage`, and applying the same hygiene systemically. |
+| **151** | review11 §2.2 | Read-route repo authorization gate | Opt-in multi-tenant enforcement: a post-`repoSessionMiddleware` check requiring the resolved user to hold a `read` grant on the named `repoId` (or the repo to be `public`), closing "read any private repo by ID." Repo-level only; per-branch filtering deferred. |
+| **152** | review11 §3.1 + §3.3 | BYOK SSRF guard + list-tool bounds | Block private/loopback/link-local ranges for BYOK endpoints by default (operator allowlist to re-permit internal hosts), and upper-bound every newly-network-exposed list tool's `top_k`/`limit`. |
+
+---
+
+### Phase 150 — Git argument-injection close-out (review11 §2.1 + §3.2)
+
+**Design:** no separate design doc — scoped directly from review11 §2.1
+(PoC-confirmed) and §3.2. Root cause: the review9/10 injection fixes switched
+git calls from `execSync(\`git … ${x}\`)` (shell) to `execFileSync('git',
+[...])` (no shell). That defeats shell metacharacters but **not** git's own
+option parsing — a ref beginning with `-` is still parsed as a git *flag*.
+`git log --output=<file>` (and similar) then becomes an arbitrary-file-write
+primitive. **Approach:** validate the ref at the sink (reuse the existing
+`isSafeGitRange()` allowlist from `src/core/narrator/narrator.ts`, which
+already rejects leading `-` and shell metacharacters) **and** interpose a
+`--` end-of-options separator before positional refs so a value can never be
+read as a flag — belt and suspenders, applied uniformly rather than
+per-site.
+
+**Goal:** Close the network-reachable git argument-injection sink
+(arbitrary file overwrite via `semantic_bisect`/`triage`) and eliminate the
+same missing-`--` hygiene gap at every other git call site that passes a
+user-influenced ref, so this injection *class* stops recurring as new git
+call sites or network entry points are added.
+
+**Scope:**
+1. Add ref validation to `resolveRefToTimestamp()`
+   (`src/core/search/clustering/clustering.ts:574`) — reject any `ref`
+   matching `/^-/` (or failing `isSafeGitRange()`) before the `git log`
+   call, and pass `--` before the positional ref. This is the confirmed
+   HIGH sink reached from `computeSemanticBisect`
+   (`src/core/search/semanticBisect.ts:97-98`, currently unvalidated) via
+   the `semantic_bisect` MCP tool (`src/mcp/tools/insights.ts:42-43`) and
+   the HTTP `triage` bundle (`src/server/routes/analysis.ts:764`).
+2. Apply the same fix to the lower-impact §3.2 sites:
+   `src/core/search/temporal/timeSearch.ts:166,168`
+   (`git rev-parse --verify` / `git show`) and
+   `src/core/git/branchDiff.ts:13` (`git merge-base`).
+3. Introduce a shared `runGit(subcommand, flags, refs)` helper (or extend an
+   existing git util) that always `--`-separates refs and rejects leading-`-`
+   ref values, and route the above call sites through it so the safe form is
+   the default for future call sites. `isSafeGitRange()` should be lifted to
+   a shared location (e.g. `src/core/git/`) if it currently lives only in
+   `narrator.ts`, so both narrator and these sites share one allowlist.
+4. Add regression tests: a unit test asserting `resolveRefToTimestamp('--output=…')`
+   (and the other sites) throws/rejects rather than shelling out, plus an
+   integration test driving `semantic_bisect`/`triage` with a `--output=`
+   ref and asserting no file is written.
+
+**Acceptance criteria:**
+- `semantic_bisect` / `triage` called with `good_ref`/`bad_ref` beginning
+  with `-` returns an error and writes no file (PoC no longer reproduces).
+- Every `execFileSync('git', …)` site that takes a user-influenced ref
+  either validates the ref or `--`-separates it (ideally both), verified by
+  grep/test.
+- `pnpm build && pnpm test` clean; new regression tests pass.
+
+**Files (anticipated):** `src/core/search/clustering/clustering.ts`,
+`src/core/search/semanticBisect.ts`, `src/core/search/temporal/timeSearch.ts`,
+`src/core/git/branchDiff.ts`, a shared git helper under `src/core/git/`,
+`src/core/narrator/narrator.ts` (if `isSafeGitRange` is relocated), tests,
+`.changeset/`.
+
+---
+
+### Phase 151 — Read-route repo authorization gate (review11 §2.2)
+
+**Design:** no separate design doc — scoped directly from review11 §2.2
+(disclosed in PLAN.md as "Phase 123 deviation #1"). The Multi-Tenant Auth
+Track built `resolveUserRepoAccess`/`roleSatisfies` and the `repo_grants`
+model, but they are called only from `remote.ts`/`orgs.ts` — none of the
+~16 read/search/analysis/evolution/graph/insights routes enforce them, and
+`repoSessionMiddleware` serves any named `repoId` with no grant check.
+**Resolved design decisions (with the user):**
+- **Scope:** repo-level gate first — enforce "user holds a `read` grant on
+  this `repoId`, or the repo is `public`." The larger `branch: string →
+  string[]` per-branch filter plumbing is **deferred** to a follow-on phase
+  (see "Deferred" below), since it is orthogonal to closing the
+  private-repo-read hole.
+- **Enforcement mode:** opt-in multi-tenant posture — enforcement activates
+  only when the server is multi-tenant (e.g. `GITSEMA_SERVE_KEY` set, or an
+  explicit `GITSEMA_MULTI_TENANT` flag; exact trigger to be finalized in
+  implementation). A default open single-dev server (no key, no flag) stays
+  unchanged, so this is not a breaking change for existing local
+  deployments.
+
+**Goal:** Make the authorization model the auth track already ships actually
+gate the routes that return repo content, so that in a multi-tenant posture
+a caller can only read repos they hold a grant on (or public repos) — closing
+"any authenticated user (or anyone, on an open server) can read any repo by
+naming its `repoId`."
+
+**Scope:**
+1. Add an authorization middleware that runs after `repoSessionMiddleware`
+   (`src/server/middleware/repoSession.ts`): when the server is in
+   multi-tenant mode and a `repoId` was resolved, require
+   `roleSatisfies(resolveUserRepoAccess(req.userId, repoId), 'read')` unless
+   the repo's `visibility === 'public'` (Phase 126 column). Reject with 403
+   otherwise. When not in multi-tenant mode, pass through unchanged.
+2. Mount it on the ~16 data routes currently behind `repoSessionMiddleware`
+   (search, analysis, evolution, graph, insights). Legacy per-repo
+   `repo_tokens` (which set `req.repoId`) continue to work as today — a
+   scoped token already implies access to its one repo.
+3. Decide and document the multi-tenant trigger (reuse `GITSEMA_SERVE_KEY`
+   presence, or add `GITSEMA_MULTI_TENANT`/`auth.multiTenant`) in
+   `CLAUDE.md`'s Configuration table.
+4. Tests: authorized user reads a granted repo (200); un-granted user reads
+   a private repo (403); any caller reads a public repo (200); open-server
+   mode still serves without a grant (behavior preserved).
+
+**Acceptance criteria:**
+- In multi-tenant mode, a request naming a `repoId` the caller has no `read`
+  grant on (and that isn't public) gets 403 from a data route.
+- Open single-dev server (no key/flag) behavior is unchanged — no new 403s.
+- `resolveUserRepoAccess` is now referenced by the request pipeline, not
+  just `remote.ts`/`orgs.ts`.
+- `pnpm build && pnpm test` clean.
+
+**Deferred (explicitly out of scope for this phase):** per-branch result
+filtering — rewriting the routes' single `branch: string` param into a
+per-user granted-branch-set (`branch: string[]`) filter threaded through
+`vectorSearch`/`analysis` (PLAN.md's "single biggest implementation-surface
+item"). Should be scheduled as its own follow-on phase once the repo-level
+gate lands.
+
+**Files (anticipated):** new middleware under `src/server/middleware/`,
+`src/server/app.ts` (mounting), `src/core/auth/grants.ts` (if a
+repo-level helper is added), `CLAUDE.md` (config docs), tests,
+`.changeset/`.
+
+---
+
+### Phase 152 — BYOK SSRF guard + newly-exposed list-tool bounds (review11 §3.1 + §3.3)
+
+**Design:** no separate design doc — scoped directly from review11 §3.1 and
+§3.3. §3.1: Phase 130's BYOK uses a request-supplied `byok.http_url`
+verbatim as the endpoint the *server* calls, on network-facing
+`narrate`/`explain`/`guide` routes, with no scheme check, allowlist, or
+loopback/private-range block — an SSRF vector on a shared server.
+**Resolved design decision (with the user):** default-**block** private,
+loopback, and link-local ranges out of the box; operators re-permit internal
+hosts (e.g. a local model server) via an explicit allowlist
+(`GITSEMA_BYOK_ALLOW_HOSTS`). This is a behavior change for anyone currently
+pointing BYOK at `localhost`/private IPs — call it out in the changeset and
+docs. §3.3: the Phase 147/148 exposure added several list-returning tools;
+confirm each has an *upper* bound, not just a positive-int check.
+
+**Goal:** Prevent BYOK from being used to make the server issue requests to
+internal/metadata endpoints by default, while leaving a documented path for
+legitimate internal model servers, and ensure no newly-network-exposed list
+tool can be asked to serialize an unbounded result set.
+
+**Scope:**
+1. Validate `byok.http_url` before constructing the provider in
+   `resolveNarratorProvider`/`resolveGuideConfig`
+   (`src/core/narrator/resolveNarrator.ts:188-198`): require `http(s)`
+   scheme; resolve the host and reject loopback (`127.0.0.0/8`, `::1`),
+   link-local (`169.254.0.0/16`, `fe80::/10`, incl. the cloud metadata IP),
+   and RFC-1918 private ranges — unless the host matches
+   `GITSEMA_BYOK_ALLOW_HOSTS` (comma-separated host/CIDR allowlist,
+   default empty). Reject with a clear error on the HTTP routes.
+2. Audit every Phase 147/148-exposed list tool (`refactor_candidates`,
+   `graph_relate`, `graph_similar`, `blast_radius`, `deps`, `co_change`,
+   and any others surfaced in that track) for an upper bound on
+   `top_k`/`limit`; add `.max(<n>)` to the Zod schema (HTTP + MCP) wherever
+   only `.positive()` exists today, matching the `hotspots.topK` `.max(500)`
+   precedent (review10 §2.1).
+3. Docs: note the BYOK SSRF behavior and `GITSEMA_BYOK_ALLOW_HOSTS` next to
+   the `--byok-*` flags (`README.md`/`docs/features.md`) and in `CLAUDE.md`'s
+   Configuration table.
+4. Tests: BYOK with a loopback/metadata URL is rejected by default; the same
+   URL is permitted when its host is in `GITSEMA_BYOK_ALLOW_HOSTS`; a list
+   tool called with an over-large `top_k` is clamped/rejected.
+
+**Acceptance criteria:**
+- `POST /guide/chat` (and narrate/explain) with `byok.http_url` pointing at
+  `http://169.254.169.254/…` or `http://127.0.0.1/…` is rejected unless the
+  host is allowlisted.
+- Every newly-exposed list tool's `top_k`/`limit` has a documented upper
+  bound in its schema.
+- `pnpm build && pnpm test` clean.
+
+**Files (anticipated):** `src/core/narrator/resolveNarrator.ts` (+ a small
+URL-guard helper), `src/server/routes/{narrator,guide}.ts`,
+`src/mcp/tools/*.ts` and `src/server/routes/*.ts` for the list-bound schemas,
+`README.md`/`docs/features.md`/`CLAUDE.md`, tests, `.changeset/`.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.
