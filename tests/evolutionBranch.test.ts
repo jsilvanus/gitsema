@@ -35,6 +35,7 @@ describe('computeEvolution branch filter', () => {
 
   afterEach(() => {
     __setDefaultSessionForTesting(undefined)
+    session?.rawDb.close()
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true })
     session = undefined
     tmpDir = undefined

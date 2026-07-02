@@ -46,7 +46,12 @@ describe('POST /api/v1/insights/bisect', () => {
   it('returns 200 with a bisect report on an empty DB', async () => {
     const res = await request(app)
       .post('/api/v1/insights/bisect')
-      .send({ goodRef: 'main', badRef: 'HEAD', query: 'authentication flow' })
+      // A date string (not a branch name) for goodRef: resolveRefToTimestamp()
+      // tries Date-parsing before falling back to `git log`, so this resolves
+      // without depending on a local `main` branch ref — CI checkouts are a
+      // shallow, detached-HEAD checkout of just the PR commit, with no other
+      // branch refs available locally.
+      .send({ goodRef: '2020-01-01', badRef: 'HEAD', query: 'authentication flow' })
     expect(res.status).toBe(200)
     expect(res.body).toHaveProperty('query', 'authentication flow')
     expect(Array.isArray(res.body.steps)).toBe(true)

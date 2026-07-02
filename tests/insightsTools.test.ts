@@ -157,7 +157,12 @@ describe('computeCodeReview', () => {
 // ===========================================================================
 describe('insights core functions — empty-DB sanity', () => {
   it('computeSemanticBisect returns a report shape on an empty DB', () => {
-    const result = computeSemanticBisect(MOCK_VEC, 'auth flow', 'main', 'HEAD', { topK: 5, maxSteps: 3 })
+    // A date string (not a branch name) for goodRef: resolveRefToTimestamp()
+    // tries Date-parsing before falling back to `git log`, so this resolves
+    // without depending on a local `main` branch ref — CI checkouts are a
+    // shallow, detached-HEAD checkout of just the PR commit, with no other
+    // branch refs available locally.
+    const result = computeSemanticBisect(MOCK_VEC, 'auth flow', '2020-01-01', 'HEAD', { topK: 5, maxSteps: 3 })
     expect(result.query).toBe('auth flow')
     expect(Array.isArray(result.steps)).toBe(true)
   })
