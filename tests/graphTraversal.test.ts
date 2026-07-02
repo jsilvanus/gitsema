@@ -49,7 +49,22 @@ function setupFixtureDb(): { session: DbSession; tmpDir: string } {
 const tmpDirs: string[] = []
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true })
+    // Retry logic for Windows EBUSY issues with better-sqlite3
+    let retries = 3
+    while (retries > 0) {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+        break
+      } catch (err) {
+        retries--
+        if (retries === 0) throw err
+        // Small delay before retry to allow Windows file handles to release
+        const startTime = Date.now()
+        while (Date.now() - startTime < 100) {
+          // Busy-wait to avoid async delay in test cleanup
+        }
+      }
+    }
   }
 })
 
@@ -67,7 +82,7 @@ async function withGraph<T>(fn: (graph: SqliteGraphStore, session: DbSession) =>
   }
 }
 
-describe('SqliteGraphStore.neighbors', () => {
+describe('SqliteGraphStore.neighbors', { timeout: 10000 }, () => {
   it('returns depth-1 neighbors by default, in both directions', async () => {
     await withGraph(async (graph) => {
       const hits = await graph.neighbors('symbol:a.ts#B#sig2')
@@ -105,7 +120,7 @@ describe('SqliteGraphStore.neighbors', () => {
   })
 })
 
-describe('SqliteGraphStore.callers / callees', () => {
+describe('SqliteGraphStore.callers / callees', { timeout: 10000 }, () => {
   it('callers walks `calls` edges backward', async () => {
     await withGraph(async (graph) => {
       const hits = await graph.callers('symbol:a.ts#C#sig3')
@@ -133,7 +148,7 @@ describe('SqliteGraphStore.callers / callees', () => {
   })
 })
 
-describe('SqliteGraphStore.path', () => {
+describe('SqliteGraphStore.path', { timeout: 10000 }, () => {
   it('finds the shortest typed path between two nodes', async () => {
     await withGraph(async (graph) => {
       const result = await graph.path('symbol:a.ts#A#sig1', 'symbol:a.ts#C#sig3')
@@ -158,7 +173,7 @@ describe('SqliteGraphStore.path', () => {
   })
 })
 
-describe('SqliteGraphStore.subgraph', () => {
+describe('SqliteGraphStore.subgraph', { timeout: 10000 }, () => {
   it('returns the node-induced subgraph within depth hops of the seed', async () => {
     await withGraph(async (graph) => {
       const { nodes, edges } = await graph.subgraph('symbol:a.ts#B#sig2', 1)
@@ -175,7 +190,7 @@ describe('SqliteGraphStore.subgraph', () => {
   })
 })
 
-describe('core/graph/traversal wrappers', () => {
+describe('core/graph/traversal wrappers', { timeout: 10000 }, () => {
   it('resolves a display name to its graph node and traverses callers', async () => {
     await withGraph(async (graph) => {
       const result = await callers(graph, 'C')

@@ -91,11 +91,13 @@ function commitFile(dir: string, relPath: string, content: string, message: stri
 // ---------------------------------------------------------------------------
 
 let repoDir: string
+let dbDir: string
 let dbPath: string
 
 beforeAll(() => {
   repoDir = mkdtempSync(join(tmpdir(), 'gitsema-test-'))
-  dbPath = join(repoDir, 'test.db')
+  dbDir = mkdtempSync(join(tmpdir(), 'gitsema-test-db-'))
+  dbPath = join(dbDir, 'test.db')
 
   initRepo(repoDir)
   commitFile(repoDir, 'src/auth.ts', 'export function authenticate(token: string) { return true }', 'add auth')
@@ -105,6 +107,22 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(repoDir, { recursive: true, force: true })
+  // DB dir cleanup with retry logic for Windows (EBUSY issues with better-sqlite3)
+  let retries = 3
+  while (retries > 0) {
+    try {
+      rmSync(dbDir, { recursive: true, force: true })
+      break
+    } catch (err) {
+      retries--
+      if (retries === 0) throw err
+      // Small delay before retry to allow Windows file handles to release
+      const startTime = Date.now()
+      while (Date.now() - startTime < 100) {
+        // Busy-wait to avoid async delay in test cleanup
+      }
+    }
+  }
 })
 
 // ---------------------------------------------------------------------------
