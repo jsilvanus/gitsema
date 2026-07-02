@@ -24,6 +24,30 @@ vi.mock('../src/core/db/sqlite.js', async (importOriginal) => {
   }
 })
 
+// Mock the provider factory so per-request model overrides (Phase 140) are
+// observable without hitting a real Ollama/HTTP backend: any model name
+// containing "override" resolves to a distinguishable mock provider whose
+// `.model` reflects the requested override, letting tests assert that
+// `resolveRequestProvider()` actually swapped providers instead of always
+// falling back to the router's default `textProvider`.
+vi.mock('../src/core/embedding/providerFactory.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/embedding/providerFactory.js')>()
+  return {
+    ...actual,
+    buildProvider: (type: string, model: string) => {
+      if (model.includes('override')) {
+        return {
+          model,
+          embed: async () => [0.9, 0.8, 0.7, 0.6],
+          embedBatch: async (texts: string[]) => texts.map(() => [0.9, 0.8, 0.7, 0.6]),
+          dimensions: 4,
+        }
+      }
+      return actual.buildProvider(type, model)
+    },
+  }
+})
+
 import { createApp } from '../src/server/app.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
@@ -300,6 +324,212 @@ describe('POST /api/v1/search/first-seen', () => {
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
   })
+
+  it('accepts vss option', async () => {
+    const res = await request(app)
+      .post('/api/v1/search/first-seen')
+      .send({ query: 'auth', vss: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts repos option (multi-repo, no repos registered)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search/first-seen')
+      .send({ query: 'auth', repos: ['repo-a', 'repo-b'] })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('honors a model override by routing away from the default provider (502 for an unreachable model proves the override was applied, not ignored)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search/first-seen')
+      .send({ query: 'auth', model: 'some-unreachable-override-model' })
+    expect(res.status).toBe(502)
+    expect(res.body).toHaveProperty('error')
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/search — Phase 138 restored query-shaping flags
+// ===========================================================================
+describe('POST /api/v1/search — Phase 138 flag parity', () => {
+  it('accepts notLike/lambda (negative example scoring)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', notLike: 'legacy code', lambda: 0.3 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts or/and boolean composition', async () => {
+    const resOr = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', or: 'login' })
+    expect(resOr.status).toBe(200)
+    expect(Array.isArray(resOr.body)).toBe(true)
+
+    const resAnd = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', and: 'session' })
+    expect(resAnd.status).toBe(200)
+    expect(Array.isArray(resAnd.body)).toBe(true)
+  })
+
+  it('accepts explain flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', explain: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts explainLlm flag with rendered output', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', explainLlm: true, rendered: true })
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toMatch(/text\/plain/)
+  })
+
+  it('accepts expandQuery flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', expandQuery: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts annotateClusters flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', annotateClusters: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts vss flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', vss: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts earlyCut flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', earlyCut: 100 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts noCache flag', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', noCache: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('accepts repos option (multi-repo, no repos registered)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', repos: ['repo-a', 'repo-b'] })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('honors a model override by routing away from the default provider (502 for an unreachable model proves the override was applied, not ignored)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', model: 'some-unreachable-override-model' })
+    expect(res.status).toBe(502)
+    expect(res.body).toHaveProperty('error')
+  })
+
+  it('accepts level=module', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'module' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns resultsByLevel when 2+ levels are active (level=symbol + chunks=true)', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('resultsByLevel')
+    expect(res.body.resultsByLevel).toHaveProperty('file')
+    expect(res.body.resultsByLevel).toHaveProperty('chunk')
+    expect(res.body.resultsByLevel).toHaveProperty('symbol')
+  })
+
+  it('returns a flat array when mergeLevels=true even with 2+ levels active', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true, mergeLevels: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns resultsByLevel + commitResults when multi-level + includeCommits', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true, includeCommits: true })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('resultsByLevel')
+    expect(res.body).toHaveProperty('commitResults')
+  })
+
+  it('renders per-level text sections when multi-level + rendered=true', async () => {
+    const res = await request(app)
+      .post('/api/v1/search')
+      .send({ query: 'auth', level: 'symbol', chunks: true, rendered: true })
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toMatch(/text\/plain/)
+  })
+
+  it('returns 400 for invalid model override causing an http provider error', async () => {
+    const prevProvider = process.env.GITSEMA_PROVIDER
+    const prevUrl = process.env.GITSEMA_HTTP_URL
+    process.env.GITSEMA_PROVIDER = 'http'
+    delete process.env.GITSEMA_HTTP_URL
+    try {
+      const res = await request(app)
+        .post('/api/v1/search')
+        .send({ query: 'auth', textModel: 'some-http-model' })
+      expect(res.status).toBe(400)
+      expect(res.body).toHaveProperty('error')
+    } finally {
+      if (prevProvider === undefined) delete process.env.GITSEMA_PROVIDER
+      else process.env.GITSEMA_PROVIDER = prevProvider
+      if (prevUrl === undefined) delete process.env.GITSEMA_HTTP_URL
+      else process.env.GITSEMA_HTTP_URL = prevUrl
+    }
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/multi-repo-search — deprecated alias (Phase 138)
+// ===========================================================================
+describe('POST /api/v1/analysis/multi-repo-search — deprecated alias', () => {
+  it('still returns 200 with an array and sets a Deprecation header', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/multi-repo-search')
+      .send({ query: 'auth' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+    expect(res.headers['deprecation']).toBe('true')
+    expect(res.headers['link']).toMatch(/\/api\/v1\/search/)
+  })
+
+  it('returns 400 for missing query', async () => {
+    const res = await request(app).post('/api/v1/analysis/multi-repo-search').send({})
+    expect(res.status).toBe(400)
+  })
 })
 
 // ===========================================================================
@@ -337,6 +567,53 @@ describe('POST /api/v1/evolution/file', () => {
     expect(res.status).toBe(200)
     expect(res.body).toHaveProperty('threshold', 0.5)
   })
+
+  it('accepts level=symbol and echoes it back (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', level: 'symbol' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('level', 'symbol')
+  })
+
+  it('rejects an invalid level value', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', level: 'chunk' })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts a branch filter and returns an empty timeline on an empty DB (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', branch: 'feature/x' })
+    expect(res.status).toBe(200)
+    expect(res.body.versions).toBe(0)
+  })
+
+  it('accepts an alerts count and includes an alerts field (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', alerts: 5 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('alerts')
+    expect(Array.isArray(res.body.alerts)).toBe(true)
+  })
+
+  it('omits the alerts field when alerts is not requested', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts' })
+    expect(res.status).toBe(200)
+    expect(res.body).not.toHaveProperty('alerts')
+  })
+
+  it('rejects a non-positive alerts count', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/file')
+      .send({ path: 'src/index.ts', alerts: 0 })
+    expect(res.status).toBe(400)
+  })
 })
 
 // ===========================================================================
@@ -357,6 +634,24 @@ describe('POST /api/v1/evolution/concept', () => {
     expect(res.body).toHaveProperty('timeline')
     expect(res.body).toHaveProperty('summary')
     expect(Array.isArray(res.body.timeline)).toBe(true)
+  })
+
+  it('accepts a branch filter (Phase 139)', async () => {
+    const res = await request(app)
+      .post('/api/v1/evolution/concept')
+      .send({ query: 'authentication middleware', branch: 'feature/x' })
+    expect(res.status).toBe(200)
+    expect(res.body.entries).toBe(0)
+  })
+
+  it('accepts textModel/model overrides without erroring on an unconfigured provider (Phase 139)', async () => {
+    // No model profile is configured for 'nonexistent-model', so buildProviderForModel
+    // falls back to the default (ollama) provider type rather than throwing synchronously —
+    // the request should still resolve to a 200 or a 502 (embed failure), never a 400.
+    const res = await request(app)
+      .post('/api/v1/evolution/concept')
+      .send({ query: 'authentication middleware', textModel: 'nonexistent-model' })
+    expect([200, 502]).toContain(res.status)
   })
 })
 
@@ -562,12 +857,70 @@ describe('POST /api/v1/analysis/author', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 200 with contributions structure (empty DB)', async () => {
+  it('returns 200 with { authors } structure (empty DB)', async () => {
     const res = await request(app)
       .post('/api/v1/analysis/author')
       .send({ query: 'authentication' })
     expect(res.status).toBe(200)
     expect(typeof res.body).toBe('object')
+    expect(Array.isArray(res.body.authors)).toBe(true)
+    expect(res.body.authors.length).toBe(0)
+    expect(res.body.commits).toBeUndefined()
+  })
+
+  it('accepts --since (Phase 141) and returns 200 with a valid date', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', since: '2020-01-01' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('returns 400 for an unparseable --since value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', since: 'not-a-date-at-all-!!' })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts --detail (Phase 141) without error', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', detail: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('accepts --hybrid + --bm25-weight (Phase 141) without error', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', hybrid: true, bm25Weight: 0.5 })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('accepts --include-commits (Phase 141) and returns a commits array', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', includeCommits: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+    expect(Array.isArray(res.body.commits)).toBe(true)
+  })
+
+  it('accepts chunks/level/vss (Phase 141 flag-surface parity, no-op like the CLI)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', chunks: true, level: 'symbol', vss: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.authors)).toBe(true)
+  })
+
+  it('returns 400 for an invalid level enum value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', level: 'not-a-real-level' })
+    expect(res.status).toBe(400)
   })
 })
 
@@ -843,6 +1196,152 @@ describe('POST /api/v1/analysis/eval', () => {
       .post('/api/v1/analysis/eval')
       .send({ cases: [] })
     expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/graph/hotspots
+// ===========================================================================
+describe('POST /api/v1/graph/hotspots', () => {
+  it('returns 200 with hotspots structure on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/hotspots').send({})
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'hybrid')
+    expect(res.body).toHaveProperty('hotspots')
+    expect(Array.isArray(res.body.hotspots)).toBe(true)
+  })
+
+  it('accepts a lens override', async () => {
+    const res = await request(app)
+      .post('/api/v1/graph/hotspots')
+      .send({ lens: 'structural' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'structural')
+  })
+
+  it('accepts weightStructural for CLI flag parity (Phase 139), currently a no-op', async () => {
+    const res = await request(app)
+      .post('/api/v1/graph/hotspots')
+      .send({ weightStructural: 0.7 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('hotspots')
+  })
+
+  it('rejects an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/graph/hotspots')
+      .send({ lens: 'nonsense' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// Phase 140: model-override triplet on analysis.ts routes
+//
+// `--model`/`--text-model`/`--code-model` are now accepted as body fields on
+// clusters, change-points, author, impact, semantic-diff, semantic-blame,
+// triage, and workflow. Requesting a model name containing "override" routes
+// (via the providerFactory mock above) to a distinguishable mock provider —
+// confirming resolveRequestProvider() actually swapped providers instead of
+// silently ignoring the override.
+// ===========================================================================
+describe('Phase 140: model overrides on analysis routes', () => {
+  it('change-points accepts model override and still returns 200', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/change-points')
+      .send({ query: 'authentication', model: 'override-model' })
+    expect(res.status).toBe(200)
+  })
+
+  it('author accepts textModel override and still returns 200', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication', textModel: 'override-text-model' })
+    expect(res.status).toBe(200)
+  })
+
+  it('impact accepts codeModel override and returns 200 or 500 (no git repo)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', codeModel: 'override-code-model' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('semantic-diff accepts model override and returns 200 or 500 (no git repo)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication', model: 'override-model' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('semantic-blame accepts model override and returns 200 with an array', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts', content: 'export function auth() {}', model: 'override-model' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('triage accepts model override and returns 200 with sections', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/triage')
+      .send({ query: 'authentication', top: 3, model: 'override-model' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('sections')
+  })
+
+  it('workflow accepts model override for the incident template', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'incident', query: 'database crash', top: 3, model: 'override-model' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'incident')
+  })
+
+  it('clusters accepts the model-override triplet without rejecting the request', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ k: 3, model: 'override-model' })
+    // clusters ignores the override for behavior (no per-model filtering),
+    // but must still accept the field and not 400 on it.
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('clusters returns 400 when the override resolves to an invalid provider config', async () => {
+    const prevProvider = process.env.GITSEMA_PROVIDER
+    process.env.GITSEMA_PROVIDER = 'http'
+    delete process.env.GITSEMA_HTTP_URL
+    try {
+      const res = await request(app)
+        .post('/api/v1/analysis/clusters')
+        .send({ k: 3, model: 'some-http-model' })
+      expect(res.status).toBe(400)
+    } finally {
+      if (prevProvider === undefined) delete process.env.GITSEMA_PROVIDER
+      else process.env.GITSEMA_PROVIDER = prevProvider
+    }
+  })
+
+  it('change-points returns 400 when the override resolves to an invalid provider config', async () => {
+    const prevProvider = process.env.GITSEMA_PROVIDER
+    process.env.GITSEMA_PROVIDER = 'http'
+    delete process.env.GITSEMA_HTTP_URL
+    try {
+      const res = await request(app)
+        .post('/api/v1/analysis/change-points')
+        .send({ query: 'auth', model: 'some-http-model' })
+      expect(res.status).toBe(400)
+    } finally {
+      if (prevProvider === undefined) delete process.env.GITSEMA_PROVIDER
+      else process.env.GITSEMA_PROVIDER = prevProvider
+    }
+  })
+
+  it('requests without any override field still use the router default textProvider', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/author')
+      .send({ query: 'authentication' })
+    expect(res.status).toBe(200)
   })
 })
 

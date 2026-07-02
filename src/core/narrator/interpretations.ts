@@ -162,11 +162,17 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
     name: 'code_search',
     category: 'search',
     summary: 'Symbol/chunk-level search using the code embedding model.',
-    resultShape: 'Rendered "score  path  [blobHash]" lines (symbol level by default).',
+    resultShape:
+      '{ snippet, results_by_level: { file: [...], chunk: [...], symbol: [...] } } by default — chunk ' +
+      'and symbol pools are searched in isolation and returned as separate, independently-ranked lists ' +
+      '(Phase 137). Pass merge_levels to get the pre-Phase-137 shape instead: ' +
+      '{ snippet, results: [{ paths[], score, blobHash }] }.',
     interpretation:
       'Like semantic_search but embeds with the code model and targets symbols/chunks — better for ' +
       'finding specific functions/classes from a code snippet than from prose. Higher scores mean ' +
-      'closer code-level similarity.',
+      "closer code-level similarity within a level's own list. Don't rank across levels by raw score — " +
+      'chunk and symbol pools embed differently-framed text (raw excerpt vs. name+signature-annotated), ' +
+      'so their scores are not on a directly comparable scale; read each level list separately.',
   },
   search_history: {
     name: 'search_history',

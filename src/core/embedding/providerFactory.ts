@@ -254,3 +254,49 @@ export function applyModelOverrides(opts: {
   if (opts.textModel) process.env.GITSEMA_TEXT_MODEL = opts.textModel
   if (opts.codeModel) process.env.GITSEMA_CODE_MODEL = opts.codeModel
 }
+
+// ---------------------------------------------------------------------------
+// Per-request model overrides (MCP/HTTP, Phase 138)
+// ---------------------------------------------------------------------------
+
+export interface ModelOverrideParams {
+  model?: string
+  textModel?: string
+  codeModel?: string
+}
+
+/**
+ * Returns `true` when at least one of `model`/`textModel`/`codeModel` is
+ * set — the signal long-running server processes (MCP stdio server, HTTP
+ * `tools serve`) use to decide whether a request needs its own provider
+ * instances at all, versus reusing the process-wide default built once at
+ * startup. Unlike CLI's `applyModelOverrides()`, none of this mutates
+ * `process.env`: a long-running server handles requests concurrently, so
+ * per-request overrides must not leak into other in-flight requests.
+ */
+export function hasModelOverride(params: ModelOverrideParams): boolean {
+  return !!(params.model || params.textModel || params.codeModel)
+}
+
+/**
+ * Builds a text- or code-role `EmbeddingProvider` for one request, honoring
+ * `override` on top of the ambient `process.env`/config-file state (same
+ * resolution order `getTextProvider`/`getCodeProvider` already apply).
+ * `role: 'code'` returns `undefined` when neither a code-specific override
+ * nor a general `model` override is given and the caller has no code
+ * provider configured — preserving single-model mode instead of forcing a
+ * redundant identical provider into existence.
+ */
+export function buildProviderForRequest(override: ModelOverrideParams, role: 'text', hasExistingCodeProvider?: boolean): EmbeddingProvider
+export function buildProviderForRequest(override: ModelOverrideParams, role: 'code', hasExistingCodeProvider: boolean): EmbeddingProvider | undefined
+export function buildProviderForRequest(
+  override: ModelOverrideParams,
+  role: 'text' | 'code',
+  hasExistingCodeProvider = false,
+): EmbeddingProvider | undefined {
+  if (role === 'code' && !hasExistingCodeProvider && !override.codeModel && !override.model) {
+    return undefined
+  }
+  const config: ResolvedConfig = { ...resolveConfigFromEnv(), model: override.model, textModel: override.textModel, codeModel: override.codeModel }
+  return role === 'text' ? getTextProvider(config) : getCodeProvider(config)
+}

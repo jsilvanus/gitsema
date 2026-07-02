@@ -534,6 +534,18 @@ Track semantic drift of a single file across its Git history.
 
 `code-review` follows the same exit-code contract as `policy-check` (0 ok / 1 runtime error / 2 usage error / 3 gate failed).
 
+#### `gitsema code-search <snippet> [options]`
+
+| Flag | Default | Description |
+|---|---|---|
+| `-k, --top <n>` | `10` | Number of results |
+| `--level <level>` | `symbol` | Search granularity: `file` \| `chunk` \| `symbol` |
+| `--model <model>` | — | Embedding model override |
+| `--branch <branch>` | — | Restrict to blobs on this branch |
+| `--threshold <n>` | `0` | Minimum similarity score (0–1) |
+| `--merge-levels` | off | The default `symbol` level isolates the chunk and symbol candidate pools into separate labeled lists (Phase 137, mirroring `search`'s `--merge-levels`); pass this flag to merge them back into one shared-cutoff ranked list |
+| `--no-headings` | — | Don't print column header row |
+
 ### Knowledge Graph
 
 | Command | Description |

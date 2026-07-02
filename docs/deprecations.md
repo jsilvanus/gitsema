@@ -4,7 +4,7 @@ Canonical list of every deprecated command, flag, and transport in gitsema:
 what replaced it, when it was deprecated, and whether (and when) it's
 scheduled for removal.
 
-**Last updated:** 2026-06-23
+**Last updated:** 2026-07-01
 
 **Removal policy:** gitsema has never set a removal date for anything in this
 file. Every hard deprecation below has been kept indefinitely since it was
@@ -38,6 +38,15 @@ functional — the warning is the only behavior change.
 | `gitsema build-vss` | `gitsema index build-vss` | Phase 71 (v0.71.0) | Not scheduled | `src/cli/register/indexing.ts:324-329` |
 | `gitsema policy check` (two-word) | `gitsema policy-check` (kebab-case) | Phase 94 (v0.91.0) | Not scheduled | `src/cli/register/analysis.ts:63-75` |
 | `gitsema tools lsp --tcp <port>` | `gitsema tools lsp --websocket <bind-address> --key <token>` | Phase 120 | Not scheduled (raw TCP has no header to carry a Bearer token in — see §3) | `src/cli/commands/tools.ts:92,126-133` |
+| `POST /api/v1/analysis/multi-repo-search` | `POST /api/v1/search` with a `repos: string[]` body param | Phase 138 | Not scheduled | `src/server/routes/analysis.ts` (`multi-repo-search` handler); response carries a `Deprecation: true` header + a `Link: </api/v1/search>; rel="successor-version"` header on every call instead of a stderr warning (this is an HTTP route, not a CLI command) |
+
+`POST /analysis/multi-repo-search`'s bare 4-param shape (`query`, `repoIds`,
+`topK`, `model`) can't express `POST /search`'s full query-shaping surface
+(levels, hybrid, boolean composition, model overrides, etc.). Rather than
+grow two divergent multi-repo implementations, `POST /search`'s new `repos`
+param became the parity-complete replacement (mirroring CLI `search
+--repos`), and the old route was kept working, unchanged in response shape,
+as a thin alias over the same `multiRepoSearch()` core call.
 
 `backfill-fts` re-fetched blob content from Git for blobs indexed before
 Phase 11, which never got an FTS5 row at all — `rebuild-fts` only re-syncs

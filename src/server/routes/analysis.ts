@@ -6,6 +6,14 @@
  *   POST /change-points — find concept change points in history
  *   POST /author        — attribute a semantic concept to authors
  *   POST /impact        — find semantically coupled blobs for a file
+ *
+ * Phase 140: `clusters`, `change-points`, `author`, `impact`, `semantic-diff`,
+ * `semantic-blame`, `triage`, and `workflow` all accept the CLI's
+ * `--model`/`--text-model`/`--code-model` override triplet as
+ * `{model, textModel, codeModel}` body fields via the shared
+ * `modelOverrideSchema` fragment + `resolveRequestProvider()` helper in
+ * `../lib/modelOverrides.js` — see that module for why it doesn't reuse
+ * `src/cli/lib/provider.ts`'s `resolveModels()`/`buildProviderOrExit()` as-is.
  */
 
 import { Router } from 'express'
@@ -15,6 +23,8 @@ import type { Embedding } from '../../core/models/types.js'
 import { computeClusters, getBlobHashesOnBranch } from '../../core/search/clustering/clustering.js'
 import { computeConceptChangePoints } from '../../core/search/temporal/changePoints.js'
 import { computeAuthorContributions } from '../../core/search/authorSearch.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
+import { searchCommits } from '../../core/search/commitSearch.js'
 import { computeExperts } from '../../core/search/experts.js'
 import { computeImpact } from '../../core/search/impact.js'
 import { parseDateArg } from '../../core/search/temporal/timeSearch.js'
@@ -36,8 +46,10 @@ import { computeEvolution } from '../../core/search/temporal/evolution.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
 import { multiRepoSearch } from '../../core/indexing/repoRegistry.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
+import { modelOverrideSchema, resolveRequestProvider, ModelOverrideError } from '../lib/modelOverrides.js'
 
 const ClustersBodySchema = z.object({
+  ...modelOverrideSchema.shape,
   k: z.number().int().positive().optional().default(8),
   topKeywords: z.number().int().positive().optional().default(5),
   useEnhancedLabels: z.boolean().optional().default(false),
@@ -45,6 +57,7 @@ const ClustersBodySchema = z.object({
 })
 
 const ChangePointsBodySchema = z.object({
+  ...modelOverrideSchema.shape,
   query: z.string().min(1),
   topK: z.number().int().positive().optional().default(50),
   threshold: z.number().min(0).max(2).optional().default(0.3),
@@ -53,13 +66,28 @@ const ChangePointsBodySchema = z.object({
 })
 
 const AuthorBodySchema = z.object({
+  ...modelOverrideSchema.shape,
   query: z.string().min(1),
   topK: z.number().int().positive().optional().default(50),
   topAuthors: z.number().int().positive().optional().default(10),
   branch: z.string().optional(),
+  since: z.string().optional(),
+  detail: z.boolean().optional().default(false),
+  includeCommits: z.boolean().optional().default(false),
+  hybrid: z.boolean().optional().default(false),
+  bm25Weight: z.number().min(0).max(1).optional().default(0.3),
+  // `chunks`/`level`/`vss` are accepted for CLI flag-surface parity but are
+  // not wired to anything — `computeAuthorContributions` is blob-level only,
+  // and the CLI's `author` command itself treats these three the same way
+  // (declared flags with no effect on results; `--vss` just prints a
+  // warning). See docs/parity.md for the audit note.
+  chunks: z.boolean().optional().default(false),
+  level: z.enum(['file', 'chunk', 'symbol']).optional(),
+  vss: z.boolean().optional().default(false),
 })
 
 const ImpactBodySchema = z.object({
+  ...modelOverrideSchema.shape,
   file: z.string().min(1),
   topK: z.number().int().positive().optional().default(10),
   branch: z.string().optional(),
@@ -82,6 +110,12 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   const router = Router()
 
   // POST /analysis/clusters
+  // Accepts the model-override triplet for CLI/HTTP flag parity (Phase 140),
+  // but — same as the CLI `clusters` command — `computeClusters()` clusters
+  // whatever embeddings are already stored regardless of model, so the
+  // override has no effect on the result today; it's accepted (and
+  // validated if it fails to resolve to a real provider) rather than
+  // rejected as an unknown field.
   router.post('/clusters', async (req, res) => {
     const parsed = ClustersBodySchema.safeParse(req.body)
     if (!parsed.success) {
@@ -89,6 +123,14 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
+    if (opts.model || opts.textModel || opts.codeModel) {
+      try {
+        resolveRequestProvider(opts, textProvider)
+      } catch (err) {
+        res.status(400).json({ error: err instanceof Error ? err.message : String(err) })
+        return
+      }
+    }
     try {
       const blobHashFilter = opts.branch ? getBlobHashesOnBranch(opts.branch) : undefined
       const report = await computeClusters({
@@ -113,9 +155,11 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     const opts = parsed.data
     let queryEmbedding: Embedding
     try {
-      queryEmbedding = await textProvider.embed(opts.query)
+      const provider = resolveRequestProvider(opts, textProvider)
+      queryEmbedding = await provider.embed(opts.query)
     } catch (err) {
-      res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+      const status = err instanceof ModelOverrideError ? 400 : 502
+      res.status(status).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
     try {
@@ -139,20 +183,54 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
+
+    let since: number | undefined
+    try {
+      if (opts.since) since = parseDateArg(opts.since)
+    } catch (err) {
+      res.status(400).json({ error: `Date parse error: ${err instanceof Error ? err.message : String(err)}` })
+      return
+    }
+
     let queryEmbedding: Embedding
     try {
-      queryEmbedding = await textProvider.embed(opts.query)
+      const provider = resolveRequestProvider(opts, textProvider)
+      queryEmbedding = await provider.embed(opts.query)
     } catch (err) {
-      res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+      const status = err instanceof ModelOverrideError ? 400 : 502
+      res.status(status).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
     try {
+      // Mirrors the CLI `author` command (src/cli/commands/author.ts): when
+      // --hybrid is set, use hybridSearch to get pre-scored candidate blobs
+      // instead of scoring the whole embeddings table by cosine similarity.
+      let candidateBlobs: Array<{ blobHash: string; score: number }> | undefined
+      if (opts.hybrid) {
+        const hybridResults = await hybridSearch(opts.query, queryEmbedding, {
+          topK: 50,
+          bm25Weight: opts.bm25Weight,
+          branch: opts.branch,
+        })
+        candidateBlobs = hybridResults.map((r) => ({ blobHash: r.blobHash, score: r.score }))
+      }
+
       const contributions = await computeAuthorContributions(queryEmbedding, {
         topK: opts.topK,
         topAuthors: opts.topAuthors,
         branch: opts.branch,
+        since,
+        detail: opts.detail,
+        candidateBlobs,
       })
-      res.json(contributions)
+
+      if (opts.includeCommits) {
+        const commitResults = await searchCommits(queryEmbedding, { topK: opts.topK, model: textProvider.model })
+        res.json({ authors: contributions, commits: commitResults })
+        return
+      }
+
+      res.json({ authors: contributions })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -191,8 +269,15 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
+    let provider: EmbeddingProvider
     try {
-      const report = await computeImpact(opts.file, textProvider, {
+      provider = resolveRequestProvider(opts, textProvider)
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) })
+      return
+    }
+    try {
+      const report = await computeImpact(opts.file, provider, {
         topK: opts.topK,
         branch: opts.branch,
       })
@@ -204,6 +289,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
 
   // POST /analysis/semantic-diff
   const SemanticDiffBodySchema = z.object({
+    ...modelOverrideSchema.shape,
     ref1: z.string().min(1),
     ref2: z.string().min(1),
     query: z.string().min(1),
@@ -219,9 +305,11 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     const opts = parsed.data
     let qEmb: Embedding
     try {
-      qEmb = await textProvider.embed(opts.query)
+      const provider = resolveRequestProvider(opts, textProvider)
+      qEmb = await provider.embed(opts.query)
     } catch (err) {
-      res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+      const status = err instanceof ModelOverrideError ? 400 : 502
+      res.status(status).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
     try {
@@ -234,6 +322,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
 
   // POST /analysis/semantic-blame
   const SemanticBlameBodySchema = z.object({
+    ...modelOverrideSchema.shape,
     filePath: z.string().min(1),
     content: z.string().min(1),
     topK: z.number().int().positive().optional().default(3),
@@ -247,7 +336,13 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
-    let qEmbProvider = textProvider
+    let qEmbProvider: EmbeddingProvider
+    try {
+      qEmbProvider = resolveRequestProvider(opts, textProvider)
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) })
+      return
+    }
     try {
       const entries = await computeSemanticBlame(opts.filePath, opts.content, qEmbProvider, { topK: opts.topK, searchSymbols: opts.searchSymbols, branch: opts.branch })
       res.json(entries)
@@ -421,6 +516,15 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     }
   })
 
+  // POST /analysis/multi-repo-search
+  // Deprecated (Phase 138): `POST /search` now accepts the same `repos`
+  // param (an array of repo IDs) and merges multi-repo results into its
+  // full query-shaping pipeline (levels, hybrid, boolean composition, model
+  // overrides, etc.) — this route's bare 4-param shape can't express any of
+  // that. Kept as a thin, unchanged-shape alias over the same
+  // `multiRepoSearch()` core call for backward compatibility; prefer
+  // `POST /search` with `repos: [...]` for new integrations. See
+  // docs/deprecations.md.
   const MultiRepoSearchBodySchema = z.object({
     query: z.string().min(1),
     repoIds: z.array(z.string()).optional(),
@@ -438,6 +542,8 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       const session = getActiveSession()
       const embedding = await embedQuery(textProvider, query) as number[]
       const results = await multiRepoSearch(session, embedding, { repoIds, topK, model })
+      res.setHeader('Deprecation', 'true')
+      res.setHeader('Link', '</api/v1/search>; rel="successor-version"')
       res.json(results)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
@@ -491,6 +597,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   // POST /analysis/triage
   // Composite incident-triage bundle: first-seen, change-points, file-evolution, bisect, experts.
   const TriageBodySchema = z.object({
+    ...modelOverrideSchema.shape,
     query: z.string().min(1),
     top: z.number().int().positive().optional().default(5),
     ref1: z.string().optional(),
@@ -506,9 +613,11 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     const opts = parsed.data
     let queryEmbedding: number[]
     try {
-      queryEmbedding = await embedQuery(textProvider, opts.query) as number[]
+      const provider = resolveRequestProvider(opts, textProvider)
+      queryEmbedding = await embedQuery(provider, opts.query) as number[]
     } catch (err) {
-      res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
+      const status = err instanceof ModelOverrideError ? 400 : 502
+      res.status(status).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
     const sections: Record<string, unknown> = {}
@@ -645,6 +754,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   // POST /analysis/workflow
   // Run a named workflow template (pr-review | incident | release-audit).
   const WorkflowBodySchema = z.object({
+    ...modelOverrideSchema.shape,
     template: z.enum(['pr-review', 'incident', 'release-audit']),
     query: z.string().optional(),
     file: z.string().optional(),
@@ -666,6 +776,13 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       res.status(400).json({ error: '`query` is required for the incident template' })
       return
     }
+    let provider: EmbeddingProvider
+    try {
+      provider = resolveRequestProvider(opts, textProvider)
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) })
+      return
+    }
     const top = opts.top
     const sections: Record<string, unknown> = {}
 
@@ -673,12 +790,12 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       const query = opts.query ?? opts.file ?? ''
       let emb: number[]
       try {
-        emb = await embedQuery(textProvider, query) as number[]
+        emb = await embedQuery(provider, query) as number[]
       } catch (err) {
         res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
         return
       }
-      try { sections.impact = await computeImpact(opts.file!, textProvider, { topK: top }) }
+      try { sections.impact = await computeImpact(opts.file!, provider, { topK: top }) }
       catch (err) { sections.impact = { error: err instanceof Error ? err.message : String(err) } }
       try { sections.changePoints = computeConceptChangePoints(query, emb, { topK: top }) }
       catch (err) { sections.changePoints = { error: err instanceof Error ? err.message : String(err) } }
@@ -688,7 +805,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     } else if (opts.template === 'incident') {
       let emb: number[]
       try {
-        emb = await embedQuery(textProvider, opts.query!) as number[]
+        emb = await embedQuery(provider, opts.query!) as number[]
       } catch (err) {
         res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
         return
@@ -705,7 +822,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       const query = opts.query ?? 'architecture changes quality'
       let emb: number[]
       try {
-        emb = await embedQuery(textProvider, query) as number[]
+        emb = await embedQuery(provider, query) as number[]
       } catch (err) {
         res.status(502).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
         return

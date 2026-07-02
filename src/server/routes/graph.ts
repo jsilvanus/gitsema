@@ -14,6 +14,11 @@ import { parseLens } from '../../cli/lib/lens.js'
 const HotspotsBodySchema = z.object({
   lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid'),
   topK: z.number().int().positive().max(500).optional().default(20),
+  // Accepted for CLI flag-surface parity (`--weight-structural`, via
+  // `addLensOption`) but currently a no-op: `computeHotspots`'s risk score is
+  // an unweighted geometric mean over the active lens's signals with no
+  // weighting hook, same as the CLI's own `hotspotsCommand` (Phase 139).
+  weightStructural: z.number().optional(),
 })
 
 export function graphRouter(): Router {

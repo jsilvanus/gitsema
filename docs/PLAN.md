@@ -5250,7 +5250,52 @@ earlier over-narrowed draft of this phase):**
 needs generalizing beyond `search.ts`), `docs/parity.md`, `docs/features.md`,
 `README.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Implemented as specified, reusing Phase 136's
+`resolveExtraLevels()`/`isMultiLevelActive()`/`includeFiles` mechanism
+directly (imported from `src/cli/commands/search.ts`) rather than
+re-deriving it in each of the three call sites.
+
+- CLI `gitsema code-search`: `codeSearchCommand()` now resolves
+  `resolveExtraLevels(searchChunksFlag, searchSymbolsFlag, false)` from the
+  `--level` argument (default `symbol` → both flags true → always
+  multi-level-active) and, when active and `--merge-levels` is not passed,
+  runs one isolated `vectorSearch()` call per level (`file`/`chunk`/`symbol`)
+  and renders them via `renderResultsByLevel()`. New `--merge-levels` flag
+  restores the pre-Phase-137 single merged call/`renderResults()` output.
+- MCP `code_search` (`src/mcp/tools/search.ts`): same isolation; adds a
+  `merge_levels` boolean param (default `false`). When multi-level and not
+  merged, returns `{ snippet, results_by_level: { file, chunk, symbol } }`
+  (each level's array pared to `{ paths, score, blobHash, kind }`) instead of
+  the old flat `{ snippet, results: [...] }` — accepted breaking change per
+  `docs/parity.md` §4.
+- Guide `code_search` tool (`src/core/narrator/guideTools.ts`): same shape
+  change (`results_by_level` vs. `results`), same `merge_levels` param. This
+  tool always searches both pools (no `level` param existed), so it always
+  hits the multi-level condition unless `merge_levels` is passed.
+- `src/core/narrator/interpretations.ts`'s `code_search` entry updated to
+  document the new `results_by_level` shape and to warn against comparing
+  raw scores across levels (chunk vs. symbol embedding-framing bias); skill
+  regenerated via `pnpm gen:skill` (`skill/gitsema-ai-assistant.md` and
+  `.github/skills/gitsema.md` both updated).
+- Tests: new `tests/integration/codeSearchLevelSeparation.test.ts` — proves
+  (a) the per-blob dedup invariant (a blob with both a chunk and a symbol
+  candidate appears at most once, in both a merged call and each isolated
+  per-level call), and (b) the crowding-out proof mirroring
+  `searchLevelSeparation.test.ts`, adapted to code-search's chunk-vs-symbol
+  pools (a weak lone chunk match survives its own isolated topK cutoff but
+  is crowded out of a small shared topK by two stronger symbol matches in
+  the merged/`--merge-levels` path). `pnpm build && pnpm test` green.
+- `docs/parity.md` updated: the "`code-search` never received Phase 136's
+  treatment" gap note (§ Parity Observations) and its §6 roadmap mention are
+  resolved; Tool Matrix/flag tables unaffected (no new interface reached,
+  same five interfaces as before — CLI/Guide/MCP/LSP/Interactive — just a
+  shape/flag change within each).
+- **Deviation from spec:** the phase entry's "Files likely touched" list
+  did not anticipate `src/core/narrator/interpretations.ts` needing an
+  update — included because `code_search`'s result shape changed and that
+  file is the single source of truth for "how to read" a tool's output
+  (enforced by the `docsSync` test).
+- Changeset added (`code-search-per-level-results.md`, minor).
 
 ---
 
@@ -5311,7 +5356,45 @@ CLI's own implementation already threads these through
 (`multi-repo-search`), `docs/parity.md`, `docs/features.md`, `README.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from the original spec:**
+- **MCP per-level output shape:** the plan text said MCP `semantic_search`
+  would return `results_by_level`; MCP `registerTool()` handlers return
+  `{ content: [{ type: 'text', text }] }` (a rendered text blob, not
+  structured JSON — no MCP search tool returns JSON today), so the per-level
+  shape is expressed as labeled `== file ==` / `== chunk ==` / `== symbol ==`
+  / `== module ==` text sections (via the existing `renderResultsByLevel()`
+  helper), mirroring CLI `search`'s own text-mode per-level output exactly.
+  A `merge_levels` param still opts back into one unlabeled list, matching
+  the CLI's `--merge-levels` semantics. HTTP `POST /search` does return the
+  literal `resultsByLevel` JSON key as specified, since that route already
+  returns structured JSON.
+- **`multi-repo-search` resolution:** chose option (b) from the two
+  alternatives listed — `repos: string[]` was folded into `POST /search`
+  (and MCP `semantic_search`/`first_seen`) as the parity-complete
+  implementation, and `POST /analysis/multi-repo-search` was kept as a thin,
+  response-shape-unchanged **deprecated** alias over the same
+  `multiRepoSearch()` core call (adds a `Deprecation: true` header + a
+  `Link` header pointing at `/api/v1/search`) rather than duplicated or
+  enriched in place. Recorded in `docs/deprecations.md` §1.
+- **Per-request model overrides implementation:** rather than mutate
+  `process.env` (CLI's `applyModelOverrides()` pattern, unsafe for a
+  long-running server handling concurrent requests), added
+  `hasModelOverride()`/`buildProviderForRequest()` to
+  `src/core/embedding/providerFactory.ts` as a small shared core-level
+  helper — resolves a per-request `ResolvedConfig` and calls the existing
+  `getTextProvider()`/`getCodeProvider()` factories directly, with no env
+  mutation. Both MCP `src/mcp/tools/search.ts` and HTTP
+  `src/server/routes/search.ts` use this same helper (no duplicated
+  resolution logic between the two interfaces). This helper is intentionally
+  narrow to `search`/`first-seen` for now; Phase 140 is scheduled to
+  generalize a model-override mechanism across the rest of the
+  `analysis.ts` HTTP routes and may fold this in or build alongside it.
+- `code_search` (the third tool sharing `src/mcp/tools/search.ts`) was
+  **not** touched — that tool's per-level separation and flag parity is
+  Phase 137's scope (a separate, concurrently-developed phase), not
+  Phase 138's.
 
 ---
 
@@ -5332,13 +5415,17 @@ throughout this track — breaking changes are expected and accepted, not
 avoided.
 
 **Build order:** no hard dependencies between these phases; Phase 138 is
-already in flight (above). The rest can ship in any order, though 140
+✅ complete (above). The rest can ship in any order, though 140
 (the model-override umbrella) is worth doing early since it's referenced by
-several others (141, 143) as "don't duplicate this per-route, do it once."
+several others (141, 143) as "don't duplicate this per-route, do it once" —
+note Phase 138 already added a narrow `hasModelOverride()`/
+`buildProviderForRequest()` helper to
+`src/core/embedding/providerFactory.ts` scoped to `search`/`first-seen`;
+Phase 140 should generalize or fold into that rather than starting fresh.
 
 | Phase | Scope | Source finding |
 |---|---|---|
-| 138 | `search`/`first-seen`/`multi-repo-search` full parity (widened above) | Search/evolution/graph audit + analysis.ts audit |
+| 138 ✅ | `search`/`first-seen`/`multi-repo-search` full parity (widened above) | Search/evolution/graph audit + analysis.ts audit |
 | 139 | `evolution` (file/concept) + `hotspots` HTTP/MCP parity | Search/evolution/graph audit |
 | 140 | Systemic `--model`/`--text-model`/`--code-model` override triplet, missing from nearly every `analysis.ts` HTTP route | analysis.ts audit |
 | 141 | `author` HTTP route full parity (largest single-command gap) | analysis.ts audit |
@@ -5385,7 +5472,33 @@ Parity Track (see Phase 138's track table).
 wherever `computeEvolution`/`computeConceptEvolution` live), `docs/parity.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from spec:**
+- Scoped to **HTTP** parity, as the title's actual scope bullets describe
+  (all three bullets say "HTTP route"/route body schemas); MCP's `evolution`/
+  `concept_evolution`/`hotspots` tools were left untouched — they have their
+  own pre-existing branch/model-override gaps shared with several other MCP
+  tools, which is a wider, separately-scoped MCP audit, not folded in here.
+- `hotspots`'s `weightStructural` is accepted on `POST /graph/hotspots` for
+  CLI flag-surface parity but is a **no-op**, exactly like the CLI's own
+  `hotspotsCommand` (`src/cli/commands/hotspots.ts` even says so in a
+  comment): `computeHotspots()`'s risk score is an unweighted geometric mean
+  over the active lens's signals with no weighting parameter anywhere in the
+  scoring function. Adding real weighting would be a `computeHotspots()`
+  behavior change beyond this phase's route-parity scope — documented as a
+  known no-op rather than silently pretended to work.
+- `--narrate` on all three routes was **deferred**, not resolved in-scope:
+  it's LLM/infra-adjacent (needs a configured narrator model + redaction
+  path already used by `narrate`/`explain`) and is better done together with
+  Phase 144's narrator-route work than piecemeal here.
+- The CLI's own `file-evolution --branch` post-filtered timeline entries
+  after calling `computeEvolution()`; this phase moved that filtering into
+  `computeEvolution()` itself (new `branch` option alongside the existing
+  `useSymbolLevel`), so the CLI command now delegates to the same
+  branch-aware core function the HTTP route uses — a small CLI-internal
+  refactor beyond the literal ask, done to avoid maintaining two branch-filter
+  implementations.
 
 ---
 
@@ -5417,7 +5530,36 @@ pattern rather than reinventing it per route.
 **Files likely touched:** `src/server/routes/analysis.ts`, a new shared
 helper module, `docs/parity.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete *(completed vNEXT)*. Implemented as specified: a new
+`src/server/lib/modelOverrides.ts` exports a `modelOverrideSchema` Zod
+fragment (`{model, textModel, codeModel}`, spread into each affected route's
+body schema via `...modelOverrideSchema.shape`) and a
+`resolveRequestProvider(body, fallbackProvider)` helper applied to all 8
+routes (`clusters`, `change-points`, `author`, `impact`, `semantic-diff`,
+`semantic-blame`, `triage`, `workflow`). One deliberate deviation from
+mirroring `resolveModels()`/`buildProviderOrExit()` verbatim: those CLI
+helpers mutate `process.env` and call `process.exit()` on failure, both
+unsafe for a long-running, concurrently-serving HTTP process (env mutation
+from one request could leak into another in-flight request; `process.exit`
+would kill the server). `resolveRequestProvider()` instead threads an
+explicit `ResolvedConfig` through `buildProvider()` (already supported,
+env-free) and throws a catchable `ModelOverrideError` that routes turn into
+a 400 instead of exiting. `clusters` accepts and validates the triplet for
+CLI/HTTP flag-surface parity, but — same as the CLI `clusters` command,
+which also only calls `applyModelOverrides()` and never threads a provider
+into `computeClusters()` — the override has no effect on clustering
+behavior today, since `computeClusters()` clusters all stored embeddings
+regardless of model; this is documented inline and in `docs/features.md`
+rather than silently faked. `docs/parity.md` §2.3 item 3 updated to mark the
+CLI-vs-HTTP gap closed. New `describe('Phase 140: model overrides on
+analysis routes', ...)` block in `tests/serverRoutes.test.ts` (11 new tests)
+covers all 8 routes, including a `providerFactory.js` mock that routes
+`model` names containing `"override"` to a distinguishable provider so the
+tests assert the override actually took effect, plus two tests asserting a
+400 (not a crash or 502) when the override resolves to an invalid provider
+config (`GITSEMA_PROVIDER=http` with no `GITSEMA_HTTP_URL`). `pnpm build &&
+pnpm test` green. Changeset added (`analysis-routes-model-overrides.md`,
+minor).
 
 ---
 
@@ -5439,7 +5581,21 @@ Update `docs/parity.md`, `docs/features.md`, `README.md`.
 `src/core/search/authorSearch.ts` (or wherever author attribution lives),
 `docs/parity.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete. `AuthorBodySchema` in `src/server/routes/analysis.ts`
+gained `since`, `detail`, `includeCommits`, `hybrid`, `bm25Weight` (all
+threaded through to `computeAuthorContributions`/`hybridSearch`/
+`searchCommits`, mirroring `src/cli/commands/author.ts` exactly) plus
+`chunks`/`level`/`vss` for flag-surface parity — these three are accepted
+but deliberately not wired to anything, matching the CLI's own dead-flag
+behavior (`computeAuthorContributions` is blob-level only; the CLI's
+`--vss` on `author` is itself just a warn-and-ignore no-op). Model-override
+triplet (`model`/`textModel`/`codeModel`) intentionally excluded — tracked
+separately in Phase 140. **Deviation from spec:** response shape changed
+from a bare `AuthorContribution[]` array to `{ authors, commits? }` (the
+`commits` key populated only when `includeCommits` is set) — a breaking
+change, taken deliberately per `docs/parity.md` §4's "parity over API
+response stability" rule, since a bare array had no room for
+`includeCommits`'s second result set.
 
 ---
 

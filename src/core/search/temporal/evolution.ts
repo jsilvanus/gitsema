@@ -68,9 +68,19 @@ export function getFileHistory(filePath: string) {
   return timeline
 }
 
-export function computeEvolution(filePath: string, originBlob?: string, opts: { useSymbolLevel?: boolean } = {}): EvolutionEntry[] {
-  const history = getFileHistory(filePath)
+export function computeEvolution(
+  filePath: string,
+  originBlob?: string,
+  opts: { useSymbolLevel?: boolean; branch?: string } = {},
+): EvolutionEntry[] {
+  let history = getFileHistory(filePath)
   if (history.length === 0) return []
+
+  if (opts.branch) {
+    const branchSet = getBranchBlobHashSet(opts.branch)
+    history = history.filter((h) => branchSet.has(h.blobHash))
+    if (history.length === 0) return []
+  }
 
   const blobHashes = history.map((h) => h.blobHash)
 
