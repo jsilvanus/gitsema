@@ -338,6 +338,9 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--until <ref\|date>` | — | Only include commits before this ref or date |
 | `--range <rev-range>` | — | Git revision range (e.g. `v1.0..HEAD`) (`narrate` only) |
 | `--focus <area>` | `all` | Filter commits by area: `bugs`, `features`, `ops`, `security`, `deps`, `performance`, `all` (`narrate` only) |
+| `--log <path>` | — | Path to an error log/stack-trace file to include as LLM context (`explain` only) |
+| `--files <glob>` | — | Restrict search to files matching this glob (`explain` only); currently only consumed by `--lens` structural enrichment, not commit filtering (see below) |
+| `--lens <lens>` | `semantic` | `semantic\|structural\|hybrid` (`explain` only) — under `structural`/`hybrid` with a concrete `--files` path, appends grounded call-graph/co-change context after the result |
 | `--format <fmt>` | `md` | Output format when narrating: `md`, `text`, `json` (legacy: prefer `--out`) |
 | `--out <spec>` | — | Output spec (repeatable): `text\|json[:file]\|markdown[:file]` (overrides `--format`) |
 | `--max-commits <n>` | `500` | Maximum commits to analyse (`narrate` only) |
