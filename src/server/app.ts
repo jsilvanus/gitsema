@@ -35,6 +35,16 @@
  *   POST /analysis/ownership      (Phase 67)
  *   POST /analysis/workflow       (Phase 68)
  *   POST /analysis/eval           (Phase 64)
+ *   POST /insights/bisect              (Phase 148 — remaining CLI-only commands)
+ *   POST /insights/refactor-candidates
+ *   POST /insights/lifecycle
+ *   POST /insights/cherry-pick-suggest
+ *   POST /insights/file-diff
+ *   POST /insights/pr-report
+ *   POST /insights/regression-gate
+ *   POST /insights/code-review
+ *   POST /insights/heatmap
+ *   POST /insights/map
  *   POST /protocol/:operation     (Phase 113 — LSP/MCP remote delegation)
  *   GET  /metrics                 (P2 — Prometheus exposition)
  *   GET  /openapi.json            (P2 — OpenAPI 3.1 spec)
@@ -63,6 +73,7 @@ import { searchRouter } from './routes/search.js'
 import { evolutionRouter } from './routes/evolution.js'
 import { remoteRouter } from './routes/remote.js'
 import { analysisRouter } from './routes/analysis.js'
+import { insightsRouter } from './routes/insights.js'
 import { graphRouter } from './routes/graph.js'
 import { protocolRouter } from './routes/protocol.js'
 import { watchRouter } from './routes/watch.js'
@@ -192,6 +203,11 @@ export function createApp(options: AppOptions): Express {
 
   app.use(`${base}/analysis`, repoSessionMiddleware, analysisRouter({ textProvider }))
 
+  // Phase 148: bisect/refactor-candidates/lifecycle/cherry-pick-suggest/
+  // file-diff/pr-report/regression-gate/code-review/heatmap/map — CLI
+  // commands that previously had no HTTP route or MCP tool at all.
+  app.use(`${base}/insights`, repoSessionMiddleware, insightsRouter({ textProvider }))
+
   // Phase 110/111: structural knowledge-graph routes (hotspots, …)
   app.use(`${base}/graph`, repoSessionMiddleware, graphRouter())
 
@@ -240,6 +256,16 @@ export function createApp(options: AppOptions): Express {
         'early_cut',
         'projections',
         'watch',
+        'semantic_bisect',
+        'refactor_candidates',
+        'concept_lifecycle',
+        'cherry_pick_suggest',
+        'file_diff',
+        'pr_report',
+        'regression_gate',
+        'code_review',
+        'activity_heatmap',
+        'semantic_map',
       ],
       providers: {
         text: textProvider.model,
