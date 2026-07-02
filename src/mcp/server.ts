@@ -13,6 +13,7 @@ import { registerWorkflowTools } from './tools/workflow.js'
 import { registerInfrastructureTools } from './tools/infrastructure.js'
 import { registerNarratorTools } from './tools/narrator.js'
 import { registerGraphTools } from './tools/graph.js'
+import { registerInsightsTools } from './tools/insights.js'
 import { setMcpRemoteConfig } from './registerTool.js'
 import { checkRemoteHealth } from '../core/remote/protocolClient.js'
 import { readFileSync } from 'node:fs'
@@ -55,6 +56,7 @@ export function buildMcpServer(): McpServer {
   registerInfrastructureTools(server)
   registerNarratorTools(server)
   registerGraphTools(server)
+  registerInsightsTools(server)
 
   return server
 }

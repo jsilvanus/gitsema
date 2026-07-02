@@ -23,6 +23,7 @@ import { registerWorkflowTools } from '../../mcp/tools/workflow.js'
 import { registerInfrastructureTools } from '../../mcp/tools/infrastructure.js'
 import { registerNarratorTools } from '../../mcp/tools/narrator.js'
 import { registerGraphTools } from '../../mcp/tools/graph.js'
+import { registerInsightsTools } from '../../mcp/tools/insights.js'
 
 type McpHandlerFn = (args: unknown) => Promise<unknown>
 
@@ -43,6 +44,7 @@ function getMcpDispatch(): Map<string, McpHandlerFn> {
   registerInfrastructureTools(fakeServer as any)
   registerNarratorTools(fakeServer as any)
   registerGraphTools(fakeServer as any)
+  registerInsightsTools(fakeServer as any)
   _mcpDispatch = map
   return map
 }

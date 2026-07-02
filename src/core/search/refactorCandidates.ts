@@ -41,11 +41,18 @@ export function computeRefactorCandidates(options: RefactorCandidatesOptions = {
   let rows: Row[]
 
   if (level === 'symbol') {
+    // `symbol_embeddings` has no `blob_hash` column of its own (only
+    // `symbol_id`, FK'd to `symbols.id`) — the blob hash and symbol
+    // name/kind live on the joined `symbols` row (`symbols.symbol_name` /
+    // `symbols.symbol_kind`, not `s.name`/`s.kind`). This query previously
+    // referenced nonexistent columns and threw on any DB with symbol
+    // embeddings present (Phase 148 bugfix, found while adding MCP/HTTP
+    // exposure for this command).
     rows = rawDb.prepare(`
-      SELECT se.blob_hash, se.vector, p.path, s.name, s.kind
+      SELECT s.blob_hash AS blob_hash, se.vector, p.path, s.symbol_name AS name, s.symbol_kind AS kind
       FROM symbol_embeddings se
       JOIN symbols s ON s.id = se.symbol_id
-      JOIN paths p ON p.blob_hash = se.blob_hash
+      JOIN paths p ON p.blob_hash = s.blob_hash
       GROUP BY se.symbol_id
       LIMIT 2000
     `).all() as Row[]

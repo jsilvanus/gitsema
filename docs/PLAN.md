@@ -5435,7 +5435,7 @@ Phase 140 should generalize or fold into that rather than starting fresh.
 | 145 | `guide` HTTP route: `--lens` param, remote multi-turn/session support | remote/watch/guide/narrator audit |
 | 146 | `watch list`/`watch remove` HTTP routes (currently only `add`/`run` exist) | remote/watch/guide/narrator audit |
 | 147 | Graph command family HTTP/MCP exposure (`graph build/callers/callees/path/relate/similar/unused`, `cycles`, `deps`, `co-change`, `blast-radius`) | Missing-endpoints audit; closes the pre-existing `docs/parity.md` "Expose graph commands to HTTP API" roadmap item |
-| 148 | Triage which remaining zero-HTTP/MCP-exposure CLI commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`, `cherry-pick-suggest`, `regression-gate`, `code-review`, `cross-repo-similarity`, `pr-report`, `file-diff`, `diff`, `map`/`heatmap`/`project`) genuinely warrant exposure vs. are CLI/visualization-shaped by nature | Missing-endpoints audit |
+| 148 ✅ | Triage which remaining zero-HTTP/MCP-exposure CLI commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`, `cherry-pick-suggest`, `regression-gate`, `code-review`, `cross-repo-similarity`, `pr-report`, `file-diff`, `diff`, `map`/`heatmap`/`project`) genuinely warrant exposure vs. are CLI/visualization-shaped by nature — 10 landed in bucket (a) and gained MCP tools + HTTP routes, 3 in bucket (b) (CLI-shaped), 2 in bucket (c) (redundant) | Missing-endpoints audit |
 
 ---
 
@@ -5800,7 +5800,65 @@ a different name. Only implement (a); document (b) and (c) explicitly in
 `src/server/routes/*.ts`, `src/mcp/tools/*.ts`, `docs/parity.md`, test
 files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Triage outcome** (see `docs/parity.md` §1 Phase 148 footnotes for full
+detail):
+
+- **Bucket (a) — genuinely missing, implemented (10 commands):** `bisect`,
+  `refactor-candidates`, `lifecycle`, `cherry-pick-suggest`, `file-diff`,
+  `pr-report`, `regression-gate`, `code-review`, `map`, `heatmap`. Each
+  gained a matching MCP tool (new `src/mcp/tools/insights.ts`, registered in
+  `src/mcp/server.ts` and `src/server/routes/protocol.ts`'s remote-dispatch
+  map) and a `POST /api/v1/insights/*` HTTP route (new
+  `src/server/routes/insights.ts`, mounted in `src/server/app.ts`). All
+  accept the `{model, textModel, codeModel}` override triplet where an
+  embedding call is involved, via the existing
+  `src/server/lib/modelOverrides.ts` helper (Phase 140 convention).
+  `regression-gate` returns HTTP 200/422 (pass/fail), mirroring
+  `policy-check`'s convention.
+- **Bucket (b) — CLI-shaped by nature, correctly excluded (3 commands):**
+  `cross-repo-similarity` (takes raw local `.gitsema/index.db` filesystem
+  paths — a different trust model than a remote call; `multi_repo_search`
+  is the safe MCP/HTTP equivalent, resolving repos via the registered
+  `repos` table instead), `project` (local precompute/write step that
+  populates the `projections` table; its read side already has `GET
+  /projections`, Phase 55), and `ci-diff` (GitHub PR-comment posting via
+  `GITHUB_TOKEN` + a CI process exit code — inherently process-shaped, not
+  a stateless API call).
+- **Bucket (c) — redundant with an already-covered command, not
+  implemented (2 commands):** `diff` (its CLI registration wires directly
+  to `semanticDiffCommand`, the exact same function backing the
+  already-exposed `semantic_diff` MCP tool/HTTP route — not a distinct
+  implementation, just a different CLI verb for the same feature) and
+  `ci-diff`'s search core (`computeSemanticDiff`, same as `semantic_diff`;
+  its only genuinely distinct behavior is the bucket (b) CI-gate/GitHub-
+  comment side effects noted above).
+
+**Deviations from a literal reading of the phase's scope:**
+- `regression-gate`'s and `code-review`'s core loops were extracted out of
+  their CLI command files into new `src/core/search/regressionGate.ts` /
+  `src/core/search/codeReview.ts` modules (not previously factored out of
+  the CLI layer) so CLI/MCP/HTTP genuinely share one implementation, per
+  `CLAUDE.md`'s design constraint #5 ("MCP layer is a thin adapter...does
+  not duplicate business logic") — this wasn't optional busywork, since
+  those two commands' logic lived entirely inline in
+  `src/cli/commands/{regressionGate,codeReview}.ts` before this phase.
+- Found and fixed a pre-existing bug in `computeRefactorCandidates`'s
+  default `level: 'symbol'` SQL query (`src/core/search/refactorCandidates.ts`):
+  it selected `se.blob_hash`/`s.name`/`s.kind`, none of which exist
+  (`symbol_embeddings` has no `blob_hash` column; `symbols`' columns are
+  `symbol_name`/`symbol_kind`) — so the CLI `refactor-candidates` command
+  itself has always thrown on any database with symbol embeddings present.
+  Found via real test coverage added for the new `refactor_candidates`
+  MCP tool/route; fixed rather than shipping a route that surfaces a
+  pre-existing crash.
+- Also corrected two pre-existing `docs/parity.md` inaccuracies unrelated
+  to new work: the Guide column was wrongly "—" for `cross-repo-similarity`,
+  `map`, and `heatmap` (all three already had Guide tools in
+  `guideTools.ts` before this phase), and `project`'s HTTP column was
+  wrongly "✓" (conflating the adjacent `GET /projections` read route with
+  `project` itself, which has no route of its own).
 
 ---
 

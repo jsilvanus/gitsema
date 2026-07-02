@@ -17,15 +17,14 @@
 
 import * as fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_USAGE, EXIT_RUNTIME } from '../lib/errors.js'
 import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
-import { structuralContextForPath, formatStructuralContext, type StructuralContext } from '../../core/graph/structuralContext.js'
+import { formatStructuralContext } from '../../core/graph/structuralContext.js'
 import { parseLens } from '../lib/lens.js'
 import { isSafeGitRange } from '../../core/narrator/narrator.js'
+import { parseDiff, computeCodeReview, type CodeReviewEntry } from '../../core/search/codeReview.js'
 
 export interface CodeReviewOptions {
   base?: string
@@ -38,37 +37,6 @@ export interface CodeReviewOptions {
   out?: string[]
   /** Phase 111 lens toggle. Default `semantic` keeps output byte-identical. */
   lens?: string
-}
-
-interface HunkSummary {
-  file: string
-  addedLines: string[]
-  removedLines: string[]
-}
-
-function parseDiff(diffText: string): HunkSummary[] {
-  const hunks: HunkSummary[] = []
-  let current: HunkSummary | null = null
-
-  for (const line of diffText.split('\n')) {
-    if (line.startsWith('--- ') || line.startsWith('+++ ')) continue
-    if (line.startsWith('diff --git ')) {
-      // Extract file path
-      const match = line.match(/b\/(.+)$/)
-      if (match) {
-        if (current) hunks.push(current)
-        current = { file: match[1], addedLines: [], removedLines: [] }
-      }
-    } else if (current) {
-      if (line.startsWith('+') && !line.startsWith('+++')) {
-        current.addedLines.push(line.slice(1))
-      } else if (line.startsWith('-') && !line.startsWith('---')) {
-        current.removedLines.push(line.slice(1))
-      }
-    }
-  }
-  if (current) hunks.push(current)
-  return hunks
 }
 
 export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> {
@@ -135,54 +103,7 @@ export async function codeReviewCommand(opts: CodeReviewOptions): Promise<void> 
   const lens = parseLens(opts.lens, 'semantic')
   const graph = lens !== 'semantic' ? getCachedStorageProfile(process.cwd()).graph : undefined
 
-  const reviews: Array<{
-    file: string
-    analogues: Array<{ path: string; score: number }>
-    regressionRisk: 'low' | 'medium' | 'high'
-    structural?: StructuralContext
-  }> = []
-
-  for (const hunk of hunks) {
-    if (hunk.addedLines.length === 0 && hunk.removedLines.length === 0) continue
-
-    // Embed the added code as the "new concept"
-    const addedText = hunk.addedLines.join('\n').slice(0, 2000)
-    if (!addedText.trim()) continue
-
-    let embedding: number[]
-    try {
-      embedding = await embedQuery(provider, addedText) as number[]
-    } catch {
-      continue
-    }
-
-    const results = await vectorSearch(embedding, { topK, searchChunks: true })
-    const analogues = results
-      .filter((r) => r.score >= threshold)
-      .map((r) => ({ path: r.paths?.[0] ?? r.blobHash.slice(0, 12), score: r.score }))
-
-    // Simple regression risk heuristic: are removed lines similar to historical top results?
-    let regressionRisk: 'low' | 'medium' | 'high' = 'low'
-    if (hunk.removedLines.length > 0 && analogues.length > 0) {
-      const removedText = hunk.removedLines.join('\n').slice(0, 2000)
-      try {
-        const removedEmbedding = await embedQuery(provider, removedText) as number[]
-        const removedResults = await vectorSearch(removedEmbedding, { topK: 3 })
-        const maxRemovedScore = removedResults[0]?.score ?? 0
-        if (maxRemovedScore >= 0.9) regressionRisk = 'high'
-        else if (maxRemovedScore >= 0.75) regressionRisk = 'medium'
-      } catch { /* ignore */ }
-    }
-
-    // Structural enrichment (Phase 110): surface call-graph/co-change context
-    // for the changed file under a structural/hybrid lens.
-    let structural: StructuralContext | undefined
-    if (graph) {
-      structural = await structuralContextForPath(graph, hunk.file)
-    }
-
-    reviews.push({ file: hunk.file, analogues, regressionRisk, structural })
-  }
+  const reviews: CodeReviewEntry[] = await computeCodeReview(hunks, provider, { topK, threshold, graph })
 
   if (format === 'json') {
     const json = JSON.stringify({ reviews }, null, 2)

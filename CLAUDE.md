@@ -400,8 +400,8 @@ git repo
 [ src/core/models/ ]       types.ts          — shared embedding/result type definitions
    ↓
 [ src/cli/ ]               program.ts (COMMAND_GROUPS) + register/*.ts + commands/*.ts  — Commander.js CLI
-[ src/mcp/ ]               server.ts + tools/{search,analysis,clustering,graph,infrastructure,workflow,narrator}.ts — MCP stdio server
-[ src/server/ ]            app.ts + routes/{search,analysis,evolution,graph,guide,narrator,blobs,commits,projections,remote,status,watch}.ts — HTTP API server (remote backend)
+[ src/mcp/ ]               server.ts + tools/{search,analysis,clustering,graph,infrastructure,workflow,narrator,insights}.ts — MCP stdio server
+[ src/server/ ]            app.ts + routes/{search,analysis,insights,evolution,graph,guide,narrator,blobs,commits,projections,remote,status,watch}.ts — HTTP API server (remote backend)
 [ src/client/ ]            remoteClient.ts            — client for remote server mode
 ```
 
@@ -567,7 +567,7 @@ node dist/cli/index.js tools mcp
 
 The MCP server reads the same environment variables as the CLI. It runs against the `.gitsema/index.db` in the current working directory when the server is started.
 
-**Exposed tools (38 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator,graph}.ts`):**
+**Exposed tools (48 total, registered across `src/mcp/tools/{search,analysis,clustering,infrastructure,workflow,narrator,graph,insights}.ts`):**
 
 | Tool | Description |
 |---|---|
@@ -609,6 +609,16 @@ The MCP server reads the same environment variables as the CLI. It runs against 
 | `graph_neighbors` | Typed neighborhood of a graph node — any edge kinds, direction, depth (Phase 108) |
 | `hotspots` | Architectural risk = co-change × call-coupling × churn; `lens` selects which signals (Phase 110) |
 | `get_skill` | Return the gitsema agent skill (usage + result-interpretation guidance for every tool) — MCP-only, so clients can ground tool usage |
+| `semantic_bisect` | Binary search over commit history to find where a concept diverged from a "good" baseline (Phase 148) |
+| `refactor_candidates` | Find pairs of symbols/chunks/files similar enough to be refactoring candidates (Phase 148) |
+| `concept_lifecycle` | Lifecycle stages (born → growing → mature → declining → dead) of a concept over history (Phase 148) |
+| `cherry_pick_suggest` | Suggest commits to cherry-pick by semantic similarity of commit messages (Phase 148) |
+| `file_diff` | Semantic diff (cosine distance) between two versions of a single file (Phase 148) |
+| `pr_report` | Composite PR report: semantic diff, impacted modules, change-points, reviewer suggestions (Phase 148) |
+| `regression_gate` | CI gate: per-query base/head drift check against a threshold (Phase 148) |
+| `code_review` | Historical analogues + regression-risk heuristic for a unified diff (Phase 148) |
+| `activity_heatmap` | Count of distinct blob changes per time period, week or month (Phase 148) |
+| `semantic_map` | Most recent k-means cluster snapshot + per-cluster blob-assignment counts (Phase 148) |
 
 ---
 
