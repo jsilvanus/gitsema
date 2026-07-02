@@ -5429,7 +5429,7 @@ Phase 140 should generalize or fold into that rather than starting fresh.
 | 139 | `evolution` (file/concept) + `hotspots` HTTP/MCP parity | Search/evolution/graph audit |
 | 140 | Systemic `--model`/`--text-model`/`--code-model` override triplet, missing from nearly every `analysis.ts` HTTP route | analysis.ts audit |
 | 141 | `author` HTTP route full parity (largest single-command gap) | analysis.ts audit |
-| 142 | `workflow` HTTP route parity (3/8 → 8/8 templates, `--role`/`--ref`/`--base`) | analysis.ts audit |
+| 142 ✅ | `workflow` HTTP route parity (3/8 → 8/8 templates, `--role`/`--ref`/`--base`) | analysis.ts audit |
 | 143 | Analysis-route small-fixes bundle (merge-audit, merge-preview, branch-summary, clusters, security-scan, impact, semantic-diff, semantic-blame) | analysis.ts audit |
 | 144 | `narrate`/`explain` HTTP routes: evidence-only/LLM-prose toggle, `--log`/`--files`, `--lens` | remote/watch/guide/narrator audit |
 | 145 | `guide` HTTP route: `--lens` param, remote multi-turn/session support | remote/watch/guide/narrator audit |
@@ -5622,7 +5622,44 @@ it in — flag any that aren't as a follow-up rather than silently stubbing.
 `src/core/workflow/*` (wherever templates are implemented), `docs/parity.md`,
 `docs/features.md`, `README.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from spec:**
+- The workflow templates were never in a separate `src/core/workflow/*`
+  module — they're implemented inline in `src/cli/commands/workflow.ts`'s
+  `workflowCommand()`. There was no shared core function to import; the
+  HTTP route already computed the first 3 templates' sections inline
+  (calling the same underlying `computeImpact`/`computeConceptChangePoints`/
+  `computeExperts`/`vectorSearch` functions the CLI calls), so the 5 new
+  templates were wired the same way — mirroring `workflowCommand()`'s
+  per-template logic directly in the route handler rather than extracting
+  a new shared module (kept the diff scoped to the route file per the
+  parallel-worktree instruction not to touch unrelated modules).
+- All 5 newly-exposed templates' underlying functions
+  (`computeAuthorContributions`, `getActiveSession`, `computeHealthTimeline`,
+  `scoreDebt`, plus the already-used `embedQuery`/`vectorSearch`/
+  `computeConceptChangePoints`/`computeExperts`) were **already imported and
+  used elsewhere in `analysis.ts`** (by the `/author`, `/health`, `/debt`
+  routes) — confirming they're HTTP-callable with no local-filesystem or
+  interactive assumptions. No follow-up flags needed for any of the 5.
+- `role`/`ref` are new body fields (mirroring the CLI's `--role`/`--ref`).
+  `base` was already present in the schema and not gated to a specific
+  template at the validation layer; investigation found it's actually a
+  **no-op in the CLI itself** — `workflowCommand()` declares `options.base`
+  in its `WorkflowOptions` interface but never reads it in the function
+  body, for any template, including `pr-review`. Rather than inventing new
+  HTTP-only behavior for a flag the CLI doesn't implement, the HTTP route
+  now matches the CLI exactly: `base` is accepted (no validation gating)
+  and remains inert. Flagged in `docs/parity.md` as a known CLI-level gap,
+  not something this HTTP-parity phase should silently "fix" on one
+  interface only.
+- Per-template required-field validation was added for the 3 templates that
+  require `query` in the CLI (`ownership-intel`, `knowledge-portal`,
+  `regression-forecast`) — mirroring the existing `pr-review`/`incident`
+  pattern already on the route. `onboarding` and `arch-drift` have no
+  required fields (defaults), also matching the CLI.
+- Model overrides (`model`/`textModel`/`codeModel`) intentionally untouched
+  — already closed in Phase 140 and out of scope here.
 
 ---
 
