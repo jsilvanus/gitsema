@@ -1450,6 +1450,119 @@ describe('POST /api/v1/protocol/:operation', () => {
 })
 
 // ===========================================================================
+// POST /api/v1/narrate, POST /api/v1/explain — Phase 144
+//
+// evidenceOnly toggle + explain's log/files/lens fields. No narrator model is
+// configured in the mocked in-memory DB, so `evidenceOnly: false` still makes
+// no network call (safe-by-default disabled provider) — these assertions
+// focus on request parsing / response shape, not real LLM output. `since:
+// '2099-01-01'` guarantees zero matching commits so results are deterministic.
+// ===========================================================================
+describe('POST /api/v1/narrate — Phase 144 evidenceOnly toggle', () => {
+  it('defaults to evidence-only (llmEnabled false, evidence array present)', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01' })
+    expect(res.status).toBe(200)
+    expect(res.body.llmEnabled).toBe(false)
+    expect(Array.isArray(res.body.evidence)).toBe(true)
+  })
+
+  it('accepts evidenceOnly: false explicitly without erroring (no narrator configured → still safe)', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', evidenceOnly: false })
+    expect(res.status).toBe(200)
+    expect(res.body.llmEnabled).toBe(false)
+  })
+
+  it('accepts a lens field for CLI flag-surface parity (no-op for narrate)', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', lens: 'hybrid' })
+    expect(res.status).toBe(200)
+  })
+
+  it('rejects an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', lens: 'nonsense' })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a non-boolean evidenceOnly value', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', evidenceOnly: 'yes' })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/explain — Phase 144 evidenceOnly/log/files/lens', () => {
+  it('defaults to evidence-only (llmEnabled false, evidence array present)', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({ topic: 'xyzzythiscannotexist_98765', since: '2099-01-01' })
+    expect(res.status).toBe(200)
+    expect(res.body.llmEnabled).toBe(false)
+    expect(Array.isArray(res.body.evidence)).toBe(true)
+  })
+
+  it('accepts a log path and a files glob without erroring', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({
+        topic: 'xyzzythiscannotexist_98765',
+        since: '2099-01-01',
+        log: '/nonexistent/path/to.log',
+        files: 'src/**/*.ts',
+      })
+    expect(res.status).toBe(200)
+  })
+
+  it('does not include structuralContext for the default semantic lens', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({
+        topic: 'xyzzythiscannotexist_98765',
+        since: '2099-01-01',
+        files: 'src/server/routes/narrator.ts',
+      })
+    expect(res.status).toBe(200)
+    expect(res.body).not.toHaveProperty('structuralContext')
+  })
+
+  it('accepts a structural/hybrid lens with files without erroring (empty graph → no structuralContext)', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({
+        topic: 'xyzzythiscannotexist_98765',
+        since: '2099-01-01',
+        files: 'src/server/routes/narrator.ts',
+        lens: 'hybrid',
+      })
+    expect(res.status).toBe(200)
+    // No graph data indexed in this test DB, so structuralContextForPath finds
+    // nothing and the field is omitted rather than throwing.
+    expect(res.body).not.toHaveProperty('structuralContext')
+  })
+
+  it('rejects an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({ topic: 'test', lens: 'nonsense' })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a non-boolean evidenceOnly value', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({ topic: 'test', evidenceOnly: 'yes' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
 // Non-existent routes
 // ===========================================================================
 describe('non-existent routes', () => {

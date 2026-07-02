@@ -2,7 +2,7 @@
 
 This document tracks the availability of gitsema tools and commands across all interfaces, and the implementation of common flags across the CLI. It serves as the single source of truth for interface parity and helps identify gaps, inconsistencies, and opportunities for unification.
 
-**Last updated:** 2026-07-01 (the only date in this document — see §4 for why)  
+**Last updated:** 2026-07-02 (the only date in this document — see §4 for why)  
 **Maintainer note:** Any tool change, interface change, or flag addition must be reflected in the tables below and in the canonical sections of `CLAUDE.md` / `docs/features.md` / `README.md`.
 
 ---
@@ -341,6 +341,10 @@ This table shows less common flags used by specific commands or command groups.
 | `--hybrid` | `author` | bool | false | Use hybrid (vector + BM25) candidate selection (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
 | `--bm25-weight` | `author` | float | 0.3 | BM25 weight when `--hybrid` is set (HTTP: also accepted by `POST /analysis/author`, Phase 141) |
 | `--chunks` / `--level` / `--vss` | `author` | bool/enum/bool | false/—/false | Declared on the CLI but not wired to anything in `computeAuthorContributions` (blob-level only); `--vss` prints a warning and is ignored. HTTP's `POST /analysis/author` accepts all three for flag-surface parity with the same no-op behavior (Phase 141) — not a gap, a documented CLI limitation mirrored intentionally. |
+| `--evidence-only` / `--narrate` | `narrate`, `explain` | bool | evidence-only (`--narrate` flips to LLM prose) | Safe-by-default toggle — CLI's `--narrate` is shorthand for `--no-evidence-only`. HTTP had no schema field for this at all until Phase 144: `POST /narrate`/`POST /explain` now accept `evidenceOnly: boolean` (omitted = evidence-only, matching `runNarrate`/`runExplain`'s own default), and both responses now also carry a structured `evidence` array (the same evidence previously only reachable by re-parsing the `prose` JSON string) |
+| `--log` | `explain` | path | — | Path to an error log/stack-trace file included as LLM context; HTTP `POST /explain` gained a matching `log` body field in Phase 144 |
+| `--files` | `explain` | glob | — | Intended to restrict search scope, but neither the CLI command nor `runExplain()` actually filters commits by it today — it's only consumed by the Phase 111 lens-driven structural-context append (see `--lens` below), a pre-existing CLI-side gap mirrored as-is (not fixed) by the matching HTTP `files` field added in Phase 144 |
+| `--lens` | `explain` | enum | semantic | Distinct from the graph-family `--lens` row above (different default: `semantic`, not `hybrid`) — when `structural`/`hybrid` and a concrete `--files` path is given, appends grounded call-graph/co-change context after the main result (CLI: printed to stdout; HTTP: a `structuralContext` response field, both via `structuralContextForPath()`). Default `semantic` lens (or no `--files`) leaves output unchanged. HTTP `POST /explain` and `POST /narrate` both gained a `lens` body field in Phase 144; for `narrate` it's accepted for flag-surface parity only — there's no single-file enrichment target on `narrate`, so it's currently a no-op there |
 
 ### 2.3 Flag Coherence Issues
 
@@ -589,7 +593,16 @@ this section's prior open-ended bullets into concrete, numbered
   merge-preview, branch-summary, clusters, security-scan, impact,
   semantic-diff, semantic-blame).
 - **Phase 144:** `narrate`/`explain` HTTP routes — evidence-only toggle,
-  `--log`/`--files`, `--lens`.
+  `--log`/`--files`, `--lens`. ✅ done — `POST /narrate`/`POST /explain` both
+  gained `evidenceOnly` (default matches `runNarrate`/`runExplain`'s own
+  evidence-only default) and `lens`; `POST /explain` additionally gained
+  `log`/`files` and, for `structural`/`hybrid` lens + a concrete `files`
+  path, a `structuralContext` response field (mirroring the CLI's post-run
+  append). Both responses also gained a structured `evidence` array (see
+  §2.2's `--evidence-only` row). `lens` on `POST /narrate` is accepted but a
+  no-op (no per-file enrichment target on `narrate`); `files` was already a
+  pre-existing CLI-side no-op for actual commit filtering (only consumed by
+  lens enrichment) and is mirrored as-is, not fixed, per §2.2.
 - **Phase 145:** `guide` HTTP route — `--lens`, remote multi-turn/session
   support (open design question).
 - **Phase 146:** `watch list`/`watch remove` HTTP routes (currently missing

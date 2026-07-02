@@ -5680,7 +5680,45 @@ routes share narrator-config plumbing.
 **Files likely touched:** `src/server/routes/narrator.ts`, `docs/parity.md`,
 `docs/features.md`, `README.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from spec:**
+- `NarrateBodySchema` and `ExplainBodySchema` both gained `evidenceOnly:
+  z.boolean().optional()`, threaded straight into `runNarrate`/`runExplain`'s
+  existing `evidenceOnly` option (which already defaulted to `true` —
+  evidence-only — so no behavior change there, just the missing schema
+  field). Both routes' JSON responses also gained a structured `evidence`
+  field (`result.evidence`) so HTTP callers get the raw commit evidence
+  directly instead of having to re-parse the `prose` string (which was
+  `JSON.stringify(events)` in evidence-only mode) — a small additive
+  response-shape improvement in the spirit of making the new toggle
+  actually useful over HTTP, not just accepted.
+- `ExplainBodySchema` gained `log`/`files`, passed through to `runExplain`
+  exactly as the CLI does. Note: `files` is a **pre-existing CLI-side
+  no-op** for actual commit filtering — neither `explainCommand` nor
+  `runExplain()` ever restricted the git-log search by it; it's only
+  consumed by the Phase 111 lens-driven structural-context append. This
+  phase mirrors that behavior as-is (documented in `docs/parity.md` §2.2)
+  rather than silently fixing `runExplain()`'s search-scope logic, which
+  would be a behavior change beyond this phase's HTTP-route-parity scope.
+- `lens` was added to both schemas. For `/explain`, it's fully functional:
+  `structural`/`hybrid` + a concrete `files` path triggers the same
+  `structuralContextForPath()`/`formatStructuralContext()` call the CLI's
+  `explainCommand` makes after printing its result, surfaced as a
+  `structuralContext` response field (plus `lens` echoed back) instead of
+  an appended stdout line. For `/narrate`, `lens` is accepted for CLI
+  flag-surface parity but is a documented **no-op** — the CLI's own
+  `narrateCommand` has no `--lens` option and no single-file target to
+  enrich (unlike `explain`'s `--files`), so there is nothing for `/narrate`
+  to enrich yet either. This mirrors the precedent set by Phase 139's
+  `hotspots` `weightStructural` no-op.
+- Added `tests/serverRoutes.test.ts` coverage: 11 new cases under `POST
+  /api/v1/narrate — Phase 144 evidenceOnly toggle` and `POST
+  /api/v1/explain — Phase 144 evidenceOnly/log/files/lens` (default
+  evidence-only, explicit `evidenceOnly: false` is still safe with no
+  narrator configured, `lens`/`evidenceOnly` validation rejects bad values,
+  `log`/`files` accepted without erroring, `structuralContext` omitted for
+  the default `semantic` lens or when the graph has no matching node).
 
 ---
 
