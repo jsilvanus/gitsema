@@ -15,7 +15,7 @@ import { startMcpServer, setupMcpRemote } from '../../mcp/server.js'
 import { startMcpWebSocketServer } from '../../mcp/webSocketServer.js'
 import { startMcpStreamableHttpServer } from '../../mcp/streamableHttpServer.js'
 import { getActiveSession } from '../../core/db/sqlite.js'
-import { startLspServer, startLspTcpServer, startLspWebSocketServer } from '../../core/lsp/server.js'
+import { startLspServer, startLspWebSocketServer } from '../../core/lsp/server.js'
 import { checkRemoteHealth, type RemoteConfig } from '../../core/remote/protocolClient.js'
 import { parseBindAddress, warnIfNonLoopbackWithoutKey } from '../../core/util/websocket.js'
 import { serveCommand } from './serve.js'
@@ -88,15 +88,14 @@ export function toolsCommand(): Command {
   // ── lsp ──────────────────────────────────────────────────────────────────
   cmd
     .command('lsp')
-    .description('Start the LSP-compatible semantic hover server (JSON-RPC over stdio or TCP)')
-    .option('--tcp <port>', '[deprecated, use --websocket] listen on TCP port instead of stdio (e.g. --tcp 2087)')
+    .description('Start the LSP-compatible semantic hover server (JSON-RPC over stdio or WebSocket)')
     .option('--websocket <bind-address>', 'listen on WebSocket at /lsp instead of stdio (e.g. --websocket 0.0.0.0:4242); TLS is not terminated here, put a reverse proxy in front for wss://')
-    .option('--key <token>', 'require this Bearer token for --websocket connections (overrides GITSEMA_WEBSOCKET_KEY); --tcp has no auth mechanism')
+    .option('--key <token>', 'require this Bearer token for --websocket connections (overrides GITSEMA_WEBSOCKET_KEY)')
     .option('--remote <url>', 'delegate all data-access calls to a running `gitsema tools serve` instance (overrides GITSEMA_REMOTE)')
     .option('--remote-key <token>', 'Bearer token for --remote (overrides GITSEMA_REMOTE_KEY)')
     .option('--remote-timeout <ms>', 'timeout in ms for remote calls (default 10000)')
     .option('--diagnostics', 'push textDocument/publishDiagnostics for high-debt/hotspot files on a background timer (opt-in, off by default; not supported with --remote)')
-    .action(async (opts: RemoteOpts & { tcp?: string; websocket?: string; key?: string; diagnostics?: boolean }) => {
+    .action(async (opts: RemoteOpts & { websocket?: string; key?: string; diagnostics?: boolean }) => {
       const remote = resolveRemoteConfig(opts)
       if (remote) {
         try {
@@ -117,21 +116,6 @@ export function toolsCommand(): Command {
         const key = opts.key ?? process.env.GITSEMA_WEBSOCKET_KEY
         warnIfNonLoopbackWithoutKey(bind.host, key, '`tools lsp --websocket`')
         startLspWebSocketServer(session, bind.host, bind.port, key, remote, lspOptions)
-      } else if (opts.tcp) {
-        const port = parseInt(opts.tcp, 10)
-        if (isNaN(port) || port < 1 || port > 65535) {
-          console.error('Error: --tcp requires a valid port number (1–65535)')
-          process.exit(1)
-        }
-        // Deprecated (Phase 120): --tcp has no auth mechanism at all, unlike
-        // --websocket/--http, and raw TCP has no header to carry a bearer token in
-        // (unlike WebSocket's upgrade request). --websocket is a strict superset of
-        // --tcp's use case (same JSON-RPC dispatcher, with working auth), so --tcp
-        // is deprecated rather than given a bespoke handshake-auth protocol.
-        console.error(
-          `Deprecation notice: \`tools lsp --tcp\` is deprecated and has no authentication — any client that can reach port ${port} gets full LSP access (call hierarchy, diagnostics, structural defs). Use \`--websocket <bind-address> --key <token>\` instead.`,
-        )
-        startLspTcpServer(session, port, remote, lspOptions)
       } else {
         startLspServer(session, remote, lspOptions)
       }

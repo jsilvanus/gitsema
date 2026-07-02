@@ -218,8 +218,9 @@ Start small:
 ### Problem
 - All search/analysis commands are built into gitsema's core; third parties
   can't add their own without forking
-- Listed in `docs/PLAN.md`'s "Long-Term Investments" table (High complexity),
-  not yet designed
+- A long-term, high-complexity investment — not yet designed, and lowest
+  priority of the open ideas in this document since no specific plugin use
+  case has been requested yet
 
 ### Intended Behavior
 Allow a third-party module to register a new CLI subcommand / MCP tool /
@@ -246,6 +247,46 @@ a language-specific structural extractor, or an org-specific compliance scan.
 ### Prerequisites
 - None blocking; lowest priority of the open ideas since no specific plugin
   use case has been requested yet.
+
+---
+
+## Scale & Performance Notes
+
+Operational notes on known scaling behavior, moved here from `docs/PLAN.md`'s
+former "Long-Term Investments" section — not "ideas" needing design, just
+current-state facts worth keeping visible.
+
+The "pgvector migration path for >500K blobs" concern that used to live here
+was resolved by Phases 101-103 (`storage.backend=postgres\|qdrant`) — see
+"Pluggable storage backends & index scoping" in `docs/PLAN.md`. SQLite
+remains the default for new projects.
+
+**Scale notes (updated for v0.81.0):**
+
+- **Search memory:** auto early-cut (Phase 82) now guards the default search
+  path — reservoir sampling kicks in at 50 K candidates without any flags.
+  ANN path (`gitsema index build-vss`) eliminates the candidate-load entirely
+  for large indexes.
+- **Indexing time:** commit-message embedding is now parallelised (Phase 83).
+  The read/embed/store pipeline (Phase 69) + parallel commit embedding
+  together keep both phases off the critical path. The remaining serial
+  bottleneck is commit-graph walking itself (`git rev-list`), which is
+  I/O-bound.
+- **Chunk/symbol candidate expansion:** when `--chunks` or `--vss` is
+  combined with a large index the candidate pool grows 3–10× before scoring.
+  Monitor RSS when indexing large monorepos with `--chunker function`.
+
+---
+
+## Non-goals (Deliberately Out of Scope)
+
+These have been considered and rejected — not open ideas awaiting design,
+just a record of "why don't we do X" for anyone who asks. Moved here from
+`docs/PLAN.md`'s former "Non-goals for now" section.
+
+| Feature | Reasoning |
+|---------|-----------|
+| Python model server (GPU Docker) | We already have a Node.js embedeer, and if we want Docker+Python, we can use Ollama. |
 
 ---
 
@@ -399,7 +440,16 @@ users:
 
 ---
 
-## Public Repo Sharing: Throttle/Rate-Limit Unification & Policy Extraction
+## Generic Keyed-Cooldown Utility for Rate-Limiting
+
+> **Note:** this entry originally covered two independent follow-ups from the
+> `/simplify` review of Phase 126/127 (public-repo-sharing). The
+> policy-extraction half — pulling the public-repo gate/throttle/grant
+> sequence in the `POST /api/v1/remote/index` handler into a named
+> `applyPublicRepoPolicy()` function — has since shipped as `docs/PLAN.md`
+> Phase 133 (verified: `src/server/routes/remote.ts` has a real
+> `applyPublicRepoPolicy()` function, called from that handler). Only the
+> rate-limiting-unification half below remains open.
 
 ### Problem
 - Found during the `/simplify` review of Phase 126/127 (public-repo-sharing).
@@ -411,90 +461,23 @@ users:
   business-rule re-index cooldown — but having two independent
   rate-limiting mechanisms in the same route module is worth revisiting if
   a third throttle-shaped requirement shows up.
-- The same review flagged that the 2c/2d/2e public-repo gate/throttle/grant
-  logic in the `POST /api/v1/remote/index` handler (first-index gate,
-  refresh throttle, attach-as-reader auto-grant) could be extracted into a
-  single `applyPublicRepoPolicy()` function for readability, but that was
-  judged too large a restructuring for a cleanup pass on already-shipped
-  code.
 
 ### Intended Behavior
-No design committed yet. Two independent, optional follow-ups:
-- If a third per-key throttle need appears, consider whether a shared
-  generic "keyed cooldown" utility (used by both `rateLimiter.ts` and
-  `checkAndRecordReindexThrottle`) is worth building, vs. keeping them
-  separate as distinct concerns.
-- Extract the public-repo gate/throttle/grant sequence in
-  `src/server/routes/remote.ts` into a named `applyPublicRepoPolicy()` (or
-  similar) function once it grows another condition or gets touched again,
-  rather than as a standalone refactor now.
+No design committed yet. If a third per-key throttle need appears, consider
+whether a shared generic "keyed cooldown" utility (used by both
+`rateLimiter.ts` and `checkAndRecordReindexThrottle`) is worth building, vs.
+keeping them separate as distinct concerns.
 
 ### Design Gaps
 - [ ] Whether a generic keyed-cooldown abstraction is worth the indirection
       given only one current caller (`checkAndRecordReindexThrottle`).
-- [ ] Where the line is for "policy extraction" — at what point does the
-      2c/2d/2e sequence justify its own function vs. staying inline.
 
 ### Effort Estimate
-- Small either way — both are isolated, mechanical refactors with existing
-  test coverage to verify against.
+- Small — an isolated, mechanical refactor with existing test coverage to
+  verify against.
 
 ### Prerequisites
-- None — both are optional cleanups on already-shipped Phase 126/127 code.
-
----
-
-## `index doctor --fix` Generalization & Multi-Profile Ephemeral-Job Parity
-
-### Problem
-- Found during the `/simplify` review of Phase 131 (`index doctor --fix`) and
-  the multi-profile embedding-serving feature (Phase 128).
-- `doctorCommand`'s `--fix` block (`src/cli/commands/doctor.ts`) hardcodes one
-  `if` branch per fixable `DoctorReport` finding (`ftsMissingCount`,
-  `orphanEmbeddings`), each with its own bespoke repair call and print
-  statement. It works for two findings but doesn't generalize — a third
-  repairable finding (e.g. a future schema/provenance issue) means another
-  copy-pasted `if` block rather than slotting into a shared structure.
-- Separately, `src/server/routes/remote.ts`'s multi-profile resolution
-  (Phase 128) only routes *persisted* indexing jobs through the
-  `profiles` map; ephemeral (non-persisted) jobs always use the bare
-  module-level `textProvider`/`codeProvider` pair, bypassing profile
-  resolution entirely even on a server configured with multiple profiles.
-  This is a documented Phase 1 scope cut (see `docs/PLAN.md`'s Phase 128
-  deviations), not a regression, but it's a second code path that could
-  silently diverge from the persisted path's profile semantics later.
-- Both were judged too large a restructuring for a cleanup pass on
-  already-shipped/just-shipped code.
-
-### Intended Behavior
-No design committed yet. Two independent, optional follow-ups:
-- Model each `DoctorReport` finding as `{ check, count, fix?: () => Promise<FixResult> }`
-  so `--fix` becomes "for each finding with a fix, run it," and the
-  post-fix report is generated generically from a second `runDoctor()` diff
-  rather than maintaining parallel `console.log` lines per finding.
-- Route ephemeral (non-persisted) `remote-index` jobs through
-  `profiles.get('default')` too, so there's exactly one source of truth for
-  "which provider pair runs this job" — persistence would only affect
-  profile *pinning*, not provider *selection*.
-
-### Design Gaps
-- [ ] Whether a generic fix-registry is worth the indirection for only two
-      current fixable findings, or whether to wait for a third before
-      generalizing.
-- [ ] Whether unifying the ephemeral/persisted provider-selection path
-      changes observable behavior for any existing `--remote` callers that
-      rely on the bare-pair fallback today.
-
-### Effort Estimate
-- `doctor --fix` generalization: small, isolated refactor with existing test
-  coverage (`tests/integration/doctorFix.integration.test.ts`) to verify
-  against.
-- Ephemeral-job profile routing: medium — touches the hot indexing-request
-  path in `remote.ts` and needs its own test coverage for the ephemeral case.
-
-### Prerequisites
-- None for the `doctor --fix` refactor.
-- None beyond Phase 128 (already shipped) for the ephemeral-job routing fix.
+- None — an optional cleanup on already-shipped Phase 126/127 code.
 
 ---
 

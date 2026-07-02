@@ -2,7 +2,6 @@ import { vectorSearch } from '../search/analysis/vectorSearch.js'
 import { getActiveSession } from '../db/sqlite.js'
 import { embedQuery } from '../embedding/embedQuery.js'
 import { buildProvider } from '../embedding/providerFactory.js'
-import { createServer as createNetServer } from 'node:net'
 import { createServer as createHttpServer } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { checkBearerAuth, DEFAULT_MAX_WS_PAYLOAD, DEFAULT_MAX_CONNECTIONS, ConnectionLimiter } from '../util/websocket.js'
@@ -544,48 +543,11 @@ export function startLspServer(
   maybeStartDiagnostics(dbSession, options, remote, (message) => process.stdout.write(serializeMessage(message)))
 }
 
-/** Start the LSP server over TCP (useful for IDEs that prefer TCP connections). */
-export function startLspTcpServer(
-  dbSession: ReturnType<typeof getActiveSession>,
-  port: number,
-  remote?: RemoteConfig,
-  options?: LspServerOptions,
-): void {
-  const sockets = new Set<import('node:net').Socket>()
-  const limiter = new ConnectionLimiter(DEFAULT_MAX_CONNECTIONS)
-  const server = createNetServer((socket) => {
-    if (!limiter.tryAcquire()) {
-      socket.destroy()
-      return
-    }
-    sockets.add(socket)
-    socket.on('close', () => {
-      sockets.delete(socket)
-      limiter.release()
-    })
-    socket.on('data', async (chunk: Buffer) => {
-      const req = parseMessage(chunk)
-      if (!req) return
-      const res = await handleRequest(dbSession, req, remote)
-      if (res) {
-        socket.write(serializeMessage(res))
-      }
-    })
-  })
-  server.listen(port, () => {
-    process.stderr.write(`LSP server listening on TCP port ${port}\n`)
-  })
-  maybeStartDiagnostics(dbSession, options, remote, (message) => {
-    const data = serializeMessage(message)
-    for (const socket of sockets) socket.write(data)
-  })
-}
-
 /**
  * Start the LSP server over WebSocket, on a fixed `/lsp` path (Phase 116).
- * Unlike `--tcp`/stdio, messages are raw JSON per WS text frame (no
- * `Content-Length` framing). Unlike `--remote` delegation, WebSocket
- * supports server push, so `--diagnostics` works normally here.
+ * Unlike stdio, messages are raw JSON per WS text frame (no `Content-Length`
+ * framing). Unlike `--remote` delegation, WebSocket supports server push, so
+ * `--diagnostics` works normally here.
  */
 export function startLspWebSocketServer(
   dbSession: ReturnType<typeof getActiveSession>,
