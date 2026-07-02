@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-01 (added the hierarchical prose/document chunker idea, raised during Phase 136 planning — distinct per-level search result lists)
+**Last updated:** 2026-07-02 (added the remote multi-turn `guide` HTTP session idea, deferred from Phase 145's `--lens`/session scope)
 **Audience:** Developers considering next phases; product planning
 
 > **Note:** As of this update, the LSP/MCP remote-delegation foundation this
@@ -642,6 +642,91 @@ A new `--chunker prose` strategy, orthogonal to today's three:
   result lists) has now shipped (see `docs/PLAN.md`), so this idea's
   search-level questions can build directly on its output rather than
   waiting on it.
+
+---
+
+## Remote Multi-Turn `guide` Sessions Over HTTP
+
+### Problem
+- Raised during Phase 145 (`guide` HTTP route: `--lens` and remote session
+  support, `docs/PLAN.md`). CLI `gitsema guide --interactive`/`-i` runs a
+  multi-turn REPL: it creates one `GuideSession` (`createGuideSession()` in
+  `src/cli/commands/guide.ts`) up front and reuses it across every turn the
+  user types, so the agent loop's conversation history persists turn to
+  turn. `POST /api/v1/guide/chat` (`src/server/routes/guide.ts`) has no
+  equivalent — every request is single-shot: `runGuide()` is called with no
+  `session` option, so it creates and immediately tears down
+  (`destroyGuideSession()`) a fresh session per call. A remote caller who
+  wants a multi-turn conversation (e.g. a chat UI backed by the HTTP API)
+  has no way to get the CLI's reused-session behavior today.
+- This is not a flag gap — there's no missing schema field to bolt on, the
+  way `lens` was for the same phase. It's a missing **session concept**:
+  something has to identify "these N requests are one conversation" and
+  something has to hold the resulting session's state (or at least its
+  conversation history) between requests, on a server that may be handling
+  many concurrent repos/callers and may restart.
+- Phase 145 shipped the `lens` half of its scope and explicitly deferred
+  this half rather than bolt on an underdesigned session scheme — see that
+  phase's Status note in `docs/PLAN.md`.
+
+### Intended Behavior
+No design committed yet. The rough shape, sketched for discussion:
+- A `sessionId` the client either generates (e.g. a UUID it mints itself
+  and passes on every call) or receives from the server on the first call
+  (e.g. `POST /guide/chat` with no `sessionId` starts a new session and
+  returns one in the response for the client to pass on subsequent turns).
+- Server-side storage for the live `GuideSession` (or, if full session
+  objects aren't practical to keep across a process restart, at minimum
+  the conversation-history array the agent loop needs) keyed by
+  `sessionId`, with a **TTL** so abandoned sessions are reclaimed instead of
+  leaking memory indefinitely — mirrors the existing `sessions` table's
+  30-day idle-window pattern (`GITSEMA_SESSION_TTL_DAYS`, Phase 122) for a
+  precedent, though a guide session's natural TTL is likely much shorter
+  (minutes, not days).
+- A decision on **storage location**: in-process memory (simple, but breaks
+  multi-turn continuity across a server restart or in a multi-instance
+  deployment behind a load balancer) vs. a persisted store (survives
+  restarts/works across instances, but adds a new table and a
+  serialize/deserialize story for whatever state `GuideSession`/the
+  chattydeer agent loop carries).
+- Auth/authorization scoping: who can resume a given `sessionId`? If
+  sessions are just an opaque client-held token with no user binding, any
+  caller who has the id can continue the conversation — probably fine for a
+  single-tenant deployment, but needs an explicit answer once `repo_grants`/
+  org boundaries (Phases 122–125) are in the picture for a multi-tenant
+  server.
+- An eviction/cleanup policy (background sweep vs. lazy-expire-on-access)
+  and a matching `DELETE /api/v1/guide/sessions/:sessionId` (or similar) to
+  let a client end a conversation early and free resources.
+
+### Design Gaps
+- [ ] Client-generated vs. server-issued `sessionId` — which is simpler and
+      safer to reason about for concurrent/multi-tenant callers?
+- [ ] In-memory vs. persisted session storage, and if persisted, a schema
+      shape (new table, or reuse `settings`-style key-value storage) for
+      whatever state needs to survive a restart.
+- [ ] TTL length and eviction mechanism (sweep vs. lazy expiry).
+- [ ] Auth/session-ownership model once multi-tenant orgs/grants are
+      considered — does a session need a `userId`/`repoId` binding, or stay
+      a bare opaque token?
+- [ ] Whether the existing `GuideSession` type (`src/cli/commands/guide.ts`)
+      is even a good fit for cross-request reuse as-is, or whether the HTTP
+      path needs its own lighter-weight session representation (e.g. just
+      the conversation-history array, not a live provider/session handle).
+
+### Effort Estimate
+- Medium — the `lens`-style schema addition this phase shipped was small;
+  this is a genuine new subsystem (session lifecycle, storage, TTL/eviction,
+  and an auth-scoping decision) layered on top of the existing single-shot
+  `runGuide()` plumbing, which itself needs no changes (it already accepts
+  an optional `session` to reuse, per its CLI interactive-mode caller).
+
+### Prerequisites
+- None blocking to start designing. `runGuide()`'s `session?: GuideSession`
+  parameter and `createGuideSession()`/`destroyGuideSession()` lifecycle
+  helpers already exist and are exercised today by CLI `--interactive` — a
+  design pass just needs to decide how an HTTP caller identifies and the
+  server stores/reclaims one of these across requests.
 
 ---
 
