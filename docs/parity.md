@@ -113,6 +113,7 @@ This table shows which tools/commands are available in which interface. A checkm
 | `pr-report` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `cherry-pick-suggest` | ✓ | — | — | — | — | ✓ | ✓ | — |
 | `workflow` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
+| `watch` (add/list/remove/run) | ✓ | — | — | — | — | ✓ | ✓ | — |
 | **Narrative & Analysis** |
 | `narrate` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
 | `explain` | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
@@ -671,7 +672,14 @@ this section's prior open-ended bullets into concrete, numbered
   `docs/feature-ideas.md` for the `sessionId`/TTL/storage tradeoffs to
   resolve in a follow-up phase.
 - **Phase 146:** `watch list`/`watch remove` HTTP routes (currently missing
-  entirely, not just flags).
+  entirely, not just flags). ✅ done — `GET /watch` lists all saved queries
+  (`{ watches: [{ id, name, query, lastRunAt, webhookUrl }] }`) and
+  `DELETE /watch/:name` removes one by name (404 if not found), mirroring
+  the CLI's `watch list`/`watch remove` exactly (`name` is the saved
+  query's unique identifier — the CLI's `remove` also deletes by name, not
+  numeric id). Added a `watch` row to the Tool Matrix above (it had no row
+  at all before this phase, despite `add`/`run` already having HTTP
+  routes).
 - **Phase 147:** graph command family HTTP/MCP exposure — closes the
   "Expose graph commands to HTTP API" item below.
 - **Phase 148:** triage pass on the remaining zero-HTTP/MCP-exposure CLI

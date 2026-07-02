@@ -5850,7 +5850,21 @@ routes mirroring CLI's `watch list`/`watch remove` behavior. Update
 **Files likely touched:** `src/server/routes/watch.ts`, `docs/parity.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Added `GET /watch` (lists all saved queries as
+`{ watches: [{ id, name, query, lastRunAt, webhookUrl }] }`, newest-first —
+same query and shape as CLI `watch list`) and `DELETE /watch/:name` (removes
+by name, 404 with an error body if not found) to
+`src/server/routes/watch.ts`. One deviation from the "or equivalent"
+`DELETE /watch/:id` phrasing in the original scope: the route uses `:name`,
+not a numeric `:id`, because the CLI's own `watch remove <name>` deletes by
+`name` (the column carrying `UNIQUE NOT NULL` on `saved_queries`), not by
+row id — matching CLI behavior exactly took priority over the id-shaped
+route sketch. Added a `watch` row to `docs/parity.md`'s Tool Matrix (it had
+no row at all before this phase) and closed out the corresponding roadmap
+bullet in §6. Added HTTP route rows to `docs/features.md`'s HTTP API table
+and expanded the `README.md` `watch` command-reference row. Added
+integration tests to `tests/serverRoutes.test.ts` covering add → list →
+remove → 404-on-repeat-remove and list-when-empty.
 
 ---
 
