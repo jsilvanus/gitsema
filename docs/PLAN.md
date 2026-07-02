@@ -5429,13 +5429,13 @@ Phase 140 should generalize or fold into that rather than starting fresh.
 | 139 | `evolution` (file/concept) + `hotspots` HTTP/MCP parity | Search/evolution/graph audit |
 | 140 | Systemic `--model`/`--text-model`/`--code-model` override triplet, missing from nearly every `analysis.ts` HTTP route | analysis.ts audit |
 | 141 | `author` HTTP route full parity (largest single-command gap) | analysis.ts audit |
-| 142 | `workflow` HTTP route parity (3/8 → 8/8 templates, `--role`/`--ref`/`--base`) | analysis.ts audit |
-| 143 | Analysis-route small-fixes bundle (merge-audit, merge-preview, branch-summary, clusters, security-scan, impact, semantic-diff, semantic-blame) | analysis.ts audit |
+| 142 ✅ | `workflow` HTTP route parity (3/8 → 8/8 templates, `--role`/`--ref`/`--base`) | analysis.ts audit |
+| 143 ✅ | Analysis-route small-fixes bundle (merge-audit, merge-preview, branch-summary, clusters, security-scan, impact, semantic-diff, semantic-blame) | analysis.ts audit |
 | 144 | `narrate`/`explain` HTTP routes: evidence-only/LLM-prose toggle, `--log`/`--files`, `--lens` | remote/watch/guide/narrator audit |
-| 145 | `guide` HTTP route: `--lens` param, remote multi-turn/session support | remote/watch/guide/narrator audit |
+| 145 ✅ | `guide` HTTP route: `--lens` param (shipped); remote multi-turn/session support explicitly deferred, see phase entry + `docs/feature-ideas.md` | remote/watch/guide/narrator audit |
 | 146 | `watch list`/`watch remove` HTTP routes (currently only `add`/`run` exist) | remote/watch/guide/narrator audit |
 | 147 | Graph command family HTTP/MCP exposure (`graph build/callers/callees/path/relate/similar/unused`, `cycles`, `deps`, `co-change`, `blast-radius`) | Missing-endpoints audit; closes the pre-existing `docs/parity.md` "Expose graph commands to HTTP API" roadmap item |
-| 148 | Triage which remaining zero-HTTP/MCP-exposure CLI commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`, `cherry-pick-suggest`, `regression-gate`, `code-review`, `cross-repo-similarity`, `pr-report`, `file-diff`, `diff`, `map`/`heatmap`/`project`) genuinely warrant exposure vs. are CLI/visualization-shaped by nature | Missing-endpoints audit |
+| 148 ✅ | Triage which remaining zero-HTTP/MCP-exposure CLI commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`, `cherry-pick-suggest`, `regression-gate`, `code-review`, `cross-repo-similarity`, `pr-report`, `file-diff`, `diff`, `map`/`heatmap`/`project`) genuinely warrant exposure vs. are CLI/visualization-shaped by nature — 10 landed in bucket (a) and gained MCP tools + HTTP routes, 3 in bucket (b) (CLI-shaped), 2 in bucket (c) (redundant) | Missing-endpoints audit |
 
 ---
 
@@ -5622,7 +5622,44 @@ it in — flag any that aren't as a follow-up rather than silently stubbing.
 `src/core/workflow/*` (wherever templates are implemented), `docs/parity.md`,
 `docs/features.md`, `README.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from spec:**
+- The workflow templates were never in a separate `src/core/workflow/*`
+  module — they're implemented inline in `src/cli/commands/workflow.ts`'s
+  `workflowCommand()`. There was no shared core function to import; the
+  HTTP route already computed the first 3 templates' sections inline
+  (calling the same underlying `computeImpact`/`computeConceptChangePoints`/
+  `computeExperts`/`vectorSearch` functions the CLI calls), so the 5 new
+  templates were wired the same way — mirroring `workflowCommand()`'s
+  per-template logic directly in the route handler rather than extracting
+  a new shared module (kept the diff scoped to the route file per the
+  parallel-worktree instruction not to touch unrelated modules).
+- All 5 newly-exposed templates' underlying functions
+  (`computeAuthorContributions`, `getActiveSession`, `computeHealthTimeline`,
+  `scoreDebt`, plus the already-used `embedQuery`/`vectorSearch`/
+  `computeConceptChangePoints`/`computeExperts`) were **already imported and
+  used elsewhere in `analysis.ts`** (by the `/author`, `/health`, `/debt`
+  routes) — confirming they're HTTP-callable with no local-filesystem or
+  interactive assumptions. No follow-up flags needed for any of the 5.
+- `role`/`ref` are new body fields (mirroring the CLI's `--role`/`--ref`).
+  `base` was already present in the schema and not gated to a specific
+  template at the validation layer; investigation found it's actually a
+  **no-op in the CLI itself** — `workflowCommand()` declares `options.base`
+  in its `WorkflowOptions` interface but never reads it in the function
+  body, for any template, including `pr-review`. Rather than inventing new
+  HTTP-only behavior for a flag the CLI doesn't implement, the HTTP route
+  now matches the CLI exactly: `base` is accepted (no validation gating)
+  and remains inert. Flagged in `docs/parity.md` as a known CLI-level gap,
+  not something this HTTP-parity phase should silently "fix" on one
+  interface only.
+- Per-template required-field validation was added for the 3 templates that
+  require `query` in the CLI (`ownership-intel`, `knowledge-portal`,
+  `regression-forecast`) — mirroring the existing `pr-review`/`incident`
+  pattern already on the route. `onboarding` and `arch-drift` have no
+  required fields (defaults), also matching the CLI.
+- Model overrides (`model`/`textModel`/`codeModel`) intentionally untouched
+  — already closed in Phase 140 and out of scope here.
 
 ---
 
@@ -5653,7 +5690,33 @@ coherence fixes into one sweep.
 **Files likely touched:** `src/server/routes/analysis.ts`,
 `docs/parity.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Implemented as scoped, plus two small deviations:
+
+- **`merge-preview`** also gained `useEnhancedLabels` (not in the original
+  scope list) since `enhancedKeywordsN` is a no-op in `computeClusters`/
+  `computeMergeImpact` unless `useEnhancedLabels` is also true — adding the
+  keyword-count knob without the toggle that activates it would have shipped
+  a dead flag, contradicting the phase's own goal.
+- **`branch-summary`**: `computeBranchSummary()` has no enhanced-labels
+  concept of its own — in the CLI, `--enhanced-labels`/`--enhanced-keywords-n`
+  only control how many of a concept's already-computed `topKeywords` are
+  *displayed* in the text renderer, while `--dump` JSON always returns the
+  full unsliced array. Since HTTP has no equivalent "text vs. JSON" split
+  (it's JSON-only), `POST /analysis/branch-summary` now slices
+  `nearestConcepts[].topKeywords` to `enhancedKeywordsN` (default 8) when
+  `enhancedLabels` is set, else 5 — giving the flags a real, observable
+  effect on the only representation this interface has.
+- **`semantic-diff`/`diff`**: fixed a pre-existing CLI bug in the process —
+  the CLI `diff <ref1> <ref2> <query>` command already declared
+  `--hybrid`/`--bm25-weight` in its Commander options but never wired them
+  to anything (dead flags, silently ignored). `computeSemanticDiff()`
+  (`src/core/search/semanticDiff.ts`) gained an optional `candidateBlobs`
+  parameter mirroring `computeAuthorContributions`'s Phase-141
+  `candidateBlobs` pattern; both the CLI and `POST /analysis/semantic-diff`
+  now genuinely blend BM25 via `hybridSearch()` when `hybrid` is set.
+
+See `docs/parity.md` §1/§2.2/§6 (Phase 143 entry) for the full flag-by-flag
+breakdown.
 
 ---
 
@@ -5680,7 +5743,45 @@ routes share narrator-config plumbing.
 **Files likely touched:** `src/server/routes/narrator.ts`, `docs/parity.md`,
 `docs/features.md`, `README.md`, test files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Deviations from spec:**
+- `NarrateBodySchema` and `ExplainBodySchema` both gained `evidenceOnly:
+  z.boolean().optional()`, threaded straight into `runNarrate`/`runExplain`'s
+  existing `evidenceOnly` option (which already defaulted to `true` —
+  evidence-only — so no behavior change there, just the missing schema
+  field). Both routes' JSON responses also gained a structured `evidence`
+  field (`result.evidence`) so HTTP callers get the raw commit evidence
+  directly instead of having to re-parse the `prose` string (which was
+  `JSON.stringify(events)` in evidence-only mode) — a small additive
+  response-shape improvement in the spirit of making the new toggle
+  actually useful over HTTP, not just accepted.
+- `ExplainBodySchema` gained `log`/`files`, passed through to `runExplain`
+  exactly as the CLI does. Note: `files` is a **pre-existing CLI-side
+  no-op** for actual commit filtering — neither `explainCommand` nor
+  `runExplain()` ever restricted the git-log search by it; it's only
+  consumed by the Phase 111 lens-driven structural-context append. This
+  phase mirrors that behavior as-is (documented in `docs/parity.md` §2.2)
+  rather than silently fixing `runExplain()`'s search-scope logic, which
+  would be a behavior change beyond this phase's HTTP-route-parity scope.
+- `lens` was added to both schemas. For `/explain`, it's fully functional:
+  `structural`/`hybrid` + a concrete `files` path triggers the same
+  `structuralContextForPath()`/`formatStructuralContext()` call the CLI's
+  `explainCommand` makes after printing its result, surfaced as a
+  `structuralContext` response field (plus `lens` echoed back) instead of
+  an appended stdout line. For `/narrate`, `lens` is accepted for CLI
+  flag-surface parity but is a documented **no-op** — the CLI's own
+  `narrateCommand` has no `--lens` option and no single-file target to
+  enrich (unlike `explain`'s `--files`), so there is nothing for `/narrate`
+  to enrich yet either. This mirrors the precedent set by Phase 139's
+  `hotspots` `weightStructural` no-op.
+- Added `tests/serverRoutes.test.ts` coverage: 11 new cases under `POST
+  /api/v1/narrate — Phase 144 evidenceOnly toggle` and `POST
+  /api/v1/explain — Phase 144 evidenceOnly/log/files/lens` (default
+  evidence-only, explicit `evidenceOnly: false` is still safe with no
+  narrator configured, `lens`/`evidenceOnly` validation rejects bad values,
+  `log`/`files` accepted without erroring, `structuralContext` omitted for
+  the default `semantic` lens or when the graph has no matching node).
 
 ---
 
@@ -5707,7 +5808,30 @@ chat is out of scope for now and only `--lens` ships in this phase.
 **Files likely touched:** `src/server/routes/guide.ts`, `docs/parity.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete (lens only). `GuideChatBodySchema` in
+`src/server/routes/guide.ts` gained `lens: 'semantic'|'structural'|'hybrid'`.
+The route doesn't pass `lens` into `runGuide()`'s options (that function has
+no lens parameter) — instead, mirroring CLI `guideCommand`'s `withLens()` in
+`src/cli/commands/guide.ts` exactly, the route appends the identical
+`"\n\n(Lens preference: <lens> — prefer the structural tools call_graph,
+blast_radius, and hotspots where relevant.)"` hint suffix to the question
+before calling `runGuide()`, for `structural`/`hybrid` (semantic/default
+leaves the question unchanged, byte-for-byte identical to pre-Phase-145
+behavior). Covered by `tests/serverGuideRoute.test.ts`.
+
+**Deviation from spec — remote multi-turn/session support deliberately
+deferred:** the open design question in this phase's original scope (an
+HTTP equivalent of CLI `guide --interactive`/`-i`, which reuses one agent
+session across multiple turns) is **not resolved or implemented** here.
+This is a considered deferral, not a silent drop: building a `sessionId`
+scheme (client-generated vs. server-issued, TTL, in-memory vs. persisted
+session storage, cleanup/eviction policy) is a genuine cross-cutting design
+question — e.g. it needs an answer for multi-process/restart durability,
+and for auth (`repo_grants`/org boundaries) touching who can resume whose
+session — that deserves its own design pass rather than a speculative
+schema bolted onto this HTTP-parity phase. Tracked as a follow-up idea in
+`docs/feature-ideas.md` ("Remote multi-turn `guide` sessions over HTTP")
+for a future phase to pick up once that question is worked through.
 
 ---
 
@@ -5726,7 +5850,21 @@ routes mirroring CLI's `watch list`/`watch remove` behavior. Update
 **Files likely touched:** `src/server/routes/watch.ts`, `docs/parity.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Added `GET /watch` (lists all saved queries as
+`{ watches: [{ id, name, query, lastRunAt, webhookUrl }] }`, newest-first —
+same query and shape as CLI `watch list`) and `DELETE /watch/:name` (removes
+by name, 404 with an error body if not found) to
+`src/server/routes/watch.ts`. One deviation from the "or equivalent"
+`DELETE /watch/:id` phrasing in the original scope: the route uses `:name`,
+not a numeric `:id`, because the CLI's own `watch remove <name>` deletes by
+`name` (the column carrying `UNIQUE NOT NULL` on `saved_queries`), not by
+row id — matching CLI behavior exactly took priority over the id-shaped
+route sketch. Added a `watch` row to `docs/parity.md`'s Tool Matrix (it had
+no row at all before this phase) and closed out the corresponding roadmap
+bullet in §6. Added HTTP route rows to `docs/features.md`'s HTTP API table
+and expanded the `README.md` `watch` command-reference row. Added
+integration tests to `tests/serverRoutes.test.ts` covering add → list →
+remove → 404-on-repeat-remove and list-when-empty.
 
 ---
 
@@ -5765,7 +5903,50 @@ commands).
 `src/mcp/tools/graph.ts`, `docs/parity.md`, `docs/features.md`, `README.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete. Implemented as specified. `src/server/routes/graph.ts`
+gained `POST` routes for `/callers`, `/callees`, `/neighbors`, `/path`,
+`/relate`, `/similar`, `/unused`, `/cycles`, `/deps`, `/co-change`, and
+`/blast-radius`, each a thin Zod-validated wrapper over the existing
+`src/core/graph/*` query helpers (`traversal.ts`, `relate.ts`, `similar.ts`,
+`unused.ts`, `cycles.ts`, `deps.ts`, `coChange.ts`, `blastRadius.ts`) —
+JSON-serializing the same result shape the CLI commands already render to
+text, following the pre-existing `/hotspots` route's pattern exactly (POST +
+body schema, not GET, matching every other analysis route in this server).
+`src/mcp/tools/graph.ts` gained `graph_path`, `graph_relate`, `graph_similar`,
+`graph_unused`, `cycles`, `deps`, `co_change`, and `blast_radius` MCP tools —
+the exact 8 tools scoped above. `graph callers`/`graph callees` were **not**
+added as new MCP tools (deviation, not an omission): the pre-existing
+`call_graph` tool already covers both directions via its `direction`
+parameter, so a second tool would duplicate it; they **did** get new HTTP
+routes (`/callers`, `/callees`) since HTTP had no equivalent to `call_graph`
+at all and the Goal explicitly listed both as gaps.
+**`graph build` decision:** kept intentionally CLI-only, not exposed as a
+mutating HTTP route. Rationale (per the open design question): it truncates
+and rebuilds `graph_nodes`/`edges` from `structural_refs`/`symbols`/
+`blob_commits` — a full-table-rewrite index-maintenance operation, not a
+query. Auditing gitsema's other maintenance commands of the same shape
+(`index vacuum`, `index gc`, `index rebuild-fts`, `index update-modules`,
+`index clear-model`, `index build-vss`) confirmed **none** of them have a
+real HTTP route either (`docs/parity.md`'s matrix claimed HTTP ✓ for several
+of these rows, but no corresponding route exists anywhere in
+`src/server/routes/` — a pre-existing documentation inaccuracy, left
+uncorrected here as out of scope for this phase and not re-derived by rows
+this phase doesn't own). `graph build` follows the real (not the
+mis-documented) precedent: mutating maintenance stays CLI/local-only.
+Since remote MCP delegation (`tools mcp --remote`) dispatches through the
+same `registerGraphTools()` registrations via `protocolRouter()`
+(`src/server/routes/protocol.ts`), all 8 new MCP tools work transparently
+over `mcp.<name>` remote delegation with no additional wiring.
+Tests added: `tests/serverRoutes.test.ts` gained one `describe` block per new
+route (not-found-resolution shape on an empty graph, lens/edge-type
+validation, 400 on missing required fields) — 25 new assertions. No new
+tests were added directly against the MCP tool handlers or the CLI command
+wrappers, consistent with the existing precedent in this codebase that thin
+CLI-command/MCP-tool plumbing over already-unit-tested core `src/core/graph/*`
+functions (covered by `graphTraversal.test.ts`, `graphLens.test.ts`,
+`graphFusion.test.ts`, `graphBuild.test.ts`, `subgraphView.test.ts`) does not
+get its own duplicate test layer. `pnpm build && pnpm test` green (123 test
+files / 1493 tests passing, 22 skipped, no regressions).
 
 ---
 
@@ -5800,7 +5981,65 @@ a different name. Only implement (a); document (b) and (c) explicitly in
 `src/server/routes/*.ts`, `src/mcp/tools/*.ts`, `docs/parity.md`, test
 files.
 
-**Status:** not started.
+**Status:** ✅ complete.
+
+**Triage outcome** (see `docs/parity.md` §1 Phase 148 footnotes for full
+detail):
+
+- **Bucket (a) — genuinely missing, implemented (10 commands):** `bisect`,
+  `refactor-candidates`, `lifecycle`, `cherry-pick-suggest`, `file-diff`,
+  `pr-report`, `regression-gate`, `code-review`, `map`, `heatmap`. Each
+  gained a matching MCP tool (new `src/mcp/tools/insights.ts`, registered in
+  `src/mcp/server.ts` and `src/server/routes/protocol.ts`'s remote-dispatch
+  map) and a `POST /api/v1/insights/*` HTTP route (new
+  `src/server/routes/insights.ts`, mounted in `src/server/app.ts`). All
+  accept the `{model, textModel, codeModel}` override triplet where an
+  embedding call is involved, via the existing
+  `src/server/lib/modelOverrides.ts` helper (Phase 140 convention).
+  `regression-gate` returns HTTP 200/422 (pass/fail), mirroring
+  `policy-check`'s convention.
+- **Bucket (b) — CLI-shaped by nature, correctly excluded (3 commands):**
+  `cross-repo-similarity` (takes raw local `.gitsema/index.db` filesystem
+  paths — a different trust model than a remote call; `multi_repo_search`
+  is the safe MCP/HTTP equivalent, resolving repos via the registered
+  `repos` table instead), `project` (local precompute/write step that
+  populates the `projections` table; its read side already has `GET
+  /projections`, Phase 55), and `ci-diff` (GitHub PR-comment posting via
+  `GITHUB_TOKEN` + a CI process exit code — inherently process-shaped, not
+  a stateless API call).
+- **Bucket (c) — redundant with an already-covered command, not
+  implemented (2 commands):** `diff` (its CLI registration wires directly
+  to `semanticDiffCommand`, the exact same function backing the
+  already-exposed `semantic_diff` MCP tool/HTTP route — not a distinct
+  implementation, just a different CLI verb for the same feature) and
+  `ci-diff`'s search core (`computeSemanticDiff`, same as `semantic_diff`;
+  its only genuinely distinct behavior is the bucket (b) CI-gate/GitHub-
+  comment side effects noted above).
+
+**Deviations from a literal reading of the phase's scope:**
+- `regression-gate`'s and `code-review`'s core loops were extracted out of
+  their CLI command files into new `src/core/search/regressionGate.ts` /
+  `src/core/search/codeReview.ts` modules (not previously factored out of
+  the CLI layer) so CLI/MCP/HTTP genuinely share one implementation, per
+  `CLAUDE.md`'s design constraint #5 ("MCP layer is a thin adapter...does
+  not duplicate business logic") — this wasn't optional busywork, since
+  those two commands' logic lived entirely inline in
+  `src/cli/commands/{regressionGate,codeReview}.ts` before this phase.
+- Found and fixed a pre-existing bug in `computeRefactorCandidates`'s
+  default `level: 'symbol'` SQL query (`src/core/search/refactorCandidates.ts`):
+  it selected `se.blob_hash`/`s.name`/`s.kind`, none of which exist
+  (`symbol_embeddings` has no `blob_hash` column; `symbols`' columns are
+  `symbol_name`/`symbol_kind`) — so the CLI `refactor-candidates` command
+  itself has always thrown on any database with symbol embeddings present.
+  Found via real test coverage added for the new `refactor_candidates`
+  MCP tool/route; fixed rather than shipping a route that surfaces a
+  pre-existing crash.
+- Also corrected two pre-existing `docs/parity.md` inaccuracies unrelated
+  to new work: the Guide column was wrongly "—" for `cross-repo-similarity`,
+  `map`, and `heatmap` (all three already had Guide tools in
+  `guideTools.ts` before this phase), and `project`'s HTTP column was
+  wrongly "✓" (conflating the adjacent `GET /projections` read route with
+  `project` itself, which has no route of its own).
 
 ---
 

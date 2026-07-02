@@ -1,7 +1,9 @@
 /**
- * Watch routes for saved searches (Phase 53).
- * POST /watch/add   — save a named query
- * POST /watch/run   — execute all saved queries and return new matches
+ * Watch routes for saved searches (Phase 53; list/remove added Phase 146).
+ * POST   /watch/add    — save a named query
+ * POST   /watch/run    — execute all saved queries and return new matches
+ * GET    /watch         — list all saved queries
+ * DELETE /watch/:name   — remove a saved query by name
  */
 
 import { Router } from 'express'
@@ -100,6 +102,40 @@ export function watchRouter(deps: WatchRouterDeps): Router {
       }
 
       res.json(output)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  router.get('/', (_req, res) => {
+    try {
+      const session = getActiveSession()
+      const rows = session.rawDb.prepare(
+        `SELECT id, name, query_text, last_run_ts, webhook_url FROM saved_queries ORDER BY created_at DESC`,
+      ).all() as Array<{ id: number; name: string; query_text: string; last_run_ts: number | null; webhook_url: string | null }>
+      const watches = rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        query: r.query_text,
+        lastRunAt: r.last_run_ts,
+        webhookUrl: r.webhook_url,
+      }))
+      res.json({ watches })
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  router.delete('/:name', (req, res) => {
+    const { name } = req.params
+    try {
+      const session = getActiveSession()
+      const result = session.rawDb.prepare(`DELETE FROM saved_queries WHERE name = ?`).run(name)
+      if (result.changes === 0) {
+        res.status(404).json({ error: `No saved query found with name '${name}'` })
+        return
+      }
+      res.json({ ok: true, name })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }

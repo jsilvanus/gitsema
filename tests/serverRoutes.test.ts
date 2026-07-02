@@ -732,6 +732,18 @@ describe('POST /api/v1/analysis/security-scan', () => {
     expect(res.status).toBe(200)
     expect(res.body.disclaimer).toMatch(/not confirmed/i)
   })
+
+  // Phase 143: --high-confidence-only flag parity
+  it('accepts highConfidenceOnly and returns only high-confidence findings', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/security-scan')
+      .send({ highConfidenceOnly: true })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.findings)).toBe(true)
+    for (const f of res.body.findings) {
+      expect(f.confidence).toBe('high')
+    }
+  })
 })
 
 // ===========================================================================
@@ -814,6 +826,21 @@ describe('POST /api/v1/analysis/clusters', () => {
     const res = await request(app)
       .post('/api/v1/analysis/clusters')
       .send({ k: 0 })
+    expect(res.status).toBe(400)
+  })
+
+  // Phase 143: iterations/edgeThreshold/enhancedKeywordsN flag parity
+  it('accepts iterations, edgeThreshold, and enhancedKeywordsN', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ k: 3, iterations: 5, edgeThreshold: 0.5, useEnhancedLabels: true, enhancedKeywordsN: 8 })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for invalid iterations', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/clusters')
+      .send({ iterations: 'bad' })
     expect(res.status).toBe(400)
   })
 })
@@ -942,6 +969,122 @@ describe('POST /api/v1/analysis/impact', () => {
     // May 500 because there's no git repo; should not be 400
     expect([200, 500]).toContain(res.status)
   })
+
+  // Phase 143: chunks/level flag parity
+  it('accepts chunks and level (chunk/symbol) options', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', chunks: true, level: 'symbol' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for an invalid level enum value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', level: 'not-a-real-level' })
+    expect(res.status).toBe(400)
+  })
+
+  // Phase 143: --lens structural|hybrid makes impact a blast-radius alias
+  it('accepts lens=structural and returns a blast-radius-shaped result', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', lens: 'structural' })
+    expect([200, 500]).toContain(res.status)
+    if (res.status === 200) {
+      expect(res.body).toHaveProperty('resolved')
+      expect(res.body).toHaveProperty('lens', 'structural')
+    }
+  })
+
+  it('accepts lens=hybrid', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', lens: 'hybrid' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/impact')
+      .send({ file: 'src/index.ts', lens: 'not-a-real-lens' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/merge-audit (Phase 143: --base flag parity)
+// ===========================================================================
+describe('POST /api/v1/analysis/merge-audit', () => {
+  it('returns 400 for missing branchA/branchB', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-audit')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for a valid request without --base', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-audit')
+      .send({ branchA: 'main', branchB: 'main' })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('accepts a --base override and returns 200 or 500', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-audit')
+      .send({ branchA: 'main', branchB: 'main', base: 'HEAD' })
+    expect([200, 500]).toContain(res.status)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/merge-preview (Phase 143: top/iterations/edgeThreshold/enhancedKeywordsN)
+// ===========================================================================
+describe('POST /api/v1/analysis/merge-preview', () => {
+  it('returns 400 for missing branch', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-preview')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for a valid request with the new flags', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/merge-preview')
+      .send({
+        branch: 'main',
+        into: 'main',
+        top: 3,
+        iterations: 5,
+        edgeThreshold: 0.5,
+        useEnhancedLabels: true,
+        enhancedKeywordsN: 8,
+      })
+    expect([200, 500]).toContain(res.status)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/analysis/branch-summary (Phase 143: enhancedLabels/enhancedKeywordsN)
+// ===========================================================================
+describe('POST /api/v1/analysis/branch-summary', () => {
+  it('returns 400 for missing branch', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/branch-summary')
+      .send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 or 500 for a valid request with enhancedLabels/enhancedKeywordsN', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/branch-summary')
+      .send({ branch: 'main', baseBranch: 'main', enhancedLabels: true, enhancedKeywordsN: 8 })
+    expect([200, 500]).toContain(res.status)
+    if (res.status === 200) {
+      expect(Array.isArray(res.body.nearestConcepts)).toBe(true)
+    }
+  })
 })
 
 // ===========================================================================
@@ -989,6 +1132,21 @@ describe('POST /api/v1/analysis/semantic-diff', () => {
       .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication' })
     expect([200, 500]).toContain(res.status)
   })
+
+  // Phase 143: hybrid/bm25Weight flag parity
+  it('accepts hybrid + bm25Weight without error', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication', hybrid: true, bm25Weight: 0.5 })
+    expect([200, 500]).toContain(res.status)
+  })
+
+  it('returns 400 for an out-of-range bm25Weight', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-diff')
+      .send({ ref1: 'abc123', ref2: 'def456', query: 'authentication', bm25Weight: 5 })
+    expect(res.status).toBe(400)
+  })
 })
 
 // ===========================================================================
@@ -1015,6 +1173,22 @@ describe('POST /api/v1/analysis/semantic-blame', () => {
       .send({ filePath: 'src/index.ts', content: 'export function auth() {}' })
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  // Phase 143: --level (file/symbol) flag parity
+  it('accepts level=symbol and returns array', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts', content: 'export function auth() {}', level: 'symbol' })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+  })
+
+  it('returns 400 for an invalid level enum value', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/semantic-blame')
+      .send({ filePath: 'src/index.ts', content: 'x', level: 'not-a-real-level' })
+    expect(res.status).toBe(400)
   })
 })
 
@@ -1161,6 +1335,100 @@ describe('POST /api/v1/analysis/workflow', () => {
       .send({ template: 'incident' })
     expect(res.status).toBe(400)
   })
+
+  // Phase 142: 5 newly-exposed templates (onboarding, ownership-intel,
+  // arch-drift, knowledge-portal, regression-forecast) — enum was previously
+  // limited to pr-review/incident/release-audit.
+  it('returns 200 for onboarding template using --role', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'onboarding', role: 'auth', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'onboarding')
+    expect(res.body.sections).toHaveProperty('relevantBlobs')
+    expect(res.body.sections).toHaveProperty('changePoints')
+    expect(res.body.sections).toHaveProperty('keyExperts')
+  })
+
+  it('returns 200 for onboarding template with no role/query (defaults)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'onboarding' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'onboarding')
+  })
+
+  it('returns 200 for ownership-intel template with query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'ownership-intel', query: 'database crash', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'ownership-intel')
+    expect(res.body.sections).toHaveProperty('suggestedReviewers')
+    expect(res.body.sections).toHaveProperty('topResults')
+  })
+
+  it('returns 400 for ownership-intel without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'ownership-intel' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 for arch-drift template without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'arch-drift', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'arch-drift')
+    expect(res.body.sections).toHaveProperty('health')
+    expect(res.body.sections).toHaveProperty('debt')
+    expect(res.body.sections).toHaveProperty('changePoints')
+  })
+
+  it('returns 200 for knowledge-portal template with query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'knowledge-portal', query: 'platform architecture', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'knowledge-portal')
+    expect(res.body.sections).toHaveProperty('results')
+    expect(res.body.sections).toHaveProperty('relatedConcepts')
+    expect(res.body.sections).toHaveProperty('owners')
+  })
+
+  it('returns 400 for knowledge-portal without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'knowledge-portal' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 200 for regression-forecast template with query and ref', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'regression-forecast', query: 'auth refactor', ref: 'main', top: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('template', 'regression-forecast')
+    expect(res.body.sections).toHaveProperty('currentNeighbourhood')
+    expect(res.body.sections).toHaveProperty('changePoints')
+    expect(res.body.sections).toHaveProperty('riskOwners')
+    expect(res.body.sections).toHaveProperty('baseRef', 'main')
+  })
+
+  it('returns 400 for regression-forecast without query', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'regression-forecast' })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts base for pr-review without error (no-op, mirrors CLI dead flag)', async () => {
+    const res = await request(app)
+      .post('/api/v1/analysis/workflow')
+      .send({ template: 'pr-review', file: 'src/index.ts', base: 'main', top: 3 })
+    expect(res.status).toBe(200)
+  })
 })
 
 // ===========================================================================
@@ -1231,6 +1499,186 @@ describe('POST /api/v1/graph/hotspots', () => {
     const res = await request(app)
       .post('/api/v1/graph/hotspots')
       .send({ lens: 'nonsense' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// Phase 147: graph command family HTTP exposure
+//
+// Every route below reads from the (empty, in-memory) graph store — since no
+// `gitsema graph build` has run, every lookup resolves to `not-found`. These
+// tests assert 200 + the resolution-failure shape (not a 500), and that Zod
+// validation rejects malformed bodies with 400 — the same contract the
+// pre-existing `/hotspots` route follows.
+// ===========================================================================
+describe('POST /api/v1/graph/callers', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/callers').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('resolved')
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('hits')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/callers').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/callees', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/callees').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/callees').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/neighbors', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/neighbors').send({ node: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+  })
+
+  it('rejects an invalid edge type', async () => {
+    const res = await request(app).post('/api/v1/graph/neighbors').send({ node: 'foo', edgeTypes: ['bogus'] })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/path', () => {
+  it('returns 200 with not-found resolutions on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/path').send({ from: 'a', to: 'b' })
+    expect(res.status).toBe(200)
+    expect(res.body.from.status).toBe('not-found')
+    expect(res.body.to.status).toBe('not-found')
+    expect(res.body.path).toBeNull()
+  })
+
+  it('rejects a missing "to"', async () => {
+    const res = await request(app).post('/api/v1/graph/path').send({ from: 'a' })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/relate', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/relate').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('lens', 'hybrid')
+  })
+
+  it('accepts a lens override', async () => {
+    const res = await request(app).post('/api/v1/graph/relate').send({ symbol: 'foo', lens: 'structural' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'structural')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/relate').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/similar', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/similar').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/similar').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/unused', () => {
+  it('returns 200 with an empty nodes array on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/unused').send({})
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('nodes')
+    expect(Array.isArray(res.body.nodes)).toBe(true)
+  })
+
+  it('rejects an invalid edge type', async () => {
+    const res = await request(app).post('/api/v1/graph/unused').send({ edgeTypes: ['bogus'] })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/cycles', () => {
+  it('returns 200 with an empty cycles array on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/cycles').send({})
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('cycles')
+    expect(Array.isArray(res.body.cycles)).toBe(true)
+    expect(res.body).toHaveProperty('edgeTypes', ['imports'])
+  })
+
+  it('accepts an edgeTypes override', async () => {
+    const res = await request(app).post('/api/v1/graph/cycles').send({ edgeTypes: ['calls'] })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('edgeTypes', ['calls'])
+  })
+
+  it('rejects an invalid edge type', async () => {
+    const res = await request(app).post('/api/v1/graph/cycles').send({ edgeTypes: ['bogus'] })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/deps', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/deps').send({ identifier: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('hits')
+  })
+
+  it('rejects a missing identifier', async () => {
+    const res = await request(app).post('/api/v1/graph/deps').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/co-change', () => {
+  it('returns 200 with found:false on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/co-change').send({ path: 'src/foo.ts' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('found', false)
+  })
+
+  it('rejects a missing path', async () => {
+    const res = await request(app).post('/api/v1/graph/co-change').send({})
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/graph/blast-radius', () => {
+  it('returns 200 with a not-found resolution on an empty graph', async () => {
+    const res = await request(app).post('/api/v1/graph/blast-radius').send({ symbol: 'foo' })
+    expect(res.status).toBe(200)
+    expect(res.body.resolved.status).toBe('not-found')
+    expect(res.body).toHaveProperty('lens', 'hybrid')
+  })
+
+  it('accepts a lens override', async () => {
+    const res = await request(app).post('/api/v1/graph/blast-radius').send({ symbol: 'foo', lens: 'structural' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('lens', 'structural')
+  })
+
+  it('rejects a missing symbol', async () => {
+    const res = await request(app).post('/api/v1/graph/blast-radius').send({})
     expect(res.status).toBe(400)
   })
 })
@@ -1446,6 +1894,167 @@ describe('POST /api/v1/protocol/:operation', () => {
       .send({ args: {} })
     expect(res.status).toBe(404)
     expect(res.body.error).toMatch(/Unknown operation/)
+  })
+})
+
+// ===========================================================================
+// POST /api/v1/narrate, POST /api/v1/explain — Phase 144
+//
+// evidenceOnly toggle + explain's log/files/lens fields. No narrator model is
+// configured in the mocked in-memory DB, so `evidenceOnly: false` still makes
+// no network call (safe-by-default disabled provider) — these assertions
+// focus on request parsing / response shape, not real LLM output. `since:
+// '2099-01-01'` guarantees zero matching commits so results are deterministic.
+// ===========================================================================
+describe('POST /api/v1/narrate — Phase 144 evidenceOnly toggle', () => {
+  it('defaults to evidence-only (llmEnabled false, evidence array present)', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01' })
+    expect(res.status).toBe(200)
+    expect(res.body.llmEnabled).toBe(false)
+    expect(Array.isArray(res.body.evidence)).toBe(true)
+  })
+
+  it('accepts evidenceOnly: false explicitly without erroring (no narrator configured → still safe)', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', evidenceOnly: false })
+    expect(res.status).toBe(200)
+    expect(res.body.llmEnabled).toBe(false)
+  })
+
+  it('accepts a lens field for CLI flag-surface parity (no-op for narrate)', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', lens: 'hybrid' })
+    expect(res.status).toBe(200)
+  })
+
+  it('rejects an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', lens: 'nonsense' })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a non-boolean evidenceOnly value', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', evidenceOnly: 'yes' })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/explain — Phase 144 evidenceOnly/log/files/lens', () => {
+  it('defaults to evidence-only (llmEnabled false, evidence array present)', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({ topic: 'xyzzythiscannotexist_98765', since: '2099-01-01' })
+    expect(res.status).toBe(200)
+    expect(res.body.llmEnabled).toBe(false)
+    expect(Array.isArray(res.body.evidence)).toBe(true)
+  })
+
+  it('accepts a log path and a files glob without erroring', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({
+        topic: 'xyzzythiscannotexist_98765',
+        since: '2099-01-01',
+        log: '/nonexistent/path/to.log',
+        files: 'src/**/*.ts',
+      })
+    expect(res.status).toBe(200)
+  })
+
+  it('does not include structuralContext for the default semantic lens', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({
+        topic: 'xyzzythiscannotexist_98765',
+        since: '2099-01-01',
+        files: 'src/server/routes/narrator.ts',
+      })
+    expect(res.status).toBe(200)
+    expect(res.body).not.toHaveProperty('structuralContext')
+  })
+
+  it('accepts a structural/hybrid lens with files without erroring (empty graph → no structuralContext)', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({
+        topic: 'xyzzythiscannotexist_98765',
+        since: '2099-01-01',
+        files: 'src/server/routes/narrator.ts',
+        lens: 'hybrid',
+      })
+    expect(res.status).toBe(200)
+    // No graph data indexed in this test DB, so structuralContextForPath finds
+    // nothing and the field is omitted rather than throwing.
+    expect(res.body).not.toHaveProperty('structuralContext')
+  })
+
+  it('rejects an invalid lens value', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({ topic: 'test', lens: 'nonsense' })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a non-boolean evidenceOnly value', async () => {
+    const res = await request(app)
+      .post('/api/v1/explain')
+      .send({ topic: 'test', evidenceOnly: 'yes' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// /api/v1/watch (Phase 53 add/run; Phase 146 list/remove)
+// ===========================================================================
+describe('/api/v1/watch', () => {
+  it('POST /watch/add saves a named query', async () => {
+    const res = await request(app)
+      .post('/api/v1/watch/add')
+      .send({ name: 'watch-test-alpha', query: 'authentication middleware' })
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true, name: 'watch-test-alpha', query: 'authentication middleware' })
+  })
+
+  it('GET /watch lists saved queries newest-first, including the one just added', async () => {
+    const res = await request(app).get('/api/v1/watch')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.watches)).toBe(true)
+    const entry = res.body.watches.find((w: { name: string }) => w.name === 'watch-test-alpha')
+    expect(entry).toBeDefined()
+    expect(entry).toMatchObject({ name: 'watch-test-alpha', query: 'authentication middleware' })
+    expect(entry).toHaveProperty('id')
+    expect(entry).toHaveProperty('lastRunAt')
+    expect(entry).toHaveProperty('webhookUrl')
+  })
+
+  it('DELETE /watch/:name removes a saved query by name', async () => {
+    const res = await request(app).delete('/api/v1/watch/watch-test-alpha')
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true, name: 'watch-test-alpha' })
+
+    const listRes = await request(app).get('/api/v1/watch')
+    expect(listRes.body.watches.find((w: { name: string }) => w.name === 'watch-test-alpha')).toBeUndefined()
+  })
+
+  it('DELETE /watch/:name returns 404 for an unknown name', async () => {
+    const res = await request(app).delete('/api/v1/watch/watch-test-does-not-exist')
+    expect(res.status).toBe(404)
+    expect(res.body).toHaveProperty('error')
+  })
+
+  it('POST /watch/run returns an array (empty saved-queries set is fine)', async () => {
+    const res = await request(app)
+      .post('/api/v1/watch/run')
+      .send({})
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
   })
 })
 

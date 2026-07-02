@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { openDatabaseAt, withDbSession } from '../src/core/db/sqlite.js'
 import { computeSemanticDiff } from '../src/core/search/semanticDiff.js'
 import type { SemanticDiffResult } from '../src/core/search/semanticDiff.js'
 import { cosineSimilarity } from '../src/core/search/analysis/vectorSearch.js'
+
+function bufFromArray(arr: number[]) {
+  return Buffer.from(new Float32Array(arr).buffer)
+}
 
 // ---------------------------------------------------------------------------
 // cosineSimilarity (used internally by computeSemanticDiff)
@@ -73,5 +81,73 @@ describe('SemanticDiffResult structure', () => {
 describe('computeSemanticDiff — logic guards (no DB required)', () => {
   it('is exported as a function', () => {
     expect(typeof computeSemanticDiff).toBe('function')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// computeSemanticDiff — candidateBlobs (Phase 143: --hybrid support)
+// ---------------------------------------------------------------------------
+
+describe('computeSemanticDiff — candidateBlobs (hybrid scoring)', () => {
+  it('uses candidateBlobs scores instead of cosine similarity when supplied', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'gitsema-semanticdiff-'))
+    const dbPath = join(tmpDir, 'test.db')
+    const session = openDatabaseAt(dbPath)
+
+    try {
+      // blobGained: introduced after ref1, present at ref2 → "gained"
+      session.rawDb.prepare('INSERT OR IGNORE INTO blobs (blob_hash, size, indexed_at) VALUES (?, ?, ?)').run('blobGained', 10, 1)
+      session.rawDb.prepare('INSERT INTO paths (blob_hash, path) VALUES (?, ?)').run('blobGained', 'src/new.ts')
+      session.rawDb.prepare('INSERT INTO embeddings (blob_hash, model, dimensions, vector, file_type) VALUES (?, ?, ?, ?, ?)')
+        .run('blobGained', 'm', 4, bufFromArray([0, 1, 0, 0]), 'code')
+      session.rawDb.prepare("INSERT INTO commits (commit_hash, timestamp, message) VALUES (?, ?, ?)")
+        .run('commit2', Math.floor(new Date('2023-06-01').getTime() / 1000), 'add new.ts')
+      session.rawDb.prepare('INSERT INTO blob_commits (blob_hash, commit_hash) VALUES (?, ?)').run('blobGained', 'commit2')
+
+      const queryEmbedding = [1, 0, 0, 0]
+
+      const result = await withDbSession(session, async () =>
+        computeSemanticDiff(queryEmbedding, 'test topic', '2020-01-01', '2024-01-01', 10, undefined, [
+          { blobHash: 'blobGained', score: 0.42 },
+        ]),
+      )
+
+      expect(result.gained.length).toBe(1)
+      // Cosine similarity between [1,0,0,0] and [0,1,0,0] is 0 — if the
+      // candidate score weren't used, score would be 0, not 0.42.
+      expect(result.gained[0].score).toBe(0.42)
+      expect(result.gained[0].blobHash).toBe('blobGained')
+    } finally {
+      session.rawDb.close()
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to cosine similarity when candidateBlobs is not supplied', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'gitsema-semanticdiff-'))
+    const dbPath = join(tmpDir, 'test.db')
+    const session = openDatabaseAt(dbPath)
+
+    try {
+      session.rawDb.prepare('INSERT OR IGNORE INTO blobs (blob_hash, size, indexed_at) VALUES (?, ?, ?)').run('blobGained', 10, 1)
+      session.rawDb.prepare('INSERT INTO paths (blob_hash, path) VALUES (?, ?)').run('blobGained', 'src/new.ts')
+      session.rawDb.prepare('INSERT INTO embeddings (blob_hash, model, dimensions, vector, file_type) VALUES (?, ?, ?, ?, ?)')
+        .run('blobGained', 'm', 4, bufFromArray([1, 0, 0, 0]), 'code')
+      session.rawDb.prepare("INSERT INTO commits (commit_hash, timestamp, message) VALUES (?, ?, ?)")
+        .run('commit2', Math.floor(new Date('2023-06-01').getTime() / 1000), 'add new.ts')
+      session.rawDb.prepare('INSERT INTO blob_commits (blob_hash, commit_hash) VALUES (?, ?)').run('blobGained', 'commit2')
+
+      const queryEmbedding = [1, 0, 0, 0]
+
+      const result = await withDbSession(session, async () =>
+        computeSemanticDiff(queryEmbedding, 'test topic', '2020-01-01', '2024-01-01', 10),
+      )
+
+      expect(result.gained.length).toBe(1)
+      expect(result.gained[0].score).toBeCloseTo(1)
+    } finally {
+      session.rawDb.close()
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
   })
 })

@@ -6,13 +6,16 @@
  *   POST /explain   — explain a bug/error topic by tracing through git history
  *
  * Both routes use the DB-backed narrator model config system.
- * Safe-by-default: returns a placeholder when no narrator model is configured.
+ * Safe-by-default: returns evidence only unless `evidenceOnly: false` is sent
+ * explicitly (Phase 144) — mirrors the CLI's `--narrate`/`--evidence-only`
+ * default (no LLM/network call unless explicitly opted in).
  */
 
 import { Router } from 'express'
 import { z } from 'zod'
 import { resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
 import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
+import { parseLens } from '../../cli/lib/lens.js'
 
 export const narratorRouter = Router()
 
@@ -33,6 +36,9 @@ const ByokSchema = z.object({
   temperature: z.number().optional(),
 })
 
+/** Cross-cutting `--lens` toggle (Phase 109/111): which signal(s) drive structural enrichment. */
+const LensSchema = z.enum(['semantic', 'structural', 'hybrid'])
+
 const NarrateBodySchema = z.object({
   since: z.string().optional(),
   until: z.string().optional(),
@@ -43,6 +49,19 @@ const NarrateBodySchema = z.object({
   narratorModelId: z.number().int().positive().optional(),
   model: z.string().optional(),
   byok: ByokSchema.optional(),
+  /**
+   * Phase 144: mirrors the CLI's `--narrate`/`--evidence-only` toggle, which
+   * HTTP callers previously had no way to request explicitly. Default
+   * (omitted/`undefined`) matches `runNarrate`'s own default of `true` —
+   * evidence-only, no LLM call.
+   */
+  evidenceOnly: z.boolean().optional(),
+  /**
+   * Phase 111/144: accepted for CLI flag-surface parity. `narrate` has no
+   * single-file target to enrich (unlike `explain`'s `--files`), so this is
+   * currently a no-op for `/narrate` — see Phase 144 deviation notes.
+   */
+  lens: LensSchema.optional(),
 })
 
 const ExplainBodySchema = z.object({
@@ -53,6 +72,19 @@ const ExplainBodySchema = z.object({
   narratorModelId: z.number().int().positive().optional(),
   model: z.string().optional(),
   byok: ByokSchema.optional(),
+  /** Phase 144: same semantics as `NarrateBodySchema.evidenceOnly`. */
+  evidenceOnly: z.boolean().optional(),
+  /** Phase 144: mirrors CLI `explain --log <path>` — error/stack-trace context file. */
+  log: z.string().optional(),
+  /** Phase 144: mirrors CLI `explain --files <glob>` — restricts search scope. */
+  files: z.string().optional(),
+  /**
+   * Phase 111/144: mirrors CLI `explain --lens`. When `structural`/`hybrid`
+   * and `files` is a concrete path, the response includes a `structuralContext`
+   * field (call-graph / co-change enrichment), same as the CLI's post-run
+   * structural context append.
+   */
+  lens: LensSchema.optional(),
 })
 
 // ---------------------------------------------------------------------------
@@ -81,6 +113,7 @@ narratorRouter.post('/narrate', async (req, res) => {
       focus: body.focus,
       format: body.format,
       maxCommits: body.maxCommits,
+      evidenceOnly: body.evidenceOnly,
     })
     res.json({
       prose: result.prose,
@@ -89,6 +122,7 @@ narratorRouter.post('/narrate', async (req, res) => {
       redactedFields: result.redactedFields,
       llmEnabled: result.llmEnabled,
       format: result.format,
+      evidence: result.evidence,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -120,8 +154,32 @@ narratorRouter.post('/explain', async (req, res) => {
     const result = await runExplain(provider, body.topic, {
       since: body.since,
       until: body.until,
+      log: body.log,
+      files: body.files,
       format: body.format,
+      evidenceOnly: body.evidenceOnly,
     })
+
+    // Structural enrichment (Phase 110/111/144): mirrors the CLI's own
+    // post-run append in `explainCommand` — when a structural/hybrid lens is
+    // requested and a concrete `files` path is given, include grounded
+    // call-graph / co-change context in the response. Default `semantic`
+    // lens (or no `files`) adds nothing, keeping the response shape
+    // unchanged for existing callers.
+    let structuralContext: string | undefined
+    const lens = parseLens(body.lens, 'semantic')
+    if (lens !== 'semantic' && body.files) {
+      try {
+        const { getCachedStorageProfile } = await import('../../core/storage/resolveProfile.js')
+        const { structuralContextForPath, formatStructuralContext } = await import('../../core/graph/structuralContext.js')
+        const graph = getCachedStorageProfile(process.cwd()).graph
+        const ctx = await structuralContextForPath(graph, body.files)
+        structuralContext = formatStructuralContext(ctx)
+      } catch {
+        // graph unavailable — skip enrichment silently, same as the CLI
+      }
+    }
+
     res.json({
       prose: result.prose,
       commitCount: result.commitCount,
@@ -129,6 +187,8 @@ narratorRouter.post('/explain', async (req, res) => {
       redactedFields: result.redactedFields,
       llmEnabled: result.llmEnabled,
       format: result.format,
+      evidence: result.evidence,
+      ...(structuralContext ? { structuralContext, lens } : {}),
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

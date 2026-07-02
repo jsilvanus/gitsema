@@ -338,6 +338,9 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--until <ref\|date>` | — | Only include commits before this ref or date |
 | `--range <rev-range>` | — | Git revision range (e.g. `v1.0..HEAD`) (`narrate` only) |
 | `--focus <area>` | `all` | Filter commits by area: `bugs`, `features`, `ops`, `security`, `deps`, `performance`, `all` (`narrate` only) |
+| `--log <path>` | — | Path to an error log/stack-trace file to include as LLM context (`explain` only) |
+| `--files <glob>` | — | Restrict search to files matching this glob (`explain` only); currently only consumed by `--lens` structural enrichment, not commit filtering (see below) |
+| `--lens <lens>` | `semantic` | `semantic\|structural\|hybrid` (`explain` only) — under `structural`/`hybrid` with a concrete `--files` path, appends grounded call-graph/co-change context after the result |
 | `--format <fmt>` | `md` | Output format when narrating: `md`, `text`, `json` (legacy: prefer `--out`) |
 | `--out <spec>` | — | Output spec (repeatable): `text\|json[:file]\|markdown[:file]` (overrides `--format`) |
 | `--max-commits <n>` | `500` | Maximum commits to analyse (`narrate` only) |
@@ -550,18 +553,18 @@ Track semantic drift of a single file across its Git history.
 
 | Command | Description |
 |---|---|
-| `gitsema graph build` | Build/rebuild `graph_nodes` and `edges` from `structural_refs`, `symbols`, and `blob_commits` (truncate-and-rebuild; requires prior `gitsema index --graph`) |
-| `gitsema co-change <path> [-k/--top <n>]` | Files that historically change together with `<path>` |
-| `gitsema deps <identifier> [--reverse] [--depth <n>] [--edge-types <types>]` | Import/dependency closure of a file or symbol (default edge types: `imports,calls,extends,implements`) |
-| `gitsema graph cycles [--edge-types <types>]` / `gitsema cycles [--edge-types <types>]` | Detect cycles in the structural graph (default: `imports`) |
-| `gitsema graph callers <symbol> [--depth <n>]` | Reverse `calls` traversal — who (transitively) calls `<symbol>` (default depth 3, max 3) |
-| `gitsema graph callees <symbol> [--depth <n>]` | Forward `calls` traversal — what `<symbol>` (transitively) calls (default depth 3, max 3) |
-| `gitsema graph neighbors <node> [--edge-types <types>] [--direction <dir>] [--depth <n>] [--out <spec>]` | Typed neighborhood of `<node>` — any edge kinds by default (default depth 1, max 3) |
-| `gitsema graph path <a> <b> [--out <spec>]` | Shortest typed path from `<a>` to `<b>` (max depth 3) |
-| `gitsema blast-radius <symbol> [--lens <lens>] [--depth <n>] [-k/--top <n>] [--weight-structural <n>] [--out <spec>]` | What changes if I touch this — structural dependents (`calls`/`imports`/`extends`/`implements`/`references`, reverse traversal) and/or semantically similar blobs (default lens: hybrid) |
-| `gitsema relate <symbol> [--lens <lens>] [-k/--top <n>] [--out <spec>]` | Callers/callees (structural, depth 1) and semantically similar blobs, labeled — both lenses, lose neither (default lens: hybrid) |
-| `gitsema similar <symbol> [--lens <lens>] [-k/--top <n>] [--weight-structural <n>] [--out <spec>]` | Symbols/files with a similar call/import shape (structural, Jaccard overlap) and/or semantically similar (vector) (default lens: hybrid) |
-| `gitsema unused [--edge-types <types>]` | Symbols/files with no inbound `calls`/`imports` edges — structural complement to `dead-concepts` |
+| `gitsema graph build` | Build/rebuild `graph_nodes` and `edges` from `structural_refs`, `symbols`, and `blob_commits` (truncate-and-rebuild; requires prior `gitsema index --graph`). CLI-only — a mutating index-maintenance operation, not exposed over HTTP/MCP (Phase 147), same as `index vacuum`/`gc`/etc |
+| `gitsema co-change <path> [-k/--top <n>]` | Files that historically change together with `<path>`. Also `POST /api/v1/graph/co-change` and MCP `co_change` |
+| `gitsema deps <identifier> [--reverse] [--depth <n>] [--edge-types <types>]` | Import/dependency closure of a file or symbol (default edge types: `imports,calls,extends,implements`). Also `POST /api/v1/graph/deps` and MCP `deps` |
+| `gitsema graph cycles [--edge-types <types>]` / `gitsema cycles [--edge-types <types>]` | Detect cycles in the structural graph (default: `imports`). Also `POST /api/v1/graph/cycles` and MCP `cycles` |
+| `gitsema graph callers <symbol> [--depth <n>]` | Reverse `calls` traversal — who (transitively) calls `<symbol>` (default depth 3, max 3). Also `POST /api/v1/graph/callers` and MCP `call_graph` (`direction: callers`) |
+| `gitsema graph callees <symbol> [--depth <n>]` | Forward `calls` traversal — what `<symbol>` (transitively) calls (default depth 3, max 3). Also `POST /api/v1/graph/callees` and MCP `call_graph` (`direction: callees`) |
+| `gitsema graph neighbors <node> [--edge-types <types>] [--direction <dir>] [--depth <n>] [--out <spec>]` | Typed neighborhood of `<node>` — any edge kinds by default (default depth 1, max 3). Also `POST /api/v1/graph/neighbors` and MCP `graph_neighbors` |
+| `gitsema graph path <a> <b> [--out <spec>]` | Shortest typed path from `<a>` to `<b>` (max depth 3). Also `POST /api/v1/graph/path` and MCP `graph_path` |
+| `gitsema blast-radius <symbol> [--lens <lens>] [--depth <n>] [-k/--top <n>] [--weight-structural <n>] [--out <spec>]` | What changes if I touch this — structural dependents (`calls`/`imports`/`extends`/`implements`/`references`, reverse traversal) and/or semantically similar blobs (default lens: hybrid). Also `POST /api/v1/graph/blast-radius` and MCP `blast_radius` |
+| `gitsema relate <symbol> [--lens <lens>] [-k/--top <n>] [--out <spec>]` | Callers/callees (structural, depth 1) and semantically similar blobs, labeled — both lenses, lose neither (default lens: hybrid). Also `POST /api/v1/graph/relate` and MCP `graph_relate` |
+| `gitsema similar <symbol> [--lens <lens>] [-k/--top <n>] [--weight-structural <n>] [--out <spec>]` | Symbols/files with a similar call/import shape (structural, Jaccard overlap) and/or semantically similar (vector) (default lens: hybrid). Also `POST /api/v1/graph/similar` and MCP `graph_similar` |
+| `gitsema unused [--edge-types <types>]` | Symbols/files with no inbound `calls`/`imports` edges — structural complement to `dead-concepts`. Also `POST /api/v1/graph/unused` and MCP `graph_unused` |
 | `gitsema hotspots [--lens <lens>] [-k/--top <n>] [--out <spec>]` | Architectural risk = co-change (temporal) × call-coupling (structural) × churn — geometric mean of the signals the lens selects (default lens: hybrid). Also `POST /api/v1/graph/hotspots` and MCP `hotspots` |
 
 `--out <spec>` on the six commands above (repeatable: `text\|json[:file]\|html[:file]\|markdown[:file]`) renders a unified subgraph view: `html` is an interactive force-graph with clickable nodes (Phase 112), `text`/`markdown` are an ASCII tree / nested bullet list. Omitting `--out` leaves each command's own default text output unchanged.
@@ -571,7 +574,7 @@ Track semantic drift of a single file across its Git history.
 | Command | Description |
 |---|---|
 | `gitsema repos` | Manage tracked repositories for multi-repo indexing |
-| `gitsema watch` | Manage saved searches and watch mode notifications |
+| `gitsema watch add/list/remove/run` | Manage saved searches and watch mode notifications. Also `POST /api/v1/watch/add`, `GET /api/v1/watch`, `DELETE /api/v1/watch/:name`, `POST /api/v1/watch/run` |
 | `gitsema pr-report [options]` | Compose a semantic PR report: diff, impacted modules, change-points, reviewer suggestions |
 | `gitsema regression-gate [options]` | CI gate: fail if key concepts drift beyond threshold between two refs |
 | `gitsema bisect <good> <bad> <query>` | Semantic git bisect — binary search to find where a concept diverged from a "good" baseline |
@@ -586,7 +589,7 @@ Track semantic drift of a single file across its Git history.
 | Command | Description |
 |---|---|
 | `gitsema workflow list` | List available productized workflow templates |
-| `gitsema workflow run <name>` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
+| `gitsema workflow run <name>` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit` \| `onboarding` \| `ownership-intel` \| `arch-drift` \| `knowledge-portal` \| `regression-forecast`). Flags: `--file`, `--query`, `--role` (onboarding topic, alias for `--query`), `--ref` (regression-forecast base ref), `--base` (declared for pr-review, currently a no-op), `--top`, `--format`/`--dump`/`--out` |
 
 ### Repo Insights
 

@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import type { Embedding } from '../../core/models/types.js'
 import { computeSemanticDiff } from '../../core/search/semanticDiff.js'
+import { hybridSearch } from '../../core/search/analysis/hybridSearch.js'
 import { formatDate, shortHash } from '../../core/search/ranking.js'
 import { renderSemanticDiffHtml } from '../../core/viz/htmlRenderer.js'
 import { resolveOutputs, hasSinkFormat, getSink } from '../../utils/outputSink.js'
@@ -112,9 +113,29 @@ export async function semanticDiffCommand(
     throw err
   }
 
+  // --hybrid: blend vector similarity with BM25 keyword matching to select the
+  // candidate blob set, mirroring the `author` command's `--hybrid` handling
+  // (src/cli/commands/author.ts). Previously declared here but never wired up.
+  let candidateBlobs: Array<{ blobHash: string; score: number }> | undefined
+  if (options.hybrid) {
+    const bm25Weight = options.bm25Weight !== undefined ? parseFloat(options.bm25Weight) : 0.3
+    try {
+      const hybridResults = await hybridSearch(topic, queryEmbedding, {
+        topK: Math.max(topK * 5, 100),
+        bm25Weight,
+        branch: options.branch,
+      })
+      candidateBlobs = hybridResults.map((r) => ({ blobHash: r.blobHash, score: r.score }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error: hybrid search failed — ${msg}`)
+      process.exit(1)
+    }
+  }
+
   let result: SemanticDiffResult
   try {
-    result = computeSemanticDiff(queryEmbedding, topic, ref1, ref2, topK, options.branch)
+    result = computeSemanticDiff(queryEmbedding, topic, ref1, ref2, topK, options.branch, candidateBlobs)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`Error: ${msg}`)

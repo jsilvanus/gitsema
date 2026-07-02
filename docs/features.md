@@ -213,6 +213,9 @@ All search uses the **text embedding model** (not the code model) to embed queri
 | **Structural enrichment of fusion commands (Phase 110)** | `code-review`, `triage`, `explain`, and `guide` gain `--lens`: under `structural`/`hybrid` they surface grounded call-graph/co-change context (`structuralContextForPath()` — "N callers, co-changes with X 80%", and for triage the cascade planner). `--lens semantic` (default) leaves output byte-for-byte unchanged. New guide/MCP tools `call_graph`, `blast_radius`, `hotspots` let AI agents navigate structurally |
 | **Lens coverage & parity sweep (Phase 111)** | Every command where more than one lens is meaningful exposes the shared `--lens` (`addLensOption()`), with §7.3 defaults enforced uniformly (existing → `semantic`, graph-native → `structural`, fusion → `hybrid`) and per-hit lens labeling across text/JSON renderers. A mechanical parity test (`tests/lensParity.test.ts`, mirroring `docsSync`) introspects the Commander program + GUIDE_TOOLS + MCP/HTTP source to guarantee coverage stays uniform |
 | **Unified graph UI — HTML force-graph + CLI subgraph view (Phase 112)** | `gitsema graph neighbors`, `gitsema graph path`, `gitsema blast-radius`, `gitsema relate`, `gitsema similar`, and `gitsema hotspots` all gain `--out <spec>` (`text\|json[:file]\|html[:file]\|markdown[:file]`) rendering a shared `RenderableSubgraph` (`src/core/graph/subgraphView.ts`) built from `GraphStore.subgraph()`/the command's own traversal result. `--out html` (`renderGraphHtml()`, `src/core/viz/htmlRenderer-graph.ts`) is an interactive canvas force-graph (reusing the `htmlRenderer-clusters.ts` physics/`safeJson()`/`BASE_CSS` pattern); clicking a node opens a sidebar with its kind/path/risk weight and copyable "suggested commands" (`suggestedCommands()`) deep-linking into other per-command HTML views (e.g. `file-evolution --out html:evolution.html`). `--out text` (`renderGraphTree()`, `src/cli/lib/graphRender.ts`) renders the same subgraph as a cycle-safe indented ASCII tree for terminal-only workflows; `--out markdown` (`renderGraphMarkdown()`) renders a nested bullet list. Passing no `--out` leaves every command's pre-existing default text output unchanged |
+| **`narrate`/`explain` HTTP route parity — evidence-only toggle + context flags (Phase 144)** | `POST /api/v1/narrate` and `POST /api/v1/explain` gain `evidenceOnly: boolean`, mirroring CLI `narrate`/`explain`'s safe-by-default `--narrate`/`--evidence-only` toggle (omitted = evidence-only, no LLM call — matching `runNarrate`/`runExplain`'s own default); both responses now also carry a structured `evidence` array alongside `prose`. `POST /explain` additionally gains `log` (error/stack-trace file content as LLM context, mirroring `--log <path>`) and `files` (mirroring `--files <glob>`, though — like the CLI — it isn't actually used to filter commits, only consumed by lens enrichment below). Both routes gain `lens: 'semantic'\|'structural'\|'hybrid'`; on `/explain`, `structural`/`hybrid` + a concrete `files` path returns a `structuralContext` field (grounded call-graph/co-change context via `structuralContextForPath()`, same mechanism as Phase 110's CLI enrichment), while on `/narrate` it's accepted for flag-surface parity but currently a no-op (no single-file enrichment target) |
+| **Graph command family HTTP/MCP exposure (Phase 147)** | Closes the long-standing HTTP/MCP gap for the rest of the `graph` command family: `POST /api/v1/graph/{callers,callees,neighbors,path,relate,similar,unused,cycles,deps,co-change,blast-radius}` HTTP routes and MCP tools `graph_path`, `graph_relate`, `graph_similar`, `graph_unused`, `cycles`, `deps`, `co_change`, `blast_radius` — thin Zod-validated / schema-validated wrappers over the existing `src/core/graph/*` query helpers, JSON-serializing the same result shapes the CLI commands already render to text. `graph callers`/`graph callees` gained HTTP routes but not new MCP tools — the pre-existing `call_graph` tool already covers both directions via its `direction` param. `graph build` remains intentionally CLI-only: it truncates and rebuilds `graph_nodes`/`edges`, a mutating index-maintenance operation like `index vacuum`/`gc`/`rebuild-fts`/etc, none of which have an HTTP route |
+| **Remaining CLI-only command triage — MCP/HTTP exposure (Phase 148)** | `gitsema bisect`, `refactor-candidates`, `lifecycle`, `cherry-pick-suggest`, `file-diff`, `pr-report`, `regression-gate`, `code-review`, `heatmap`, and `map` gained MCP tools (`src/mcp/tools/insights.ts`) and `POST /api/v1/insights/*` HTTP routes — the last CLI commands that had neither. `regression-gate`'s and `code-review`'s core logic moved into `src/core/search/regressionGate.ts` / `src/core/search/codeReview.ts` so CLI/MCP/HTTP share one implementation. `cross-repo-similarity` (raw local filesystem `.gitsema/index.db` paths — a different trust model than a remote call), `project` (local precompute/write step; its read side already has `GET /projections`), and `ci-diff` (GitHub PR-comment posting + CI process exit code) were judged CLI-shaped by design and intentionally not exposed; `diff` was found to be the exact same implementation as the already-exposed `semantic-diff`, not a separate feature. See `docs/parity.md` §1 footnotes for the full per-command rationale. Also fixed a pre-existing bug in `computeRefactorCandidates`'s default `level: 'symbol'` query (referenced a nonexistent `symbol_embeddings.blob_hash` column, so it threw on any DB with symbol embeddings present) |
 
 ---
 
@@ -249,20 +252,24 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/commits`, `POST /api/v1/commits/mark-indexed` | Commit metadata |
 | `POST /api/v1/search`, `POST /api/v1/search/first-seen` | Search — full CLI `search`/`first-seen` flag parity since Phase 138, including per-level `resultsByLevel` responses and multi-repo `repos` |
 | `POST /api/v1/evolution/file`, `POST /api/v1/evolution/concept` | Evolution |
+| `POST /api/v1/narrate` | Repository development history — evidence-only by default (`evidenceOnly: false` to call the configured narrator LLM instead, Phase 144); `lens` accepted for CLI flag-surface parity (currently a no-op — see Phase 144) |
+| `POST /api/v1/explain` | Bug/error/topic timeline — same `evidenceOnly` toggle, plus `log`/`files` context fields and a `lens`-driven `structuralContext` response field when `files` resolves to a graph node (Phase 144) |
+| `POST /api/v1/graph/hotspots` | Architectural risk ranking (Phase 110) |
+| `POST /api/v1/graph/{callers,callees,neighbors,path,relate,similar,unused,cycles,deps,co-change,blast-radius}` | Structural knowledge-graph traversal/analysis routes — one per `graph`/top-level CLI graph command, following `/hotspots`'s pattern (Phase 147). `graph build` is intentionally **not** exposed here (mutating truncate-and-rebuild op — CLI-only, same as `index vacuum`/`gc`/etc) |
 | `POST /api/v1/remote/index` | Remote repo indexing |
 | `GET /api/v1/remote/jobs/metrics`, `GET /api/v1/remote/jobs/:id/progress` | Job progress |
-| `POST /api/v1/analysis/clusters` | Clustering — accepts `{model, textModel, codeModel}` overrides for CLI/HTTP flag parity (Phase 140), though `computeClusters()` doesn't filter by model so behavior is unchanged today |
+| `POST /api/v1/analysis/clusters` | Clustering — accepts `{model, textModel, codeModel}` overrides for CLI/HTTP flag parity (Phase 140), though `computeClusters()` doesn't filter by model so behavior is unchanged today; full `iterations`/`edgeThreshold`/`enhancedKeywordsN` flag parity with the CLI (Phase 143), alongside the pre-existing `useEnhancedLabels` |
 | `POST /api/v1/analysis/change-points` | Change-point detection — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/author` | Author attribution — full CLI flag parity (Phase 141): `since`, `detail`, `includeCommits`, `hybrid`, `bm25Weight` all wired through, plus `{model, textModel, codeModel}` embedding overrides (Phase 140); response is `{ authors, commits? }` |
-| `POST /api/v1/analysis/impact` | Impact analysis — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
-| `POST /api/v1/analysis/semantic-diff` | Semantic diff — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
-| `POST /api/v1/analysis/semantic-blame` | Semantic blame — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/impact` | Impact analysis — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140); `chunks`/`level` and, most notably, `lens` (`semantic`\|`structural`\|`hybrid`) for full CLI parity (Phase 143) — `structural`/`hybrid` makes this route a thin `blast-radius` alias, closing a prior silent divergence where HTTP only ever did semantic-lens impact analysis |
+| `POST /api/v1/analysis/semantic-diff` | Semantic diff — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140); `hybrid`/`bm25Weight` (Phase 143) blend BM25 keyword matching into candidate selection via `hybridSearch()` + `computeSemanticDiff()`'s new `candidateBlobs` parameter — this also fixed a pre-existing CLI bug where `diff`'s `--hybrid`/`--bm25-weight` flags were declared but never wired to anything |
+| `POST /api/v1/analysis/semantic-blame` | Semantic blame — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140); `level` (`file`\|`symbol`, Phase 143) as an alternate spelling of the pre-existing `searchSymbols` boolean, matching the CLI's flag surface |
 | `POST /api/v1/analysis/dead-concepts` | Dead-concept detection |
-| `POST /api/v1/analysis/merge-audit` | Merge audit |
-| `POST /api/v1/analysis/merge-preview` | Merge preview |
-| `POST /api/v1/analysis/branch-summary` | Branch summary |
+| `POST /api/v1/analysis/merge-audit` | Merge audit — `base` (Phase 143) overrides merge-base detection, mirroring CLI `--base` |
+| `POST /api/v1/analysis/merge-preview` | Merge preview — `top`/`iterations`/`edgeThreshold`/`enhancedKeywordsN`/`useEnhancedLabels` (Phase 143) for CLI cluster-flag parity |
+| `POST /api/v1/analysis/branch-summary` | Branch summary — `enhancedLabels`/`enhancedKeywordsN` (Phase 143) slice `nearestConcepts[].topKeywords` in the JSON response, mirroring the CLI's text-mode keyword-count behavior |
 | `POST /api/v1/analysis/experts` | Experts / reviewer suggestions (Phase 61) |
-| `POST /api/v1/analysis/security-scan` | Vulnerability pattern similarity scan (Phase 43) |
+| `POST /api/v1/analysis/security-scan` | Vulnerability pattern similarity scan (Phase 43) — `highConfidenceOnly` (Phase 143) filters to `confidence === 'high'` findings only |
 | `POST /api/v1/analysis/health` | Time-bucketed health timeline (Phase 44) |
 | `POST /api/v1/analysis/debt` | Technical debt scoring (Phase 45) |
 | `POST /api/v1/analysis/doc-gap` | Documentation gap analysis (Phase 38) |
@@ -270,10 +277,14 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 | `POST /api/v1/analysis/triage` | Incident triage bundle (Phase 65) — accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/policy-check` | Automated CI gate checks (Phase 66) |
 | `POST /api/v1/analysis/ownership` | Ownership heatmap by concept (Phase 67) |
-| `POST /api/v1/analysis/workflow` | Workflow template runner — `pr-review \| incident \| release-audit` (Phase 68); accepts `{model, textModel, codeModel}` embedding overrides (Phase 140) |
+| `POST /api/v1/analysis/workflow` | Workflow template runner — all 8 productized CLI templates (`pr-review`, `incident`, `release-audit`, `onboarding`, `ownership-intel`, `arch-drift`, `knowledge-portal`, `regression-forecast`; Phase 68, expanded from 3 to all 8 in Phase 142); accepts `role`/`ref`/`base` generally (not gated to one template — `base` remains a no-op, mirroring the CLI's own unused `--base` flag) and `{model, textModel, codeModel}` embedding overrides (Phase 140) |
 | `POST /api/v1/analysis/eval` | Inline retrieval evaluation harness — P@k, R@k, MRR (Phase 64) |
 | `POST /api/v1/analysis/multi-repo-search` | **Deprecated** (Phase 138) — search across multiple registered repos; use `POST /api/v1/search` with a `repos` body param instead, which merges multi-repo results into the full search flag surface. Kept as a thin unchanged-shape alias, see `docs/deprecations.md` |
-| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 38 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115) |
+| `POST /api/v1/guide/chat` | Ask the gitsema guide agent a question — `{question, model?, guideModelId?, includeContext?, lens?, byok?}`, response `{answer, contextUsed, llmEnabled, roundtrips?, toolCallsUsed?}`. `lens: 'semantic'\|'structural'\|'hybrid'` (Phase 145) mirrors CLI `guide --lens` byte-for-byte — it appends the same "(Lens preference: ...)" hint suffix to the question before the agent loop runs, biasing tool choice toward `call_graph`/`blast_radius`/`hotspots` under `structural`/`hybrid`. Remote multi-turn/session support (an HTTP equivalent of CLI `guide --interactive`) remains deferred — see `docs/PLAN.md` Phase 145 and `docs/feature-ideas.md` |
+| `POST /api/v1/watch/add`, `POST /api/v1/watch/run` | Save a named watch query / run all saved queries and return new matches (Phase 53) |
+| `GET /api/v1/watch`, `DELETE /api/v1/watch/:name` | List all saved watch queries / remove one by name — full CLI `watch list`/`watch remove` parity (Phase 146) |
+| `POST /api/v1/insights/bisect`, `/lifecycle`, `/refactor-candidates`, `/cherry-pick-suggest`, `/file-diff`, `/pr-report`, `/regression-gate`, `/code-review`, `/heatmap`, `/map` | **Phase 148** — CLI commands (`bisect`, `lifecycle`, `refactor-candidates`, `cherry-pick-suggest`, `file-diff`, `pr-report`, `regression-gate`, `code-review`, `heatmap`, `map`) that previously had no HTTP route or MCP tool at all; all accept `{model, textModel, codeModel}` overrides where embedding is used. `regression-gate` returns HTTP 200/422 (pass/fail), same convention as `policy-check` |
+| `POST /api/v1/protocol/:operation` | Generic LSP/MCP remote-delegation dispatch — `mcp.<toolName>` runs any of the 56 MCP tools, `lsp.<op>` runs any of the 9 LSP data methods, both via the existing local dispatch (no duplicated logic) (Phase 113; `lsp.codeLens` added Phase 115; `graph.ts` tools added Phase 147, `insights.ts` tools added Phase 148) |
 | `GET /api/v1/capabilities` | Capabilities manifest (Phase 64) |
 | `POST /api/v1/auth/login` | Username/password → session token (Phase 122) |
 | `POST /api/v1/auth/logout` | Revoke the session token used to call it (Phase 122) |
@@ -612,6 +623,28 @@ Start with `gitsema tools mcp`. All tools share the same core logic as the CLI.
 | `workflow_run` | Run a named workflow template (`pr-review` \| `incident` \| `release-audit`) |
 | `call_graph` | Structural call-graph traversal — callers/callees of a symbol (Phase 108) |
 | `graph_neighbors` | Typed neighborhood of a graph node — any edge kinds, direction, depth (Phase 108) |
+| `hotspots` | Architectural risk = co-change × call-coupling × churn; `lens` selects which signals (Phase 110) |
+| `graph_path` | Shortest typed path between two graph nodes (Phase 108/147) |
+| `graph_relate` | Structural callers/callees + semantically similar blobs/symbols for a node (Phase 109/147) |
+| `graph_similar` | Structural (Jaccard shape) + semantic similarity to a node (Phase 109/147) |
+| `graph_unused` | Symbols/files with no inbound calls/imports edges — structural complement to `dead_concepts` (Phase 109/147) |
+| `cycles` | Cycle detection over typed edges, default `imports` (Phase 107/147) |
+| `deps` | Dependency/dependent closure over imports/calls/extends/implements edges (Phase 107/147) |
+| `co_change` | Files that historically change together with a path (Phase 107/147) |
+| `blast_radius` | Structural dependents + semantic neighbors — "what breaks if I touch this" (Phase 109/147) |
+| `narrate_repo` | Generate evidence (default) or an LLM narrative of repository development history |
+| `explain_issue_or_error` | Generate evidence (default) or an LLM explanation/timeline for a bug, error, or topic |
+| `get_skill` | Return the gitsema agent skill (usage + result-interpretation guidance for every tool) — MCP-only |
+| `semantic_bisect` | Binary search over commit history to find where a concept diverged from a "good" baseline (Phase 148) |
+| `refactor_candidates` | Find pairs of symbols/chunks/files similar enough to be refactoring candidates (Phase 148) |
+| `concept_lifecycle` | Lifecycle stages (born → growing → mature → declining → dead) of a concept over history (Phase 148) |
+| `cherry_pick_suggest` | Suggest commits to cherry-pick by semantic similarity of commit messages (Phase 148) |
+| `file_diff` | Semantic diff (cosine distance) between two versions of a single file (Phase 148) |
+| `pr_report` | Composite PR report: semantic diff, impacted modules, change-points, reviewer suggestions (Phase 148) |
+| `regression_gate` | CI gate: per-query base/head drift check against a threshold (Phase 148) |
+| `code_review` | Historical analogues + regression-risk heuristic for a unified diff (Phase 148) |
+| `activity_heatmap` | Count of distinct blob changes per time period, week or month (Phase 148) |
+| `semantic_map` | Most recent k-means cluster snapshot + per-cluster blob-assignment counts (Phase 148) |
 
 ---
 

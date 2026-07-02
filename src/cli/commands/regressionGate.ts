@@ -18,11 +18,11 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
-import { vectorSearch, cosineSimilarity } from '../../core/search/analysis/vectorSearch.js'
 import { buildProviderOrExit, resolveModels } from '../lib/provider.js'
 import { EXIT_USAGE, EXIT_RUNTIME, EXIT_GATE_FAILED } from '../lib/errors.js'
 import { resolveOutputs, getSink } from '../../utils/outputSink.js'
 import { isSafeGitRange } from '../../core/narrator/narrator.js'
+import { computeRegressionGate, type RegressionGateResult, type RegressionGateQuery } from '../../core/search/regressionGate.js'
 
 export interface RegressionGateOptions {
   base?: string
@@ -36,14 +36,8 @@ export interface RegressionGateOptions {
   out?: string[]
 }
 
-export interface RegressionResult {
-  query: string
-  threshold: number
-  baseScore: number
-  headScore: number
-  drift: number
-  passed: boolean
-}
+/** @deprecated use `RegressionGateResult` from `../../core/search/regressionGate.js` */
+export type RegressionResult = RegressionGateResult
 
 export async function regressionGateCommand(opts: RegressionGateOptions): Promise<void> {
   const baseRef = opts.base ?? 'main'
@@ -107,8 +101,9 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
     console.log()
   }
 
-  const results: RegressionResult[] = []
-
+  // Embed all queries up front (core function takes pre-embedded vectors, same
+  // convention as computeSemanticDiff/computeConceptLifecycle/etc).
+  const embeddedQueries: RegressionGateQuery[] = []
   for (const { query, threshold } of queries) {
     let embedding: number[]
     try {
@@ -117,32 +112,28 @@ export async function regressionGateCommand(opts: RegressionGateOptions): Promis
       console.error(`Could not embed query "${query}": ${err instanceof Error ? err.message : String(err)}`)
       process.exit(EXIT_RUNTIME)
     }
+    embeddedQueries.push({ query, embedding, threshold })
+  }
 
-    // Search at base/head ref. When refs are branch names the `branch` filter in
-    // vectorSearch restricts to blobs indexed on that branch (via blob_branches table).
-    // For commit hashes or tags, blob_branches may have no match and the filter is
-    // effectively a no-op (returns all blobs), which is safe but less precise.
-    const baseResults = await vectorSearch(embedding, { topK, branch: baseRef })
-    const headResults = await vectorSearch(embedding, { topK, branch: headRef })
+  // Search at base/head ref. When refs are branch names the `branch` filter in
+  // vectorSearch restricts to blobs indexed on that branch (via blob_branches table).
+  // For commit hashes or tags, blob_branches may have no match and the filter is
+  // effectively a no-op (returns all blobs), which is safe but less precise.
+  const report = await computeRegressionGate(embeddedQueries, { baseRef, headRef, topK })
+  const results = report.results
 
-    const baseScore = baseResults.length > 0 ? baseResults[0].score : 0
-    const headScore = headResults.length > 0 ? headResults[0].score : 0
-    const drift = Math.abs(baseScore - headScore)
-    const passed = drift <= threshold
-
-    results.push({ query, threshold, baseScore, headScore, drift, passed })
-
-    if (format === 'text') {
-      const icon = passed ? '✓' : '✗'
-      console.log(`${icon} "${query}"`)
-      console.log(`   base: ${baseScore.toFixed(4)}  head: ${headScore.toFixed(4)}  drift: ${drift.toFixed(4)} (threshold: ${threshold})`)
-      if (!passed) {
+  if (format === 'text') {
+    for (const r of results) {
+      const icon = r.passed ? '✓' : '✗'
+      console.log(`${icon} "${r.query}"`)
+      console.log(`   base: ${r.baseScore.toFixed(4)}  head: ${r.headScore.toFixed(4)}  drift: ${r.drift.toFixed(4)} (threshold: ${r.threshold})`)
+      if (!r.passed) {
         console.log(`   ↑ REGRESSION DETECTED`)
       }
     }
   }
 
-  const allPassed = results.every((r) => r.passed)
+  const allPassed = report.allPassed
 
   if (format === 'json') {
     const json = JSON.stringify({ base: baseHash, head: headHash, results, allPassed }, null, 2)
