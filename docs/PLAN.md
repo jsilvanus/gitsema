@@ -5432,7 +5432,7 @@ Phase 140 should generalize or fold into that rather than starting fresh.
 | 142 ✅ | `workflow` HTTP route parity (3/8 → 8/8 templates, `--role`/`--ref`/`--base`) | analysis.ts audit |
 | 143 ✅ | Analysis-route small-fixes bundle (merge-audit, merge-preview, branch-summary, clusters, security-scan, impact, semantic-diff, semantic-blame) | analysis.ts audit |
 | 144 | `narrate`/`explain` HTTP routes: evidence-only/LLM-prose toggle, `--log`/`--files`, `--lens` | remote/watch/guide/narrator audit |
-| 145 | `guide` HTTP route: `--lens` param, remote multi-turn/session support | remote/watch/guide/narrator audit |
+| 145 ✅ | `guide` HTTP route: `--lens` param (shipped); remote multi-turn/session support explicitly deferred, see phase entry + `docs/feature-ideas.md` | remote/watch/guide/narrator audit |
 | 146 | `watch list`/`watch remove` HTTP routes (currently only `add`/`run` exist) | remote/watch/guide/narrator audit |
 | 147 | Graph command family HTTP/MCP exposure (`graph build/callers/callees/path/relate/similar/unused`, `cycles`, `deps`, `co-change`, `blast-radius`) | Missing-endpoints audit; closes the pre-existing `docs/parity.md` "Expose graph commands to HTTP API" roadmap item |
 | 148 | Triage which remaining zero-HTTP/MCP-exposure CLI commands (`bisect`, `refactor-candidates`, `ci-diff`, `lifecycle`, `cherry-pick-suggest`, `regression-gate`, `code-review`, `cross-repo-similarity`, `pr-report`, `file-diff`, `diff`, `map`/`heatmap`/`project`) genuinely warrant exposure vs. are CLI/visualization-shaped by nature | Missing-endpoints audit |
@@ -5808,7 +5808,30 @@ chat is out of scope for now and only `--lens` ships in this phase.
 **Files likely touched:** `src/server/routes/guide.ts`, `docs/parity.md`,
 test files.
 
-**Status:** not started.
+**Status:** ✅ complete (lens only). `GuideChatBodySchema` in
+`src/server/routes/guide.ts` gained `lens: 'semantic'|'structural'|'hybrid'`.
+The route doesn't pass `lens` into `runGuide()`'s options (that function has
+no lens parameter) — instead, mirroring CLI `guideCommand`'s `withLens()` in
+`src/cli/commands/guide.ts` exactly, the route appends the identical
+`"\n\n(Lens preference: <lens> — prefer the structural tools call_graph,
+blast_radius, and hotspots where relevant.)"` hint suffix to the question
+before calling `runGuide()`, for `structural`/`hybrid` (semantic/default
+leaves the question unchanged, byte-for-byte identical to pre-Phase-145
+behavior). Covered by `tests/serverGuideRoute.test.ts`.
+
+**Deviation from spec — remote multi-turn/session support deliberately
+deferred:** the open design question in this phase's original scope (an
+HTTP equivalent of CLI `guide --interactive`/`-i`, which reuses one agent
+session across multiple turns) is **not resolved or implemented** here.
+This is a considered deferral, not a silent drop: building a `sessionId`
+scheme (client-generated vs. server-issued, TTL, in-memory vs. persisted
+session storage, cleanup/eviction policy) is a genuine cross-cutting design
+question — e.g. it needs an answer for multi-process/restart durability,
+and for auth (`repo_grants`/org boundaries) touching who can resume whose
+session — that deserves its own design pass rather than a speculative
+schema bolted onto this HTTP-parity phase. Tracked as a follow-up idea in
+`docs/feature-ideas.md` ("Remote multi-turn `guide` sessions over HTTP")
+for a future phase to pick up once that question is worked through.
 
 ---
 

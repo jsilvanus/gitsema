@@ -658,8 +658,18 @@ this section's prior open-ended bullets into concrete, numbered
   no-op (no per-file enrichment target on `narrate`); `files` was already a
   pre-existing CLI-side no-op for actual commit filtering (only consumed by
   lens enrichment) and is mirrored as-is, not fixed, per §2.2.
-- **Phase 145:** `guide` HTTP route — `--lens`, remote multi-turn/session
-  support (open design question).
+- **Phase 145:** `guide` HTTP route — `--lens`. ✅ done — `POST
+  /api/v1/guide/chat` now accepts `lens: 'semantic'|'structural'|'hybrid'`,
+  appending the identical "(Lens preference: ...)" hint suffix to the
+  question that CLI `guide --lens` appends (`withLens()` in
+  `src/cli/commands/guide.ts`), so structural/hybrid callers get the same
+  tool-choice bias over HTTP as on the CLI. The remote multi-turn/session
+  half of the original scope (HTTP equivalent of CLI `--interactive`/`-i`,
+  which reuses one agent session across turns) is a genuine open design
+  question — not "not started," a deliberate deferral — and was **not**
+  implemented in this phase; see `docs/PLAN.md`'s Phase 145 Status note and
+  `docs/feature-ideas.md` for the `sessionId`/TTL/storage tradeoffs to
+  resolve in a follow-up phase.
 - **Phase 146:** `watch list`/`watch remove` HTTP routes (currently missing
   entirely, not just flags).
 - **Phase 147:** graph command family HTTP/MCP exposure — closes the
