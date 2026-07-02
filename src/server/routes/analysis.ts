@@ -47,12 +47,23 @@ import { getActiveSession } from '../../core/db/sqlite.js'
 import { multiRepoSearch } from '../../core/indexing/repoRegistry.js'
 import { embedQuery } from '../../core/embedding/embedQuery.js'
 import { modelOverrideSchema, resolveRequestProvider, ModelOverrideError } from '../lib/modelOverrides.js'
+import { getCachedStorageProfile } from '../../core/storage/resolveProfile.js'
+import { blastRadius } from '../../core/graph/blastRadius.js'
+import { parseLens } from '../../cli/lib/lens.js'
 
+// Phase 143: `clusters`, `merge-preview` additionally accept `iterations`
+// (k-means max iterations), `edgeThreshold` (concept-graph edge cutoff), and
+// `enhancedKeywordsN` (TF-IDF keyword count when `useEnhancedLabels` is on) —
+// mirrors the CLI's `--iterations`/`--edge-threshold`/`--enhanced-keywords-n`
+// flags (see `src/cli/commands/clusters.ts` / `mergePreview.ts`).
 const ClustersBodySchema = z.object({
   ...modelOverrideSchema.shape,
   k: z.number().int().positive().optional().default(8),
   topKeywords: z.number().int().positive().optional().default(5),
   useEnhancedLabels: z.boolean().optional().default(false),
+  enhancedKeywordsN: z.number().int().positive().optional().default(5),
+  iterations: z.number().int().positive().optional().default(20),
+  edgeThreshold: z.number().min(0).optional().default(0.3),
   branch: z.string().optional(),
 })
 
@@ -86,11 +97,21 @@ const AuthorBodySchema = z.object({
   vss: z.boolean().optional().default(false),
 })
 
+// Phase 143: `chunks`/`level` mirror the CLI's `--chunks`/`--level` flags
+// (src/cli/commands/impact.ts). `lens` (semantic/structural/hybrid, default
+// `semantic`) closes the gap noted in review10/PLAN Phase 143 — this route
+// previously only ever did semantic-lens impact analysis, silently diverging
+// from the CLI's `impact` command, whose default lens (via `addLensOption`)
+// is also `semantic` but which additionally supports `--lens
+// structural|hybrid` as a thin alias over `blast-radius`.
 const ImpactBodySchema = z.object({
   ...modelOverrideSchema.shape,
   file: z.string().min(1),
   topK: z.number().int().positive().optional().default(10),
   branch: z.string().optional(),
+  chunks: z.boolean().optional().default(false),
+  level: z.enum(['file', 'chunk', 'symbol']).optional(),
+  lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('semantic'),
 })
 
 const ExpertsBodySchema = z.object({
@@ -137,6 +158,9 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
         k: opts.k,
         topKeywords: opts.topKeywords,
         useEnhancedLabels: opts.useEnhancedLabels,
+        enhancedKeywordsN: opts.enhancedKeywordsN,
+        maxIterations: opts.iterations,
+        edgeThreshold: opts.edgeThreshold,
         blobHashFilter,
       })
       res.json(report)
@@ -269,6 +293,23 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     const opts = parsed.data
+    const lens = parseLens(opts.lens, 'semantic')
+
+    // `--lens structural|hybrid` makes impact a thin alias over blast-radius
+    // (mirrors `impactCommand` in src/cli/commands/impact.ts, Phase 109/143) —
+    // true structural dependents instead of (or alongside) semantic similarity.
+    if (lens !== 'semantic') {
+      try {
+        const profile = getCachedStorageProfile(process.cwd())
+        const normalised = opts.file.trim().replace(/\\/g, '/').replace(/^\.\//, '')
+        const result = await blastRadius(profile.graph, normalised, { lens, topK: opts.topK })
+        res.json(result)
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+      }
+      return
+    }
+
     let provider: EmbeddingProvider
     try {
       provider = resolveRequestProvider(opts, textProvider)
@@ -280,6 +321,8 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       const report = await computeImpact(opts.file, provider, {
         topK: opts.topK,
         branch: opts.branch,
+        searchChunks: opts.level === 'chunk' || opts.chunks,
+        searchSymbols: opts.level === 'symbol',
       })
       res.json(report)
     } catch (err) {
@@ -288,6 +331,11 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   })
 
   // POST /analysis/semantic-diff
+  // Phase 143: `hybrid`/`bm25Weight` mirror the CLI `diff <ref1> <ref2>
+  // <query>` command's `--hybrid`/`--bm25-weight` flags (src/cli/commands/
+  // semanticDiff.ts) — previously declared on the CLI but never wired to
+  // anything; both the CLI and this route now actually blend BM25 keyword
+  // matching in via `hybridSearch()` when `hybrid` is set.
   const SemanticDiffBodySchema = z.object({
     ...modelOverrideSchema.shape,
     ref1: z.string().min(1),
@@ -295,6 +343,8 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     query: z.string().min(1),
     topK: z.number().int().positive().optional().default(10),
     branch: z.string().optional(),
+    hybrid: z.boolean().optional().default(false),
+    bm25Weight: z.number().min(0).max(1).optional().default(0.3),
   })
   router.post('/semantic-diff', async (req, res) => {
     const parsed = SemanticDiffBodySchema.safeParse(req.body)
@@ -312,8 +362,22 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       res.status(status).json({ error: `Embedding failed: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
+    let candidateBlobs: Array<{ blobHash: string; score: number }> | undefined
+    if (opts.hybrid) {
+      try {
+        const hybridResults = await hybridSearch(opts.query, qEmb, {
+          topK: Math.max(opts.topK * 5, 100),
+          bm25Weight: opts.bm25Weight,
+          branch: opts.branch,
+        })
+        candidateBlobs = hybridResults.map((r) => ({ blobHash: r.blobHash, score: r.score }))
+      } catch (err) {
+        res.status(500).json({ error: `Hybrid search failed: ${err instanceof Error ? err.message : String(err)}` })
+        return
+      }
+    }
     try {
-      const result = computeSemanticDiff(qEmb, opts.query, opts.ref1, opts.ref2, opts.topK, opts.branch)
+      const result = computeSemanticDiff(qEmb, opts.query, opts.ref1, opts.ref2, opts.topK, opts.branch, candidateBlobs)
       res.json(result)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
@@ -321,12 +385,18 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   })
 
   // POST /analysis/semantic-blame
+  // Phase 143: `level` (file/symbol) mirrors the CLI `blame`/`semantic-blame`
+  // command's `--level` flag (src/cli/commands/semanticBlame.ts) — `level:
+  // 'symbol'` is equivalent to `searchSymbols: true`, kept for backward
+  // compatibility with existing HTTP callers that already pass `searchSymbols`
+  // directly.
   const SemanticBlameBodySchema = z.object({
     ...modelOverrideSchema.shape,
     filePath: z.string().min(1),
     content: z.string().min(1),
     topK: z.number().int().positive().optional().default(3),
     searchSymbols: z.boolean().optional().default(false),
+    level: z.enum(['file', 'symbol']).optional(),
     branch: z.string().optional(),
   })
   router.post('/semantic-blame', async (req, res) => {
@@ -344,7 +414,8 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
       return
     }
     try {
-      const entries = await computeSemanticBlame(opts.filePath, opts.content, qEmbProvider, { topK: opts.topK, searchSymbols: opts.searchSymbols, branch: opts.branch })
+      const searchSymbols = opts.level === 'symbol' || opts.searchSymbols
+      const entries = await computeSemanticBlame(opts.filePath, opts.content, qEmbProvider, { topK: opts.topK, searchSymbols, branch: opts.branch })
       res.json(entries)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
@@ -382,9 +453,13 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   })
 
   // POST /analysis/merge-audit
+  // Phase 143: `base` mirrors the CLI `merge-audit` command's `--base <commit>`
+  // flag (src/cli/commands/mergeAudit.ts) — overrides merge-base detection
+  // (useful when the true merge-base isn't reachable, e.g. shallow clones).
   const MergeAuditBodySchema = z.object({
     branchA: z.string().min(1),
     branchB: z.string().min(1),
+    base: z.string().optional(),
     threshold: z.number().min(0).max(1).optional().default(0.85),
     topK: z.number().int().positive().optional().default(10),
   })
@@ -396,7 +471,7 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     }
     const opts = parsed.data
     try {
-      const mergeBase = getMergeBase(opts.branchA, opts.branchB)
+      const mergeBase = opts.base ?? getMergeBase(opts.branchA, opts.branchB)
       const blobsA = getBranchExclusiveBlobs(opts.branchA, mergeBase)
       const blobsB = getBranchExclusiveBlobs(opts.branchB, mergeBase)
       const report = computeSemanticCollisions(blobsA, blobsB, opts.branchA, opts.branchB, mergeBase, { threshold: opts.threshold, topK: opts.topK })
@@ -407,10 +482,23 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   })
 
   // POST /analysis/merge-preview
+  // Phase 143: `top`/`iterations`/`edgeThreshold`/`enhancedKeywordsN` mirror
+  // the CLI `merge-preview` command's `--top`/`--iterations`/
+  // `--edge-threshold`/`--enhanced-keywords-n` flags (src/cli/commands/
+  // mergePreview.ts). `useEnhancedLabels` isn't in the CLI's flag list for
+  // this route per the Phase 143 scope, but is added here too (deviation,
+  // noted in docs/PLAN.md) since `enhancedKeywordsN` is a no-op without it —
+  // `computeClusters`/`computeMergeImpact` only compute TF-IDF-enhanced
+  // keywords when `useEnhancedLabels` is true.
   const MergePreviewBodySchema = z.object({
     branch: z.string().min(1),
     into: z.string().optional().default('main'),
     k: z.number().int().positive().optional().default(8),
+    top: z.number().int().positive().optional().default(5),
+    iterations: z.number().int().positive().optional().default(20),
+    edgeThreshold: z.number().min(0).optional().default(0.3),
+    useEnhancedLabels: z.boolean().optional().default(false),
+    enhancedKeywordsN: z.number().int().positive().optional().default(5),
   })
   router.post('/merge-preview', async (req, res) => {
     const parsed = MergePreviewBodySchema.safeParse(req.body)
@@ -420,7 +508,14 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     }
     const opts = parsed.data
     try {
-      const report = await computeMergeImpact(opts.branch, opts.into, { k: opts.k })
+      const report = await computeMergeImpact(opts.branch, opts.into, {
+        k: opts.k,
+        topPaths: opts.top,
+        maxIterations: opts.iterations,
+        edgeThreshold: opts.edgeThreshold,
+        useEnhancedLabels: opts.useEnhancedLabels,
+        enhancedKeywordsN: opts.enhancedKeywordsN,
+      })
       res.json(report)
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
@@ -428,10 +523,23 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   })
 
   // POST /analysis/branch-summary
+  // Phase 143: `enhancedLabels`/`enhancedKeywordsN` mirror the CLI
+  // `branch-summary` command's `--enhanced-labels`/`--enhanced-keywords-n`
+  // flags (src/cli/commands/branchSummary.ts). Unlike `clusters`/
+  // `merge-preview`, `computeBranchSummary()` itself has no enhanced-labels
+  // concept — in the CLI these flags only control how many of each concept's
+  // already-computed `topKeywords` are *displayed* in the text renderer
+  // (`printResult`), while the CLI's own `--dump` JSON always returns the
+  // full unsliced array. Since this HTTP route's response is JSON-only (the
+  // API's only "view"), we apply that same slicing here so the flags have an
+  // observable effect: sliced to `enhancedKeywordsN` (default 8) when
+  // `enhancedLabels` is set, else the CLI's non-enhanced text default of 5.
   const BranchSummaryBodySchema = z.object({
     branch: z.string().min(1),
     baseBranch: z.string().optional().default('main'),
     topConcepts: z.number().int().positive().optional().default(5),
+    enhancedLabels: z.boolean().optional().default(false),
+    enhancedKeywordsN: z.number().int().positive().optional().default(8),
   })
   router.post('/branch-summary', async (req, res) => {
     const parsed = BranchSummaryBodySchema.safeParse(req.body)
@@ -442,7 +550,12 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     const opts = parsed.data
     try {
       const report = await computeBranchSummary(opts.branch, opts.baseBranch, { topConcepts: opts.topConcepts })
-      res.json(report)
+      const keywordsN = opts.enhancedLabels ? opts.enhancedKeywordsN : 5
+      const nearestConcepts = report.nearestConcepts.map((c) => ({
+        ...c,
+        topKeywords: c.topKeywords.slice(0, keywordsN),
+      }))
+      res.json({ ...report, nearestConcepts })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -451,9 +564,13 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
   // POST /analysis/security-scan
   // Returns semantic similarity findings for common vulnerability patterns.
   // Results are similarity scores, NOT confirmed vulnerabilities.
+  // Phase 143: `highConfidenceOnly` mirrors the CLI `security-scan` command's
+  // `--high-confidence-only` flag (src/cli/commands/securityScan.ts) — filters
+  // findings down to `confidence === 'high'` (both semantic + structural signal).
   const SecurityScanBodySchema = z.object({
     top: z.number().int().positive().optional().default(10),
     model: z.string().optional(),
+    highConfidenceOnly: z.boolean().optional().default(false),
   })
   router.post('/security-scan', async (req, res) => {
     const parsed = SecurityScanBodySchema.safeParse(req.body)
@@ -464,7 +581,10 @@ export function analysisRouter(deps: AnalysisRouterDeps): Router {
     const opts = parsed.data
     try {
       const session = getActiveSession()
-      const findings = await scanForVulnerabilities(session, textProvider, { top: opts.top, model: opts.model })
+      let findings = await scanForVulnerabilities(session, textProvider, { top: opts.top, model: opts.model })
+      if (opts.highConfidenceOnly) {
+        findings = findings.filter((f) => f.confidence === 'high')
+      }
       res.json({ disclaimer: 'Results are semantic similarity scores, not confirmed vulnerabilities. Manual review required.', findings })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
