@@ -12,6 +12,9 @@ import { redactAll } from './redact.js'
 import type { NarratorProvider } from './types.js'
 import { buildNarratorSystemPrompt } from './interpretations.js'
 import { logger } from '../../utils/logger.js'
+import { isSafeGitRange } from '../git/refSafety.js'
+
+export { isSafeGitRange } from '../git/refSafety.js'
 
 // ---------------------------------------------------------------------------
 // Git log streaming
@@ -31,11 +34,6 @@ const MAX_COMMITS_DEFAULT = 500
  * `POST /api/v1/narrate` request body, so it must never be interpolated into a
  * shell or used to inject flags.
  */
-export function isSafeGitRange(range: string): boolean {
-  // First char must be a normal ref character (not `-`); remaining chars may
-  // include the range/exclusion punctuation git uses (`.` covers `..`/`...`).
-  return /^[A-Za-z0-9._/~^@{}][A-Za-z0-9._/~^@{}-]*$/.test(range)
-}
 
 /**
  * Stream commits from git log as an array of CommitEvent records.
