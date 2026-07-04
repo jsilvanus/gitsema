@@ -145,7 +145,7 @@ export async function narrateCommand(
   // --narrate is shorthand for --no-evidence-only; default is evidence-only
   const evidenceOnly = opts.narrate ? false : (opts.evidenceOnly !== false)
   const narratorModelId = opts.narratorModelId !== undefined ? parseInt(opts.narratorModelId, 10) : undefined
-  const provider = resolveNarratorProvider({
+  const provider = await resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
     byok: parseByokCliOpts(opts),
@@ -200,7 +200,7 @@ export async function explainCommand(
   // --narrate is shorthand for --no-evidence-only; default is evidence-only
   const evidenceOnly = opts.narrate ? false : (opts.evidenceOnly !== false)
   const narratorModelId = opts.narratorModelId !== undefined ? parseInt(opts.narratorModelId, 10) : undefined
-  const provider = resolveNarratorProvider({
+  const provider = await resolveNarratorProvider({
     narratorModelId,
     modelName: opts.model,
     byok: parseByokCliOpts(opts),

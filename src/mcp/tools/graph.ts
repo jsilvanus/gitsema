@@ -181,7 +181,7 @@ export function registerGraphTools(server: McpServer) {
     {
       symbol: z.string().describe('A symbol qualified name, file path, or literal node key (file:..., symbol:..., external:...)'),
       lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid').describe('Which lens(es) to include (default: hybrid)'),
-      top_k: z.number().int().positive().optional().describe('Number of semantic neighbors to return (default 10)'),
+      top_k: z.number().int().positive().max(500).optional().describe('Number of semantic neighbors to return (default 10)'),
     },
     async ({ symbol, lens, top_k }) => {
       try {
@@ -216,7 +216,7 @@ export function registerGraphTools(server: McpServer) {
     {
       symbol: z.string().describe('A symbol qualified name, file path, or literal node key (file:..., symbol:..., external:...)'),
       lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid').describe('Which lens(es) to include (default: hybrid)'),
-      top_k: z.number().int().positive().optional().describe('Number of results to return per lens (default 10)'),
+      top_k: z.number().int().positive().max(500).optional().describe('Number of results to return per lens (default 10)'),
     },
     async ({ symbol, lens, top_k }) => {
       try {
@@ -335,7 +335,7 @@ export function registerGraphTools(server: McpServer) {
     'Files that historically change together with a given path (Phase 107/147), materialized as `co_change` edges by `gitsema graph build` from `blob_commits` history.',
     {
       path: z.string().describe('File path'),
-      top: z.number().int().positive().optional().default(10).describe('Number of co-changing files to return (default 10)'),
+      top: z.number().int().positive().max(500).optional().default(10).describe('Number of co-changing files to return (default 10)'),
     },
     async ({ path, top }) => {
       try {
@@ -364,7 +364,7 @@ export function registerGraphTools(server: McpServer) {
       symbol: z.string().describe('A symbol qualified name, file path, or literal node key (file:..., symbol:..., external:...)'),
       lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid').describe('Which lens(es) to include (default: hybrid)'),
       depth: z.number().int().positive().optional().describe('Structural traversal depth (default: unlimited within MAX_GRAPH_TRAVERSAL_DEPTH)'),
-      top_k: z.number().int().positive().optional().describe('Number of semantic neighbors to return (default 10)'),
+      top_k: z.number().int().positive().max(500).optional().describe('Number of semantic neighbors to return (default 10)'),
     },
     async ({ symbol, lens, depth, top_k }) => {
       try {

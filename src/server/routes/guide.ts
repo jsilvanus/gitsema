@@ -28,6 +28,7 @@ import { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { runGuide } from '../../cli/commands/guide.js'
 import { parseLens } from '../../cli/lib/lens.js'
+import { ByokUrlValidationError } from '../../core/narrator/resolveNarrator.js'
 
 const router = Router()
 
@@ -100,6 +101,10 @@ router.post('/chat', async (req: Request, res: Response) => {
       ...(result.toolCallsUsed !== undefined ? { toolCallsUsed: result.toolCallsUsed } : {}),
     })
   } catch (err) {
+    if (err instanceof ByokUrlValidationError) {
+      res.status(400).json({ error: err.message })
+      return
+    }
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
   }
 })

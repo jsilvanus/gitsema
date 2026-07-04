@@ -1586,6 +1586,11 @@ describe('POST /api/v1/graph/relate', () => {
     const res = await request(app).post('/api/v1/graph/relate').send({})
     expect(res.status).toBe(400)
   })
+
+  it('rejects topK values above the hard cap', async () => {
+    const res = await request(app).post('/api/v1/graph/relate').send({ symbol: 'foo', topK: 600 })
+    expect(res.status).toBe(400)
+  })
 })
 
 describe('POST /api/v1/graph/similar', () => {
@@ -1943,6 +1948,14 @@ describe('POST /api/v1/narrate — Phase 144 evidenceOnly toggle', () => {
       .post('/api/v1/narrate')
       .send({ since: '2099-01-01', evidenceOnly: 'yes' })
     expect(res.status).toBe(400)
+  })
+
+  it('rejects blocked BYOK endpoints with 400', async () => {
+    const res = await request(app)
+      .post('/api/v1/narrate')
+      .send({ since: '2099-01-01', byok: { httpUrl: 'http://127.0.0.1:9999' } })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/blocked/i)
   })
 })
 
