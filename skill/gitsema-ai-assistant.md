@@ -677,8 +677,8 @@ This section is generated from `src/core/narrator/interpretations.ts` (result in
 
 - Usage: Find when a concept first appeared in the codebase (results sorted earliest-first).
 - Parameters: `query` (required) — Natural-language query describing the concept to search for.; `top_k` — Maximum number of results to return (default 10, max 25).; `hybrid` — Blend vector similarity with BM25 keyword matching.; `branch` — Restrict results to blobs seen on this branch.
-- Result shape: Lines "<date>  path  [blobHash]  (score: …)", oldest first.
-- How to read it: The earliest dated row is the best evidence for a concept's origin, but only among semantically-matching blobs — confirm relevance via the score before claiming an origin date. Cite the date and short blob hash.
+- Result shape: Lines "<date>  path  [blob:blobHash]  (score: …)", oldest first.
+- How to read it: The earliest dated row is the best evidence for a concept's origin, but only among semantically-matching blobs — confirm relevance via the score before claiming an origin date. Cite the date and short blob hash. The [blob:…] prefix identifies a blob hash (content-addressed) — not a commit hash.
 
 **`multi_repo_search`** — Semantic search across multiple registered gitsema repos.
 
@@ -691,15 +691,15 @@ This section is generated from `src/core/narrator/interpretations.ts` (result in
 
 - Usage: Semantic search enriched with first-seen date and commit, optionally sorted by date.
 - Parameters: `query` (required) — Natural-language query to embed and search for.; `top_k` — Maximum number of results to return (default 10, max 25).; `before` — Only include blobs first seen before this date (YYYY-MM-DD).; `after` — Only include blobs first seen after this date (YYYY-MM-DD).; `sort_by_date` — Sort results by first-seen date (ascending) instead of score.; `branch` — Restrict results to blobs seen on this branch.
-- Result shape: Rendered "score  path  [blobHash]  first: <date>" lines.
-- How to read it: Use when the time dimension matters. Score still ranks relevance; the first-seen date tells you when that content entered history. Date-sorted output surfaces the earliest occurrences.
+- Result shape: Rendered "score  path  [blob:blobHash]  first: <date>" lines.
+- How to read it: Use when the time dimension matters. Score still ranks relevance; the first-seen date tells you when that content entered history. Date-sorted output surfaces the earliest occurrences. The [blob:…] prefix identifies a blob hash (content-addressed) — not a commit hash.
 
 **`semantic_search`** — Vector similarity search over indexed history.
 
 - Usage: Vector similarity search over the indexed git history. Returns the top matching files/blobs.
 - Parameters: `query` (required) — Natural-language search query.; `top_k` — Number of results to return (default 10, max 25).; `branch` — Restrict results to blobs seen on this branch.
 - Result shape: { query, results: [{ paths[], score, blobHash }] }.
-- How to read it: Ranked by cosine similarity (0–1): roughly >0.75 is a strong match, 0.5–0.75 is related, <0.5 is weak. Each result is a content-addressed blob; the same blob can appear under several paths. Use the top paths as the most relevant files; cite the short blob hash.
+- How to read it: Ranked by cosine similarity (0–1): roughly >0.75 is a strong match, 0.5–0.75 is related, <0.5 is weak. Each result is a content-addressed blob; the same blob can appear under several paths. Use the top paths as the most relevant files; cite the short blob hash. In text output, hashes appear as [blob:abc1234] — the "blob:" prefix marks these as blob hashes (content-addressed, internal), not commit hashes.
 
 ### History & temporal drift
 

@@ -31,7 +31,7 @@ const registry = new OpenAPIRegistry()
 const BlobResultSchema = registry.register(
   'BlobResult',
   z.object({
-    blobHash: z.string().openapi({ description: 'Git blob SHA-1' }),
+    blobHash: z.string().openapi({ description: 'Git blob OID (content-addressed hash, 40 hex chars). Identifies blob content uniquely — not a commit hash.' }),
     path: z.string().openapi({ description: 'File path' }),
     score: z.number().openapi({ description: 'Similarity score [0, 1]' }),
     firstSeen: z.string().optional().openapi({ description: 'ISO-8601 timestamp of first commit' }),

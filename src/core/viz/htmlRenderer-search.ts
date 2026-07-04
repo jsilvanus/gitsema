@@ -40,7 +40,7 @@ th{color:#565f89;text-align:left}
 <div class="hdr"><h1>Search Results</h1><div class="stat">query: <b>${escHtml(query)}</b></div><div class="stat">hits: <b>${escHtml(data.results.length)}</b></div></div>
 <div style="padding:12px;overflow:auto">
   <table class="table" id="results-table">
-    <thead><tr><th>Score</th><th>Path</th><th>First seen</th><th>Hash</th></tr></thead>
+    <thead><tr><th>Score</th><th>Path</th><th>First seen</th><th>Blob Hash</th></tr></thead>
     <tbody></tbody>
   </table>
 </div>
@@ -58,7 +58,7 @@ ${COMMON_JS}
       '<td class="score">' + (r.score||0).toFixed(3) + '</td>' +
       '<td class="path">' + esc(path) + (sig?('<div class="sig">'+esc(sig)+'</div>'): '') + '</td>' +
       '<td class="date">' + esc(date) + '</td>' +
-      '<td class="hash">' + esc(r.blobHash.slice(0,7)) + '</td>' +
+      '<td class="hash">blob:' + esc(r.blobHash.slice(0,7)) + '</td>' +
       '</tr>';
     tb.insertAdjacentHTML('beforeend', row);
   });
@@ -132,7 +132,7 @@ th,td{padding:8px;border-bottom:1px solid #232534}
 <body>
 <div class="hdr"><h1>First Seen</h1><div class="stat">query: <b>${escHtml(query)}</b></div><div class="stat">hits: <b>${escHtml(data.results.length)}</b></div></div>
 <div style="padding:12px;overflow:auto">
-  <table class="table" id="fs-table"><thead><tr><th>Date</th><th>Score</th><th>Path</th><th>Hash</th></tr></thead><tbody></tbody></table>
+  <table class="table" id="fs-table"><thead><tr><th>Date</th><th>Score</th><th>Path</th><th>Blob Hash</th></tr></thead><tbody></tbody></table>
 </div>
 <script>
 var DATA=${safeJson(data)};
@@ -141,7 +141,7 @@ ${COMMON_JS}
   var tb=document.querySelector('#fs-table tbody');
   DATA.results.forEach(function(r){
     var date=r.firstSeen?new Date(r.firstSeen*1000).toISOString().slice(0,10):'-';
-    tb.insertAdjacentHTML('beforeend','<tr><td>'+esc(date)+'</td><td class="score">'+(r.score||0).toFixed(3)+'</td><td>'+esc(r.path)+'</td><td class="hash">'+esc(r.blobHash.slice(0,7))+'</td></tr>');
+    tb.insertAdjacentHTML('beforeend','<tr><td>'+esc(date)+'</td><td class="score">'+(r.score||0).toFixed(3)+'</td><td>'+esc(r.path)+'</td><td class="hash">blob:'+esc(r.blobHash.slice(0,7))+'</td></tr>');
   });
 })();
 </script>
@@ -150,7 +150,7 @@ ${COMMON_JS}
 }
 
 export function renderImpactHtml(report: ImpactReport, targetPath: string): string {
-  const data = { targetPath, results: report.results.map((r)=>({path:r.paths[0]||'',score:r.score,module:r.module,hash:r.blobHash.slice(0,7)})), groups: report.moduleGroups||[] }
+  const data = { targetPath, results: report.results.map((r)=>({path:r.paths[0]||'',score:r.score,module:r.module,hash:'blob:'+r.blobHash.slice(0,7)})), groups: report.moduleGroups||[] }
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -165,7 +165,7 @@ th,td{padding:8px;border-bottom:1px solid #232534}
 <body>
 <div class="hdr"><h1>Impact Analysis</h1><div class="stat">target: <b>${escHtml(targetPath)}</b></div><div class="stat">coupled: <b>${escHtml(data.results.length)}</b></div></div>
 <div style="padding:12px;overflow:auto">
-  <table class="table"><thead><tr><th>Score</th><th>Path</th><th>Module</th><th>Hash</th></tr></thead><tbody>${data.results.map(r=>`<tr><td class="score">${r.score.toFixed(3)}</td><td class="path">${escHtml(r.path)}</td><td class="meta">${escHtml(r.module)}</td><td class="hash">${escHtml(r.hash)}</td></tr>`).join('')}</tbody></table>
+  <table class="table"><thead><tr><th>Score</th><th>Path</th><th>Module</th><th>Blob Hash</th></tr></thead><tbody>${data.results.map(r=>`<tr><td class="score">${r.score.toFixed(3)}</td><td class="path">${escHtml(r.path)}</td><td class="meta">${escHtml(r.module)}</td><td class="hash">${escHtml(r.hash)}</td></tr>`).join('')}</tbody></table>
   <h3 style="color:#7aa2f7">Cross-module coupling</h3>
   <div>${data.groups.map(g=>`<div style="margin:6px 0">${escHtml(g.module)}: ${g.maxScore.toFixed(3)} (${g.count})</div>`).join('')}</div>
 </div>

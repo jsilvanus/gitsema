@@ -57,7 +57,7 @@ export function renderResults(results: SearchResult[], showHeadings = true): str
 		const score = typeof r.score === 'number' ? formatScore(r.score) : String(r.score)
 		const path = (r.paths && r.paths[0]) ?? '(unknown path)'
 		const hash = shortHash(r.blobHash)
-		let line = `${score}  ${path}  [${hash}]`
+		let line = `${score}  ${path}  [blob:${hash}]`
 		if (r.firstSeen !== undefined && r.firstSeen !== null) {
 			line += `  ${formatDate(r.firstSeen)}`
 		}

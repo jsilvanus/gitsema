@@ -200,7 +200,7 @@ ${COMMON_JS}
   var container = document.getElementById("fe-table");
   entries.forEach(function(e, i) {
     var date = e.timestamp ? new Date(e.timestamp * 1000).toISOString().slice(0, 10) : "?";
-    var hash = e.commitHash ? e.commitHash.slice(0, 7) : "?";
+    var hash = e.commitHash ? "commit:" + e.commitHash.slice(0, 7) : "?";
     var dist = e.distFromPrev.toFixed(3);
     var pct = Math.min(100, Math.round(e.distFromPrev / 2 * 100));
     var barColor = e.distFromPrev >= THR ? "#f7768e" : "#7aa2f7";

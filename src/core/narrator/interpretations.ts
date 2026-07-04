@@ -156,7 +156,9 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
     interpretation:
       'Ranked by cosine similarity (0–1): roughly >0.75 is a strong match, 0.5–0.75 is related, ' +
       '<0.5 is weak. Each result is a content-addressed blob; the same blob can appear under several ' +
-      'paths. Use the top paths as the most relevant files; cite the short blob hash.',
+      'paths. Use the top paths as the most relevant files; cite the short blob hash. ' +
+      'In text output, hashes appear as [blob:abc1234] — the "blob:" prefix marks these as blob hashes ' +
+      '(content-addressed, internal), not commit hashes.',
   },
   code_search: {
     name: 'code_search',
@@ -178,20 +180,22 @@ export const TOOL_INTERPRETATIONS: Record<string, ToolInterpretation> = {
     name: 'search_history',
     category: 'search',
     summary: 'Semantic search enriched with first-seen date / commit, optionally date-sorted.',
-    resultShape: 'Rendered "score  path  [blobHash]  first: <date>" lines.',
+    resultShape: 'Rendered "score  path  [blob:blobHash]  first: <date>" lines.',
     interpretation:
       'Use when the time dimension matters. Score still ranks relevance; the first-seen date tells you ' +
-      'when that content entered history. Date-sorted output surfaces the earliest occurrences.',
+      'when that content entered history. Date-sorted output surfaces the earliest occurrences. ' +
+      'The [blob:…] prefix identifies a blob hash (content-addressed) — not a commit hash.',
   },
   first_seen: {
     name: 'first_seen',
     category: 'search',
     summary: 'Find when a concept first appeared (results sorted earliest-first).',
-    resultShape: 'Lines "<date>  path  [blobHash]  (score: …)", oldest first.',
+    resultShape: 'Lines "<date>  path  [blob:blobHash]  (score: …)", oldest first.',
     interpretation:
       'The earliest dated row is the best evidence for a concept\'s origin, but only among ' +
       'semantically-matching blobs — confirm relevance via the score before claiming an origin date. ' +
-      'Cite the date and short blob hash.',
+      'Cite the date and short blob hash. The [blob:…] prefix identifies a blob hash (content-addressed) ' +
+      '— not a commit hash.',
   },
   multi_repo_search: {
     name: 'multi_repo_search',
