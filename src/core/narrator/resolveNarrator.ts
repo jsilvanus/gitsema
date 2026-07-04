@@ -12,6 +12,8 @@ import type Database from 'better-sqlite3'
 import type { ByokCredentials, NarratorModelConfig, NarratorModelParams, NarratorProvider } from './types.js'
 import { isCliParams } from './types.js'
 import { createHash } from 'node:crypto'
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 import { createChattydeerProvider, createDisabledProvider } from './chattydeerProvider.js'
 import { createCliProvider } from './cliProvider.js'
 import { getActiveSession } from '../db/sqlite.js'
@@ -19,6 +21,116 @@ import { getActiveSession } from '../db/sqlite.js'
 // ---------------------------------------------------------------------------
 // Settings helpers
 // ---------------------------------------------------------------------------
+
+export class ByokUrlValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ByokUrlValidationError'
+  }
+}
+
+function getAllowlistedByokHosts(): string[] {
+  return (process.env.GITSEMA_BYOK_ALLOW_HOSTS ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
+
+function isBlockedIPv4(address: string): boolean {
+  const octets = address.split('.').map((part) => Number.parseInt(part, 10))
+  if (octets.length !== 4 || octets.some((part) => Number.isNaN(part))) return false
+  const [first, second] = octets
+  if (first === 127) return true
+  if (first === 0) return true
+  if (first === 10) return true
+  if (first === 169 && second === 254) return true
+  if (first === 172 && second >= 16 && second <= 31) return true
+  if (first === 192 && second === 168) return true
+  return false
+}
+
+function isBlockedIPv6(address: string): boolean {
+  if (address === '::1') return true
+  if (address.startsWith('fe8') || address.startsWith('fe9') || address.startsWith('fea') || address.startsWith('feb')) return true
+  if (address.startsWith('fc') || address.startsWith('fd')) return true
+  return false
+}
+
+function isBlockedAddress(address: string): boolean {
+  if (isIP(address) === 4) return isBlockedIPv4(address)
+  if (isIP(address) === 6) return isBlockedIPv6(address)
+  return false
+}
+
+function isIPv4CidrMatch(address: string, cidr: string): boolean {
+  const [network, prefixText] = cidr.split('/')
+  if (!network || !prefixText) return false
+  const prefix = Number.parseInt(prefixText, 10)
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false
+  const octets = address.split('.').map((part) => Number.parseInt(part, 10))
+  if (octets.length !== 4 || octets.some((part) => Number.isNaN(part))) return false
+  const networkOctets = network.split('.').map((part) => Number.parseInt(part, 10))
+  if (networkOctets.length !== 4 || networkOctets.some((part) => Number.isNaN(part))) return false
+  const ipValue = ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0
+  const networkValue = ((networkOctets[0] << 24) | (networkOctets[1] << 16) | (networkOctets[2] << 8) | networkOctets[3]) >>> 0
+  if (prefix === 0) return true
+  const mask = prefix === 0 ? 0 : ((0xffffffff << (32 - prefix)) >>> 0)
+  return (ipValue & mask) === (networkValue & mask)
+}
+
+function isAllowlistedHost(hostname: string, allowlist: string[]): boolean {
+  const normalizedHost = hostname.toLowerCase()
+  return allowlist.some((entry) => {
+    const normalizedEntry = entry.toLowerCase()
+    if (!normalizedEntry) return false
+    if (normalizedEntry === normalizedHost) return true
+    if (isIP(normalizedHost) === 4 && normalizedEntry.includes('/')) {
+      return isIPv4CidrMatch(normalizedHost, normalizedEntry)
+    }
+    return false
+  })
+}
+
+async function validateByokUrl(byokUrl: string): Promise<void> {
+  let parsed: URL
+  try {
+    parsed = new URL(byokUrl)
+  } catch {
+    throw new ByokUrlValidationError(`Invalid BYOK URL: ${byokUrl}`)
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new ByokUrlValidationError(`BYOK URL must use http or https: ${byokUrl}`)
+  }
+
+  const host = parsed.hostname.toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost') || host.includes('metadata')) {
+    throw new ByokUrlValidationError(`BYOK URL resolves to a blocked host: ${host}`)
+  }
+
+  const allowlist = getAllowlistedByokHosts()
+  if (allowlist.length > 0 && isAllowlistedHost(host, allowlist)) return
+
+  const ipVersion = isIP(host)
+  if (ipVersion === 4 || ipVersion === 6) {
+    const address = host
+    if (isBlockedAddress(address)) {
+      throw new ByokUrlValidationError(`BYOK URL resolves to a blocked address: ${address}`)
+    }
+    return
+  }
+
+  try {
+    const resolved = await lookup(host, { all: true })
+    const blocked = resolved.some(({ address }) => isBlockedAddress(address))
+    if (blocked) {
+      throw new ByokUrlValidationError(`BYOK URL resolves to a blocked host: ${host}`)
+    }
+  } catch (err) {
+    if (err instanceof ByokUrlValidationError) throw err
+    // Ignore DNS failures — the URL may still be valid but temporarily unresolved.
+  }
+}
 
 export function getSetting(rawDb: InstanceType<typeof Database>, key: string): string | null {
   const row = rawDb.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined
@@ -185,7 +297,8 @@ export function getActiveNarratorConfig(rawDb: InstanceType<typeof Database>): N
  * BYOK credentials (Phase 130 / locked-model-set-plan.md §5 Phase 3). `id: -1`
  * is a sentinel — this config is never written to or read from `embed_config`.
  */
-export function byokConfig(byok: ByokCredentials): NarratorModelConfig {
+export async function byokConfig(byok: ByokCredentials): Promise<NarratorModelConfig> {
+  await validateByokUrl(byok.httpUrl)
   return {
     id: -1,
     name: byok.model ?? 'byok',
@@ -225,13 +338,14 @@ export function createNarratorProviderFor(config: NarratorModelConfig | null): N
  *   3. Active narrator config from settings table
  *   4. Disabled (safe-by-default)
  */
-export function resolveNarratorProvider(opts: {
+export async function resolveNarratorProvider(opts: {
   narratorModelId?: number
   modelName?: string
   byok?: ByokCredentials
-} = {}): NarratorProvider {
+} = {}): Promise<NarratorProvider> {
   if (opts.byok) {
-    return createNarratorProviderFor(byokConfig(opts.byok))
+    const config = await byokConfig(opts.byok)
+    return createNarratorProviderFor(config)
   }
 
   const { rawDb } = getActiveSession()
@@ -340,13 +454,13 @@ export function deleteGuideConfig(rawDb: InstanceType<typeof Database>, name: st
  * `gitsema guide` agent loop, which needs raw params (httpUrl/apiKey/model)
  * to construct a `createChatProvider` from `@jsilvanus/chattydeer`.
  */
-export function resolveGuideConfig(opts: {
+export async function resolveGuideConfig(opts: {
   guideModelId?: number
   modelName?: string
   byok?: ByokCredentials
-} = {}): NarratorModelConfig | null {
+} = {}): Promise<NarratorModelConfig | null> {
   if (opts.byok) {
-    return byokConfig(opts.byok)
+    return await byokConfig(opts.byok)
   }
 
   const { rawDb } = getActiveSession()
@@ -362,11 +476,11 @@ export function resolveGuideConfig(opts: {
 }
 
 /** Resolve the active guide NarratorProvider from the DB. Falls back to narrator config, then disabled. */
-export function resolveGuideProvider(opts: {
+export async function resolveGuideProvider(opts: {
   guideModelId?: number
   modelName?: string
   byok?: ByokCredentials
-} = {}): NarratorProvider {
-  const config = resolveGuideConfig(opts)
+} = {}): Promise<NarratorProvider> {
+  const config = await resolveGuideConfig(opts)
   return createNarratorProviderFor(config)
 }

@@ -186,7 +186,7 @@ describe('resolveNarratorProvider()', () => {
       return { ...actual, getActiveSession: () => testSession }
     })
     const { resolveNarratorProvider: resolveNarrator } = await import('../src/core/narrator/resolveNarrator.js')
-    const provider = resolveNarrator({})
+    const provider = await resolveNarrator({})
     expect(provider.modelName).toBe('narrator')
 
     const res = await provider.narrate({ systemPrompt: 'sys', userPrompt: 'user' })

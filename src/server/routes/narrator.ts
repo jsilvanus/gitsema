@@ -13,7 +13,7 @@
 
 import { Router } from 'express'
 import { z } from 'zod'
-import { resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
+import { ByokUrlValidationError, resolveNarratorProvider } from '../../core/narrator/resolveNarrator.js'
 import { runNarrate, runExplain } from '../../core/narrator/narrator.js'
 import { parseLens } from '../../cli/lib/lens.js'
 
@@ -99,11 +99,21 @@ narratorRouter.post('/narrate', async (req, res) => {
   }
 
   const body = parsed.data
-  const provider = resolveNarratorProvider({
-    narratorModelId: body.narratorModelId,
-    modelName: body.model,
-    byok: body.byok,
-  })
+  let provider: Awaited<ReturnType<typeof resolveNarratorProvider>>
+  try {
+    provider = await resolveNarratorProvider({
+      narratorModelId: body.narratorModelId,
+      modelName: body.model,
+      byok: body.byok,
+    })
+  } catch (err) {
+    if (err instanceof ByokUrlValidationError) {
+      res.status(400).json({ error: err.message })
+      return
+    }
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    return
+  }
 
   try {
     const result = await runNarrate(provider, {
@@ -144,11 +154,21 @@ narratorRouter.post('/explain', async (req, res) => {
   }
 
   const body = parsed.data
-  const provider = resolveNarratorProvider({
-    narratorModelId: body.narratorModelId,
-    modelName: body.model,
-    byok: body.byok,
-  })
+  let provider: Awaited<ReturnType<typeof resolveNarratorProvider>>
+  try {
+    provider = await resolveNarratorProvider({
+      narratorModelId: body.narratorModelId,
+      modelName: body.model,
+      byok: body.byok,
+    })
+  } catch (err) {
+    if (err instanceof ByokUrlValidationError) {
+      res.status(400).json({ error: err.message })
+      return
+    }
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    return
+  }
 
   try {
     const result = await runExplain(provider, body.topic, {

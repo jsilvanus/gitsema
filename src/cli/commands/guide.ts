@@ -311,7 +311,7 @@ export async function runGuide(question: string, opts: {
   if (session) {
     config = session.config
   } else {
-    config = resolveGuideConfig({ guideModelId: opts.guideModelId, modelName: opts.model, byok: opts.byok })
+    config = await resolveGuideConfig({ guideModelId: opts.guideModelId, modelName: opts.model, byok: opts.byok })
   }
 
   // Safe-by-default: no model configured — no network access / subprocess.
@@ -410,7 +410,7 @@ export async function guideCommand(
 
     // Resolve the model config once; build a shared session lazily on first
     // turn if a model is configured (safe-by-default if not).
-    const config = resolveGuideConfig({ guideModelId, modelName: opts.model, byok })
+    const config = await resolveGuideConfig({ guideModelId, modelName: opts.model, byok })
     let session: GuideSession | undefined
     if (isGuideConfigEnabled(config)) {
       session = await createGuideSession(config!, buildSystemPrompt())
