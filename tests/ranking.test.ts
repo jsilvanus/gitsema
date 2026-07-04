@@ -5,6 +5,7 @@ import {
   formatDate,
   groupResults,
   renderResults,
+  renderFirstSeenResults,
   renderResultsByLevel,
 } from '../src/core/search/ranking.js'
 import type { SearchResult } from '../src/core/models/types.js'
@@ -160,14 +161,14 @@ describe('renderResults', () => {
     expect(renderResults([])).toBe('  (no results)')
   })
 
-  it('includes score, path, and hash', () => {
+  it('includes score, path, and hash with blob: prefix', () => {
     const results: SearchResult[] = [
       makeResult({ blobHash: 'a3f9c2d1e5b7f0123456789', paths: ['src/auth.ts'], score: 0.921 }),
     ]
     const output = renderResults(results)
     expect(output).toContain('0.921')
     expect(output).toContain('src/auth.ts')
-    expect(output).toContain('[a3f9c2d]')
+    expect(output).toContain('[blob:a3f9c2d]')
   })
 
   it('includes first-seen date when firstSeen is set', () => {
@@ -203,6 +204,47 @@ describe('renderResults', () => {
     ]
     const output = renderResults(results)
     expect(output).toContain('(unknown path)')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Hash labeling — blob: prefix (Phase 153)
+// ---------------------------------------------------------------------------
+
+describe('renderResults hash labeling', () => {
+  it('prefixes blob hashes with "blob:" to distinguish from commit hashes', () => {
+    const results: SearchResult[] = [
+      makeResult({ blobHash: 'abcdef0123456789abcdef0123456789abcdef01', paths: ['src/auth.ts'], score: 0.9 }),
+    ]
+    const output = renderResults(results)
+    expect(output).toContain('[blob:abcdef0]')
+    expect(output).not.toContain('[abcdef0]')
+  })
+
+  it('does not show a bare hash bracket without the blob: prefix', () => {
+    const results: SearchResult[] = [
+      makeResult({ blobHash: 'deadbeef1234567', paths: ['src/foo.ts'], score: 0.7 }),
+    ]
+    const output = renderResults(results)
+    expect(output).toMatch(/\[blob:[0-9a-f]+\]/)
+    expect(output).not.toMatch(/\[[0-9a-f]+\]/)
+  })
+
+  it('renderFirstSeenResults inherits blob: prefix from renderResults', () => {
+    const results: SearchResult[] = [
+      makeResult({ blobHash: 'abc1234deadbeef', paths: ['src/api.ts'], score: 0.85, firstSeen: 1647302400 }),
+    ]
+    const output = renderFirstSeenResults(results)
+    expect(output).toContain('[blob:abc1234]')
+  })
+
+  it('renderResultsByLevel propagates blob: prefix into each section', () => {
+    const output = renderResultsByLevel({
+      file: [makeResult({ blobHash: 'aaa1111222333444', paths: ['src/a.ts'], score: 0.9 })],
+      chunk: [makeResult({ blobHash: 'bbb5556667778889', paths: ['src/b.ts'], score: 0.6 })],
+    })
+    expect(output).toContain('[blob:aaa1111]')
+    expect(output).toContain('[blob:bbb5556]')
   })
 })
 
