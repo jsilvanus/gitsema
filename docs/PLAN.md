@@ -6281,6 +6281,42 @@ URL-guard helper), `src/server/routes/{narrator,guide}.ts`,
 
 ---
 
+### Phase 153 — Hash labeling & disambiguation (CLI/MCP/HTTP/HTML clarity)
+
+**Design:** Full design and rationale live in [`docs/hash-labeling-plan.md`](hash-labeling-plan.md). **Chosen direction:** single-line change to the core text formatter (`renderResults()`) cascades across CLI, MCP (text output), and HTTP (text rendering mode). Add explicit `blob:` prefix to distinguish content-addressed blob hashes from commit hashes in all user-facing output.
+
+**Goal:** Eliminate ambiguity between blob hashes (internal, content-addressed) and commit hashes (Git-level, user-visible). Users naturally interpret unlabeled hashes like `[abc1234]` as commit hashes; this phase makes the distinction explicit across all interfaces (CLI, MCP, HTTP, HTML).
+
+**Scope:**
+
+1. **Core formatter change** (`src/core/search/ranking.ts:60`): update `renderResults()` to show `[blob:${hash}]` instead of `[${hash}]`. This cascades to:
+   - CLI: `gitsema search`, `gitsema first-seen`, `gitsema code-search`
+   - MCP: `semantic_search`, `search_history`, `code_search` text output
+   - HTTP: `/search`, `/first-seen` with `rendered=true`
+
+2. **HTML renderers** (`src/core/viz/htmlRenderer-*.ts`): change "Hash" column header to "Blob Hash" and prefix hash cells with `blob:` for visual consistency.
+
+3. **OpenAPI documentation** (`src/server/routes/openapi.ts`): add field descriptions clarifying `blobHash` (content-addressed) vs `firstCommit` (earliest commit introducing the blob).
+
+4. **MCP guidance** (`src/core/narrator/interpretations.ts`): add tool interpretations clarifying the distinction for LLMs.
+
+5. **Unit tests** (`tests/ranking.test.ts`): verify `renderResults()` and related functions output `[blob:...]` prefix.
+
+6. **Verification:** test all interfaces (CLI, MCP, HTTP, HTML) to confirm consistent labeling.
+
+**Acceptance criteria:**
+- CLI: `gitsema search`, `first-seen`, `code-search` output includes `[blob:...]` prefix
+- MCP: `semantic_search`, `search_history`, `code_search` text output includes `[blob:...]` prefix
+- HTTP: `/search`, `/first-seen` text rendering includes `[blob:...]` prefix
+- HTML: search results show "Blob Hash" column or `blob:` prefix
+- Tests: new hash-labeling tests pass
+- No breaking changes to JSON field names or structured responses
+- `pnpm build && pnpm test` clean
+
+**Files (anticipated):** `src/core/search/ranking.ts`, `src/core/viz/htmlRenderer-search.ts`, `src/core/viz/htmlRenderer-evolution.ts` (review), `src/server/routes/openapi.ts`, `src/core/narrator/interpretations.ts`, `tests/ranking.test.ts`, `.changeset/`.
+
+---
+
 ## Deployment scenarios & usage envisioning
 
 The architecture of gitsema supports three distinct deployment scenarios, each with different operational models and target users. This section clarifies the intended usage patterns and the infrastructure requirements for each.
