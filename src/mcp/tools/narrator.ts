@@ -64,7 +64,7 @@ export function registerNarratorTools(server: McpServer) {
       ...BYOK_FIELDS,
     },
     async ({ since, until, range, focus, format, max_commits, evidence_only, narrator_model_id, model, ...byokArgs }) => {
-      const provider = resolveNarratorProvider({
+     const provider = await resolveNarratorProvider({
         narratorModelId: narrator_model_id,
         modelName: model,
         byok: parseByok(byokArgs),
@@ -132,7 +132,7 @@ export function registerNarratorTools(server: McpServer) {
       ...BYOK_FIELDS,
     },
     async ({ topic, since, until, format, evidence_only, narrator_model_id, model, ...byokArgs }) => {
-      const provider = resolveNarratorProvider({
+     const provider = await resolveNarratorProvider({
         narratorModelId: narrator_model_id,
         modelName: model,
         byok: parseByok(byokArgs),

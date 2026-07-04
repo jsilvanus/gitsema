@@ -37,6 +37,7 @@ vi.mock('../src/cli/commands/guide.js', async (importOriginal) => {
 })
 
 import { createApp } from '../src/server/app.js'
+import { ByokUrlValidationError } from '../src/core/narrator/resolveNarrator.js'
 import type { EmbeddingProvider } from '../src/core/embedding/provider.js'
 
 const MOCK_VEC = [0.1, 0.2, 0.3, 0.4]
@@ -100,5 +101,18 @@ describe('POST /api/v1/guide/chat — lens (Phase 145)', () => {
 
     expect(res.status).toBe(400)
     expect(runGuideMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when BYOK validation rejects the supplied endpoint', async () => {
+    runGuideMock.mockImplementationOnce(async () => {
+      throw new ByokUrlValidationError('BYOK URL resolves to a blocked host: localhost')
+    })
+
+    const res = await request(app)
+      .post('/api/v1/guide/chat')
+      .send({ question: 'hi', byok: { http_url: 'http://localhost:9999' } })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toContain('blocked host')
   })
 })

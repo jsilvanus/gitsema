@@ -67,7 +67,7 @@ const NeighborsBodySchema = z.object({
 const LensQueryBodySchema = z.object({
   symbol: z.string().min(1),
   lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid'),
-  topK: z.number().int().positive().optional(),
+  topK: z.number().int().positive().max(500).optional(),
 })
 
 const UnusedBodySchema = z.object({
@@ -87,14 +87,14 @@ const DepsBodySchema = z.object({
 
 const CoChangeBodySchema = z.object({
   path: z.string().min(1),
-  top: z.number().int().positive().optional().default(10),
+  top: z.number().int().positive().max(500).optional().default(10),
 })
 
 const BlastRadiusBodySchema = z.object({
   symbol: z.string().min(1),
   lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid'),
   depth: z.number().int().positive().optional(),
-  topK: z.number().int().positive().optional(),
+  topK: z.number().int().positive().max(500).optional(),
 })
 
 /**
