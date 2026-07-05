@@ -107,4 +107,16 @@ describe('temporal filtering (last-seen semantics)', () => {
 
     session.rawDb.close()
   })
+
+  it('parseDateArg rejects unsafe git refs before invoking git', async () => {
+    const session = openDatabaseAt(dbPath)
+    const provider = new MockEmbeddingProvider()
+    await withDbSession(session, async () => runIndex({ repoPath: repoDir, provider, concurrency: 1, since: 'all' }))
+
+    await withDbSession(session, async () => {
+      expect(() => parseDateArg('--all')).toThrow('Unsafe git ref')
+    })
+
+    session.rawDb.close()
+  })
 })

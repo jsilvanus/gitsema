@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { blobCommits, commits } from '../../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
+import { isSafeGitRange } from '../../git/refSafety.js'
 
 export interface FirstSeenInfo {
   commitHash: string
@@ -160,6 +161,10 @@ export function parseDateArg(value: string): number {
     }
   } catch {
     // fall through to process.cwd()
+  }
+
+  if (!isSafeGitRange(value)) {
+    throw new Error(`Unsafe git ref: ${JSON.stringify(value)}`)
   }
 
   try {

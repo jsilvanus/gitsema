@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { getMergeBase } from '../src/core/git/branchDiff.js'
 import { getBranchExclusiveBlobs } from '../src/core/git/branchDiff.js'
 
 // ---------------------------------------------------------------------------
@@ -103,5 +104,21 @@ describe('getBranchExclusiveBlobs', () => {
     getBranchExclusiveBlobs('feature/qux', 'f'.repeat(40))
     // The prepare call's all() should have been called once (one valid batch)
     expect(rawDb.prepare).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects unsafe ref values before invoking git', () => {
+    const rawDb = makeRawDb([])
+    mockGetActiveSession.mockReturnValue({ rawDb } as ReturnType<typeof getActiveSession>)
+
+    const result = getBranchExclusiveBlobs('--all', 'f'.repeat(40))
+    expect(result).toEqual([])
+    expect(mockExecFileSync).not.toHaveBeenCalled()
+  })
+})
+
+describe('getMergeBase', () => {
+  it('throws on unsafe refs before invoking git', () => {
+    expect(() => getMergeBase('--all', 'main')).toThrow('Unsafe git ref')
+    expect(mockExecFileSync).not.toHaveBeenCalled()
   })
 })

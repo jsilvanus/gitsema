@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { getActiveSession } from '../db/sqlite.js'
+import { isSafeGitRange } from './refSafety.js'
 
 /**
  * Returns the merge-base commit hash for two branches/refs.
@@ -8,6 +9,10 @@ import { getActiveSession } from '../db/sqlite.js'
  * Throws if the branches have no common ancestor or git fails.
  */
 export function getMergeBase(branchA: string, branchB: string, repoPath = '.'): string {
+  if (!isSafeGitRange(branchA) || !isSafeGitRange(branchB)) {
+    throw new Error(`Unsafe git ref supplied to merge-base: ${JSON.stringify({ branchA, branchB })}`)
+  }
+
   let out: string
   try {
     out = execFileSync('git', ['merge-base', branchA, branchB], {
@@ -44,6 +49,10 @@ export function getBranchExclusiveBlobs(
   mergeBaseHash: string,
   repoPath = '.',
 ): string[] {
+  if (!isSafeGitRange(branch) || !isSafeGitRange(mergeBaseHash)) {
+    return []
+  }
+
   let gitOutput: string
   try {
     gitOutput = execFileSync(

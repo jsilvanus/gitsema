@@ -6,6 +6,7 @@ import { logger } from '../../../utils/logger.js'
 import { bufferToEmbedding } from '../../../utils/embedding.js'
 import { cosineSimilarity } from '../analysis/vectorSearch.js'
 import { enhanceClusters, type EnhancedLabelOptions, type ClusterEnhancerInput } from './labelEnhancer.js'
+import { isSafeGitRange } from '../../git/refSafety.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -568,6 +569,10 @@ export function resolveRefToTimestamp(ref: string, repoPath = '.'): number {
   // Try date string first (e.g. "2024-01-15" or "2024-01-15T12:00:00Z")
   const d = new Date(ref)
   if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000)
+
+  if (!isSafeGitRange(ref)) {
+    throw new Error(`Unsafe git ref: ${JSON.stringify(ref)}`)
+  }
 
   // Try as a git ref using git log
   try {
