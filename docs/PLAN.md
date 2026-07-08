@@ -6316,22 +6316,28 @@ URL-guard helper), `src/server/routes/{narrator,guide}.ts`,
 
 **Goal:** Enable semantic index snapshots and incremental sync between repositories, forming the foundation of federated semantic knowledge exchange.
 
+**Key design decisions:**
+- **Chunk-level granularity:** Semantic objects wrap *chunks*, not whole blobs. Enables fine-grained deduplication and specific summaries.
+- **Model versioning:** Every semantic object stores `profile_version` (e.g. "text-embedding-3-small:1.0") and `model_dimensions`. Cross-model federation rejected in Phase 154–158 (deferred to Phase 159).
+- **Storage:** Semantic objects are permanent, content-addressed, immutable (like Git objects).
+
 **Scope:**
 
-1. **Database schema:** Add `sema_refs` and `sema_trees` tables (v33 migration):
-   - `sema_refs(name, target_sema_tree_hash, blob_count, created_at, updated_at)`
-   - `sema_trees(tree_hash, parent_tree_hash, entries_jsonl, metadata_json)`
-   - `semantic_objects(object_hash, blob_hash, embedding, summary, keywords, language, entities, profile_version, created_at)`
+1. **Database schema (v33 migration):**
+   - New `semantic_objects` table: `(object_hash, chunk_hash, blob_hash, embedding, summary, keywords, language, entities, structural_refs, profile_version, model_dimensions, signer, created_at)`
+   - New `sema_refs` table: `(name, target_sema_tree_hash, blob_count, created_at, updated_at)`
+   - New `sema_trees` table: `(tree_hash, parent_tree_hash, entries_jsonl, metadata_json)` — tracks semantic snapshot lineage
+   - Extend `chunk_embeddings`: add `summary`, `keywords`, `language` columns (nullable for backward compat)
 
 2. **CLI commands:**
-   - `gitsema sema push [--remote url] [--branch name]` — create semantic ref, push new objects
-   - `gitsema sema pull [--remote url] [--branch name]` — fetch semantic ref + missing objects
-   - `gitsema sema log [--ref name] [--graph]` — show semantic ref history
-   - `gitsema sema diff <ref1> <ref2> [--format text|json|html]` — semantic diff (high-level concept changes)
+   - `gitsema sema push [--remote url] [--branch name]` — create semantic ref, push new semantic objects to remote
+   - `gitsema sema pull [--remote url] [--branch name]` — fetch semantic ref + missing semantic objects from remote
+   - `gitsema sema log [--ref name] [--graph]` — show semantic ref history (like `git log`)
+   - `gitsema sema diff <ref1> <ref2> [--format text|json|html]` — semantic diff (high-level concept changes between snapshots)
 
 3. **HTTP API:**
-   - `POST /api/v1/sema/push` — accept semantic tree + objects
-   - `GET /api/v1/sema/pull?ref=<name>` — fetch semantic tree + packfile
+   - `POST /api/v1/sema/push` — accept semantic tree + objects for storage
+   - `GET /api/v1/sema/pull?ref=<name>` — fetch semantic tree + packfile of missing objects
    - `GET /api/v1/sema/log` — semantic ref history
    - `POST /api/v1/sema/diff` — compute semantic diff between two refs
 
@@ -6341,30 +6347,39 @@ URL-guard helper), `src/server/routes/{narrator,guide}.ts`,
    - `sema_log()` — list semantic ref history
    - `sema_diff()` — semantic diff between refs
 
-5. **Feature:** Semantic object enrichment (Layer 1 enhancement from federation design)
-   - Extend `embeddings` table with `summary`, `keywords`, `language` columns (nullable for backward compat)
-   - Populate via optional `--semantic-enrich` flag on `gitsema index start` (calls narrator LLM to generate summaries)
-   - MCP/HTTP tools that return blobs now include summaries (if available) for richer context
+5. **Feature:** Semantic object enrichment (Layer 1 enhancement)
+   - Optional `--semantic-enrich` flag on `gitsema index start` (calls narrator LLM to generate `summary`, `keywords`, `entities` per chunk)
+   - Extends existing chunking pipeline: `chunk → embed → [enrich] → store`
+   - Backward compat: old indexes without semantic_objects table still index normally (opt-in feature)
+   - Summary generation: reuse narrator infrastructure from Phase 56 (`buildSemanticSummary()` or similar)
 
 6. **Tests:**
-   - Two-repo sync scenario: push from Repo A, pull into Repo B, verify object deduplication
-   - Semantic diff correctness: track high-level concept changes between refs
-   - Backward compat: old indexes without semantic_objects table still index normally
+   - Schema: v32 → v33 migration applies cleanly; new tables created
+   - Two-repo push/pull scenario: push from Repo A, pull into Repo B, verify object deduplication by `object_hash`
+   - Semantic diff: track concept-level changes between refs (added/removed/changed summaries)
+   - Backward compat: old indexes without semantic_objects still index; queries still work (semantic objects lazy-loaded)
+   - Cross-model rejection: `sema pull` from a peer with different model → error with helpful message
+   - Enrichment: `--semantic-enrich` generates summaries; summaries appear in MCP/HTTP results
 
 **Acceptance criteria:**
-- Semantic refs created correctly and stored persistently
-- `gitsema sema push` transfers only new semantic objects (bandwidth reduction verified)
-- `gitsema sema pull` correctly reconstructs remote index state
-- `gitsema sema diff` shows concept-level changes (not just vector differences)
-- All commands work via HTTP + MCP in addition to CLI
+- Semantic refs created, stored persistently, survive session restarts
+- `gitsema sema push` transfers only new semantic objects (content-addressed dedup verified via hash)
+- `gitsema sema pull` correctly reconstructs remote semantic state
+- `gitsema sema diff` shows high-level concept changes (not just raw vector diffs)
+- `--semantic-enrich` produces meaningful summaries (manual QA on real repo)
+- Cross-model federation rejected with clear error message
+- All commands work via HTTP + MCP + CLI (parity)
 - `pnpm build && pnpm test` clean; changesets added
 
-**Effort:** ~2 weeks  
-**Risk:** Low (new tables, no breaking changes; backward compat preserved via nullable columns)
+**Effort:** ~2.5 weeks (schema migration + enrichment pipeline adds complexity)  
+**Risk:** Medium (new tables + semantic enrichment pipeline; needs LLM integration testing)
 
-**Files (anticipated):** `src/core/db/schema.ts`, `src/core/db/sqlite.ts` (v33 migration), `src/core/federation/semanticRefs.ts`, `src/cli/commands/sema.ts`, `src/server/routes/federation/sema.ts`, `src/mcp/tools/federation.ts`, tests, `CLAUDE.md`, `.changeset/`
+**Files (anticipated):** `src/core/db/schema.ts`, `src/core/db/sqlite.ts` (v33 migration), `src/core/federation/semanticRefs.ts`, `src/core/narrator/semanticEnrichment.ts`, `src/cli/commands/sema.ts`, `src/server/routes/federation/sema.ts`, `src/mcp/tools/federation.ts`, tests, `CLAUDE.md`, `.changeset/`
 
-**Deferred:** Semantic commit deltas (see Phase 158). This phase focuses on *static* semantic state snapshots; Phase 158 adds *dynamic* change tracking.
+**Design decisions deferred to Phase 159:**
+- Cross-model federation (re-embedding queries for different model spaces)
+- Trust/signatures (cryptographic verification of semantic objects)
+- Semantic commit deltas (see Phase 158; focuses on static state here)
 
 ---
 
@@ -6422,54 +6437,83 @@ URL-guard helper), `src/server/routes/{narrator,guide}.ts`,
 
 **Design:** Covered in `docs/design/semantic-federation.md`.
 
-**Goal:** Route queries intelligently to the most relevant peers based on semantic similarity, reducing broadcast queries and latency.
+**Goal:** Route queries intelligently to the most relevant peers based on semantic similarity, reducing broadcast queries and enabling users to choose how federated results are stored.
+
+**Key design decisions:**
+- **Storage modes:** Support transient (no storage), cached (session scope), and imported (permanent) federation search results.
+- **Same-model only:** Only query peers with matching `profile_version`; cross-model federation deferred to Phase 159.
+- **Three-signal ranking:** Reuse existing three-signal ranking (Phase 41) for merged cross-peer results.
 
 **Scope:**
 
-1. **Semantic DHT routing table:**
-   - `semanticDHT.ts`: Build routing table from peer gossip + centroid embeddings
-   - For each known peer, store its semantic topics (cluster centroids + labels)
-   - On each query, embed the query and compute similarity to all peer centroids
-   - Select top-N peers (default N=5, configurable via `--federation-peers <n>`) above a similarity threshold (default 0.3)
+1. **Semantic DHT routing table (`semanticDHT.ts`):**
+   - Build routing table from peer gossip + centroid embeddings (from Phase 155)
+   - For each known peer, store semantic topics (cluster centroids + labels)
+   - On each query, embed query and compute similarity to all peer centroids
+   - Select top-N peers (default N=5, configurable `--federation-peers <n>`) above threshold (default 0.3)
+   - Filter by model match: only include peers with same `profile_version` as local index
 
 2. **Federated search CLI:**
-   - `gitsema federation search <query> [--peers <comma-separated-urls> | --auto] [--top k] [--format text|json|html]`
-   - `--auto` mode: use gossip-discovered peers; `--peers` mode: explicit peer list
-   - Fetch results from selected peers in parallel
-   - Merge results by combining vector scores + freshness (prefer recent embeddings)
-   - Rank by three-signal ranking (existing Phase 41 logic)
+   - `gitsema federation search <query> [--peers <urls> | --auto] [--top k] [--cache|--import|--no-cache] [--format text|json|html]`
+   - `--auto`: use gossip-discovered peers; `--peers`: explicit peer URLs
+   - Storage modes (mutually exclusive):
+     - `--cache` (default): store in temp `federation_cache` table (session scope), TTL = session
+     - `--import`: merge into permanent `semantic_objects` table (mark with `origin: "federation_imported"`)
+     - `--no-cache`: transient (show results, don't store)
+   - Fetch results from selected peers in parallel with timeout (default 5s/peer)
+   - Merge by `chunk_hash` (remove duplicates)
+   - Re-rank using three-signal ranking (vector similarity, recency, path relevance)
+   - Include provenance: show peer URL + model version for each result
 
 3. **HTTP API:**
-   - `POST /api/v1/federation/search` — accept query + optional peer hints
-   - `GET /api/v1/federation/route?query=<text>` — return which peers would be queried (decision transparency)
-   - Concurrent fetches with timeout per peer (default 5s)
+   - `POST /api/v1/federation/search` — accept query, storage mode (`cache|import|transient`), peer hints
+   - `GET /api/v1/federation/route?query=<text>` — return routing decision (which peers selected + why)
+   - Streaming results as peers respond (don't wait for slowest)
+   - `X-Peer-Info` header on each result: `{url: "...", model: "...", response_time: ...}`
 
 4. **MCP tools:**
-   - `federation_search()` — query federated peers
-   - `federation_route()` — show routing decision (which peers would be queried)
+   - `federation_search()` — query federated peers (supports storage mode selection)
+   - `federation_route()` — show routing decision (peers selected + reasoning)
 
 5. **Result merging & ranking:**
-   - Combine results from multiple peers (remove duplicates by blob hash)
-   - Re-rank using three-signal model (vector similarity, recency, path relevance)
-   - Include provenance: show which peer each result came from
+   - De-duplicate by `chunk_hash` (if same chunk from multiple peers, keep highest-confidence result)
+   - Combine provenance metadata: `{peer_url: "...", peer_model: "...", local_origin: "..."}`
+   - Re-rank using three-signal: vector similarity (70%) + recency (20%) + path relevance (10%)
+   - Fallback: if peer unresponsive, drop and continue (fail-open)
 
-6. **Tests:**
-   - 3-repo network: query "authentication", verify only auth-heavy repos are selected
-   - Result ranking: merge results from 2 peers, verify no regressions vs. single-repo search
-   - Timeout handling: simulate slow peer, verify others return quickly + slow peer times out gracefully
+6. **Metadata tracking:**
+   - Extend `semantic_objects` to track `origin` (values: "local", "federation_temp", "federation_imported") + `peer_url` + `import_date`
+   - Cache table `federation_cache`: same schema as `semantic_objects`, but session-scoped (dropped on exit)
+
+7. **Tests:**
+   - Schema: `federation_cache` table creates/drops correctly
+   - 3-repo network: query "authentication", verify only auth-heavy repos selected
+   - Routing: `--federation-peers 3` limits to top-3 by similarity
+   - Storage modes: `--cache` doesn't pollute local index; `--import` persists; `--no-cache` returns 0 cached results
+   - Cross-model rejection: query Repo B (different model) → skipped with warning
+   - Result ranking: merge from 2 peers, verify no regressions vs. single-repo ranking
+   - Timeout: slow peer (latency > 5s) doesn't block others; partial results returned
+   - Provenance: results show peer URL + model; CLI and HTTP match
 
 **Acceptance criteria:**
-- `gitsema federation search <query>` returns ranked results from multiple peers
-- Routing logic selects relevant peers (validate against ground truth)
-- Merged results correctly de-duplicate by blob hash
+- `gitsema federation search <query>` returns ranked results from multiple (same-model) peers
+- Routing logic selects relevant peers; `--federation-peers <n>` respected
+- Merged results de-duplicated by chunk_hash, re-ranked correctly
+- `--cache` (default) doesn't persist results; `--import` does; `--no-cache` is transient
+- Cross-model peers rejected with warning (not queried)
 - Peer timeout doesn't block final result (fail-open)
 - HTTP + MCP parity with CLI
+- Provenance metadata visible in all formats (text, json, html)
 - `pnpm build && pnpm test` clean
 
-**Effort:** ~3 weeks  
-**Risk:** Medium (distributed ranking; needs careful testing + validation on realistic multi-repo setup)
+**Effort:** ~3.5 weeks (DHT + caching + storage modes add complexity)  
+**Risk:** Medium (distributed ranking; needs careful testing on multi-repo setup; caching adds state management)
 
-**Files (anticipated):** `src/core/federation/semanticDHT.ts`, `src/core/federation/federatedSearch.ts`, `src/cli/commands/federation.ts` (extended), `src/server/routes/federation/search.ts`, `src/mcp/tools/federation.ts` (extended), tests, `.changeset/`
+**Files (anticipated):** `src/core/db/schema.ts` (federation_cache table), `src/core/federation/semanticDHT.ts`, `src/core/federation/federatedSearch.ts`, `src/cli/commands/federation.ts` (extended), `src/server/routes/federation/search.ts`, `src/mcp/tools/federation.ts` (extended), tests, `.changeset/`
+
+**Design decisions deferred to Phase 159:**
+- Cross-model federation (re-embedding for different model spaces)
+- Peer trust/signatures (verifying peer semantic objects)
 
 ---
 

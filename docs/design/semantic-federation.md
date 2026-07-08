@@ -43,30 +43,61 @@ The core insight: **Git distributes bytes. Gitsema distributes meaning. Federati
 
 ### Layer 1: Semantic Objects (✅ ~80% complete, needs enrichment)
 
-**Current state:** Blobs are stored with embeddings.  
-**What we add:** Rich semantic metadata envelopes.
+**Current state:** Blobs are stored with embeddings; large blobs are chunked with per-chunk embeddings.  
+**What we add:** Rich semantic metadata envelopes at chunk level.
 
 ```
-blob (SHA-1)
+semantic_object (content-addressed, not blob-addressed)
+├── chunk_hash (content-addressed, stable across repos)
+├── blob_hash (parent file reference)
 ├── embedding (Float32 vector)
 ├── summary (LLM-generated snippet)
 ├── keywords (extracted terms)
 ├── language (source code, prose, config, etc.)
 ├── entities (author, date, module path)
-├── structural_refs (imports/calls/extends, already tracked)
-├── references (backward pointers: which blobs cite this?)
+├── structural_refs (imports/calls/extends, if chunk-level)
+├── references (backward pointers: which chunks cite this?)
+├── line_range (if chunked: lines 42–87 in blob)
 ├── timestamp (when first indexed)
-├── profile (embedding model name + version)
+├── profile_version (embedding model + version, e.g. "text-embedding-3-small:1.0")
+├── model_dimensions (vector dimensionality, e.g. 1536)
 ├── signer (public key, optional)
-└── content_hash (hash of blob content for cache-busting)
+└── content_hash (hash of chunk content for cache-busting)
 ```
 
-**Database changes:** Extend `embeddings` and `blob_fts` tables with `summary`, `keywords`, `language`, `entities` columns; optionally `signer` and `profile_version` for provenance.
+**Key design decision: Chunk-level granularity**
+- Semantic objects wrap **chunks**, not whole blobs
+- Enables fine-grained deduplication (identical code snippets across repos = one object)
+- Summaries are specific ("JWT validation handler" not broad "auth module")
+- Matches current gitsema chunking strategy (whole-file, function, fixed windows)
+
+**Database changes:** New `semantic_objects` table + extend `chunk_embeddings` table with `summary`, `keywords`, `language`, `entities` columns.
+
+```sql
+CREATE TABLE semantic_objects (
+  object_hash TEXT PRIMARY KEY,        -- content-addressed
+  chunk_hash TEXT NOT NULL,            -- reference to chunk
+  blob_hash TEXT,                      -- reference to parent blob
+  embedding BLOB,                      -- Float32 vector
+  summary TEXT,                        -- LLM summary
+  keywords TEXT,                       -- JSON array: ["jwt", "token", ...]
+  language TEXT,                       -- "code" | "prose" | "config"
+  entities TEXT,                       -- JSON: {authors: [...], dates: [...]}
+  structural_refs TEXT,                -- JSON: {imports: [...], defines: [...]}
+  profile_version TEXT,                -- "text-embedding-3-small:1.0"
+  model_dimensions INTEGER,            -- e.g. 1536
+  signer TEXT,                         -- optional Ed25519 public key
+  created_at DATETIME,
+  updated_at DATETIME
+);
+```
 
 **Benefits:**
 - Richer semantic queries without re-fetching blobs
 - Gossip protocol can propagate summaries without full embeddings
 - Semantic diffs become composable (diff summaries instead of vectors)
+- Cross-repo deduplication at chunk level (identical implementations = one object)
+- Model version tracking enables cross-model federation decisions (Phase 159)
 
 ---
 
@@ -225,6 +256,59 @@ git sema fetch --query "caching"
 - **Deduplication:** Shared topics compress well across repos
 - **Offline use:** Packfiles can be shared via email, S3, etc.
 
+#### Phase C.5: Federation Search Storage Strategy
+
+**Problem:** When you query federated peers via `gitsema federation search`, what happens to the results?
+
+Option 1: **Transient** — results displayed, not stored
+Option 2: **Cached** — results stored in a session-scoped table, available for re-query
+Option 3: **Imported** — results merged into your permanent local semantic_objects table
+
+**Design:** Support all three via flags, with caching as default.
+
+```bash
+# Option 1: Transient (no storage)
+gitsema federation search "JWT" --no-cache
+  → queries peers, shows results, discards
+
+# Option 2: Cached (session scope) [DEFAULT]
+gitsema federation search "JWT" --cache
+  → queries peers, stores in temp semantic_objects (in-memory or temp DB)
+  → re-running same query hits cache (no peer call)
+  → cache expires on session close
+
+# Option 3: Imported (permanent)
+gitsema federation search "JWT" --import
+  → queries peers
+  → pulls semantic objects into YOUR permanent index
+  → future `gitsema search "JWT"` hits local index (no peer call)
+  → now `gitsema first-seen` can trace to imported chunks
+```
+
+**Storage tables:**
+```sql
+-- Permanent semantic objects (yours)
+semantic_objects (scope: local)
+
+-- Session cache (federation results)
+federation_cache (scope: temp, TTL: session)
+
+-- Imported federation results (merged into semantic_objects)
+-- (same table, marked with origin metadata)
+```
+
+**Metadata tracking:**
+- Permanent objects: `origin: "local"`
+- Cached objects: `origin: "federation_temp"`, `peer_url: "https://..."`
+- Imported objects: `origin: "federation_imported"`, `peer_url: "https://..."`, `import_date`
+
+**Benefit:** Users can control federation integration:
+- **Pure federation** (--no-cache): use federation as a search engine, keep local index clean
+- **Hybrid federation** (--cache, default): federation as a cache layer, no permanent changes
+- **Integrated federation** (--import): absorb peer insights into your index for future local searches
+
+---
+
 #### Phase D: Semantic Commits & Deltas (Phase 158)
 
 **Problem:** When a repository changes, how do peers know what concepts changed?
@@ -372,18 +456,30 @@ gitsema semantic-blame <query> [--file path]
 
 **Hybrid approach:** Support both. Repos can register with an optional registry and/or seed with known peers.
 
-### Semantic Versioning
+### Semantic Versioning & Cross-Model Federation
 
 **Constraint:** Semantic objects are bound to their embedding model version.
 
-If Repo A indexes with `nomic-embed-text` v1.5 and Repo B uses v1.6, their centroids may not be directly comparable. 
+If Repo A indexes with `nomic-embed-text` v1.5 and Repo B uses `text-embedding-3-small` v1.0, their vectors live in different vector spaces and are not directly comparable (different dimensions, different semantic structure).
 
-**Solution:** Store `profile_version` in semantic objects + metadata. Routing code can choose:
-1. Require exact model match (safer but less coverage)
-2. Use approximate matching with a similarity threshold (faster but less reliable)
-3. Re-embed query with both models and merge results (slow but most accurate)
+**Problem:** In a federated network, repos will use different models (different hardware, different requirements, model updates over time). How do we federate across model boundaries?
 
-**Recommendation:** Default to (1) in Phase 154, add (3) in Phase 156, document (2) as a research direction.
+**Solutions (by phase):**
+
+| Phase | Approach | Cost | Accuracy | Notes |
+|---|---|---|---|---|
+| **154–156** | Require model match | Low | High | Repo A only queries Repo B if same `profile_version` |
+| **157** | Cache same-model results | Medium | High | Packfiles tagged by model; only import if model matches |
+| **159** *(future)* | Re-embed on query | High | High | Query embedded with each peer's model, results merged |
+| **162** *(future)* | Cross-space similarity | Research | Unknown | Use alignment layers / model mapping (open research) |
+
+**Recommendation for Phases 154–158:** 
+- Store `profile_version` + `model_dimensions` in every semantic object
+- Phase 154–156: Reject cross-model federation (log warning: "Repo B uses text-embedding-3-small, you use nomic-embed-text; skipping")
+- Phase 157: Same-model packfiles only
+- Phase 159 design doc: Plan re-embedding strategy for Phase 160+
+
+**Implementation detail:** Add `GITSEMA_FEDERATION_ALLOW_CROSS_MODEL` env var (default false) for experimental cross-model federation; if enabled, log a warning and attempt best-effort matching (documented as unreliable).
 
 ### Trust & Signatures
 
