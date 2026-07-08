@@ -2,15 +2,21 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-02 (added the remote multi-turn `guide` HTTP session idea, deferred from Phase 145's `--lens`/session scope)
+**Last updated:** 2026-07-08 (semantic federation now fully designed → PLAN.md Phases 154–158)
 **Audience:** Developers considering next phases; product planning
 
-> **Note:** As of this update, the LSP/MCP remote-delegation foundation this
-> document used to describe as undesigned (remote delegation, WebSocket
-> transport, structural navigation, diagnostics/code lens, hover enrichment)
-> has shipped as Phases 113–117 in `docs/PLAN.md` (see the "LSP & MCP
-> Fleshout Track"). Those sections were removed from here; this file now
-> tracks only what's genuinely still just an idea.
+> **Note 1:** As of 2026-07-02, the LSP/MCP remote-delegation foundation
+> previously described as undesigned (remote delegation, WebSocket transport,
+> structural navigation, diagnostics/code lens, hover enrichment) has shipped
+> as Phases 113–117 in `docs/PLAN.md` (see the "LSP & MCP Fleshout Track").
+> Those sections were removed from here; this file now tracks only what's
+> genuinely still just an idea.
+> 
+> **Note 2:** As of 2026-07-08, semantic federation (distributed semantic
+> knowledge, peer-to-peer query routing, semantic packfiles) is now fully
+> designed in `docs/design/semantic-federation.md` and scheduled as Phases
+> 154–158 in `docs/PLAN.md`. The design is comprehensive; implementation
+> begins after Phase 153 completes.
 
 ---
 
