@@ -1,8 +1,19 @@
 # Semantic Federation: Distributing Knowledge Across Repositories
 
-**Status:** Design document (proposed phases 154–158)  
-**Last updated:** 2026-07-08  
+**Status:** ⛔ **WITHDRAWN (2026-07-09)** — removed from `docs/PLAN.md` before any implementation began. Retained for reference only; do not implement from this document.  
+**Last updated:** 2026-07-09  
 **Initiated by:** ChatGPT feedback on gitsema architecture
+
+> **Why withdrawn:** The design centered on a speculative P2P/gossip network
+> rather than the problem that actually motivated it (agent-scale read load
+> concentrating on hosted repo endpoints), and it was written without
+> reconciling against gitsema's shipped multi-tenant auth (Phases 122–126),
+> storage abstraction (101–103), and locked-model-set (128) layers. It also
+> collided with existing features (`semantic-blame`, `concept-lifecycle`,
+> `index export/import`). The salvageable kernels — chunk-level semantic
+> enrichment, a SKOS-style concept vocabulary, and prebuilt-index
+> distribution for agent-scale serving — are tracked as fresh ideas in
+> [`docs/feature-ideas.md`](../feature-ideas.md).
 
 ---
 

@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-08 (semantic federation now fully designed → PLAN.md Phases 154–158)
+**Last updated:** 2026-07-09 (semantic federation withdrawn from PLAN.md; salvaged kernels re-captured here as fresh ideas)
 **Audience:** Developers considering next phases; product planning
 
 > **Note 1:** As of 2026-07-02, the LSP/MCP remote-delegation foundation
@@ -12,11 +12,16 @@ This document tracks upcoming feature ideas that are **not yet in active develop
 > Those sections were removed from here; this file now tracks only what's
 > genuinely still just an idea.
 > 
-> **Note 2:** As of 2026-07-08, semantic federation (distributed semantic
-> knowledge, peer-to-peer query routing, semantic packfiles) is now fully
-> designed in `docs/design/semantic-federation.md` and scheduled as Phases
-> 154–158 in `docs/PLAN.md`. The design is comprehensive; implementation
-> begins after Phase 153 completes.
+> **Note 2:** Semantic federation (distributed semantic knowledge,
+> peer-to-peer query routing, semantic packfiles) was designed in
+> `docs/design/semantic-federation.md` and briefly scheduled as PLAN.md
+> Phases 154–158 (2026-07-08), then **withdrawn on 2026-07-09 before any
+> implementation** — the design was speculative (P2P/gossip network) and
+> unreconciled with the shipped auth/storage/model-profile layers. The
+> design doc is retained, marked withdrawn. Its salvageable kernels are
+> re-captured below as three independent ideas: *Prebuilt Index
+> Distribution*, *Chunk-Level Semantic Enrichment*, and *SKOS-Style Concept
+> Vocabulary*.
 
 ---
 
@@ -719,6 +724,165 @@ No design committed yet. The rough shape, sketched for discussion:
 
 ---
 
+## Prebuilt Index Distribution ("index once, serve many" for agent-scale load)
+
+*Salvaged from the withdrawn semantic-federation design (2026-07-09) and re-framed around its actual motivating problem.*
+
+### Problem
+- The federation idea was triggered by industry news (e.g. Entire's GitHub
+  federation work): swarms of coding agents hammering a single hosting
+  endpoint is hard on hardware. The withdrawn design answered this with a
+  P2P query network; the simpler reading of the same problem for gitsema is
+  **redundant cold-start cost**: every agent/machine/CI job that wants
+  semantic access to a repo either re-embeds the entire history locally
+  (expensive, slow, N× duplicated embedding spend for the same content) or
+  queries one shared `gitsema tools serve` instance (load concentrates on
+  one endpoint — the exact problem the news was about).
+- gitsema's content-addressed model means an index for (repo, commit, embed
+  profile) is a **deterministic, shareable artifact** — there is no reason
+  for two consumers to ever compute it twice. The pieces mostly exist:
+  `index export` / `index import` tar.gz bundles (Phase 54), public repo
+  sharing (Phases 126–127), `repos.profile_name` pinning (Phase 128),
+  `remote-index`, and the `GITSEMA_DATA_DIR` server registry. What's missing
+  is **distribution**: a way to publish and fetch prebuilt indexes so reads
+  scale by copying artifacts, not by adding query capacity.
+
+### Intended Behavior
+- A publishable, content-addressed index artifact keyed by
+  `(repo, commit, embed profile)` — likely an evolution of the existing
+  `index export` bundle format with a manifest (schema version, embed
+  profile incl. chunker + quantization, commit range, checksums).
+- `gitsema attach <repo-url>` (name TBD): resolve and download a prebuilt
+  bundle for the repo's HEAD instead of embedding locally; fall back to
+  local indexing when none exists. Incremental catch-up via bundle
+  **deltas** keyed by commit range (old-tip → new-tip), so consumers pull
+  only new blobs' embeddings.
+- **Boring transport, no P2P:** plain HTTPS conventions — GitHub Releases,
+  CI artifacts, an S3 bucket, or a well-known URL pattern — plus optionally
+  a git ref namespace so the artifact can ride existing git remotes and
+  inherit their auth/hosting. A GitHub Action that indexes on push and
+  publishes the bundle makes the whole loop zero-server.
+- Server-side benefit: a `gitsema tools serve` instance can also *serve*
+  bundles (cheap static reads, cacheable/CDN-able) instead of answering
+  every agent's semantic query individually.
+
+### Design Gaps
+- [ ] Artifact format: extend the Phase 54 tar.gz bundle vs. a new
+      manifest-led format; how deltas are computed and validated.
+- [ ] Integrity/trust: checksums are easy; are signatures needed for
+      third-party-published bundles, and who verifies?
+- [ ] Profile matching: exact embed-profile equality (model + dimensions +
+      chunker config + quantization) as the compatibility key — reuse
+      `embed_config` provenance rather than inventing a new version string.
+- [ ] Resolution: convention URL vs. a small registry vs. git ref
+      namespace — and how `attach` discovers which exists.
+- [ ] Auth interplay for private repos (Phases 122–126 grants) when bundles
+      are served by a gitsema server rather than a public release.
+
+### Effort Estimate
+- Medium, phaseable: (1) manifest + delta support on the existing bundle,
+  (2) `attach`/publish CLI + HTTPS resolution, (3) CI action + server-side
+  bundle serving. No new network protocol, no new daemon.
+
+### Prerequisites
+- None blocking; builds directly on `index export/import`, Phase 126–128
+  work. Best designed alongside the deprecations registry (the Phase 54
+  bundle either evolves or gets superseded — record whichever happens).
+
+---
+
+## Chunk-Level Semantic Enrichment (summaries, keywords, entities)
+
+*Salvaged Layer-1 kernel of the withdrawn semantic-federation design — valuable purely locally, no networking required.*
+
+### Problem
+- Search results, MCP tool output, and guide grounding today surface raw
+  chunk text and scores. There is no stored human/LLM-readable *description*
+  of what a chunk is ("JWT validation handler"), no extracted keywords, and
+  no lightweight metadata an agent can consume instead of the full chunk —
+  so agents burn tokens re-reading content the indexer already understood
+  once.
+
+### Intended Behavior
+- Opt-in `--semantic-enrich` on `gitsema index start`: after embedding, call
+  the configured narrator LLM to generate per-chunk `summary`, `keywords`,
+  and optionally `entities`, stored as **metadata referencing the existing
+  chunk/embedding rows** (no duplication of vectors; embeddings remain the
+  single source of truth).
+- Enriched fields surface in search/first-seen/MCP results (snippet = stored
+  summary instead of raw text head), and feed `guide` context cheaply.
+- **Redaction is mandatory:** run `redact.ts` over LLM output before
+  storing, since stored summaries may later leave the machine (bundles,
+  server responses).
+
+### Design Gaps
+- [ ] Cost controls: which chunks get enriched (all vs. top-N by search
+      demand vs. lazy on first hit), batch size, and resumability.
+- [ ] Backfill story for already-indexed repos (`index enrich` subcommand?).
+- [ ] Schema: new table vs. nullable columns on `chunk_embeddings`; storage
+      abstraction (Phases 101–103) coverage for all three backends.
+- [ ] Keyword normalization — freeform terms now, or reserve the field to
+      hold references into a concept vocabulary (see SKOS idea below)?
+
+### Effort Estimate
+- Small–medium for the pipeline (narrator plumbing exists); the cost-control
+  and backfill design is most of the work.
+
+### Prerequisites
+- A configured narrator/guide model (Phase 91+ `models` infrastructure) —
+  already shipped.
+
+---
+
+## SKOS-Style Concept Vocabulary (model-independent semantic layer)
+
+*Salvaged from the withdrawn semantic-federation design's keyword/SKOS thread.*
+
+### Problem
+- Everything semantic in gitsema today lives in one embedding model's vector
+  space. Vectors from different models are incomparable — which is exactly
+  why the withdrawn federation design had to forbid cross-model exchange and
+  defer "cross-space similarity" to open research. Cluster labels, keywords,
+  and topics are ad-hoc strings with no structure or stability across runs,
+  repos, or models.
+
+### Intended Behavior
+- A lightweight controlled vocabulary in the index: **concepts** with
+  SKOS-ish relations (`broader` / `narrower` / `related`, plus alt-labels),
+  mapped onto existing artifacts — clusters, enriched keywords, chunks,
+  symbols.
+- Key property: concepts are **model-independent**. Two repos indexed with
+  different embedding models can still interoperate at the concept layer
+  ("both have material under `auth > token-refresh`") — the cross-model
+  problem that is unsolvable at the vector layer simply dissolves one level
+  up. This is the principled foundation for any future cross-repo feature.
+- Enables: faceted search (`gitsema search --concept auth/jwt`), stable
+  topic labels across re-clustering, concept-level diffs between refs, and
+  a human-curated map of "what this codebase is about."
+
+### Design Gaps
+- [ ] Curation model: fully LLM-proposed, LLM-proposed + human-approved, or
+      imported from an external SKOS/taxonomy file?
+- [ ] Storage: concepts + relations + assignments tables; interplay with
+      `blob_clusters` and (if built) enrichment keywords.
+- [ ] Assignment mechanics: how chunks/blobs get tagged (centroid proximity,
+      keyword match, LLM classification) and with what confidence model.
+- [ ] Query surface: flag on existing search vs. new commands; MCP/HTTP
+      parity from day one.
+- [ ] Scheme evolution: merging/splitting concepts over time without
+      invalidating history.
+
+### Effort Estimate
+- Medium–large; genuinely new subsystem, but independent of any networking
+  and incrementally shippable (vocabulary + manual tagging first, automated
+  assignment later).
+
+### Prerequisites
+- Benefits from Chunk-Level Semantic Enrichment (keywords as assignment
+  signal) but not blocked by it.
+
+---
+
 ## Related Issues & Documents
 
 - **Parity tracking:** See `docs/parity.md` for tool availability across interfaces
@@ -736,6 +900,6 @@ No design committed yet. The rough shape, sketched for discussion:
 
 ---
 
-**Document Status:** ✓ Current (2026-06-22)
+**Document Status:** ✓ Current (2026-07-09)
 **Next Review:** When Semahub or the plugin API work begins
 **Maintainer:** jsilvanus@gmail.com
