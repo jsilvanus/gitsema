@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-09 (semantic federation withdrawn from PLAN.md; salvaged kernels re-captured here as fresh ideas)
+**Last updated:** 2026-07-09 (Prebuilt Index Distribution refined into `docs/prebuilt-index-distribution-plan.md`; semantic federation withdrawn from PLAN.md, salvaged kernels re-captured here as fresh ideas)
 **Audience:** Developers considering next phases; product planning
 
 > **Note 1:** As of 2026-07-02, the LSP/MCP remote-delegation foundation
@@ -728,66 +728,14 @@ No design committed yet. The rough shape, sketched for discussion:
 
 *Salvaged from the withdrawn semantic-federation design (2026-07-09) and re-framed around its actual motivating problem.*
 
-### Problem
-- The federation idea was triggered by industry news (e.g. Entire's GitHub
-  federation work): swarms of coding agents hammering a single hosting
-  endpoint is hard on hardware. The withdrawn design answered this with a
-  P2P query network; the simpler reading of the same problem for gitsema is
-  **redundant cold-start cost**: every agent/machine/CI job that wants
-  semantic access to a repo either re-embeds the entire history locally
-  (expensive, slow, N× duplicated embedding spend for the same content) or
-  queries one shared `gitsema tools serve` instance (load concentrates on
-  one endpoint — the exact problem the news was about).
-- gitsema's content-addressed model means an index for (repo, commit, embed
-  profile) is a **deterministic, shareable artifact** — there is no reason
-  for two consumers to ever compute it twice. The pieces mostly exist:
-  `index export` / `index import` tar.gz bundles (Phase 54), public repo
-  sharing (Phases 126–127), `repos.profile_name` pinning (Phase 128),
-  `remote-index`, and the `GITSEMA_DATA_DIR` server registry. What's missing
-  is **distribution**: a way to publish and fetch prebuilt indexes so reads
-  scale by copying artifacts, not by adding query capacity.
-
-### Intended Behavior
-- A publishable, content-addressed index artifact keyed by
-  `(repo, commit, embed profile)` — likely an evolution of the existing
-  `index export` bundle format with a manifest (schema version, embed
-  profile incl. chunker + quantization, commit range, checksums).
-- `gitsema attach <repo-url>` (name TBD): resolve and download a prebuilt
-  bundle for the repo's HEAD instead of embedding locally; fall back to
-  local indexing when none exists. Incremental catch-up via bundle
-  **deltas** keyed by commit range (old-tip → new-tip), so consumers pull
-  only new blobs' embeddings.
-- **Boring transport, no P2P:** plain HTTPS conventions — GitHub Releases,
-  CI artifacts, an S3 bucket, or a well-known URL pattern — plus optionally
-  a git ref namespace so the artifact can ride existing git remotes and
-  inherit their auth/hosting. A GitHub Action that indexes on push and
-  publishes the bundle makes the whole loop zero-server.
-- Server-side benefit: a `gitsema tools serve` instance can also *serve*
-  bundles (cheap static reads, cacheable/CDN-able) instead of answering
-  every agent's semantic query individually.
-
-### Design Gaps
-- [ ] Artifact format: extend the Phase 54 tar.gz bundle vs. a new
-      manifest-led format; how deltas are computed and validated.
-- [ ] Integrity/trust: checksums are easy; are signatures needed for
-      third-party-published bundles, and who verifies?
-- [ ] Profile matching: exact embed-profile equality (model + dimensions +
-      chunker config + quantization) as the compatibility key — reuse
-      `embed_config` provenance rather than inventing a new version string.
-- [ ] Resolution: convention URL vs. a small registry vs. git ref
-      namespace — and how `attach` discovers which exists.
-- [ ] Auth interplay for private repos (Phases 122–126 grants) when bundles
-      are served by a gitsema server rather than a public release.
-
-### Effort Estimate
-- Medium, phaseable: (1) manifest + delta support on the existing bundle,
-  (2) `attach`/publish CLI + HTTPS resolution, (3) CI action + server-side
-  bundle serving. No new network protocol, no new daemon.
-
-### Prerequisites
-- None blocking; builds directly on `index export/import`, Phase 126–128
-  work. Best designed alongside the deprecations registry (the Phase 54
-  bundle either evolves or gets superseded — record whichever happens).
+**Refined into:** see [`docs/prebuilt-index-distribution-plan.md`](prebuilt-index-distribution-plan.md)
+(2026-07-09) — full design: bundle manifest v2 with `embed_config`-derived
+provenance, sqlite delta bundles, `index attach`/`index publish` with a
+layered HTTPS resolution ladder (config URL template → gitsema server →
+GitHub rolling release), server-side bundle routes under the Phase 122–126
+grant model, and a zero-server CI loop. Includes a "Decisions taken
+autonomously (pending user review)" section covering every Design Gap the
+original entry listed. Not yet scheduled in `PLAN.md`.
 
 ---
 
