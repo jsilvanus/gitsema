@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-09 (Prebuilt Index Distribution refined into `docs/prebuilt-index-distribution-plan.md`; semantic federation withdrawn from PLAN.md, salvaged kernels re-captured here as fresh ideas)
+**Last updated:** 2026-07-10 (Chunk-Level Semantic Enrichment refined into `docs/semantic-enrichment-plan.md`; previously: Prebuilt Index Distribution refined into `docs/prebuilt-index-distribution-plan.md`, semantic federation withdrawn from PLAN.md with salvaged kernels re-captured here)
 **Audience:** Developers considering next phases; product planning
 
 > **Note 1:** As of 2026-07-02, the LSP/MCP remote-delegation foundation
@@ -743,42 +743,24 @@ original entry listed. Not yet scheduled in `PLAN.md`.
 
 *Salvaged Layer-1 kernel of the withdrawn semantic-federation design — valuable purely locally, no networking required.*
 
-### Problem
-- Search results, MCP tool output, and guide grounding today surface raw
-  chunk text and scores. There is no stored human/LLM-readable *description*
-  of what a chunk is ("JWT validation handler"), no extracted keywords, and
-  no lightweight metadata an agent can consume instead of the full chunk —
-  so agents burn tokens re-reading content the indexer already understood
-  once.
+**Refined into:** see [`docs/semantic-enrichment-plan.md`](semantic-enrichment-plan.md) (2026-07-10).
 
-### Intended Behavior
-- Opt-in `--semantic-enrich` on `gitsema index start`: after embedding, call
-  the configured narrator LLM to generate per-chunk `summary`, `keywords`,
-  and optionally `entities`, stored as **metadata referencing the existing
-  chunk/embedding rows** (no duplication of vectors; embeddings remain the
-  single source of truth).
-- Enriched fields surface in search/first-seen/MCP results (snippet = stored
-  summary instead of raw text head), and feed `guide` context cheaply.
-- **Redaction is mandatory:** run `redact.ts` over LLM output before
-  storing, since stored summaries may later leave the machine (bundles,
-  server responses).
-
-### Design Gaps
-- [ ] Cost controls: which chunks get enriched (all vs. top-N by search
-      demand vs. lazy on first hit), batch size, and resumability.
-- [ ] Backfill story for already-indexed repos (`index enrich` subcommand?).
-- [ ] Schema: new table vs. nullable columns on `chunk_embeddings`; storage
-      abstraction (Phases 101–103) coverage for all three backends.
-- [ ] Keyword normalization — freeform terms now, or reserve the field to
-      hold references into a concept vocabulary (see SKOS idea below)?
-
-### Effort Estimate
-- Small–medium for the pipeline (narrator plumbing exists); the cost-control
-  and backfill design is most of the work.
-
-### Prerequisites
-- A configured narrator/guide model (Phase 91+ `models` infrastructure) —
-  already shipped.
+One-paragraph summary of the refined design: an opt-in LLM-generated metadata
+layer (`summary`, `keywords`, optional `entities`) for the index's retrieval
+units — whole-file blobs *and* chunks — stored in a new `enrichments` table
+(schema v33) that **references** existing blob/chunk/embedding rows (no vector
+duplication), written only after mandatory **inbound redaction** of LLM output
+via `redact.ts` (stored summaries travel in bundles and server responses),
+generated via the existing narrator model configs (no new `embed_config`
+kind), and surfaced additively through `SearchResult.summary`/`keywords`
+across CLI/REPL/MCP/HTTP/guide. Trigger model: `index start --semantic-enrich`
+plus an `index enrich` backfill subcommand; lazy enrich-on-search was
+explicitly rejected (read paths stay network-free). All four original Design
+Gaps (cost controls, backfill, schema/storage-abstraction coverage, keyword
+normalization) are resolved in the plan's §6 "Decisions taken autonomously
+(pending user review)" table — review that section before phase-planning.
+Three implementation phases (E1 core+storage+backfill, E2 index-time flag,
+E3 surfacing & parity), not yet scheduled in `PLAN.md`.
 
 ---
 
