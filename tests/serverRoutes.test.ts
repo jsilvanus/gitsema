@@ -1653,6 +1653,16 @@ describe('POST /api/v1/graph/deps', () => {
     const res = await request(app).post('/api/v1/graph/deps').send({})
     expect(res.status).toBe(400)
   })
+
+  it('rejects an over-large depth (review11 §3.3 upper bound)', async () => {
+    const res = await request(app).post('/api/v1/graph/deps').send({ identifier: 'foo', depth: 100000 })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts a depth within the bound', async () => {
+    const res = await request(app).post('/api/v1/graph/deps').send({ identifier: 'foo', depth: 3 })
+    expect(res.status).toBe(200)
+  })
 })
 
 describe('POST /api/v1/graph/co-change', () => {
@@ -1684,6 +1694,11 @@ describe('POST /api/v1/graph/blast-radius', () => {
 
   it('rejects a missing symbol', async () => {
     const res = await request(app).post('/api/v1/graph/blast-radius').send({})
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects an over-large depth (review11 §3.3 upper bound)', async () => {
+    const res = await request(app).post('/api/v1/graph/blast-radius').send({ symbol: 'foo', depth: 100000 })
     expect(res.status).toBe(400)
   })
 })

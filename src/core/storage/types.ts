@@ -170,6 +170,16 @@ export interface GraphEdgeRecord {
  */
 export const MAX_GRAPH_TRAVERSAL_DEPTH = 3
 
+/**
+ * Upper bound for a network-supplied `depth` request parameter on the graph
+ * closure/blast-radius tools (Phase 152 / review11 §3.3). These tools accept a
+ * caller-chosen depth ("default: unlimited"); this cap is a generous but finite
+ * ceiling so a network client can't request a pathologically deep traversal.
+ * Deliberately far above `MAX_GRAPH_TRAVERSAL_DEPTH` — real dependency closures
+ * never approach it, so it never rejects a legitimate value.
+ */
+export const MAX_GRAPH_DEPTH_REQUEST = 64
+
 /** A node reached during a `GraphStore` traversal (Phase 108, knowledge-graph §6). */
 export interface GraphHit {
   nodeKey: string

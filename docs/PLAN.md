@@ -6096,7 +6096,29 @@ rather than continuing to carry it forward.
 
 ---
 
-### Phase 150 — Git argument-injection close-out (review11 §2.1 + §3.2)
+### Phase 150 — Git argument-injection close-out (review11 §2.1 + §3.2) ✅
+
+**Status:** ✅ complete. Landed a shared `runGit(subcommand, flags, refs,
+options)` helper (`src/core/git/runGit.ts`) that (a) rejects any ref failing
+`isSafeGitRange()` (leading `-` and non-ref characters) before spawning git,
+throwing `UnsafeGitRefError`, and (b) always inserts git's `--end-of-options`
+marker before the positional refs so a value can never be reparsed as a flag.
+Routed the three PLAN-scoped sinks through it: `resolveRefToTimestamp`
+(`clustering.ts` — the confirmed §2.1 `semantic_bisect`/`triage` sink),
+`parseDateArg` (`timeSearch.ts` — §3.2 `rev-parse`/`show`), and
+`getMergeBase`/`getBranchExclusiveBlobs` (`branchDiff.ts` — §3.2 `merge-base`).
+Regression suite `tests/integration/gitArgInjection.test.ts` (8 tests) asserts
+`runGit`/`resolveRefToTimestamp` reject a `--output=<path>` ref and write no
+file (PoC no longer reproduces), while still resolving legitimate refs and ISO
+dates. **Deviations:** (1) used git's `--end-of-options` rather than a bare
+`--` — empirically, a bare `--` before a ref makes `git log`/`show` treat the
+ref as a *pathspec*, silently breaking valid-ref resolution; `--end-of-options`
+(git ≥ 2.24) stops flag parsing without reclassifying the positional, verified
+against git 2.43. (2) `regressionGate.ts`/`codeReview.ts` were left as-is:
+they already gate their refs through `isSafeGitRange()` (the review10 §7 fix)
+and so already satisfy the "validates the ref" acceptance criterion; they are
+CLI-only, not network-exposed. (3) `isSafeGitRange` had already been relocated
+to `src/core/git/refSafety.ts` in prior work, so no move was needed.
 
 **Design:** no separate design doc — scoped directly from review11 §2.1
 (PoC-confirmed) and §3.2. Root cause: the review9/10 injection fixes switched
@@ -6157,7 +6179,37 @@ call sites or network entry points are added.
 
 ---
 
-### Phase 151 — Read-route repo authorization gate (review11 §2.2)
+### Phase 151 — Read-route repo authorization gate (review11 §2.2) ✅
+
+**Status:** ✅ complete. Added `repoAuthMiddleware`
+(`src/server/middleware/repoAuth.ts`), mounted immediately after
+`repoSessionMiddleware` on all ten data-route groups (search, evolution,
+analysis, insights, graph, protocol, watch, projections, narrate/explain,
+guide). In multi-tenant mode it requires
+`roleSatisfies(resolveUserRepoAccess(getRawDb(), userId, repoId), 'read')`
+unless the repo's mirror row is `visibility === 'public'`, else 403.
+`resolveRequestedRepoId()` was extracted from `repoSessionMiddleware` so both
+middlewares resolve the addressed repo identically. `authMiddleware` now marks
+`req.globalKeyAuth` (global `GITSEMA_SERVE_KEY`) and `req.repoTokenScoped`
+(legacy per-repo token); both bypass the grant check since they already imply
+access. **Multi-tenant trigger (decided):** `isMultiTenantMode()` =
+explicit `GITSEMA_MULTI_TENANT` (`1`/`true`/`yes`/`on` → on, `0`/`false` →
+off) if set, else `GITSEMA_SERVE_KEY` presence; a default open server (no key,
+no flag) is a no-op. Documented in `CLAUDE.md`/`README.md` config tables.
+Tests: `tests/repoAuthMiddleware.test.ts` (15 cases) covers granted-read (pass),
+un-granted/unauthenticated private (403), public (pass), global-key bypass,
+scoped-token bypass, missing-mirror-defaults-private, query-string repoId, and
+the `isMultiTenantMode` trigger matrix; the full server-route suite (247 tests)
+confirms open-mode behavior is unchanged (no new 403s). **Deviations:** (1)
+visibility is read from the addressed repo's own DB mirror row
+(`getRepo(getActiveSession(), repoId)`) — the authoritative source used by the
+shipped Phase 126 register path in `remote.ts` — which is why the middleware
+mounts *after* `repoSessionMiddleware` (so the repo DB is active) rather than
+before. (2) Enforcement is verified at the middleware unit level plus a
+full-suite open-mode regression rather than a new supertest e2e, matching the
+existing `repoSessionMiddleware.test.ts` unit-only convention (a real e2e would
+require standing up the three-DB registry/control-plane/repo topology).
+(3) Per-branch filtering remains deferred as specified below.
 
 **Design:** no separate design doc — scoped directly from review11 §2.2
 (disclosed in PLAN.md as "Phase 123 deviation #1"). The Multi-Tenant Auth
@@ -6224,7 +6276,32 @@ repo-level helper is added), `CLAUDE.md` (config docs), tests,
 
 ---
 
-### Phase 152 — BYOK SSRF guard + newly-exposed list-tool bounds (review11 §3.1 + §3.3)
+### Phase 152 — BYOK SSRF guard + newly-exposed list-tool bounds (review11 §3.1 + §3.3) ✅
+
+**Status:** ✅ complete. **§3.1 (BYOK SSRF):** `validateByokUrl()` in
+`resolveNarrator.ts` (invoked from `byokConfig()` before the provider is
+constructed, on the `narrate`/`explain`/`guide` HTTP routes) requires an
+`http(s)` scheme and rejects hosts resolving to loopback (`127.0.0.0/8`,
+`::1`), link-local (`169.254.0.0/16` incl. the `169.254.169.254` metadata IP,
+`fe80::/10`), and RFC-1918 ranges — including via DNS resolution for
+non-literal hosts — unless the host matches `GITSEMA_BYOK_ALLOW_HOSTS`
+(comma-separated host/CIDR allowlist, default empty). The routes surface it as
+a 400 `ByokUrlValidationError`. **§3.3 (list bounds):** audited every Phase
+147/148-exposed list tool for an upper bound; all `top_k`/`top`/`limit` params
+already carried `.max(...)` (500 for graph tools, 50 for insights). The one
+gap was the `depth` param on `deps` (whose core BFS uses `depth ?? Infinity`
+with no server-side clamp) and `blast_radius`; both now carry
+`.max(MAX_GRAPH_DEPTH_REQUEST)` (= 64, a new shared constant in
+`storage/types.ts`) on the HTTP schema and MCP tool. **Deviations:** (1) the
+§3.1 SSRF guard and its allowlist were already implemented + unit-tested in a
+prior commit; this phase verified completeness, extended the tests
+(`byokCredentials.test.ts`: metadata IP, RFC-1918, non-http scheme, public
+pass, CIDR re-permit), and documented it in README/features/CLAUDE config
+tables. (2) `blast_radius`'s traversal already clamps to
+`MAX_GRAPH_TRAVERSAL_DEPTH` (3), so its 64-cap is documentation/defense-in-depth
+rather than the effective limit; `deps` is the only genuinely-unbounded site
+the cap constrains. (3) Guide (local, in-process) tool schemas were not
+bounded — §3.3 scopes to *network-exposed* tools only.
 
 **Design:** no separate design doc — scoped directly from review11 §3.1 and
 §3.3. §3.1: Phase 130's BYOK uses a request-supplied `byok.http_url`

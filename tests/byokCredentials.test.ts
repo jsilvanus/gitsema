@@ -68,10 +68,39 @@ describe('byokConfig()', () => {
     await expect(byokConfig({ httpUrl: 'http://127.0.0.1:9999' })).rejects.toThrow('blocked')
   })
 
+  it('rejects the cloud metadata IP (169.254.169.254) by default', async () => {
+    await expect(byokConfig({ httpUrl: 'http://169.254.169.254/latest/meta-data/' })).rejects.toThrow('blocked')
+  })
+
+  it('rejects RFC-1918 private ranges by default', async () => {
+    await expect(byokConfig({ httpUrl: 'http://10.1.2.3:8080/v1' })).rejects.toThrow('blocked')
+    await expect(byokConfig({ httpUrl: 'http://192.168.0.5/v1' })).rejects.toThrow('blocked')
+    await expect(byokConfig({ httpUrl: 'http://172.16.9.9/v1' })).rejects.toThrow('blocked')
+  })
+
+  it('rejects a "localhost" hostname by default', async () => {
+    await expect(byokConfig({ httpUrl: 'http://localhost:11434/v1' })).rejects.toThrow('blocked')
+  })
+
+  it('rejects a non-http(s) scheme', async () => {
+    await expect(byokConfig({ httpUrl: 'file:///etc/passwd' })).rejects.toThrow(/http or https/)
+  })
+
+  it('allows a public https URL', async () => {
+    const config = await byokConfig({ httpUrl: 'https://api.example.com/v1' })
+    expect(config.params.httpUrl).toBe('https://api.example.com/v1')
+  })
+
   it('allows allowlisted hosts and CIDRs via GITSEMA_BYOK_ALLOW_HOSTS', async () => {
     process.env.GITSEMA_BYOK_ALLOW_HOSTS = '127.0.0.1,10.0.0.0/8'
     const config = await byokConfig({ httpUrl: 'http://127.0.0.1:9999' })
     expect(config.params.httpUrl).toBe('http://127.0.0.1:9999')
+  })
+
+  it('re-permits an RFC-1918 host once its CIDR is allowlisted', async () => {
+    process.env.GITSEMA_BYOK_ALLOW_HOSTS = '10.0.0.0/8'
+    const config = await byokConfig({ httpUrl: 'http://10.1.2.3:8080/v1' })
+    expect(config.params.httpUrl).toBe('http://10.1.2.3:8080/v1')
   })
 })
 

@@ -304,6 +304,8 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 
 Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`. Per-repo scoped tokens can be minted with `gitsema repos token add <repo-id>` and are stored as **SHA-256 hashes** at rest (review7 §4.1) — the plaintext is never persisted in the database.
 
+**Git argument-injection hardening (Phase 150 / review11 §2.1–§3.2):** every `git` call site that takes a caller-influenced ref (commit hash, branch, tag, range) routes through a shared `runGit()` helper (`src/core/git/runGit.ts`) that rejects refs failing `isSafeGitRange()` (leading `-` and non-ref characters) *before* spawning git and always inserts git's `--end-of-options` separator, so a value like `--output=/path` can never be reparsed as a git flag. This closes the network-reachable arbitrary-file-write that was reachable through `semantic_bisect`/`triage` when a "ref" began with `-`.
+
 ### Identity & credentials core (Phase 122)
 
 User accounts (`gitsema auth create-user <username>`, local DB bootstrap; org/role-gated
@@ -342,10 +344,28 @@ create/list`, `gitsema repos grant/grants/revoke/move-to-org` — all operator-t
 commands that read/write the local server DB directly (`getRawDb()`), the same pattern
 as `gitsema auth create-user` and `gitsema repos token *`, not the remote-HTTP-client
 pattern used by `gitsema auth login/logout/whoami/token`. Deliberate scope limits (see
-`docs/PLAN.md` Phase 123 for the full list): the ~16 pre-existing analysis/search/
-evolution/graph HTTP routes are not yet retrofitted to enforce `resolveUserRepoAccess`;
-newly created repos do not default into the creator's personal org; and there is no
-backfill migration granting pre-existing users a personal org retroactively.
+`docs/PLAN.md` Phase 123 for the full list): newly created repos do not default into the
+creator's personal org; and there is no backfill migration granting pre-existing users a
+personal org retroactively. (The read-route enforcement gap flagged here in Phase 123 is
+now closed by Phase 151, below.)
+
+### Read-route repo authorization gate (Phase 151)
+
+`repoAuthMiddleware` (`src/server/middleware/repoAuth.ts`) runs immediately after
+`repoSessionMiddleware` on every data route that returns repo content (search, analysis,
+evolution, graph, insights, protocol, watch, projections, narrate/explain, guide). In
+**multi-tenant mode** (`GITSEMA_MULTI_TENANT`, defaulting to `GITSEMA_SERVE_KEY`
+presence) a request naming a `repoId` must satisfy
+`roleSatisfies(resolveUserRepoAccess(userId, repoId), 'read')` unless the repo is
+`visibility: 'public'` — otherwise the route returns **403**. This closes review11 §2.2
+("any authenticated user, or anyone on an open server, can read any repo by naming its
+`repoId`"): the grant model the auth track ships now actually gates the read surface it
+was built to protect. Two credentials bypass the grant check because they already imply
+access — the global `GITSEMA_SERVE_KEY` (operator/admin) and a legacy per-repo scoped
+`repo_tokens` token (already scoped to its one repo). A default open single-dev server
+(no key, no flag) is a no-op — no new 403s. **Repo-level only:** per-branch grant
+filtering (rewriting the routes' `branch: string` into a per-user granted-branch set) is
+deferred to a follow-on phase.
 
 ### SSO/OIDC identity linking (Phase 124)
 
@@ -527,6 +547,17 @@ denied server-wide ("lock to none").
   (if supplied) short-circuits before any other lookup — explicit model
   id, model name, active DB selection, disabled. BYOK always resolves to
   an HTTP/`chattydeer`-backed provider.
+- **SSRF guard (Phase 152 / review11 §3.1):** because the server issues the
+  request to the caller-supplied `byok.http_url`, that URL is validated before
+  the provider is constructed — the scheme must be `http`/`https`, and hosts
+  resolving to loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`
+  incl. the `169.254.169.254` cloud-metadata IP, `fe80::/10`), or RFC-1918
+  private ranges (`10/8`, `172.16/12`, `192.168/16`) are **rejected by
+  default** (400 `ByokUrlValidationError`). Operators re-permit specific
+  internal hosts (e.g. a local model server) via `GITSEMA_BYOK_ALLOW_HOSTS`,
+  a comma-separated host/CIDR allowlist (default empty). This is a behavior
+  change for anyone previously pointing BYOK at `localhost`/a private IP —
+  add the host to the allowlist.
 
 ### Persistent server-side repo storage
 
