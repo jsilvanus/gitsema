@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-10 (Chunk-Level Semantic Enrichment refined into `docs/semantic-enrichment-plan.md`; previously: Prebuilt Index Distribution refined into `docs/prebuilt-index-distribution-plan.md`, semantic federation withdrawn from PLAN.md with salvaged kernels re-captured here)
+**Last updated:** 2026-07-10 (SKOS-Style Concept Vocabulary refined into `docs/design/concept-vocabulary.md`; same day: Chunk-Level Semantic Enrichment refined into `docs/semantic-enrichment-plan.md`; previously: Prebuilt Index Distribution refined into `docs/prebuilt-index-distribution-plan.md`, semantic federation withdrawn from PLAN.md with salvaged kernels re-captured here)
 **Audience:** Developers considering next phases; product planning
 
 > **Note 1:** As of 2026-07-02, the LSP/MCP remote-delegation foundation
@@ -768,48 +768,32 @@ E3 surfacing & parity), not yet scheduled in `PLAN.md`.
 
 *Salvaged from the withdrawn semantic-federation design's keyword/SKOS thread.*
 
-### Problem
-- Everything semantic in gitsema today lives in one embedding model's vector
-  space. Vectors from different models are incomparable — which is exactly
-  why the withdrawn federation design had to forbid cross-model exchange and
-  defer "cross-space similarity" to open research. Cluster labels, keywords,
-  and topics are ad-hoc strings with no structure or stability across runs,
-  repos, or models.
+**Refined into:** see [`docs/design/concept-vocabulary.md`](design/concept-vocabulary.md) (2026-07-10).
 
-### Intended Behavior
-- A lightweight controlled vocabulary in the index: **concepts** with
-  SKOS-ish relations (`broader` / `narrower` / `related`, plus alt-labels),
-  mapped onto existing artifacts — clusters, enriched keywords, chunks,
-  symbols.
-- Key property: concepts are **model-independent**. Two repos indexed with
-  different embedding models can still interoperate at the concept layer
-  ("both have material under `auth > token-refresh`") — the cross-model
-  problem that is unsolvable at the vector layer simply dissolves one level
-  up. This is the principled foundation for any future cross-repo feature.
-- Enables: faceted search (`gitsema search --concept auth/jwt`), stable
-  topic labels across re-clustering, concept-level diffs between refs, and
-  a human-curated map of "what this codebase is about."
-
-### Design Gaps
-- [ ] Curation model: fully LLM-proposed, LLM-proposed + human-approved, or
-      imported from an external SKOS/taxonomy file?
-- [ ] Storage: concepts + relations + assignments tables; interplay with
-      `blob_clusters` and (if built) enrichment keywords.
-- [ ] Assignment mechanics: how chunks/blobs get tagged (centroid proximity,
-      keyword match, LLM classification) and with what confidence model.
-- [ ] Query surface: flag on existing search vs. new commands; MCP/HTTP
-      parity from day one.
-- [ ] Scheme evolution: merging/splitting concepts over time without
-      invalidating history.
-
-### Effort Estimate
-- Medium–large; genuinely new subsystem, but independent of any networking
-  and incrementally shippable (vocabulary + manual tagging first, automated
-  assignment later).
-
-### Prerequisites
-- Benefits from Chunk-Level Semantic Enrichment (keywords as assignment
-  signal) but not blocked by it.
+One-paragraph summary of the refined design: a lightweight, curated,
+**model-independent** controlled vocabulary — a real SKOS subset
+(`broader`/`related` relations, pref/alt/hidden labels, concept schemes,
+`exact_match`/`close_match` cross-scheme mapping, deprecation with
+`replaced_by` forwarding) in four durable relational tables (schema v33)
+plus a recomputable `concept_assignments` table (v34), behind a new
+fail-loud `ConceptStore` on the storage seam. Assignments target
+content-addressed, path-free identities (blob/chunk/symbol occurrence
+keys) with per-method confidence rows: `manual` (1.0), **`lexical` as the
+model-independent backbone** (labelEnhancer + FTS + cluster keywords),
+`centroid` (model-recorded and model-filtered), `llm` (redacted,
+safe-by-default), and a cluster↔concept bridge that gives clusters stable
+names. Query surface: a new `concepts` CLI group + `--concept` faceting on
+`search`/`first-seen` with narrower-transitive expansion, shipped at
+MCP/HTTP parity per phase; cross-repo interop is a git-friendly JSON scheme
+file + scheme URIs — no network protocol. All five original Design Gaps
+(curation model, storage, assignment mechanics/confidence, query surface,
+scheme evolution) are resolved in the plan's §11 "Decisions taken
+autonomously (pending user review)" section — review it before
+phase-planning. Five implementation phases (C1 vocabulary core, C2
+assignments + faceted search, C3 semantic/LLM assigners, C4 bridges +
+diffs + agent surface, C5 Postgres + interop), not yet scheduled in
+`PLAN.md`. Stands alone; Chunk-Level Semantic Enrichment keywords slot in
+as an extra lexical signal if that design ships.
 
 ---
 
@@ -830,6 +814,6 @@ E3 surfacing & parity), not yet scheduled in `PLAN.md`.
 
 ---
 
-**Document Status:** ✓ Current (2026-07-09)
+**Document Status:** ✓ Current (2026-07-10)
 **Next Review:** When Semahub or the plugin API work begins
 **Maintainer:** jsilvanus@gmail.com

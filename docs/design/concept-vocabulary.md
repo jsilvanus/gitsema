@@ -119,7 +119,7 @@ triple store**. The mapping:
 native format, `skos:Collection`/`OrderedCollection`, per-language label tags,
 `broadMatch`/`narrowMatch`/`relatedMatch`, SKOS-XL. A best-effort Turtle
 import/export can be added later without schema changes (§10); the native
-interchange format is JSON (§6.3).
+interchange format is JSON (§6.1).
 
 ---
 
@@ -202,7 +202,9 @@ immutable-vs-recomputable discipline:
 Two migrations, following the one-file-per-version pattern
 (`src/core/db/migrations/NNN_name.ts`, appended to `runner.ts`, bump
 `CURRENT_SCHEMA_VERSION`, mirror in `schema.ts` + `initTables`). Numbers below
-assume v32 is still current when C1 lands; renumber if other work ships first.
+assume v32 is still current when C1 lands; renumber if other work ships first
+(note: the also-unscheduled `docs/semantic-enrichment-plan.md` pencils in v33
+for its `enrichments` table — whichever design lands first takes v33).
 
 ### 4.1 Vocabulary tables — migration v32 → v33 (phase C1)
 
@@ -311,7 +313,7 @@ interface ConceptStore {
   setLabels(key: string, labels: ConceptLabelRecord[]): Promise<void>
   relate(src: string, dst: string, relation: ConceptRelation): Promise<void>  // validates §4.1 integrity
   unrelate(src: string, dst: string, relation: ConceptRelation): Promise<void>
-  /** Narrower-transitive closure of `key`, depth-capped (§5.4 expansion). */
+  /** Narrower-transitive closure of `key`, depth-capped (§8.1 faceted-search expansion). */
   narrowerClosure(key: string, maxDepth?: number): Promise<string[]>
 
   // assignments (manual durable; automated replaced per method)
@@ -403,7 +405,7 @@ chunk, which concepts apply?" Follows every established narrator convention:
   "LLM assignment requires a configured narrator model" and exits cleanly
   (`createDisabledProvider` pattern). Never a hard failure.
 - **Redaction is mandatory**: all outbound content passes `redact.ts`
-  (`redactPrompts`), same as `narrate`/`explain`.
+  (`redact`/`redactAll`), same as `narrate`/`explain`.
 - Confidence = LLM-reported, **capped at 0.9** (only `manual` reaches 1.0).
 - Cost-bounded: `--max-targets <n>` and concept/paths filters; resumable by
   skipping (concept, target, method='llm') rows that already exist.
@@ -458,12 +460,12 @@ automated proposals.** Every concept row carries `source`
    history worth preserving). `concepts.autoApprove=true` opts out of the
    gate for throwaway/experimental use.
 3. **Imported (C1 for JSON; Turtle later).** `gitsema concepts import
-   <file>` loads a scheme file (§6.3) as `source='imported'`,
+   <file>` loads a scheme file (§6.1) as `source='imported'`,
    `status='approved'` (an external taxonomy is presumed curated). Re-import
    **upserts by `(scheme, slug)`** and prints an added/updated/now-missing
    diff; missing concepts are flagged, not auto-deprecated.
 
-### 6.3 Interchange format
+### 6.1 Interchange format
 
 Native format: a **JSON scheme file** with a documented 1:1 SKOS mapping
 (kept lightweight; no RDF dependency):
@@ -539,7 +541,7 @@ called from `all.ts`; entries added to `COMMAND_GROUPS` under a new
 | `concepts label <ref> --alt <l> \| --hidden <l> \| --remove <l>` | C1 | Manage alt/hidden labels |
 | `concepts relate <ref> <ref2> --as broader\|related\|exact-match\|close-match` / `unrelate` | C1 | Manage relations (integrity-checked) |
 | `concepts deprecate <ref> [--replaced-by ref2]` | C1 | Deprecation/merge (§7) |
-| `concepts import <file>` / `concepts export [--out f] [--include-assignments]` | C1 | JSON scheme interchange (§6.3) |
+| `concepts import <file>` / `concepts export [--out f] [--include-assignments]` | C1 | JSON scheme interchange (§6.1) |
 | `concepts tag <ref> <path\|blob:hash> [--carry-forward]` / `untag` | C2 | Manual assignment (resolves a path at HEAD to its blob hash) |
 | `concepts assign [--method lexical\|centroid\|llm\|cluster] [--concept ref] [--dry-run]` | C2 (lexical) / C3 (centroid, llm) / C4 (cluster) | Run an automated assigner; replaces that method's rows |
 | `concepts of <path\|blob:hash>` | C2 | Reverse lookup: which concepts cover this file/blob |
@@ -704,12 +706,12 @@ and recorded here. Each is revisable before C1 is scheduled.
     preserved, queries follow forwarding chains, deletion is an explicit
     escape hatch.
 11. **Cross-repo interop = scheme files + scheme URIs + match relations; no
-    network protocol** (§6.3, C5). *Rationale:* the federation design was
+    network protocol** (§6.1, C5). *Rationale:* the federation design was
     withdrawn precisely for network speculation; multi-repo is
     one-DB-per-repo (verified: no `repo_id` on content tables), so a
     file-travelling scheme + per-repo resolution in `multi_repo_search` is
     the smallest true interop story.
-12. **JSON as the native interchange format; RDF/Turtle deferred** (§6.3,
+12. **JSON as the native interchange format; RDF/Turtle deferred** (§6.1,
     open question 1). *Rationale:* lightweight-implementation constraint from
     the idea entry; JSON preserves the SKOS semantics losslessly for the
     adopted subset.
