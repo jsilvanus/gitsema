@@ -78,6 +78,8 @@ Configuration is read from environment variables or persisted via `gitsema confi
 | `GITSEMA_LOG_MAX_BYTES` | `1048576` | Log rotation threshold (1 MB) |
 | `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema tools serve` |
 | `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
+| `GITSEMA_MULTI_TENANT` | *(unset → follows `GITSEMA_SERVE_KEY`)* | Opt-in read-route authorization: when active, a request naming a `repoId` requires the caller to hold a `read` grant on that repo (or the repo to be `public`). `1`/`true`/`yes`/`on` enables, `0`/`false` disables even with a serve key; unset follows `GITSEMA_SERVE_KEY` presence. A default open server (no key, no flag) is unaffected. |
+| `GITSEMA_BYOK_ALLOW_HOSTS` | *(empty)* | Comma-separated host/CIDR allowlist re-permitting otherwise-blocked BYOK endpoint hosts (loopback/link-local/RFC-1918). BYOK narrator/guide endpoints are SSRF-guarded by default. |
 | `GITSEMA_WEBSOCKET_KEY` | *(optional)* | Bearer token fallback for `tools mcp --websocket`/`tools lsp --websocket` when `--key` is omitted |
 | `GITSEMA_MCP_HTTP_KEY` | *(optional)* | Bearer token fallback for `tools mcp --http` when `--key` is omitted |
 | `GITSEMA_MAX_BODY_SIZE` | `1mb` | Body-size cap for `tools serve` and `tools mcp --http` (e.g. `5mb`) |

@@ -6179,7 +6179,37 @@ call sites or network entry points are added.
 
 ---
 
-### Phase 151 — Read-route repo authorization gate (review11 §2.2)
+### Phase 151 — Read-route repo authorization gate (review11 §2.2) ✅
+
+**Status:** ✅ complete. Added `repoAuthMiddleware`
+(`src/server/middleware/repoAuth.ts`), mounted immediately after
+`repoSessionMiddleware` on all ten data-route groups (search, evolution,
+analysis, insights, graph, protocol, watch, projections, narrate/explain,
+guide). In multi-tenant mode it requires
+`roleSatisfies(resolveUserRepoAccess(getRawDb(), userId, repoId), 'read')`
+unless the repo's mirror row is `visibility === 'public'`, else 403.
+`resolveRequestedRepoId()` was extracted from `repoSessionMiddleware` so both
+middlewares resolve the addressed repo identically. `authMiddleware` now marks
+`req.globalKeyAuth` (global `GITSEMA_SERVE_KEY`) and `req.repoTokenScoped`
+(legacy per-repo token); both bypass the grant check since they already imply
+access. **Multi-tenant trigger (decided):** `isMultiTenantMode()` =
+explicit `GITSEMA_MULTI_TENANT` (`1`/`true`/`yes`/`on` → on, `0`/`false` →
+off) if set, else `GITSEMA_SERVE_KEY` presence; a default open server (no key,
+no flag) is a no-op. Documented in `CLAUDE.md`/`README.md` config tables.
+Tests: `tests/repoAuthMiddleware.test.ts` (15 cases) covers granted-read (pass),
+un-granted/unauthenticated private (403), public (pass), global-key bypass,
+scoped-token bypass, missing-mirror-defaults-private, query-string repoId, and
+the `isMultiTenantMode` trigger matrix; the full server-route suite (247 tests)
+confirms open-mode behavior is unchanged (no new 403s). **Deviations:** (1)
+visibility is read from the addressed repo's own DB mirror row
+(`getRepo(getActiveSession(), repoId)`) — the authoritative source used by the
+shipped Phase 126 register path in `remote.ts` — which is why the middleware
+mounts *after* `repoSessionMiddleware` (so the repo DB is active) rather than
+before. (2) Enforcement is verified at the middleware unit level plus a
+full-suite open-mode regression rather than a new supertest e2e, matching the
+existing `repoSessionMiddleware.test.ts` unit-only convention (a real e2e would
+require standing up the three-DB registry/control-plane/repo topology).
+(3) Per-branch filtering remains deferred as specified below.
 
 **Design:** no separate design doc — scoped directly from review11 §2.2
 (disclosed in PLAN.md as "Phase 123 deviation #1"). The Multi-Tenant Auth

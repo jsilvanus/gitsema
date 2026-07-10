@@ -10,6 +10,21 @@ declare global {
     interface Request {
       repoId?: string
       userId?: number
+      /**
+       * True when `req.repoId` was set by a legacy per-repo scoped token
+       * (`repo_tokens`) rather than by an explicit `repoId` in the request.
+       * A scoped token already implies access to its one repo, so
+       * `repoAuthMiddleware` (Phase 151) skips the grant/visibility check
+       * for these requests.
+       */
+      repoTokenScoped?: boolean
+      /**
+       * True when the request authenticated with the global `GITSEMA_SERVE_KEY`
+       * — the operator/admin credential. `repoAuthMiddleware` (Phase 151)
+       * treats it as full access, so a single-key server's behavior is
+       * unchanged by the multi-tenant read gate.
+       */
+      globalKeyAuth?: boolean
     }
   }
 }
@@ -82,6 +97,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf)
 
   if (isGlobal) {
+    req.globalKeyAuth = true
     next()
     return
   }
@@ -97,6 +113,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
         .get(tokenHash) as { repo_id: string } | undefined
       if (row) {
         req.repoId = row.repo_id
+        req.repoTokenScoped = true
         next()
         return
       }

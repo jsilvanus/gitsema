@@ -344,10 +344,28 @@ create/list`, `gitsema repos grant/grants/revoke/move-to-org` — all operator-t
 commands that read/write the local server DB directly (`getRawDb()`), the same pattern
 as `gitsema auth create-user` and `gitsema repos token *`, not the remote-HTTP-client
 pattern used by `gitsema auth login/logout/whoami/token`. Deliberate scope limits (see
-`docs/PLAN.md` Phase 123 for the full list): the ~16 pre-existing analysis/search/
-evolution/graph HTTP routes are not yet retrofitted to enforce `resolveUserRepoAccess`;
-newly created repos do not default into the creator's personal org; and there is no
-backfill migration granting pre-existing users a personal org retroactively.
+`docs/PLAN.md` Phase 123 for the full list): newly created repos do not default into the
+creator's personal org; and there is no backfill migration granting pre-existing users a
+personal org retroactively. (The read-route enforcement gap flagged here in Phase 123 is
+now closed by Phase 151, below.)
+
+### Read-route repo authorization gate (Phase 151)
+
+`repoAuthMiddleware` (`src/server/middleware/repoAuth.ts`) runs immediately after
+`repoSessionMiddleware` on every data route that returns repo content (search, analysis,
+evolution, graph, insights, protocol, watch, projections, narrate/explain, guide). In
+**multi-tenant mode** (`GITSEMA_MULTI_TENANT`, defaulting to `GITSEMA_SERVE_KEY`
+presence) a request naming a `repoId` must satisfy
+`roleSatisfies(resolveUserRepoAccess(userId, repoId), 'read')` unless the repo is
+`visibility: 'public'` — otherwise the route returns **403**. This closes review11 §2.2
+("any authenticated user, or anyone on an open server, can read any repo by naming its
+`repoId`"): the grant model the auth track ships now actually gates the read surface it
+was built to protect. Two credentials bypass the grant check because they already imply
+access — the global `GITSEMA_SERVE_KEY` (operator/admin) and a legacy per-repo scoped
+`repo_tokens` token (already scoped to its one repo). A default open single-dev server
+(no key, no flag) is a no-op — no new 403s. **Repo-level only:** per-branch grant
+filtering (rewriting the routes' `branch: string` into a per-user granted-branch set) is
+deferred to a follow-on phase.
 
 ### SSO/OIDC identity linking (Phase 124)
 

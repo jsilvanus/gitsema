@@ -62,6 +62,7 @@ import type { EmbeddingProviderPair } from '../core/embedding/profiles.js'
 import type { ChunkStrategy } from '../core/chunking/chunker.js'
 import { authMiddleware } from './middleware/auth.js'
 import { repoSessionMiddleware } from './middleware/repoSession.js'
+import { repoAuthMiddleware } from './middleware/repoAuth.js'
 import { requestTimingMiddleware, metricsRegistry, refreshIndexGauges, syncProcessCounters } from './middleware/metrics.js'
 import { buildRateLimiter } from './middleware/rateLimiter.js'
 import { statusRouter } from './routes/status.js'
@@ -192,35 +193,40 @@ export function createApp(options: AppOptions): Express {
   // repo scope of a per-repo auth token) to a persisted repo's index DB and
   // makes it the active DB session for the request. With no repoId, requests
   // fall through to the default cwd `.gitsema/index.db` session unchanged.
-  app.use(`${base}/search`, repoSessionMiddleware, searchRouter({ textProvider, codeProvider }))
+  //
+  // repoAuthMiddleware (Phase 151 / review11 §2.2) runs immediately after, so
+  // the addressed repo's DB is active (authoritative source of its
+  // visibility). In multi-tenant mode it 403s a caller who holds no `read`
+  // grant on a named private repo; in single-dev/open mode it is a no-op.
+  app.use(`${base}/search`, repoSessionMiddleware, repoAuthMiddleware, searchRouter({ textProvider, codeProvider }))
 
-  app.use(`${base}/evolution`, repoSessionMiddleware, evolutionRouter({ textProvider }))
+  app.use(`${base}/evolution`, repoSessionMiddleware, repoAuthMiddleware, evolutionRouter({ textProvider }))
 
   app.use(
     `${base}/remote`,
     remoteRouter({ textProvider, codeProvider, chunkerStrategy, concurrency, profiles }),
   )
 
-  app.use(`${base}/analysis`, repoSessionMiddleware, analysisRouter({ textProvider }))
+  app.use(`${base}/analysis`, repoSessionMiddleware, repoAuthMiddleware, analysisRouter({ textProvider }))
 
   // Phase 148: bisect/refactor-candidates/lifecycle/cherry-pick-suggest/
   // file-diff/pr-report/regression-gate/code-review/heatmap/map — CLI
   // commands that previously had no HTTP route or MCP tool at all.
-  app.use(`${base}/insights`, repoSessionMiddleware, insightsRouter({ textProvider }))
+  app.use(`${base}/insights`, repoSessionMiddleware, repoAuthMiddleware, insightsRouter({ textProvider }))
 
   // Phase 110/111: structural knowledge-graph routes (hotspots, …)
-  app.use(`${base}/graph`, repoSessionMiddleware, graphRouter())
+  app.use(`${base}/graph`, repoSessionMiddleware, repoAuthMiddleware, graphRouter())
 
   // Phase 113: generic LSP/MCP remote-delegation dispatch — see src/server/routes/protocol.ts
-  app.use(`${base}/protocol`, repoSessionMiddleware, protocolRouter())
+  app.use(`${base}/protocol`, repoSessionMiddleware, repoAuthMiddleware, protocolRouter())
 
-  app.use(`${base}/watch`, repoSessionMiddleware, watchRouter({ textProvider }))
+  app.use(`${base}/watch`, repoSessionMiddleware, repoAuthMiddleware, watchRouter({ textProvider }))
 
-  app.use(`${base}/projections`, repoSessionMiddleware, projectionsRouter())
+  app.use(`${base}/projections`, repoSessionMiddleware, repoAuthMiddleware, projectionsRouter())
 
   // Narrator/explainer endpoints (POST /narrate, POST /explain) and guide chat
-  app.use(base, repoSessionMiddleware, narratorRouter)
-  app.use(`${base}/guide`, repoSessionMiddleware, guideRouter)
+  app.use(base, repoSessionMiddleware, repoAuthMiddleware, narratorRouter)
+  app.use(`${base}/guide`, repoSessionMiddleware, repoAuthMiddleware, guideRouter)
 
   // Phase 64: Capabilities manifest — machine-readable list of server capabilities
   app.get(`${base}/capabilities`, (_req, res) => {

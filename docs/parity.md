@@ -23,7 +23,7 @@ tools are available — that's §1.
 | Guide | Local (in-process agentic loop) | — | n/a | n/a |
 | `tools mcp` | stdio (spawned as a local child process) | `--websocket <bind-address>` (non-standard MCP transport, kept for forward compatibility); `--http <bind-address>` (Streamable HTTP — MCP's actual standard network transport, Phase 117) | `--key`/`GITSEMA_WEBSOCKET_KEY` (websocket); `--key`/`GITSEMA_MCP_HTTP_KEY` (http) | `maxPayload` 10MB + max 100 connections/sessions on both network modes (review10 §3) |
 | `tools lsp` | stdio (spawned as a local child process) | `--websocket <bind-address>` | `--key`/`GITSEMA_WEBSOCKET_KEY` (`--websocket`) | max 100 connections; `maxPayload` 10MB |
-| `tools serve` | Always a server (no local-only mode) | HTTP (REST-ish routes) | `--key`/`GITSEMA_SERVE_KEY` | `express.json({ limit })` body-size cap |
+| `tools serve` | Always a server (no local-only mode) | HTTP (REST-ish routes) | `--key`/`GITSEMA_SERVE_KEY`; optional per-user session/API-key credentials (Phase 122) with a repo-level read-grant gate on data routes in multi-tenant mode (`GITSEMA_MULTI_TENANT`, Phase 151) | `express.json({ limit })` body-size cap |
 
 All network modes print a startup warning if bound to a non-loopback address
 with no key configured. (The unauthenticated `tools lsp --tcp` raw-TCP

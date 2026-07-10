@@ -15,19 +15,32 @@ import { getRegistrySession, getRepo } from '../../core/indexing/repoRegistry.js
  * - If no `repoId` is resolved (single-dev mode), the request proceeds against
  *   the default cwd-relative `.gitsema/index.db` session, unchanged.
  */
-export function repoSessionMiddleware(req: Request, res: Response, next: NextFunction): void {
+/**
+ * Resolves the repoId a request is asking for, using the same precedence as
+ * `repoSessionMiddleware`: an explicit `repoId` in the request body (POST) or
+ * query string (GET), else the per-repo scope of a legacy scoped token
+ * (`req.repoId`, set by `authMiddleware`). Returns `repoId: undefined` in
+ * single-dev mode (no repoId named, no scoped token). Shared with
+ * `repoAuthMiddleware` (Phase 151) so both middlewares agree on which repo is
+ * being addressed.
+ */
+export function resolveRequestedRepoId(req: Request): { requestedRepoId?: string; repoId?: string } {
   const bodyRepoId = req.body && typeof req.body === 'object' && typeof (req.body as Record<string, unknown>)['repoId'] === 'string'
     ? (req.body as Record<string, unknown>)['repoId'] as string
     : undefined
   const queryRepoId = typeof req.query['repoId'] === 'string' ? req.query['repoId'] as string : undefined
   const requestedRepoId = bodyRepoId ?? queryRepoId
+  return { requestedRepoId, repoId: requestedRepoId ?? req.repoId }
+}
+
+export function repoSessionMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const { requestedRepoId, repoId } = resolveRequestedRepoId(req)
 
   if (req.repoId && requestedRepoId && requestedRepoId !== req.repoId) {
     res.status(403).json({ error: 'Token is not authorized for this repo' })
     return
   }
 
-  const repoId = requestedRepoId ?? req.repoId
   if (!repoId) {
     next()
     return
