@@ -33,6 +33,7 @@ import { deps, DEPS_EDGE_TYPES } from '../../core/graph/deps.js'
 import { coChange } from '../../core/graph/coChange.js'
 import { blastRadius } from '../../core/graph/blastRadius.js'
 import { parseLens } from '../../cli/lib/lens.js'
+import { MAX_GRAPH_DEPTH_REQUEST } from '../../core/storage/types.js'
 import type { EdgeType } from '../../core/storage/types.js'
 
 const HotspotsBodySchema = z.object({
@@ -81,7 +82,9 @@ const CyclesBodySchema = z.object({
 const DepsBodySchema = z.object({
   identifier: z.string().min(1),
   reverse: z.boolean().optional(),
-  depth: z.number().int().positive().optional(),
+  // Upper-bounded per review11 §3.3 — deps' core BFS uses `depth ?? Infinity`
+  // (no server-side clamp), so a network-supplied depth needs an explicit cap.
+  depth: z.number().int().positive().max(MAX_GRAPH_DEPTH_REQUEST).optional(),
   edgeTypes: z.array(EdgeTypeSchema).optional(),
 })
 
@@ -93,7 +96,9 @@ const CoChangeBodySchema = z.object({
 const BlastRadiusBodySchema = z.object({
   symbol: z.string().min(1),
   lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid'),
-  depth: z.number().int().positive().optional(),
+  // Structural traversal already clamps to MAX_GRAPH_TRAVERSAL_DEPTH; this
+  // generous schema cap documents an explicit upper bound (review11 §3.3).
+  depth: z.number().int().positive().max(MAX_GRAPH_DEPTH_REQUEST).optional(),
   topK: z.number().int().positive().max(500).optional(),
 })
 

@@ -445,6 +445,8 @@ Configuration is via environment variables or the `gitsema config` command (pers
 | `GITSEMA_LOG_MAX_BYTES` | `1048576` | Log rotation threshold (1 MB) |
 | `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema tools serve` HTTP server |
 | `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
+| `GITSEMA_MULTI_TENANT` | *(unset → follows `GITSEMA_SERVE_KEY` presence)* | Opt-in read-route authorization gate (Phase 151). When multi-tenant mode is active, a request naming a `repoId` requires the caller to hold a `read` grant on that repo (or the repo to be `public`); the global key and legacy per-repo scoped tokens bypass the check. Explicit `1`/`true`/`yes`/`on` enables it, `0`/`false` disables it even when a serve key is set; when unset, enforcement follows `GITSEMA_SERVE_KEY` presence. A default open server (no key, no flag) is unaffected. |
+| `GITSEMA_BYOK_ALLOW_HOSTS` | *(empty)* | Comma-separated host/CIDR allowlist that re-permits otherwise-blocked BYOK endpoint hosts (loopback/link-local/RFC-1918). BYOK narrator/guide endpoints are SSRF-guarded by default (Phase 152); add internal model-server hosts here to allow them. |
 | `GITSEMA_LLM_URL` | *(optional)* | OpenAI-compatible URL for `--narrate` LLM summaries |
 | `GITSEMA_DATA_DIR` | `~/.gitsema/data` | Root directory for `gitsema tools serve`'s persisted repo clones + index DBs (`repos/<repoId>/{repo,index.db}`, `registry.db`) |
 | `GITSEMA_STORAGE_BACKEND` | `sqlite` | `sqlite` \| `postgres` \| `qdrant` — selects the storage profile (Phase 101–103) |

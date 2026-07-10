@@ -78,6 +78,8 @@ Configuration is read from environment variables or persisted via `gitsema confi
 | `GITSEMA_LOG_MAX_BYTES` | `1048576` | Log rotation threshold (1 MB) |
 | `GITSEMA_SERVE_PORT` | `4242` | Port for `gitsema tools serve` |
 | `GITSEMA_SERVE_KEY` | *(optional)* | Bearer token required by `gitsema tools serve` |
+| `GITSEMA_MULTI_TENANT` | *(unset → follows `GITSEMA_SERVE_KEY`)* | Opt-in read-route authorization: when active, a request naming a `repoId` requires the caller to hold a `read` grant on that repo (or the repo to be `public`). `1`/`true`/`yes`/`on` enables, `0`/`false` disables even with a serve key; unset follows `GITSEMA_SERVE_KEY` presence. A default open server (no key, no flag) is unaffected. |
+| `GITSEMA_BYOK_ALLOW_HOSTS` | *(empty)* | Comma-separated host/CIDR allowlist re-permitting otherwise-blocked BYOK endpoint hosts (loopback/link-local/RFC-1918). BYOK narrator/guide endpoints are SSRF-guarded by default. |
 | `GITSEMA_WEBSOCKET_KEY` | *(optional)* | Bearer token fallback for `tools mcp --websocket`/`tools lsp --websocket` when `--key` is omitted |
 | `GITSEMA_MCP_HTTP_KEY` | *(optional)* | Bearer token fallback for `tools mcp --http` when `--key` is omitted |
 | `GITSEMA_MAX_BODY_SIZE` | `1mb` | Body-size cap for `tools serve` and `tools mcp --http` (e.g. `5mb`) |
@@ -346,6 +348,8 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--byok-model <name>` | — | Model id sent to `--byok-http-url` (defaults to the endpoint default) |
 | `--byok-max-tokens <n>` | — | Max tokens per BYOK call |
 | `--byok-temperature <n>` | — | Temperature for BYOK calls |
+
+> **SSRF note (server deployments):** on `gitsema tools serve`, the server issues the request to the caller-supplied `--byok-http-url`/`byok.http_url`. To prevent it being used to reach internal/metadata endpoints, URLs whose host resolves to loopback, link-local (incl. `169.254.169.254`), or RFC-1918 private ranges are **rejected by default**. Re-permit specific internal hosts via `GITSEMA_BYOK_ALLOW_HOSTS` (comma-separated host/CIDR allowlist). This does not affect local CLI use, only what a networked server will call.
 
 Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, with a local Ollama model (`gitsema models add <name> --narrator --provider ollama [--global-name <tag>] --activate`, see "Ollama" below), or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below). Alternatively, pass `--byok-http-url` (and optionally `--byok-api-key`/`--byok-model`) for a one-off, never-persisted request-scoped model — it bypasses the configured/allow-listed model selection entirely (Phase 130).
 

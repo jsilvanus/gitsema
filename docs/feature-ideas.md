@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-08 (semantic federation now fully designed → PLAN.md Phases 154–158)
+**Last updated:** 2026-07-10 (SKOS-Style Concept Vocabulary refined into `docs/design/concept-vocabulary.md`; same day: Chunk-Level Semantic Enrichment refined into `docs/semantic-enrichment-plan.md`; previously: Prebuilt Index Distribution refined into `docs/prebuilt-index-distribution-plan.md`, semantic federation withdrawn from PLAN.md with salvaged kernels re-captured here)
 **Audience:** Developers considering next phases; product planning
 
 > **Note 1:** As of 2026-07-02, the LSP/MCP remote-delegation foundation
@@ -12,11 +12,16 @@ This document tracks upcoming feature ideas that are **not yet in active develop
 > Those sections were removed from here; this file now tracks only what's
 > genuinely still just an idea.
 > 
-> **Note 2:** As of 2026-07-08, semantic federation (distributed semantic
-> knowledge, peer-to-peer query routing, semantic packfiles) is now fully
-> designed in `docs/design/semantic-federation.md` and scheduled as Phases
-> 154–158 in `docs/PLAN.md`. The design is comprehensive; implementation
-> begins after Phase 153 completes.
+> **Note 2:** Semantic federation (distributed semantic knowledge,
+> peer-to-peer query routing, semantic packfiles) was designed in
+> `docs/design/semantic-federation.md` and briefly scheduled as PLAN.md
+> Phases 154–158 (2026-07-08), then **withdrawn on 2026-07-09 before any
+> implementation** — the design was speculative (P2P/gossip network) and
+> unreconciled with the shipped auth/storage/model-profile layers. The
+> design doc is retained, marked withdrawn. Its salvageable kernels are
+> re-captured below as three independent ideas: *Prebuilt Index
+> Distribution*, *Chunk-Level Semantic Enrichment*, and *SKOS-Style Concept
+> Vocabulary*.
 
 ---
 
@@ -719,6 +724,79 @@ No design committed yet. The rough shape, sketched for discussion:
 
 ---
 
+## Prebuilt Index Distribution ("index once, serve many" for agent-scale load)
+
+*Salvaged from the withdrawn semantic-federation design (2026-07-09) and re-framed around its actual motivating problem.*
+
+**Refined into:** see [`docs/prebuilt-index-distribution-plan.md`](prebuilt-index-distribution-plan.md)
+(2026-07-09) — full design: bundle manifest v2 with `embed_config`-derived
+provenance, sqlite delta bundles, `index attach`/`index publish` with a
+layered HTTPS resolution ladder (config URL template → gitsema server →
+GitHub rolling release), server-side bundle routes under the Phase 122–126
+grant model, and a zero-server CI loop. Includes a "Decisions taken
+autonomously (pending user review)" section covering every Design Gap the
+original entry listed. Not yet scheduled in `PLAN.md`.
+
+---
+
+## Chunk-Level Semantic Enrichment (summaries, keywords, entities)
+
+*Salvaged Layer-1 kernel of the withdrawn semantic-federation design — valuable purely locally, no networking required.*
+
+**Refined into:** see [`docs/semantic-enrichment-plan.md`](semantic-enrichment-plan.md) (2026-07-10).
+
+One-paragraph summary of the refined design: an opt-in LLM-generated metadata
+layer (`summary`, `keywords`, optional `entities`) for the index's retrieval
+units — whole-file blobs *and* chunks — stored in a new `enrichments` table
+(schema v33) that **references** existing blob/chunk/embedding rows (no vector
+duplication), written only after mandatory **inbound redaction** of LLM output
+via `redact.ts` (stored summaries travel in bundles and server responses),
+generated via the existing narrator model configs (no new `embed_config`
+kind), and surfaced additively through `SearchResult.summary`/`keywords`
+across CLI/REPL/MCP/HTTP/guide. Trigger model: `index start --semantic-enrich`
+plus an `index enrich` backfill subcommand; lazy enrich-on-search was
+explicitly rejected (read paths stay network-free). All four original Design
+Gaps (cost controls, backfill, schema/storage-abstraction coverage, keyword
+normalization) are resolved in the plan's §6 "Decisions taken autonomously
+(pending user review)" table — review that section before phase-planning.
+Three implementation phases (E1 core+storage+backfill, E2 index-time flag,
+E3 surfacing & parity), not yet scheduled in `PLAN.md`.
+
+---
+
+## SKOS-Style Concept Vocabulary (model-independent semantic layer)
+
+*Salvaged from the withdrawn semantic-federation design's keyword/SKOS thread.*
+
+**Refined into:** see [`docs/design/concept-vocabulary.md`](design/concept-vocabulary.md) (2026-07-10).
+
+One-paragraph summary of the refined design: a lightweight, curated,
+**model-independent** controlled vocabulary — a real SKOS subset
+(`broader`/`related` relations, pref/alt/hidden labels, concept schemes,
+`exact_match`/`close_match` cross-scheme mapping, deprecation with
+`replaced_by` forwarding) in four durable relational tables (schema v33)
+plus a recomputable `concept_assignments` table (v34), behind a new
+fail-loud `ConceptStore` on the storage seam. Assignments target
+content-addressed, path-free identities (blob/chunk/symbol occurrence
+keys) with per-method confidence rows: `manual` (1.0), **`lexical` as the
+model-independent backbone** (labelEnhancer + FTS + cluster keywords),
+`centroid` (model-recorded and model-filtered), `llm` (redacted,
+safe-by-default), and a cluster↔concept bridge that gives clusters stable
+names. Query surface: a new `concepts` CLI group + `--concept` faceting on
+`search`/`first-seen` with narrower-transitive expansion, shipped at
+MCP/HTTP parity per phase; cross-repo interop is a git-friendly JSON scheme
+file + scheme URIs — no network protocol. All five original Design Gaps
+(curation model, storage, assignment mechanics/confidence, query surface,
+scheme evolution) are resolved in the plan's §11 "Decisions taken
+autonomously (pending user review)" section — review it before
+phase-planning. Five implementation phases (C1 vocabulary core, C2
+assignments + faceted search, C3 semantic/LLM assigners, C4 bridges +
+diffs + agent surface, C5 Postgres + interop), not yet scheduled in
+`PLAN.md`. Stands alone; Chunk-Level Semantic Enrichment keywords slot in
+as an extra lexical signal if that design ships.
+
+---
+
 ## Related Issues & Documents
 
 - **Parity tracking:** See `docs/parity.md` for tool availability across interfaces
@@ -736,6 +814,6 @@ No design committed yet. The rough shape, sketched for discussion:
 
 ---
 
-**Document Status:** ✓ Current (2026-06-22)
+**Document Status:** ✓ Current (2026-07-10)
 **Next Review:** When Semahub or the plugin API work begins
 **Maintainer:** jsilvanus@gmail.com

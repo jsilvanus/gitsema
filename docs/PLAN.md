@@ -6096,7 +6096,29 @@ rather than continuing to carry it forward.
 
 ---
 
-### Phase 150 — Git argument-injection close-out (review11 §2.1 + §3.2)
+### Phase 150 — Git argument-injection close-out (review11 §2.1 + §3.2) ✅
+
+**Status:** ✅ complete. Landed a shared `runGit(subcommand, flags, refs,
+options)` helper (`src/core/git/runGit.ts`) that (a) rejects any ref failing
+`isSafeGitRange()` (leading `-` and non-ref characters) before spawning git,
+throwing `UnsafeGitRefError`, and (b) always inserts git's `--end-of-options`
+marker before the positional refs so a value can never be reparsed as a flag.
+Routed the three PLAN-scoped sinks through it: `resolveRefToTimestamp`
+(`clustering.ts` — the confirmed §2.1 `semantic_bisect`/`triage` sink),
+`parseDateArg` (`timeSearch.ts` — §3.2 `rev-parse`/`show`), and
+`getMergeBase`/`getBranchExclusiveBlobs` (`branchDiff.ts` — §3.2 `merge-base`).
+Regression suite `tests/integration/gitArgInjection.test.ts` (8 tests) asserts
+`runGit`/`resolveRefToTimestamp` reject a `--output=<path>` ref and write no
+file (PoC no longer reproduces), while still resolving legitimate refs and ISO
+dates. **Deviations:** (1) used git's `--end-of-options` rather than a bare
+`--` — empirically, a bare `--` before a ref makes `git log`/`show` treat the
+ref as a *pathspec*, silently breaking valid-ref resolution; `--end-of-options`
+(git ≥ 2.24) stops flag parsing without reclassifying the positional, verified
+against git 2.43. (2) `regressionGate.ts`/`codeReview.ts` were left as-is:
+they already gate their refs through `isSafeGitRange()` (the review10 §7 fix)
+and so already satisfy the "validates the ref" acceptance criterion; they are
+CLI-only, not network-exposed. (3) `isSafeGitRange` had already been relocated
+to `src/core/git/refSafety.ts` in prior work, so no move was needed.
 
 **Design:** no separate design doc — scoped directly from review11 §2.1
 (PoC-confirmed) and §3.2. Root cause: the review9/10 injection fixes switched
@@ -6157,7 +6179,37 @@ call sites or network entry points are added.
 
 ---
 
-### Phase 151 — Read-route repo authorization gate (review11 §2.2)
+### Phase 151 — Read-route repo authorization gate (review11 §2.2) ✅
+
+**Status:** ✅ complete. Added `repoAuthMiddleware`
+(`src/server/middleware/repoAuth.ts`), mounted immediately after
+`repoSessionMiddleware` on all ten data-route groups (search, evolution,
+analysis, insights, graph, protocol, watch, projections, narrate/explain,
+guide). In multi-tenant mode it requires
+`roleSatisfies(resolveUserRepoAccess(getRawDb(), userId, repoId), 'read')`
+unless the repo's mirror row is `visibility === 'public'`, else 403.
+`resolveRequestedRepoId()` was extracted from `repoSessionMiddleware` so both
+middlewares resolve the addressed repo identically. `authMiddleware` now marks
+`req.globalKeyAuth` (global `GITSEMA_SERVE_KEY`) and `req.repoTokenScoped`
+(legacy per-repo token); both bypass the grant check since they already imply
+access. **Multi-tenant trigger (decided):** `isMultiTenantMode()` =
+explicit `GITSEMA_MULTI_TENANT` (`1`/`true`/`yes`/`on` → on, `0`/`false` →
+off) if set, else `GITSEMA_SERVE_KEY` presence; a default open server (no key,
+no flag) is a no-op. Documented in `CLAUDE.md`/`README.md` config tables.
+Tests: `tests/repoAuthMiddleware.test.ts` (15 cases) covers granted-read (pass),
+un-granted/unauthenticated private (403), public (pass), global-key bypass,
+scoped-token bypass, missing-mirror-defaults-private, query-string repoId, and
+the `isMultiTenantMode` trigger matrix; the full server-route suite (247 tests)
+confirms open-mode behavior is unchanged (no new 403s). **Deviations:** (1)
+visibility is read from the addressed repo's own DB mirror row
+(`getRepo(getActiveSession(), repoId)`) — the authoritative source used by the
+shipped Phase 126 register path in `remote.ts` — which is why the middleware
+mounts *after* `repoSessionMiddleware` (so the repo DB is active) rather than
+before. (2) Enforcement is verified at the middleware unit level plus a
+full-suite open-mode regression rather than a new supertest e2e, matching the
+existing `repoSessionMiddleware.test.ts` unit-only convention (a real e2e would
+require standing up the three-DB registry/control-plane/repo topology).
+(3) Per-branch filtering remains deferred as specified below.
 
 **Design:** no separate design doc — scoped directly from review11 §2.2
 (disclosed in PLAN.md as "Phase 123 deviation #1"). The Multi-Tenant Auth
@@ -6224,7 +6276,32 @@ repo-level helper is added), `CLAUDE.md` (config docs), tests,
 
 ---
 
-### Phase 152 — BYOK SSRF guard + newly-exposed list-tool bounds (review11 §3.1 + §3.3)
+### Phase 152 — BYOK SSRF guard + newly-exposed list-tool bounds (review11 §3.1 + §3.3) ✅
+
+**Status:** ✅ complete. **§3.1 (BYOK SSRF):** `validateByokUrl()` in
+`resolveNarrator.ts` (invoked from `byokConfig()` before the provider is
+constructed, on the `narrate`/`explain`/`guide` HTTP routes) requires an
+`http(s)` scheme and rejects hosts resolving to loopback (`127.0.0.0/8`,
+`::1`), link-local (`169.254.0.0/16` incl. the `169.254.169.254` metadata IP,
+`fe80::/10`), and RFC-1918 ranges — including via DNS resolution for
+non-literal hosts — unless the host matches `GITSEMA_BYOK_ALLOW_HOSTS`
+(comma-separated host/CIDR allowlist, default empty). The routes surface it as
+a 400 `ByokUrlValidationError`. **§3.3 (list bounds):** audited every Phase
+147/148-exposed list tool for an upper bound; all `top_k`/`top`/`limit` params
+already carried `.max(...)` (500 for graph tools, 50 for insights). The one
+gap was the `depth` param on `deps` (whose core BFS uses `depth ?? Infinity`
+with no server-side clamp) and `blast_radius`; both now carry
+`.max(MAX_GRAPH_DEPTH_REQUEST)` (= 64, a new shared constant in
+`storage/types.ts`) on the HTTP schema and MCP tool. **Deviations:** (1) the
+§3.1 SSRF guard and its allowlist were already implemented + unit-tested in a
+prior commit; this phase verified completeness, extended the tests
+(`byokCredentials.test.ts`: metadata IP, RFC-1918, non-http scheme, public
+pass, CIDR re-permit), and documented it in README/features/CLAUDE config
+tables. (2) `blast_radius`'s traversal already clamps to
+`MAX_GRAPH_TRAVERSAL_DEPTH` (3), so its 64-cap is documentation/defense-in-depth
+rather than the effective limit; `deps` is the only genuinely-unbounded site
+the cap constrains. (3) Guide (local, in-process) tool schemas were not
+bounded — §3.3 scopes to *network-exposed* tools only.
 
 **Design:** no separate design doc — scoped directly from review11 §3.1 and
 §3.3. §3.1: Phase 130's BYOK uses a request-supplied `byok.http_url`
@@ -6307,350 +6384,6 @@ URL-guard helper), `src/server/routes/{narrator,guide}.ts`,
 **Acceptance criteria:**
 - CLI: `gitsema search`, `first-seen`, `code-search` output includes `[blob:...]` prefix ✅
 - MCP: `semantic_search`, `search_history`, `code_search` text output includes `[blob:...]` prefix ✅
-
----
-
-### Phase 154 — Semantic Refs & Incremental Transfer
-
-**Design:** Full design in [`docs/design/semantic-federation.md`](design/semantic-federation.md).
-
-**Goal:** Enable semantic index snapshots and incremental sync between repositories, forming the foundation of federated semantic knowledge exchange.
-
-**Key design decisions:**
-- **Chunk-level granularity:** Semantic objects wrap *chunks*, not whole blobs. Enables fine-grained deduplication and specific summaries.
-- **Model versioning:** Every semantic object stores `profile_version` (e.g. "text-embedding-3-small:1.0") and `model_dimensions`. Cross-model federation rejected in Phase 154–158 (deferred to Phase 159).
-- **Storage:** Semantic objects are permanent, content-addressed, immutable (like Git objects).
-
-**Scope:**
-
-1. **Database schema (v33 migration):**
-   - New `semantic_objects` table: `(object_hash, chunk_hash, blob_hash, embedding, summary, keywords, language, entities, structural_refs, profile_version, model_dimensions, signer, created_at)`
-   - New `sema_refs` table: `(name, target_sema_tree_hash, blob_count, created_at, updated_at)`
-   - New `sema_trees` table: `(tree_hash, parent_tree_hash, entries_jsonl, metadata_json)` — tracks semantic snapshot lineage
-   - Extend `chunk_embeddings`: add `summary`, `keywords`, `language` columns (nullable for backward compat)
-
-2. **CLI commands:**
-   - `gitsema sema push [--remote url] [--branch name]` — create semantic ref, push new semantic objects to remote
-   - `gitsema sema pull [--remote url] [--branch name]` — fetch semantic ref + missing semantic objects from remote
-   - `gitsema sema log [--ref name] [--graph]` — show semantic ref history (like `git log`)
-   - `gitsema sema diff <ref1> <ref2> [--format text|json|html]` — semantic diff (high-level concept changes between snapshots)
-
-3. **HTTP API:**
-   - `POST /api/v1/sema/push` — accept semantic tree + objects for storage
-   - `GET /api/v1/sema/pull?ref=<name>` — fetch semantic tree + packfile of missing objects
-   - `GET /api/v1/sema/log` — semantic ref history
-   - `POST /api/v1/sema/diff` — compute semantic diff between two refs
-
-4. **MCP tools:**
-   - `sema_push()` — create/update semantic ref
-   - `sema_pull()` — fetch semantic ref and objects
-   - `sema_log()` — list semantic ref history
-   - `sema_diff()` — semantic diff between refs
-
-5. **Feature:** Semantic object enrichment (Layer 1 enhancement)
-   - Optional `--semantic-enrich` flag on `gitsema index start` (calls narrator LLM to generate `summary`, `keywords`, `entities` per chunk)
-   - Extends existing chunking pipeline: `chunk → embed → [enrich] → store`
-   - Backward compat: old indexes without semantic_objects table still index normally (opt-in feature)
-   - Summary generation: reuse narrator infrastructure from Phase 56 (`buildSemanticSummary()` or similar)
-
-6. **Tests:**
-   - Schema: v32 → v33 migration applies cleanly; new tables created
-   - Two-repo push/pull scenario: push from Repo A, pull into Repo B, verify object deduplication by `object_hash`
-   - Semantic diff: track concept-level changes between refs (added/removed/changed summaries)
-   - Backward compat: old indexes without semantic_objects still index; queries still work (semantic objects lazy-loaded)
-   - Cross-model rejection: `sema pull` from a peer with different model → error with helpful message
-   - Enrichment: `--semantic-enrich` generates summaries; summaries appear in MCP/HTTP results
-
-**Acceptance criteria:**
-- Semantic refs created, stored persistently, survive session restarts
-- `gitsema sema push` transfers only new semantic objects (content-addressed dedup verified via hash)
-- `gitsema sema pull` correctly reconstructs remote semantic state
-- `gitsema sema diff` shows high-level concept changes (not just raw vector diffs)
-- `--semantic-enrich` produces meaningful summaries (manual QA on real repo)
-- Cross-model federation rejected with clear error message
-- All commands work via HTTP + MCP + CLI (parity)
-- `pnpm build && pnpm test` clean; changesets added
-
-**Effort:** ~2.5 weeks (schema migration + enrichment pipeline adds complexity)  
-**Risk:** Medium (new tables + semantic enrichment pipeline; needs LLM integration testing)
-
-**Files (anticipated):** `src/core/db/schema.ts`, `src/core/db/sqlite.ts` (v33 migration), `src/core/federation/semanticRefs.ts`, `src/core/narrator/semanticEnrichment.ts`, `src/cli/commands/sema.ts`, `src/server/routes/federation/sema.ts`, `src/mcp/tools/federation.ts`, tests, `CLAUDE.md`, `.changeset/`
-
-**Design decisions deferred to Phase 159:**
-- Cross-model federation (re-embedding queries for different model spaces)
-- Trust/signatures (cryptographic verification of semantic objects)
-- Semantic commit deltas (see Phase 158; focuses on static state here)
-
----
-
-### Phase 155 — Federation Discovery & Gossip
-
-**Design:** Covered in `docs/design/semantic-federation.md`.
-
-**Goal:** Enable repositories to discover and register with peers, forming a federated network of semantic services.
-
-**Scope:**
-
-1. **Peer registration & discovery:**
-   - `GET /api/v1/federation/info` — returns peer's semantic capabilities (centroid embeddings per cluster, model version, repo URL)
-   - `POST /api/v1/federation/gossip` — receive peer info, propagate to known peers
-   - `gitsema federation info` — show local federation metadata
-   - `gitsema federation peers [--list]` — list known peers + their semantic topics
-
-2. **Gossip protocol:**
-   - Simple rumor-spreading: when Peer A learns about Peer B, A propagates to C, C to D, etc.
-   - TTL on gossip entries (default 24 hours) — stale peers auto-expire
-   - Bounded peer list (default max 50 peers) — prevents broadcast storm
-   - Rate limiting on gossip (default 1 gossip/sec per peer pair) — prevents network saturation
-
-3. **Optional central registry (lightweight):**
-   - HTTP endpoint to list registered peers (optional, can be disabled)
-   - Repos can opt-in to publish to a central registry
-   - Registry serves as bootstrap source for P2P gossip, but isn't required
-
-4. **Semantic topics per peer:**
-   - On each `gitsema index start`, compute cluster centroids (Phase 21)
-   - Extract top-K clusters and their semantic topics (function labels from guide interpretation)
-   - Store in federation metadata + include in `GET /api/v1/federation/info`
-   - Used by Phase 156 routing logic to decide which peers to query
-
-5. **Tests:**
-   - 3-repo network: A ↔ B ↔ C, verify gossip reaches all nodes within 3 rounds
-   - Peer expiry: mark peer stale, verify it stops being returned after TTL
-   - Peer limit: add 100 peers, verify only top 50 (by relevance) are kept
-
-**Acceptance criteria:**
-- Peer discovery works across 3+ repositories without manual configuration
-- Gossip protocol converges within expected rounds (O(log N) proof not needed, just empirical validation)
-- Peer info includes semantic topics (centroid embeddings + labels)
-- `gitsema federation peers` shows current peer list with last-seen timestamps
-- `pnpm build && pnpm test` clean
-
-**Effort:** ~1.5 weeks  
-**Risk:** Low (read-only; no data mutation)
-
-**Files (anticipated):** `src/core/federation/gossip.ts`, `src/cli/commands/federation.ts`, `src/server/routes/federation/discovery.ts`, `src/mcp/tools/federation.ts` (extended), tests, `.changeset/`
-
----
-
-### Phase 156 — Semantic Query Routing
-
-**Design:** Covered in `docs/design/semantic-federation.md`.
-
-**Goal:** Route queries intelligently to the most relevant peers based on semantic similarity, reducing broadcast queries and enabling users to choose how federated results are stored.
-
-**Key design decisions:**
-- **Storage modes:** Support transient (no storage), cached (session scope), and imported (permanent) federation search results.
-- **Same-model only:** Only query peers with matching `profile_version`; cross-model federation deferred to Phase 159.
-- **Three-signal ranking:** Reuse existing three-signal ranking (Phase 41) for merged cross-peer results.
-
-**Scope:**
-
-1. **Semantic DHT routing table (`semanticDHT.ts`):**
-   - Build routing table from peer gossip + centroid embeddings (from Phase 155)
-   - For each known peer, store semantic topics (cluster centroids + labels)
-   - On each query, embed query and compute similarity to all peer centroids
-   - Select top-N peers (default N=5, configurable `--federation-peers <n>`) above threshold (default 0.3)
-   - Filter by model match: only include peers with same `profile_version` as local index
-
-2. **Federated search CLI:**
-   - `gitsema federation search <query> [--peers <urls> | --auto] [--top k] [--cache|--import|--no-cache] [--format text|json|html]`
-   - `--auto`: use gossip-discovered peers; `--peers`: explicit peer URLs
-   - Storage modes (mutually exclusive):
-     - `--cache` (default): store in temp `federation_cache` table (session scope), TTL = session
-     - `--import`: merge into permanent `semantic_objects` table (mark with `origin: "federation_imported"`)
-     - `--no-cache`: transient (show results, don't store)
-   - Fetch results from selected peers in parallel with timeout (default 5s/peer)
-   - Merge by `chunk_hash` (remove duplicates)
-   - Re-rank using three-signal ranking (vector similarity, recency, path relevance)
-   - Include provenance: show peer URL + model version for each result
-
-3. **HTTP API:**
-   - `POST /api/v1/federation/search` — accept query, storage mode (`cache|import|transient`), peer hints
-   - `GET /api/v1/federation/route?query=<text>` — return routing decision (which peers selected + why)
-   - Streaming results as peers respond (don't wait for slowest)
-   - `X-Peer-Info` header on each result: `{url: "...", model: "...", response_time: ...}`
-
-4. **MCP tools:**
-   - `federation_search()` — query federated peers (supports storage mode selection)
-   - `federation_route()` — show routing decision (peers selected + reasoning)
-
-5. **Result merging & ranking:**
-   - De-duplicate by `chunk_hash` (if same chunk from multiple peers, keep highest-confidence result)
-   - Combine provenance metadata: `{peer_url: "...", peer_model: "...", local_origin: "..."}`
-   - Re-rank using three-signal: vector similarity (70%) + recency (20%) + path relevance (10%)
-   - Fallback: if peer unresponsive, drop and continue (fail-open)
-
-6. **Metadata tracking:**
-   - Extend `semantic_objects` to track `origin` (values: "local", "federation_temp", "federation_imported") + `peer_url` + `import_date`
-   - Cache table `federation_cache`: same schema as `semantic_objects`, but session-scoped (dropped on exit)
-
-7. **Tests:**
-   - Schema: `federation_cache` table creates/drops correctly
-   - 3-repo network: query "authentication", verify only auth-heavy repos selected
-   - Routing: `--federation-peers 3` limits to top-3 by similarity
-   - Storage modes: `--cache` doesn't pollute local index; `--import` persists; `--no-cache` returns 0 cached results
-   - Cross-model rejection: query Repo B (different model) → skipped with warning
-   - Result ranking: merge from 2 peers, verify no regressions vs. single-repo ranking
-   - Timeout: slow peer (latency > 5s) doesn't block others; partial results returned
-   - Provenance: results show peer URL + model; CLI and HTTP match
-
-**Acceptance criteria:**
-- `gitsema federation search <query>` returns ranked results from multiple (same-model) peers
-- Routing logic selects relevant peers; `--federation-peers <n>` respected
-- Merged results de-duplicated by chunk_hash, re-ranked correctly
-- `--cache` (default) doesn't persist results; `--import` does; `--no-cache` is transient
-- Cross-model peers rejected with warning (not queried)
-- Peer timeout doesn't block final result (fail-open)
-- HTTP + MCP parity with CLI
-- Provenance metadata visible in all formats (text, json, html)
-- `pnpm build && pnpm test` clean
-
-**Effort:** ~3.5 weeks (DHT + caching + storage modes add complexity)  
-**Risk:** Medium (distributed ranking; needs careful testing on multi-repo setup; caching adds state management)
-
-**Files (anticipated):** `src/core/db/schema.ts` (federation_cache table), `src/core/federation/semanticDHT.ts`, `src/core/federation/federatedSearch.ts`, `src/cli/commands/federation.ts` (extended), `src/server/routes/federation/search.ts`, `src/mcp/tools/federation.ts` (extended), tests, `.changeset/`
-
-**Design decisions deferred to Phase 159:**
-- Cross-model federation (re-embedding for different model spaces)
-- Peer trust/signatures (verifying peer semantic objects)
-
----
-
-### Phase 157 — Semantic Packfiles
-
-**Design:** Covered in `docs/design/semantic-federation.md`.
-
-**Goal:** Enable efficient bulk transfer of semantic objects related to a query via a binary packfile format.
-
-**Scope:**
-
-1. **Packfile format (`semanticPackfile.ts`):**
-   - Binary format: `[count: varint][for each object: hash_len, hash, embedding, summary_len, summary, metadata][checksum: SHA-256]`
-   - Gzip compression by default
-   - Optional signing: include Ed25519 signature (for future Phase 155+ trust model)
-   - Fast serialization: stream-based, no full buffer load
-
-2. **CLI commands:**
-   - `gitsema sema pack --query <text> [--output file.sema] [--sign]` — create packfile locally (for sharing)
-   - `gitsema sema fetch --query <text> [--remote url] [--output file.sema]` — fetch packfile from peer
-   - `gitsema sema unpack [--input file.sema] [--merge]` — import packfile into local index (dedup by blob hash)
-
-3. **HTTP API:**
-   - `POST /api/v1/federation/pack` — client specifies query, server returns packfile
-   - `GET /api/v1/federation/fetch?packfile_id=<id>` — retrieve pre-computed packfile (streaming)
-
-4. **MCP tools:**
-   - `sema_pack()` — create packfile
-   - `sema_fetch()` — fetch packfile from peer
-   - (No `sema_unpack()` on MCP — unpacking happens locally)
-
-5. **Packfile integration:**
-   - On `gitsema sema fetch --query <text>`, automatically unpack + merge into local index
-   - Deduplication by blob hash: if local index already has the blob, skip re-storing
-   - Bandwidth savings: packfiles compress ~50%+ over individual fetch requests (tested empirically)
-
-6. **Tests:**
-   - Pack/unpack round-trip: create packfile, unpack, verify blob hashes match
-   - Compression: measure packfile size vs. raw objects (expect 50%+ reduction)
-   - Streaming: packfile for large query (1000s of objects) doesn't allocate full buffer
-   - Deduplication: fetch same packfile twice, verify second fetch doesn't re-store blobs
-
-**Acceptance criteria:**
-- Packfiles serialize + deserialize correctly
-- Compression reduces size by 40%+ (tunable via zlib level)
-- `gitsema sema pack` + `gitsema sema fetch` work end-to-end
-- Unpacking deduplicates by blob hash (second unpack adds 0 new blobs)
-- Packfiles can be shared offline (email, S3, etc.)
-- `pnpm build && pnpm test` clean
-
-**Effort:** ~2.5 weeks  
-**Risk:** Medium (new binary format; needs robust error handling + fuzzing)
-
-**Files (anticipated):** `src/core/federation/semanticPackfile.ts`, `src/cli/commands/sema.ts` (extended), `src/server/routes/federation/pack.ts`, `src/mcp/tools/federation.ts` (extended), tests, `.changeset/`
-
----
-
-### Phase 158 — Semantic Commits & Deltas
-
-**Design:** Covered in `docs/design/semantic-federation.md`.
-
-**Goal:** Track semantic changes per Git commit, enabling concept-level causality analysis and change-driven queries.
-
-**Scope:**
-
-1. **Database schema:** Add `semantic_commits` table (v34 migration):
-   - `semantic_commits(id, git_commit_hash, semantic_commit_hash, parent_semantic_commit_hash, summary, added_concepts_json, removed_concepts_json, changed_concepts_json, author, timestamp, provenance_json)`
-   - Added/removed/changed concepts include: concept text, embedding, confidence score, affected blob hashes
-
-2. **Semantic delta computation:**
-   - On each `gitsema index start`, compare current semantic state to previous state (via `sema_refs`)
-   - For each Git commit, compute:
-     - **Added concepts:** new embeddings not in parent commit
-     - **Removed concepts:** embeddings in parent but not current
-     - **Changed concepts:** embeddings in both but with large cosine distance (> threshold, default 0.3)
-   - Store deltas in `semantic_commits` with git commit hash linkage
-
-3. **CLI commands:**
-   - `gitsema semantic-commits [--ref] [--since <date>] [--until <date>] [--format text|json|html]` — show semantic commit log
-   - `gitsema semantic-blame <query> [--file path] [--since <date>] [--format text|json]` — blame a concept by semantic change (not line change)
-   - `gitsema concept-lifecycle <query> [--format text|json|html]` — show lifecycle stages of a concept (born → growing → mature → declining → dead)
-
-4. **HTTP API:**
-   - `GET /api/v1/semantic-commits` — fetch semantic commit log with filtering
-   - `POST /api/v1/semantic-blame` — semantic blame endpoint
-   - `GET /api/v1/concept-lifecycle` — concept lifecycle endpoint
-
-5. **MCP tools:**
-   - `semantic_commits()` — query semantic commit log
-   - `semantic_blame()` — blame by semantic change
-   - `concept_lifecycle()` — trace concept evolution stages
-
-6. **Queries enabled:**
-   - "Show me repos that recently improved OAuth" → search semantic commit summaries + concepts
-   - "Who introduced this security pattern?" → semantic blame on semantic commits
-   - "When did caching become stale?" → concept-lifecycle detection (declining stage)
-   - "What breaks if I remove this function?" → semantic blast radius + concept lifecycle
-
-7. **Tests:**
-   - Semantic commit creation on index: verify deltas computed correctly
-   - Concept lifecycle detection: manually create a multi-commit arc (add → grow → mature → decline), verify classification
-   - Semantic blame accuracy: compare semantic-blame results to `gitsema blame` (should show similar patterns)
-
-**Acceptance criteria:**
-- Semantic commits created on every indexing run (one per Git commit)
-- Deltas correctly identify added/removed/changed concepts
-- Lifecycle detection classifies concept stages accurately (tested on synthetic + real repo)
-- `gitsema semantic-blame <query>` produces meaningful results (compared to line-level blame)
-- All commands work via HTTP + MCP + CLI
-- `pnpm build && pnpm test` clean
-
-**Effort:** ~2 weeks  
-**Risk:** Medium (delta computation is complex; needs extensive validation on real repos with semantic drift)
-
-**Files (anticipated):** `src/core/db/schema.ts`, `src/core/db/sqlite.ts` (v34 migration), `src/core/federation/semanticCommits.ts`, `src/core/search/semanticBlame.ts`, `src/cli/commands/semanticCommits.ts`, `src/server/routes/federation/semanticCommits.ts`, `src/mcp/tools/federation.ts` (extended), tests, `CLAUDE.md`, `.changeset/`
-
----
-
-## Semantic Federation Summary
-
-**Phases 154–158 implement the three-layer federation architecture from `docs/design/semantic-federation.md`:**
-
-| Phase | Layer | Goal |
-|---|---|---|
-| 154 | Layer 1 + 2 | Semantic objects + snapshots; incremental sync |
-| 155 | Layer 3 | Peer discovery & gossip protocol |
-| 156 | Layer 3 | Intelligent query routing (DHT) |
-| 157 | Layer 3 | Efficient bulk transfer (packfiles) |
-| 158 | Layer 1 | Semantic deltas + concept causality |
-
-**Key insight:** These phases transform gitsema from a single-repository tool into a network of federated semantic services. By Phase 158, repositories can answer questions about their own knowledge, share insights with peers, and collectively answer complex semantic queries that no single repository could answer alone.
-
-**Post-Phase-158 roadmap** (future phases):
-- **Phase 159:** Semantic signatures & trust model (Phase 155 follow-on) — enable signed semantic objects for supply-chain provenance
-- **Phase 160:** Web UI for federation — dashboard showing peer network, popular topics, cross-repo insights
-- **Phase 161:** Semantic LLM grounding — use federated semantic knowledge to improve LLM context in `guide` and `narrate` commands
-- **Phase 162:** Integration with package managers — expose gitsema federation API as a plugin for npm/pip/cargo semantic search
 - HTTP: `/search`, `/first-seen` text rendering includes `[blob:...]` prefix ✅
 - HTML: search results show "Blob Hash" column or `blob:` prefix ✅
 - Tests: new hash-labeling tests added ✅
@@ -6660,6 +6393,25 @@ URL-guard helper), `src/server/routes/{narrator,guide}.ts`,
 **Files changed:** `src/core/search/ranking.ts`, `src/core/viz/htmlRenderer-search.ts`, `src/core/viz/htmlRenderer-evolution.ts`, `src/server/routes/openapi.ts`, `src/core/narrator/interpretations.ts`, `tests/ranking.test.ts`, `.changeset/`.
 
 **Status: complete.**
+
+---
+
+## Withdrawn: Semantic Federation (Phases 154–158)
+
+Phases 154–158 (semantic objects & refs, federation discovery & gossip,
+semantic query routing, semantic packfiles, semantic commits & deltas) were
+scheduled here on 2026-07-08 from `docs/design/semantic-federation.md` and
+**withdrawn on 2026-07-09, before any implementation began**. The design was
+judged premature: it centered on a speculative P2P/gossip network rather than
+the actual driver (agent-scale read load on hosted repo endpoints), and it was
+written without reconciling against the shipped multi-tenant auth (Phases
+122–126), storage-abstraction (101–103), and locked-model-set (128) layers.
+
+The design doc is retained and marked withdrawn. The salvageable kernels —
+chunk-level semantic enrichment, a SKOS-style concept vocabulary, and
+prebuilt-index distribution for agent-scale serving — moved back to
+`docs/feature-ideas.md`. Phase numbers 154–158 are retired to keep git history
+unambiguous; the next scheduled phase starts at 159.
 
 ---
 
