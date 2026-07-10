@@ -304,6 +304,8 @@ Start with `gitsema tools serve [--port n] [--key token] [--ui]`.
 
 Authentication: optional Bearer token via `--key <token>` / `GITSEMA_SERVE_KEY`. Per-repo scoped tokens can be minted with `gitsema repos token add <repo-id>` and are stored as **SHA-256 hashes** at rest (review7 §4.1) — the plaintext is never persisted in the database.
 
+**Git argument-injection hardening (Phase 150 / review11 §2.1–§3.2):** every `git` call site that takes a caller-influenced ref (commit hash, branch, tag, range) routes through a shared `runGit()` helper (`src/core/git/runGit.ts`) that rejects refs failing `isSafeGitRange()` (leading `-` and non-ref characters) *before* spawning git and always inserts git's `--end-of-options` separator, so a value like `--output=/path` can never be reparsed as a git flag. This closes the network-reachable arbitrary-file-write that was reachable through `semantic_bisect`/`triage` when a "ref" began with `-`.
+
 ### Identity & credentials core (Phase 122)
 
 User accounts (`gitsema auth create-user <username>`, local DB bootstrap; org/role-gated

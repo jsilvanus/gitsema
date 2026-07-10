@@ -1,9 +1,8 @@
 import { getActiveSession } from '../../db/sqlite.js'
-import { execFileSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { blobCommits, commits } from '../../db/schema.js'
 import { inArray, eq } from 'drizzle-orm'
-import { isSafeGitRange } from '../../git/refSafety.js'
+import { runGit, UnsafeGitRefError } from '../../git/runGit.js'
 
 export interface FirstSeenInfo {
   commitHash: string
@@ -163,18 +162,20 @@ export function parseDateArg(value: string): number {
     // fall through to process.cwd()
   }
 
-  if (!isSafeGitRange(value)) {
-    throw new Error(`Unsafe git ref: ${JSON.stringify(value)}`)
-  }
-
+  // runGit() rejects unsafe refs (leading `-`) before spawning git, and always
+  // separates the ref with `--end-of-options` so it can never be parsed as a
+  // flag (Phase 150 / review11 §3.2).
   try {
-    const commitHash = execFileSync('git', ['rev-parse', '--verify', value], { encoding: 'utf8', cwd: gitCwd }).trim()
+    const commitHash = runGit('rev-parse', ['--verify'], [value], { encoding: 'utf8', cwd: gitCwd }).trim()
     if (commitHash) {
-      const tsOut = execFileSync('git', ['show', '-s', '--format=%ct', commitHash], { encoding: 'utf8', cwd: gitCwd }).trim()
+      const tsOut = runGit('show', ['-s', '--format=%ct'], [commitHash], { encoding: 'utf8', cwd: gitCwd }).trim()
       const ts = parseInt(tsOut, 10)
       if (!isNaN(ts)) return ts
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof UnsafeGitRefError) {
+      throw new Error(`Unsafe git ref: ${JSON.stringify(value)}`)
+    }
     // ignore and throw below
   }
 

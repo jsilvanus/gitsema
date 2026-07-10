@@ -1,26 +1,27 @@
-import { execFileSync } from 'node:child_process'
 import { getActiveSession } from '../db/sqlite.js'
 import { isSafeGitRange } from './refSafety.js'
+import { runGit, UnsafeGitRefError } from './runGit.js'
 
 /**
  * Returns the merge-base commit hash for two branches/refs.
  *
- * Runs `git merge-base <branchA> <branchB>`.
+ * Runs `git merge-base <branchA> <branchB>` via `runGit()`, which rejects
+ * unsafe refs (leading `-`) before spawning git and always separates the
+ * positional refs with `--end-of-options` (Phase 150 / review11 §3.2).
  * Throws if the branches have no common ancestor or git fails.
  */
 export function getMergeBase(branchA: string, branchB: string, repoPath = '.'): string {
-  if (!isSafeGitRange(branchA) || !isSafeGitRange(branchB)) {
-    throw new Error(`Unsafe git ref supplied to merge-base: ${JSON.stringify({ branchA, branchB })}`)
-  }
-
   let out: string
   try {
-    out = execFileSync('git', ['merge-base', branchA, branchB], {
+    out = runGit('merge-base', [], [branchA, branchB], {
       cwd: repoPath,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
   } catch (err) {
+    if (err instanceof UnsafeGitRefError) {
+      throw new Error(`Unsafe git ref supplied to merge-base: ${JSON.stringify({ branchA, branchB })}`)
+    }
     throw new Error(
       `Cannot find merge base for "${branchA}" and "${branchB}": ${err instanceof Error ? err.message : String(err)}`,
     )
@@ -55,13 +56,14 @@ export function getBranchExclusiveBlobs(
 
   let gitOutput: string
   try {
-    gitOutput = execFileSync(
-      'git',
-      ['log', `${mergeBaseHash}..${branch}`, '--format=%H'],
+    gitOutput = runGit(
+      'log',
+      ['--format=%H'],
+      [`${mergeBaseHash}..${branch}`],
       { cwd: repoPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     )
   } catch {
-    return [] // branch not found or no git; return empty gracefully
+    return [] // unsafe ref, branch not found, or no git; return empty gracefully
   }
 
   const commitHashes = gitOutput

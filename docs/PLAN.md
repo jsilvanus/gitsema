@@ -6096,7 +6096,29 @@ rather than continuing to carry it forward.
 
 ---
 
-### Phase 150 — Git argument-injection close-out (review11 §2.1 + §3.2)
+### Phase 150 — Git argument-injection close-out (review11 §2.1 + §3.2) ✅
+
+**Status:** ✅ complete. Landed a shared `runGit(subcommand, flags, refs,
+options)` helper (`src/core/git/runGit.ts`) that (a) rejects any ref failing
+`isSafeGitRange()` (leading `-` and non-ref characters) before spawning git,
+throwing `UnsafeGitRefError`, and (b) always inserts git's `--end-of-options`
+marker before the positional refs so a value can never be reparsed as a flag.
+Routed the three PLAN-scoped sinks through it: `resolveRefToTimestamp`
+(`clustering.ts` — the confirmed §2.1 `semantic_bisect`/`triage` sink),
+`parseDateArg` (`timeSearch.ts` — §3.2 `rev-parse`/`show`), and
+`getMergeBase`/`getBranchExclusiveBlobs` (`branchDiff.ts` — §3.2 `merge-base`).
+Regression suite `tests/integration/gitArgInjection.test.ts` (8 tests) asserts
+`runGit`/`resolveRefToTimestamp` reject a `--output=<path>` ref and write no
+file (PoC no longer reproduces), while still resolving legitimate refs and ISO
+dates. **Deviations:** (1) used git's `--end-of-options` rather than a bare
+`--` — empirically, a bare `--` before a ref makes `git log`/`show` treat the
+ref as a *pathspec*, silently breaking valid-ref resolution; `--end-of-options`
+(git ≥ 2.24) stops flag parsing without reclassifying the positional, verified
+against git 2.43. (2) `regressionGate.ts`/`codeReview.ts` were left as-is:
+they already gate their refs through `isSafeGitRange()` (the review10 §7 fix)
+and so already satisfy the "validates the ref" acceptance criterion; they are
+CLI-only, not network-exposed. (3) `isSafeGitRange` had already been relocated
+to `src/core/git/refSafety.ts` in prior work, so no move was needed.
 
 **Design:** no separate design doc — scoped directly from review11 §2.1
 (PoC-confirmed) and §3.2. Root cause: the review9/10 injection fixes switched

@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import Database from 'better-sqlite3'
 import { getActiveSession } from '../../db/sqlite.js'
 import { embeddings, paths } from '../../db/schema.js'
@@ -6,7 +5,7 @@ import { logger } from '../../../utils/logger.js'
 import { bufferToEmbedding } from '../../../utils/embedding.js'
 import { cosineSimilarity } from '../analysis/vectorSearch.js'
 import { enhanceClusters, type EnhancedLabelOptions, type ClusterEnhancerInput } from './labelEnhancer.js'
-import { isSafeGitRange } from '../../git/refSafety.js'
+import { runGit, UnsafeGitRefError } from '../../git/runGit.js'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -570,20 +569,20 @@ export function resolveRefToTimestamp(ref: string, repoPath = '.'): number {
   const d = new Date(ref)
   if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000)
 
-  if (!isSafeGitRange(ref)) {
-    throw new Error(`Unsafe git ref: ${JSON.stringify(ref)}`)
-  }
-
-  // Try as a git ref using git log
+  // Try as a git ref using git log. runGit() rejects unsafe refs (leading
+  // `-`) before spawning git, and always separates the ref with
+  // `--end-of-options` so it can never be parsed as a flag (Phase 150 /
+  // review11 §2.1 — the confirmed arbitrary-file-overwrite sink).
   try {
-    const out = execFileSync('git', ['log', '-1', '--format=%ct', ref], {
+    const out = runGit('log', ['-1', '--format=%ct'], [ref], {
       cwd: repoPath,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
     const ts = parseInt(out, 10)
     if (!isNaN(ts) && ts > 0) return ts
-  } catch {
+  } catch (err) {
+    if (err instanceof UnsafeGitRefError) throw err
     // fall through
   }
 
