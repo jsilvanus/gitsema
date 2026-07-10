@@ -2,7 +2,7 @@
 
 This document tracks upcoming feature ideas that are **not yet in active development** (not in `PLAN.md`) and haven't been **fully designed** (no design file). It's a staging area for "what now?" questions and medium-term product direction.
 
-**Last updated:** 2026-07-08 (semantic federation now fully designed → PLAN.md Phases 154–158)
+**Last updated:** 2026-07-10 (Chunk-Level Semantic Enrichment refined into `docs/semantic-enrichment-plan.md`; entry below reduced to a pointer)
 **Audience:** Developers considering next phases; product planning
 
 > **Note 1:** As of 2026-07-02, the LSP/MCP remote-delegation foundation
@@ -716,6 +716,31 @@ No design committed yet. The rough shape, sketched for discussion:
   helpers already exist and are exercised today by CLI `--interactive` — a
   design pass just needs to decide how an HTTP caller identifies and the
   server stores/reclaims one of these across requests.
+
+---
+
+## Chunk-Level Semantic Enrichment (summaries, keywords, entities)
+
+*Salvaged Layer-1 kernel of the withdrawn semantic-federation design — valuable purely locally, no networking required.*
+
+**Refined into:** see [`docs/semantic-enrichment-plan.md`](semantic-enrichment-plan.md) (2026-07-10).
+
+One-paragraph summary of the refined design: an opt-in LLM-generated metadata
+layer (`summary`, `keywords`, optional `entities`) for the index's retrieval
+units — whole-file blobs *and* chunks — stored in a new `enrichments` table
+(schema v33) that **references** existing blob/chunk/embedding rows (no vector
+duplication), written only after mandatory **inbound redaction** of LLM output
+via `redact.ts` (stored summaries travel in bundles and server responses),
+generated via the existing narrator model configs (no new `embed_config`
+kind), and surfaced additively through `SearchResult.summary`/`keywords`
+across CLI/REPL/MCP/HTTP/guide. Trigger model: `index start --semantic-enrich`
+plus an `index enrich` backfill subcommand; lazy enrich-on-search was
+explicitly rejected (read paths stay network-free). All four original Design
+Gaps (cost controls, backfill, schema/storage-abstraction coverage, keyword
+normalization) are resolved in the plan's §6 "Decisions taken autonomously
+(pending user review)" table — review that section before phase-planning.
+Three implementation phases (E1 core+storage+backfill, E2 index-time flag,
+E3 surfacing & parity), not yet scheduled in `PLAN.md`.
 
 ---
 
