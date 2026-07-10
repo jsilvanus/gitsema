@@ -13,6 +13,7 @@ import { coChange } from '../../core/graph/coChange.js'
 import { blastRadius } from '../../core/graph/blastRadius.js'
 import { renderBlastRadius } from '../../cli/lib/graphRender.js'
 import { parseLens } from '../../cli/lib/lens.js'
+import { MAX_GRAPH_DEPTH_REQUEST } from '../../core/storage/types.js'
 import type { EdgeType, GraphHit } from '../../core/storage/types.js'
 import type { SemanticHit } from '../../core/graph/semanticNeighbors.js'
 
@@ -302,7 +303,7 @@ export function registerGraphTools(server: McpServer) {
     {
       identifier: z.string().describe('A symbol qualified name, file path, or literal node key (file:..., symbol:..., external:...)'),
       reverse: z.boolean().optional().describe('Walk dependents (inbound edges) instead of dependencies (outbound edges)'),
-      depth: z.number().int().positive().optional().describe('Traversal depth (default: unlimited)'),
+      depth: z.number().int().positive().max(MAX_GRAPH_DEPTH_REQUEST).optional().describe(`Traversal depth (default: unlimited, max ${MAX_GRAPH_DEPTH_REQUEST})`),
       edge_types: z.array(EDGE_TYPE_ENUM).optional().describe('Edge types to traverse (default: imports, calls, extends, implements)'),
     },
     async ({ identifier, reverse, depth, edge_types }) => {
@@ -363,7 +364,7 @@ export function registerGraphTools(server: McpServer) {
     {
       symbol: z.string().describe('A symbol qualified name, file path, or literal node key (file:..., symbol:..., external:...)'),
       lens: z.enum(['semantic', 'structural', 'hybrid']).optional().default('hybrid').describe('Which lens(es) to include (default: hybrid)'),
-      depth: z.number().int().positive().optional().describe('Structural traversal depth (default: unlimited within MAX_GRAPH_TRAVERSAL_DEPTH)'),
+      depth: z.number().int().positive().max(MAX_GRAPH_DEPTH_REQUEST).optional().describe('Structural traversal depth (default: unlimited within MAX_GRAPH_TRAVERSAL_DEPTH)'),
       top_k: z.number().int().positive().max(500).optional().describe('Number of semantic neighbors to return (default 10)'),
     },
     async ({ symbol, lens, depth, top_k }) => {

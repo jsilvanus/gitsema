@@ -547,6 +547,17 @@ denied server-wide ("lock to none").
   (if supplied) short-circuits before any other lookup — explicit model
   id, model name, active DB selection, disabled. BYOK always resolves to
   an HTTP/`chattydeer`-backed provider.
+- **SSRF guard (Phase 152 / review11 §3.1):** because the server issues the
+  request to the caller-supplied `byok.http_url`, that URL is validated before
+  the provider is constructed — the scheme must be `http`/`https`, and hosts
+  resolving to loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`
+  incl. the `169.254.169.254` cloud-metadata IP, `fe80::/10`), or RFC-1918
+  private ranges (`10/8`, `172.16/12`, `192.168/16`) are **rejected by
+  default** (400 `ByokUrlValidationError`). Operators re-permit specific
+  internal hosts (e.g. a local model server) via `GITSEMA_BYOK_ALLOW_HOSTS`,
+  a comma-separated host/CIDR allowlist (default empty). This is a behavior
+  change for anyone previously pointing BYOK at `localhost`/a private IP —
+  add the host to the allowlist.
 
 ### Persistent server-side repo storage
 

@@ -349,6 +349,8 @@ Both commands are **safe-by-default**: with no narrator model configured (or wit
 | `--byok-max-tokens <n>` | — | Max tokens per BYOK call |
 | `--byok-temperature <n>` | — | Temperature for BYOK calls |
 
+> **SSRF note (server deployments):** on `gitsema tools serve`, the server issues the request to the caller-supplied `--byok-http-url`/`byok.http_url`. To prevent it being used to reach internal/metadata endpoints, URLs whose host resolves to loopback, link-local (incl. `169.254.169.254`), or RFC-1918 private ranges are **rejected by default**. Re-permit specific internal hosts via `GITSEMA_BYOK_ALLOW_HOSTS` (comma-separated host/CIDR allowlist). This does not affect local CLI use, only what a networked server will call.
+
 Configure a narrator model with `gitsema models add <name> --narrator --http-url <url> [--key <token>] --activate`, with a local Ollama model (`gitsema models add <name> --narrator --provider ollama [--global-name <tag>] --activate`, see "Ollama" below), or with a local CLI AI tool: `gitsema models add <name> --narrator --provider cli --cli-command <tool> [--cli-args "<args>"] --activate` (see "CLI-based AI tool backends" below). Alternatively, pass `--byok-http-url` (and optionally `--byok-api-key`/`--byok-model`) for a one-off, never-persisted request-scoped model — it bypasses the configured/allow-listed model selection entirely (Phase 130).
 
 #### `--narrate` on other commands
