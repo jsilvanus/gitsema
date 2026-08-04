@@ -1,6 +1,9 @@
 # gitsema → Kotlin Port: Design Specification
 
-**Status:** Phase 1 deliverable — specification only, no Kotlin written against it yet.
+**Status:** Phase 1 specification, approved 2026-08-04 (§9.2's vector-search
+redesign approved as written; §12 — the tool description/interpretation catalog —
+added after initial review). Tier 1 implementation is in progress in
+`gitsema-kotlin` against this spec.
 **Companion repo:** `github.com/jsilvanus/gitsema-kotlin` (Kotlin Multiplatform, JVM +
 Android targets). First consumer: Aidos (`github.com/jsilvanus/aidos`), an
 offline-first Android-first AI development environment. This document is the sole
@@ -1307,7 +1310,343 @@ than asserted from intuition:
 
 ---
 
-## 12. Source map (for future reference, not for direct reading)
+## 12. Tool descriptions and result interpretations (model-facing text)
+
+**Scope of this section, precisely:** the porting brief excludes `src/core/narrator/`
+and `src/mcp/` as runtime logic (the agentic tool-calling loop, the MCP stdio
+protocol, LLM invocation) — that exclusion stands. But two files inside
+`narrator/` are not runtime logic at all; they are **model-facing prose and JSON
+schemas**, authored once and consumed by three different surfaces in gitsema-TS
+(`gitsema guide`'s system prompt, the narrator/explain LLM prompts, and the
+generated `skill/gitsema-ai-assistant.md`). That text — what a tool is called,
+what arguments it takes, and critically, how to *read* its numbers — is exactly
+the material a Kotlin library cannot regenerate from its own code, and exactly
+what a consuming host (Aidos) needs if it wants to hand any of these capabilities
+to a model of its own. **This section ports the data, not the loop that used it.**
+
+Two source files, cataloged for every Tier 1 and Wave 1 capability (§9's search
+core, and Decision B's Wave 1 list from §10):
+
+- **`src/core/narrator/guideTools.ts`** (1,814 lines) — the "how to call it" half:
+  one entry per tool, each pairing a `name`/`description`/JSON-schema
+  `parameters` with an executable `run()`. Only the `definition` half (name,
+  description, parameters) is in scope here — `run()` is the runtime logic this
+  port explicitly excludes.
+- **`src/core/narrator/interpretations.ts`** (695 lines) — the "how to read it"
+  half: `summary`, `resultShape`, and `interpretation` (thresholds, what's
+  significant, caveats) per tool, plus `aliases` for alternate registered names
+  (e.g. MCP tool names that differ from the guide tool name). The file's own
+  header states why this is the more valuable half and why it is kept
+  dependency-free: *"this registry is dependency-free prose so the skill
+  generator and the narrators can import it without pulling in `guideTools.ts`'s
+  heavy executor dependency graph."* That reasoning holds without modification in
+  Kotlin — an interpretation object must not depend on the class that implements
+  the capability, only describe its output.
+
+### 12.1 The discipline worth carrying, not just the content
+
+gitsema-TS enforces three invariants across these two files plus a generated
+artifact, via `scripts/gen-skill.mjs` and `tests/docsSync.test.ts`
+("`TOOL_INTERPRETATIONS coverage`" describe block):
+
+1. **Coverage**: every entry in `GUIDE_TOOLS` has a matching entry in
+   `TOOL_INTERPRETATIONS` (`Object.keys(GUIDE_TOOLS).filter(name =>
+   !TOOL_INTERPRETATIONS[name])` must be empty) — you cannot ship a callable tool
+   with no reading guidance.
+2. **Resolvability**: every `TOOL_INTERPRETATIONS` entry (by name or alias)
+   resolves a usage definition in `GUIDE_TOOLS` — you cannot ship reading
+   guidance for a tool that isn't actually callable.
+3. **Generated-artifact staleness**: `gen-skill.mjs` joins the two registries by
+   name into a rendered Markdown block (usage + result shape + "how to read it"
+   per tool, grouped by category); a checked-in copy of that block lives in
+   `skill/gitsema-ai-assistant.md` (mirrored to `.github/skills/gitsema.md`); the
+   test regenerates the block at test time and asserts it matches the committed
+   copy byte-for-byte, with an actionable failure message (`run \`pnpm gen:skill\`
+   to regenerate`).
+
+**Port this exact three-part shape** — two small, independent registries plus a
+generator-and-test pair — not just today's tool list. The reason the source
+project keeps `guideTools.ts` and `interpretations.ts` as two files instead of
+one is itself worth preserving: usage text changes when an argument is added;
+interpretation text changes when a threshold is retuned or a result shape
+changes. Coupling them into one file/class means either change touches code the
+other change has no business touching.
+
+**Proposed Kotlin shape** (data classes, no behavior):
+
+```kotlin
+data class ToolDescriptor(
+    val name: String,
+    val description: String,
+    val parameters: ParameterSchema,
+)
+
+data class ParameterSchema(
+    val properties: Map<String, ParameterSpec>,
+    val required: Set<String> = emptySet(),
+)
+
+data class ParameterSpec(
+    val type: ParameterType,   // STRING, INTEGER, BOOLEAN, ENUM, ARRAY
+    val description: String,
+    val minimum: Number? = null,
+    val maximum: Number? = null,
+    val enumValues: List<String>? = null,
+)
+
+data class ToolInterpretation(
+    val name: String,
+    val category: ToolCategory,
+    val summary: String,
+    val resultShape: String,
+    val interpretation: String,
+    val aliases: List<String> = emptyList(),
+)
+
+enum class ToolCategory { SEARCH, HISTORY, BRANCH, OWNERSHIP, QUALITY, ADMIN }
+
+object GitsemaToolCatalog {
+    val descriptors: Map<String, ToolDescriptor> = mapOf(/* §12.3 */)
+    val interpretations: Map<String, ToolInterpretation> = mapOf(/* §12.3 */)
+}
+```
+
+A JVM-only generator (a small script or a `main()`, not shipped to Android) joins
+the two by name into a rendered Markdown catalog, mirroring `gen-skill.mjs`
+exactly; a test mirroring `docsSync.test.ts`'s three assertions above guards it.
+**The consuming host decides what to do with `GitsemaToolCatalog`** — hand it to
+its own agent loop, render it into its own system prompt, ignore it entirely.
+This library ships the data and the freshness guarantee, never a loop that calls
+a model with it.
+
+### 12.2 Finding, stated plainly: most of this text is already single-repo-scoped
+
+Before flagging exceptions: the large majority of the text below required **no
+rewording**. `gitsema guide`'s tool text was authored for a single CLI session
+already scoped to one local repository (the guide agent runs against `.gitsema/`
+in the current directory), so most entries never mention multi-repo, auth, or
+remote concerns at all — those concerns live in tools this port correctly
+excludes already (`multi_repo_search`, `cross_repo_similarity`, both Tier 3). The
+exceptions, below, are genuinely few and each is called out with its reworded
+replacement.
+
+### 12.3 Catalog — Tier 1 (search core)
+
+**`semantic_search`**
+- Description: *"Vector similarity search over the indexed git history. Returns
+  the top matching files/blobs."*
+- Parameters: `query` (string, required) — natural-language search query;
+  `top_k` (integer, 1–25, default 10); `branch` (string) — restrict to blobs seen
+  on this branch.
+- Result shape: `{ query, results: [{ paths[], score, blobHash }] }`.
+- How to read it: *"Ranked by cosine similarity (0–1): roughly >0.75 is a strong
+  match, 0.5–0.75 is related, <0.5 is weak. Each result is a content-addressed
+  blob; the same blob can appear under several paths. Use the top paths as the
+  most relevant files; cite the short blob hash."*
+- **Flagged — CLI-output-format assumption, drop it:** the source interpretation
+  continues, *"In text output, hashes appear as [blob:abc1234] — the 'blob:'
+  prefix marks these as blob hashes... not commit hashes."* This describes
+  gitsema-CLI's specific text-rendering convention, which no consuming host has
+  any reason to replicate. **Port only the substantive half** (the threshold
+  bands and the blob-vs-path distinction); drop the citation-format sentence, or
+  replace it with a neutral note that a `blobHash` and a `commitHash` are
+  different identifier spaces and must not be conflated when citing evidence —
+  that fact is real and worth keeping, its CLI rendering convention is not.
+
+**`index`**
+- Description: *"Index (or incrementally re-index) the Git repository at the
+  current working directory. This is a WRITE operation that embeds blobs — only
+  run it when the index is missing or stale."*
+- Parameters: `since` (string) — date, tag, commit hash, or `"all"` for a full
+  re-index; `concurrency` (integer, 1–16, default 4).
+- Result shape: stats — `seen`, `indexed`, `skipped`, `oversized`, `filtered`,
+  `failed`, `commits`.
+- How to read it: *"A WRITE operation that embeds blobs — only run it when the
+  index is missing or stale, and prefer asking the user first for large repos.
+  `indexed` is new work done; a high `failed` count points to an unreachable
+  embedding provider."*
+- **Flagged — implicit-cwd invocation model:** *"at the current working
+  directory"* assumes a single-process, single-repo-via-`cwd` invocation model —
+  correct for a CLI subprocess, wrong for a library where the caller holds an
+  explicit repository handle. This resolves cleanly rather than needing a hard
+  rewrite: Tier 1's `SemanticIndex` interface (per the porting brief) is already
+  instance-scoped to one repository (`suspend fun index(ref: String, ...)`, no
+  path/cwd parameter, because the instance itself *is* the repo binding) — so the
+  underlying API was never going to inherit this assumption. What needs
+  rewording is only the **tool descriptor's description string**, for a host that
+  exposes `index` as a named tool to its own model: *"Index (or incrementally
+  re-index) the given repository. This is a write operation that embeds blobs —
+  only run it when the index is missing or stale."* The result-shape/interpretation
+  text needs no change — it's already repo-instance-agnostic.
+
+*(Tier 1's `search()`/`status()` interface methods otherwise correspond to
+`semantic_search` above and — see below — nothing in gitsema-TS's registry.)*
+
+**`status` — a genuine gap, not a rewording problem.** `gitsema status` exists as
+a CLI command but was never registered as a `guide`/MCP tool (confirmed: no
+`status`/`index_status`/`coverage` entry exists in `guideTools.ts` or
+`interpretations.ts`). There is no TS-side model-facing text to port for Tier 1's
+`SemanticIndex.status()`. The Kotlin port must originate its own
+`ToolDescriptor`/`ToolInterpretation` for this one from scratch — a small, bounded
+task (report index coverage: blob/embedding counts, last-indexed commit, model
+config), not a blocker, but worth flagging so it isn't mistaken for an oversight
+in the extraction above.
+
+### 12.4 Catalog — Wave 1 (§10 Decision B's cheapest-first build order)
+
+**`experts`**
+- Description: *"List top contributors by semantic area (which concepts/clusters
+  they work on)."*
+- Parameters: `top_n` (integer, 1–25, default 10); `since`/`until` (string dates);
+  `min_blobs` (integer, ≥1, default 1); `top_clusters` (integer, 1–25, default 5).
+- Result shape: contributors with `blobCount` and their top clusters
+  (`label`, `blobCount`, `representativePaths`).
+- How to read it: *"Maps people to the concept clusters they own. ... Use it to
+  route work or find reviewers by area rather than by file paths."*
+- **Flagged — CLI-invocation phrasing:** the source continues, *"Requires clusters
+  to exist (**run `clusters` first**)."* — an instruction phrased as a CLI
+  command invocation. The underlying fact is real (this capability reads
+  `cluster_assignments`, populated by the clustering capability, per §5) and must
+  be kept; only the phrasing needs to generalize: *"Requires the clustering
+  capability to have already been run against this index — its output is empty
+  until then."*
+
+**`health_timeline`**
+- Description: *"Time-bucketed codebase health metrics: active blob count,
+  semantic churn rate, and dead-concept ratio."*
+- Parameters: `buckets` (integer, 1–50, default 12); `branch` (string).
+- Result shape: per-bucket rows — `activeBlobCount`, `semanticChurnRate`,
+  `deadConceptRatio`.
+- How to read it: *"Rising churn means more concept turnover; a rising
+  dead-concept ratio means more stale/removed code. Read the trend, not single
+  buckets — sustained high churn or a growing dead ratio are health concerns;
+  stable low values indicate maturity."*
+- No server assumption. Ports as-is.
+
+**`file_evolution`** (source alias for the file-scoped `evolution` capability, §5)
+- Description: *"Track a single file's semantic drift across its Git history."*
+- Parameters: `path` (string, required); `threshold` (number, default 0.3).
+- Result shape: version timeline — `distFromPrev`/`distFromOrigin` per step.
+- How to read it: *"`distFromPrev` (cosine, 0–2) is how much it changed from the
+  prior version and `distFromOrigin` is cumulative drift. Steps at/above the
+  threshold (default 0.3) are large changes worth explaining — correlate their
+  dates/commits with what happened. Steady small distances mean incremental
+  change; a spike means a rewrite or repurposing."*
+- No server assumption. Ports as-is.
+
+**`file_change_points`**
+- Description: *"Detect semantic change points in a single file's Git history."*
+- Parameters: `path` (string, required); `threshold` (number, default 0.3);
+  `top_points` (integer, 1–25, default 5); `branch` (string).
+- Result shape: `{ points: [{ before, after, distance }] }`.
+- How to read it: *"File-scoped version of change_points: the dates where the
+  file changed most in meaning. Use the before/after blob hashes to diff what
+  actually changed at each inflection."*
+- No server assumption. Ports as-is.
+
+**`concept_lifecycle`**
+- Description: *"Analyze the lifecycle stages (born → growing → mature →
+  declining → dead) of a semantic concept across Git history."*
+- Parameters: `query` (string, required); `steps` (integer, 2–50, default 10);
+  `threshold` (number, default 0.7).
+- Result shape: `{ bornTimestamp, peakTimestamp, peakCount, currentStage, isDead,
+  points[] }`.
+- How to read it: *"Read it as a story: when the concept was born, when it
+  peaked, and its current stage/growth trend. `isDead` flags concepts with no
+  recent matches — useful for spotting abandoned ideas vs. ones still actively
+  developed."*
+- No server assumption. Ports as-is.
+
+**`semantic_bisect`**
+- Description: *"Binary search over commit history to find where a concept
+  diverged from a 'good' baseline (semantic git bisect)."*
+- Parameters: `good_ref`/`bad_ref`/`query` (string, required); `top_k` (integer,
+  1–50, default 20); `max_steps` (integer, 1–25, default 10).
+- Result shape: `{ culpritRef, maxShift, steps: [{ ref, date, blobCount,
+  distanceFromGood }] }`.
+- How to read it: *"`culpritRef` is the bisection's best guess for when the
+  concept diverged... Treat the culprit as a narrowed time window to investigate
+  further (e.g. with change_points or file_evolution), not a definitive single
+  commit."*
+- No server assumption. The cross-reference to sibling tool names (`change_points`,
+  `file_evolution`) is fine to keep, but only makes sense to a host whose own tool
+  registry includes both — worth a light footnote in the Kotlin doc rather than a
+  rewording.
+
+**`branch_summary`**
+- Description: *"Generate a semantic summary of what a branch is about compared
+  to its base branch."*
+- Parameters: `branch` (string, required); `base_branch` (string, default
+  `"main"`); `top_concepts` (integer, 1–25, default 5).
+- Result shape: `{ branch, baseBranch, mergeBase, exclusiveBlobCount,
+  nearestConcepts[], topChangedPaths[] }`.
+- How to read it: *"`nearestConcepts` (with similarity) name what the branch is
+  about; `topChangedPaths` (with drift) are where it diverges most.
+  exclusiveBlobCount=0 means the branch adds nothing new vs base (or is not
+  indexed)."*
+- No server assumption — branches are a local-repository concept, not a
+  multi-tenant one. Ports as-is. The `base_branch` default of `"main"` is a
+  convention worth keeping configurable rather than hardcoded, since a phone-local
+  repo may default its base branch differently.
+
+**`merge_audit`** (the collision-detection half of Wave 1; `merge_preview` is a
+separate, Wave-4-tier tool since it depends on full k-means clustering per §5 —
+cataloging it is deferred until clustering itself is built)
+- Description: *"Detect semantic collisions between two branches — pairs of
+  files about the same concept even without shared lines."*
+- Parameters: `branch_a`/`branch_b` (string, required); `threshold` (number,
+  default 0.85); `top_k` (integer, 1–50, default 20).
+- Result shape: `{ blobCountA/B, centroidSimilarity, collisionZones[],
+  collisionPairs[] }`.
+- How to read it: *"Collision pairs are files on each branch that are
+  semantically close (similarity ≥ threshold, default 0.85) even without shared
+  lines — likely conflict/duplication risks at merge. High centroid similarity
+  means the branches overlap broadly. Review the top pairs before merging."*
+- No server assumption. Ports as-is.
+
+**`refactor_candidates`**
+- Description: *"Find pairs of symbols/chunks/files that are semantically
+  similar enough to be refactoring candidates."*
+- Parameters: `threshold` (number, default 0.88); `top_k` (integer, 1–50,
+  default 50); `level` (enum `symbol`/`chunk`/`file`, default `symbol`).
+- Result shape: `{ threshold, level, totalScanned, pairs: [{ similarity, a, b }]
+  }`.
+- How to read it: *"High `similarity` (near the threshold, default 0.88, max
+  1.0)... likely duplicated or near-duplicated logic — candidates for extraction
+  into a shared helper... Not every pair is worth merging — check whether the
+  duplication is incidental (e.g. boilerplate) or meaningful."*
+- No server assumption. Ports as-is.
+
+**`cherry_pick_suggest`**
+- Description: *"Suggest commits to cherry-pick based on semantic similarity of
+  their commit messages to a query."*
+- Parameters: `query` (string, required); `top_k` (integer, 1–25, default 10).
+- Result shape: `{ query, results: [{ commitHash, score, message, paths[] }] }`.
+- How to read it: *"Ranked by relevance to the query (higher `score` = more
+  relevant). Each result is a candidate commit to cherry-pick onto another
+  branch — check `paths` for what it touches and `message` for intent before
+  recommending it; relevance does not guarantee the commit applies cleanly
+  elsewhere."*
+- No server assumption. Ports as-is.
+
+### 12.5 Summary of flags
+
+Three genuine flags out of thirteen entries cataloged (Tier 1's two plus eleven
+of Wave 1's — `merge_preview` excluded pending clustering):
+
+| Tool | What's server/CLI-flavored | Fix |
+|---|---|---|
+| `semantic_search` | Interpretation cites the CLI's `[blob:...]` text-rendering convention | Drop the rendering convention; keep the substantive blob-vs-commit-hash distinction |
+| `index` | Description says "at the current working directory" (implicit single-repo-via-cwd) | Reword description to "the given repository"; the underlying Tier 1 API was never cwd-scoped, only the tool descriptor's prose was |
+| `experts` | Interpretation phrases a data dependency as a CLI command ("run `clusters` first") | Reword to describe the dependency generically ("requires the clustering capability to have already been run") |
+
+Everything else cataloged above ports verbatim — the finding in §12.2 holds: this
+text was written for a single local repository already, and needed far less
+translation than a "server → phone" port usually implies.
+
+---
+
+## 13. Source map (for future reference, not for direct reading)
 
 Every claim above traces to one of: `src/core/{chunking,embedding,search,
 indexing,storage,db,graph,git}/*.ts`, `docs/knowledge-graph.md`,
@@ -1315,7 +1654,10 @@ indexing,storage,db,graph,git}/*.ts`, `docs/knowledge-graph.md`,
 corrected from the porting brief's assumption), `docs/parity.md`,
 `docs/locked-model-set-plan.md`, `docs/storage-backends-plan.md`,
 `docs/prebuilt-index-distribution-plan.md`, `docs/review10.md`, `docs/review11.md`,
-`CLAUDE.md`. An implementer who finds a gap between this document and the actual
+`CLAUDE.md`. §12 additionally traces to `src/core/narrator/guideTools.ts` (usage
+definitions only, not `run()`), `src/core/narrator/interpretations.ts` in full,
+`scripts/gen-skill.mjs`, and `tests/docsSync.test.ts`'s `TOOL_INTERPRETATIONS
+coverage` block. An implementer who finds a gap between this document and the actual
 TS source should treat this document as needing a correction, not the source as
 needing a re-read — but if genuinely stuck, the file:line citations throughout are
 real and current as of this research pass.
