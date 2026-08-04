@@ -939,10 +939,24 @@ improvement the Kotlin port should make here rather than replicate.
 
 | TS file | What it does | JGit equivalent |
 |---|---|---|
-| `revList.ts` | Streams `(blobHash, path)` via piped `git rev-list --objects` \| `git cat-file --batch-check`, `readline`-parsed, genuinely streaming, no full-output buffering | `RevWalk` iterating commits + `TreeWalk.setRecursive(true)` per commit's tree, filtered to non-tree entries, deduplicated by `ObjectId` — this is the one file whose *streaming* behavior should be preserved exactly, not "improved later" |
+| `revList.ts` | Streams `(blobHash, path)` via piped `git rev-list --objects` \| `git cat-file --batch-check`, `readline`-parsed, genuinely streaming, no full-output buffering | JGit's **`ObjectWalk`** — not a manual `RevWalk` + per-commit `TreeWalk`. `ObjectWalk` is the direct equivalent of `rev-list --objects`: it walks commits and their trees/blobs together, visiting each object exactly once by OID regardless of how many commits/paths reference it. A naive per-commit `TreeWalk.setRecursive(true)` would instead revisit every still-live blob once per commit that contains it — the exact redundant-re-walk problem this table's `commitMap.ts` row already flags in the TS original. |
 | `showBlob.ts` | Spawns a **new** `git cat-file --batch` subprocess *per call* (not reused), manually parses the batch header for size, aborts early past `maxBytes` (default 200 KB) | `ObjectReader.open(objectId).getBytes()` / `.getCachedBytes(sizeLimit)` — zero subprocess overhead, a strict improvement, not just a port |
 | `commitMap.ts` | `buildCommitBranchMap()`: one synchronous, fully-buffered `execFileSync('git log --all --format=%H %D')` for branch decoration, **then** `streamCommitMap()`: spawned `git log --raw`, `readline`-parsed into commit/blob-touch events (added/modified only; deletions and content-unchanged renames are skipped) | `RevWalk` over commits + a tree diff per commit vs. its parent(s) (`TreeWalk`/`DiffFormatter` or manual `AbstractTreeIterator` comparison) for added/modified blob OIDs; `Repository.getAllRefs()` + `RevWalk.isMergedInto()` for branch decoration — **should be computed incrementally/streamed, not front-loaded as one buffered pass**, unlike the TS original (see Decision C, §11) |
 | `walker.ts` | A separate, simpler dedup-by-hash blob walker used only by `gitsema status <file>`, not the indexer pipeline | Lower priority; same `TreeWalk` primitives, smaller surface |
+
+**Empirical finding, verified against real `git rev-list --objects` while implementing
+this (not assumed):** a single walk emits **exactly one path per unique blob
+object**, not every path that blob has ever had. Two files with identical
+content in the same commit produce only one `(hash, path)` line — the second
+path is never emitted, because rev-list/`ObjectWalk` mark objects seen by OID,
+not by `(commit, path)`. This means gitsema-TS's "one blob, many paths"
+invariant on the `paths` table (§1.1) is necessarily built up **across repeated
+walks over the index's lifetime** (incremental re-indexing, multiple branches,
+renames discovered over time) — never from a single walk in one run. `ObjectWalk`
+is the correct Kotlin equivalent specifically *because* it reproduces this
+one-path-per-object behavior faithfully; an implementation that tried to be
+"more complete" by emitting every path in one pass would silently diverge from
+what `revList.ts` (and the git plumbing under it) actually does.
 
 ### 7.4 Error containment pattern (port this shape, not the specific regex)
 
