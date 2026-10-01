@@ -1,5 +1,45 @@
 # gitsema
 
+## 0.98.0
+
+### Minor Changes
+
+- 1767bff: Phase 153: Add `blob:` prefix to blob hashes in all text outputs (CLI, MCP, HTTP) so they are clearly distinguishable from commit hashes. HTML renderers now show "Blob Hash" column headers and `blob:`/`commit:` prefixes. OpenAPI `blobHash` field description updated for clarity. MCP tool interpretations for `semantic_search`, `search_history`, and `first_seen` updated to guide LLMs on hash types.
+
+### Patch Changes
+
+- d06182f: Security (Phase 150 / review11 §2.1 + §3.2): close the network-reachable git
+  argument-injection sink. A caller-supplied "ref" beginning with `-` (e.g.
+  `--output=/path`) was parsed by git as a _flag_, turning `git log` into an
+  arbitrary-file-write primitive reachable via `semantic_bisect`/`triage`. All
+  git call sites that take a user-influenced ref now route through a shared
+  `runGit()` helper that rejects leading-`-` refs before spawning git and always
+  inserts git's `--end-of-options` separator so a value can never be read as a
+  flag (`resolveRefToTimestamp`, `parseDateArg`, `getMergeBase`,
+  `getBranchExclusiveBlobs`).
+- 842be12: Security (Phase 151 / review11 §2.2): enforce repo authorization on read
+  routes. The multi-tenant grant model (`repo_grants` / `resolveUserRepoAccess`)
+  was defined but never checked on the ~16 search/analysis/evolution/graph/
+  insights routes, so any caller could read any repo's indexed content by naming
+  its `repoId`. A new `repoAuthMiddleware` now runs after `repoSessionMiddleware`
+  and, in multi-tenant mode, requires the caller to hold a `read` grant on the
+  addressed repo unless it is `public` (else 403). Multi-tenant mode is opt-in
+  via `GITSEMA_MULTI_TENANT` (defaulting to `GITSEMA_SERVE_KEY` presence); the
+  global serve key and legacy per-repo scoped tokens bypass the check, and a
+  default open single-dev server is unaffected. Repo-level only — per-branch
+  grant filtering is deferred to a follow-on phase.
+- 6bf15d8: Security (Phase 152 / review11 §3.1 + §3.3). **BYOK SSRF guard:** on
+  `tools serve`, a caller-supplied `byok.http_url` is now validated before the
+  server calls it — non-`http(s)` schemes and hosts resolving to loopback,
+  link-local (incl. the `169.254.169.254` cloud-metadata IP), or RFC-1918
+  private ranges are rejected by default. Operators re-permit specific internal
+  hosts (e.g. a local model server) via the new `GITSEMA_BYOK_ALLOW_HOSTS`
+  allowlist. This is a behavior change for anyone pointing BYOK at a
+  `localhost`/private endpoint — add the host to the allowlist. **List-tool
+  bounds:** the network-exposed `deps` and `blast_radius` `depth` parameter is
+  now upper-bounded (max 64) on both the HTTP route and MCP tool, closing the
+  last unbounded traversal-depth input from the Phase 147/148 exposure.
+
 ## 0.97.0
 
 ### Minor Changes
