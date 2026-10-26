@@ -1,6 +1,8 @@
 # Design Doc — Structural Knowledge Graph Layer
 
-> Status: **Design / not yet implemented.** Target track: Phases 105–112.
+> Status: **Phases 105–112 and 147 implemented** (see `PLAN.md`; code in
+> `src/core/graph/`). Extraction is code-only (TS/TSX/JS/Python); the storage and traversal
+> layers are corpus-agnostic. Target track: Phases 105–112.
 > Scope decision (owner): build the **structural** graph first (typed edges from
 > static analysis), starting with **TypeScript/JavaScript + Python**, then expand
 > to Go/Rust/Java. A cross-command lens-coverage sweep (Phase 111) precedes a
