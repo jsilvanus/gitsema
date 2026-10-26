@@ -105,8 +105,8 @@ triple store**. The mapping:
 |---|---|---|
 | `skos:ConceptScheme` | `concept_schemes` row | A named vocabulary. One default scheme per index; imported schemes are additional rows. Scheme `uri` gives global identity for cross-repo interop. |
 | `skos:Concept` | `concepts` row | Identified by `(scheme, slug)` — see §3.1. |
-| `skos:prefLabel` | `concepts.pref_label` | Exactly one per concept (we do not model per-language labels in v1 — see §10). |
-| `skos:altLabel`, `skos:hiddenLabel` | `concept_labels` rows | Alternative/hidden labels power **lexical assignment** (§5.2) — the model-independent signal. |
+| `skos:prefLabel` | `concepts.pref_label` (display fallback in the scheme's `default_lang`) plus `concept_labels` rows with `kind='pref'` and a `lang` tag | One prefLabel per concept **per language**. Revised 2026-10-26: per-language labels are in v1 (needed for Finnish/Swedish/English vocabularies such as Finto's); see §4.1. |
+| `skos:altLabel`, `skos:hiddenLabel` | `concept_labels` rows (each with an optional `lang`) | Alternative/hidden labels power **lexical assignment** (§5.2) — the model-independent signal. |
 | `skos:notation` | `concepts.slug` | A stable, scheme-unique machine key. |
 | `skos:definition`, `skos:scopeNote` | `concepts.definition`, `concepts.scope_note` | Free text; also feeds the centroid assigner's embedding text (§5.3). |
 | `skos:broader` / `skos:narrower` | `concept_relations` rows, **stored one direction only** (`broader`) | `narrower` is derived as the inverse, per SKOS convention. Hierarchy is a DAG (a concept may have multiple broader concepts); cycles are rejected on write. |
@@ -116,10 +116,9 @@ triple store**. The mapping:
 | Deprecation (`owl:deprecated` idiom) | `concepts.status = 'deprecated'` + `concepts.replaced_by` | Concepts are never hard-deleted — see §7 (scheme evolution). |
 
 **Explicitly skipped** (lightweight by design): RDF serialization as the
-native format, `skos:Collection`/`OrderedCollection`, per-language label tags,
-`broadMatch`/`narrowMatch`/`relatedMatch`, SKOS-XL. A best-effort Turtle
-import/export can be added later without schema changes (§10); the native
-interchange format is JSON (§6.1).
+native format, `skos:Collection`/`OrderedCollection`, `broadMatch`/`narrowMatch`/`relatedMatch`, SKOS-XL. Turtle/RDF **import** is
+in scope (phase C1b, §9) so external SKOS vocabularies can be loaded; export stays
+best-effort. The native interchange format is JSON (§6.1).
 
 ---
 
@@ -215,6 +214,8 @@ concept_schemes = sqliteTable('concept_schemes', {
   /** Global identity for cross-repo interop (skos:ConceptScheme URI). Optional; */
   /** defaults to a tag-URI derived from slug on export. */
   uri:         text('uri').unique(),
+  /** BCP 47 tag of the language used for `concepts.pref_label` (e.g. 'fi'). */
+  defaultLang: text('default_lang').notNull().default('en'),
   /** 'manual' | 'imported' — provenance of the scheme itself. */
   source:      text('source').notNull().default('manual'),
   createdAt:   integer('created_at').notNull(),
@@ -243,9 +244,12 @@ concept_labels = sqliteTable('concept_labels', {
   id:          integer('id').primaryKey({ autoIncrement: true }),
   conceptKey:  text('concept_key').notNull().references(() => concepts.conceptKey),
   label:       text('label').notNull(),
-  /** 'alt' | 'hidden' (prefLabel lives on the concept row). */
+  /** 'pref' | 'alt' | 'hidden'. `pref` rows hold per-language prefLabels; the */
+  /** concept row's `pref_label` stays as the default-language display fallback. */
   kind:        text('kind').notNull().default('alt'),
-}, (t) => ({ perConcept: uniqueIndex(...).on(t.conceptKey, t.label) }))
+  /** BCP 47 language tag; NULL = language-neutral (matches in any language). */
+  lang:        text('lang'),
+}, (t) => ({ perConcept: uniqueIndex(...).on(t.conceptKey, t.label, t.lang) }))
 
 concept_relations = sqliteTable('concept_relations', {
   srcKey:      text('src_key').notNull().references(() => concepts.conceptKey),
@@ -611,6 +615,7 @@ tagging + faceted search); C3–C5 are each independently shippable.
 | Phase | Title | Schema | Deliverable | Effort |
 |---|---|---|---|---|
 | **C1** | Vocabulary core | v33 | `concept_schemes`/`concepts`/`concept_labels`/`concept_relations`; `ConceptStore` seam (sqlite + fail-loud stub); CLI `concepts list/show/add/label/relate/unrelate/deprecate/import/export`; JSON interchange; integrity rules (§4.1); MCP `concept_list`/`concept_show`; HTTP GET routes. | S–M |
+| **C1b** | SKOS import | — | Turtle/JSON-LD and Skosmos/Finto REST importer into a scheme (language-tagged labels, hierarchy, match links, original URIs preserved); `concepts import --format skos-turtle`; fixture-based tests, no network in CI. | S–M |
 | **C2** | Assignments & faceted search | v34 | `concept_assignments`; manual `tag`/`untag`/`of`; **lexical assigner** (streaming, labelEnhancer reuse); confidence/aggregation model (§5.6); `--concept` on `search`/`first-seen` with narrower-expansion; `coverage`; MCP/HTTP parity for all of it. | M |
 | **C3** | Semantic assigners & LLM curation | — | `centroid` assigner (model-recorded, model-filtered at query); `llm` assigner + `propose/approve/reject` workflow (narrator plumbing, `redact.ts`, safe-by-default, cost bounds); `POST /concepts/assign`. | M |
 | **C4** | Bridges, diffs & agent surface | — | Cluster↔concept bridge (§5.5) + concept names in `clusters` output; `concepts diff <ref1> <ref2>`; guide tools + `interpretations.ts` entries + `pnpm gen:skill`; `--concept` parity sweep over remaining query-string commands; `index doctor --extended` concept checks. | M |
@@ -623,13 +628,17 @@ estimate; no networking, no new daemon, no new binary dependencies.
 
 ## 10. Remaining open questions (deliberately deferred)
 
-1. **Turtle/RDF import-export** — worth a best-effort `skos:Concept` subset
-   reader for real external taxonomies (OWASP, org-internal SKOS files)?
-   Needs a user with an actual RDF file in hand; JSON covers the designed
-   workflows. No schema impact either way.
-2. **Per-language labels** (`prefLabel@lang`) — skipped in v1; adding a
-   `lang` column to `concept_labels` later is a trivial migration. Decide
-   when a non-English-vocabulary user appears.
+1. **Turtle/RDF import** — **decided 2026-10-26: yes** (phase C1b). A
+   `skos:Concept` subset reader for Turtle/JSON-LD files and for Skosmos/Finto
+   REST export, mapping prefLabel/altLabel/hiddenLabel with language tags,
+   broader/narrower/related and exactMatch/closeMatch. Imported schemes get
+   `source='imported'` and keep their original concept URIs. Export is still
+   best-effort and not scheduled.
+2. **Per-language labels** (`prefLabel@lang`) — **decided 2026-10-26: in v1.**
+   A non-English-vocabulary user exists (Finnish church vocabularies). §4.1 now
+   carries `lang` on `concept_labels` and `default_lang` on schemes. Lexical
+   assignment (§5.2) matches labels in all languages by default, optionally
+   restricted by a `--lang` option.
 3. **Chunk/symbol-granular automated assignment** — the schema supports it
    (§4.2); whether C3's LLM assigner should classify at chunk granularity by
    default (better precision, higher cost) needs a cost measurement on a real
@@ -656,6 +665,13 @@ enrichment → (optionally feeds) → concepts, never the reverse.
 ---
 
 ## 11. Decisions taken autonomously (pending user review)
+
+> **Revision 2026-10-26 (knowledge-engine discovery):** per-language labels and
+> Turtle import moved from "deferred" into scope (§2, §4.1, §10 items 1–2,
+> phase C1b). Rationale and context: general-knowledge use beyond code,
+> including Finnish-language church vocabularies. The scheme model is
+> corpus-agnostic, so a coding vocabulary and a church vocabulary are simply two
+> schemes. The structural graph stays off for non-code corpora.
 
 This refinement ran non-interactively; every product/scope call the
 refine-idea flow would normally ask about was resolved from codebase evidence
